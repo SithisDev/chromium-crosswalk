@@ -1,10 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/api/context_menus/context_menus_api.h"
 
 #include <string>
+#include <utility>
 
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -20,8 +21,9 @@ using extensions::ErrorUtils;
 
 namespace {
 
-const char kIdRequiredError[] = "Extensions using event pages must pass an "
-    "id parameter to chrome.contextMenus.create";
+const char kIdRequiredError[] =
+    "Extensions using event pages or Service "
+    "Workers must pass an id parameter to chrome.contextMenus.create";
 
 }  // namespace
 
@@ -31,27 +33,31 @@ ExtensionFunction::ResponseAction ContextMenusCreateFunction::Run() {
   MenuItem::Id id(browser_context()->IsOffTheRecord(),
                   MenuItem::ExtensionKey(extension_id()));
   std::unique_ptr<api::context_menus::Create::Params> params(
-      api::context_menus::Create::Params::Create(*args_));
+      api::context_menus::Create::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  if (params->create_properties.id.get()) {
+  if (params->create_properties.id) {
     id.string_uid = *params->create_properties.id;
   } else {
-    if (BackgroundInfo::HasLazyBackgroundPage(extension()))
+    if (BackgroundInfo::HasLazyContext(extension()))
       return RespondNow(Error(kIdRequiredError));
 
     // The Generated Id is added by context_menus_custom_bindings.js.
-    base::DictionaryValue* properties = NULL;
-    EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &properties));
-    EXTENSION_FUNCTION_VALIDATE(properties->GetInteger(
-        extensions::context_menus_api_helpers::kGeneratedIdKey, &id.uid));
+    EXTENSION_FUNCTION_VALIDATE(args().size() >= 1);
+    EXTENSION_FUNCTION_VALIDATE(args()[0].is_dict());
+
+    const base::Value& properties = args()[0];
+    absl::optional<int> result = properties.FindIntKey(
+        extensions::context_menus_api_helpers::kGeneratedIdKey);
+    EXTENSION_FUNCTION_VALIDATE(result);
+    id.uid = *result;
   }
 
   std::string error;
   if (!extensions::context_menus_api_helpers::CreateMenuItem(
           params->create_properties, browser_context(), extension(), id,
           &error)) {
-    return RespondNow(Error(error));
+    return RespondNow(Error(std::move(error)));
   }
   return RespondNow(NoArguments());
 }
@@ -60,7 +66,7 @@ ExtensionFunction::ResponseAction ContextMenusUpdateFunction::Run() {
   MenuItem::Id item_id(browser_context()->IsOffTheRecord(),
                        MenuItem::ExtensionKey(extension_id()));
   std::unique_ptr<api::context_menus::Update::Params> params(
-      api::context_menus::Update::Params::Create(*args_));
+      api::context_menus::Update::Params::Create(args()));
 
   EXTENSION_FUNCTION_VALIDATE(params.get());
   if (params->id.as_string)
@@ -74,14 +80,14 @@ ExtensionFunction::ResponseAction ContextMenusUpdateFunction::Run() {
   if (!extensions::context_menus_api_helpers::UpdateMenuItem(
           params->update_properties, browser_context(), extension(), item_id,
           &error)) {
-    return RespondNow(Error(error));
+    return RespondNow(Error(std::move(error)));
   }
   return RespondNow(NoArguments());
 }
 
 ExtensionFunction::ResponseAction ContextMenusRemoveFunction::Run() {
   std::unique_ptr<api::context_menus::Remove::Params> params(
-      api::context_menus::Remove::Params::Create(*args_));
+      api::context_menus::Remove::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   MenuManager* manager = MenuManager::Get(browser_context());

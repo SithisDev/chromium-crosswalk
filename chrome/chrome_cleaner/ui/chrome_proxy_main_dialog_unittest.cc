@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,19 +10,19 @@
 #include "base/callback.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
-#include "chrome/chrome_cleaner/ipc/mock_chrome_prompt_ipc.h"
+#include "base/test/task_environment.h"
+#include "chrome/chrome_cleaner/ipc/chrome_prompt_test_util.h"
 #include "chrome/chrome_cleaner/test/test_file_util.h"
 #include "chrome/chrome_cleaner/test/test_pup_data.h"
 #include "chrome/chrome_cleaner/test/test_settings_util.h"
 #include "chrome/chrome_cleaner/ui/mock_main_dialog_delegate.h"
+#include "components/chrome_cleaner/public/proto/chrome_prompt.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chrome_cleaner {
 namespace {
 
-using mojom::PromptAcceptance;
 using ::testing::_;
 using ::testing::Eq;
 using ::testing::Invoke;
@@ -48,18 +48,18 @@ TEST_F(ChromeProxyMainDialogTest, Create) {
 }
 
 TEST_F(ChromeProxyMainDialogTest, NoPUPsFound) {
-  base::test::ScopedTaskEnvironment scoped_task_environment(
-      base::test::ScopedTaskEnvironment::MainThreadType::UI);
+  base::test::SingleThreadTaskEnvironment task_environment(
+      base::test::SingleThreadTaskEnvironment::MainThreadType::UI);
 
   base::RunLoop run_loop;
   EXPECT_CALL(delegate_, OnClose())
       .WillOnce(testing::InvokeWithoutArgs([&run_loop]() { run_loop.Quit(); }));
   EXPECT_CALL(chrome_prompt_ipc_, MockPostPromptUserTask(_, _, _, _))
       .WillOnce(Invoke([](const std::vector<base::FilePath>& files_to_delete,
-                          const std::vector<base::string16>& registry_keys,
-                          const std::vector<base::string16>& extension_ids,
-                          mojom::ChromePrompt::PromptUserCallback* callback) {
-        std::move(*callback).Run(PromptAcceptance::DENIED);
+                          const std::vector<std::wstring>& registry_keys,
+                          const std::vector<std::wstring>& extension_ids,
+                          ChromePromptIPC::PromptUserCallback* callback) {
+        std::move(*callback).Run(PromptUserResponse::DENIED);
       }));
 
   dialog_->NoPUPsFound();
@@ -77,7 +77,7 @@ TEST_F(ChromeProxyMainDialogTest, Close) {
 }
 
 class ConfirmCleanupChromeProxyMainDialogTest
-    : public ::testing::TestWithParam<PromptAcceptance> {
+    : public ::testing::TestWithParam<PromptUserResponse::PromptAcceptance> {
  public:
   void SetUp() override { Settings::SetInstanceForTesting(&mock_settings_); }
 
@@ -86,16 +86,18 @@ class ConfirmCleanupChromeProxyMainDialogTest
   StrictMock<MockSettings> mock_settings_;
 };
 
-TEST_P(ConfirmCleanupChromeProxyMainDialogTest, ConfirmCleanup) {
+// Flaky, see: crbug.com/1189076.
+TEST_P(ConfirmCleanupChromeProxyMainDialogTest, DISABLED_ConfirmCleanup) {
   constexpr UwSId kFakePupId = 1024;
-  PromptAcceptance prompt_acceptance = GetParam();
+  PromptUserResponse::PromptAcceptance prompt_acceptance = GetParam();
   bool accept_cleanup =
-      prompt_acceptance == PromptAcceptance::ACCEPTED_WITH_LOGS ||
-      prompt_acceptance == PromptAcceptance::ACCEPTED_WITHOUT_LOGS;
-  bool logs_allowed = prompt_acceptance == PromptAcceptance::ACCEPTED_WITH_LOGS;
+      prompt_acceptance == PromptUserResponse::ACCEPTED_WITH_LOGS ||
+      prompt_acceptance == PromptUserResponse::ACCEPTED_WITHOUT_LOGS;
+  bool logs_allowed =
+      prompt_acceptance == PromptUserResponse::ACCEPTED_WITH_LOGS;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment(
-      base::test::ScopedTaskEnvironment::MainThreadType::UI);
+  base::test::SingleThreadTaskEnvironment task_environment(
+      base::test::SingleThreadTaskEnvironment::MainThreadType::UI);
 
   EXPECT_CALL(mock_settings_,
               set_logs_allowed_in_cleanup_mode(Eq(logs_allowed)))
@@ -126,7 +128,7 @@ TEST_P(ConfirmCleanupChromeProxyMainDialogTest, ConfirmCleanup) {
 
   pup->expanded_registry_footprints.push_back(PUPData::RegistryFootprint(
       RegKeyPath(HKEY_USERS, L"Software\\bad-software\\bad-key"),
-      base::string16(), base::string16(), REGISTRY_VALUE_MATCH_KEY));
+      std::wstring(), std::wstring(), REGISTRY_VALUE_MATCH_KEY));
 
   std::vector<UwSId> found_pups{kFakePupId};
 
@@ -137,9 +139,9 @@ TEST_P(ConfirmCleanupChromeProxyMainDialogTest, ConfirmCleanup) {
                                      /*extensions*/ SizeIs(0), _))
       .WillOnce(Invoke([prompt_acceptance](
                            const std::vector<base::FilePath>& files_to_delete,
-                           const std::vector<base::string16>& registry_keys,
-                           const std::vector<base::string16>& extension_ids,
-                           mojom::ChromePrompt::PromptUserCallback* callback) {
+                           const std::vector<std::wstring>& registry_keys,
+                           const std::vector<std::wstring>& extension_ids,
+                           ChromePromptIPC::PromptUserCallback* callback) {
         std::move(*callback).Run(prompt_acceptance);
       }));
 
@@ -156,9 +158,9 @@ TEST_P(ConfirmCleanupChromeProxyMainDialogTest, ConfirmCleanup) {
 INSTANTIATE_TEST_SUITE_P(
     All,
     ConfirmCleanupChromeProxyMainDialogTest,
-    testing::Values(PromptAcceptance::ACCEPTED_WITH_LOGS,
-                    PromptAcceptance::ACCEPTED_WITHOUT_LOGS,
-                    PromptAcceptance::DENIED));
+    testing::Values(PromptUserResponse::ACCEPTED_WITH_LOGS,
+                    PromptUserResponse::ACCEPTED_WITHOUT_LOGS,
+                    PromptUserResponse::DENIED));
 
 }  // namespace
 }  // namespace chrome_cleaner

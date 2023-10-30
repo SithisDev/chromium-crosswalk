@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,15 +21,19 @@ namespace extensions {
 class ClipboardExtensionHelper {
  public:
   ClipboardExtensionHelper();
+
+  ClipboardExtensionHelper(const ClipboardExtensionHelper&) = delete;
+  ClipboardExtensionHelper& operator=(const ClipboardExtensionHelper&) = delete;
+
   ~ClipboardExtensionHelper();
 
   // Decodes and saves the image data on clipboard. Must run on UI thread.
   void DecodeAndSaveImageData(
-      const std::vector<char>& data,
+      std::vector<uint8_t> data,
       api::clipboard::ImageType type,
       AdditionalDataItemList additional_items,
-      const base::Closure& success_callback,
-      const base::Callback<void(const std::string&)>& error_callback);
+      base::OnceClosure success_callback,
+      base::OnceCallback<void(const std::string&)> error_callback);
 
  private:
   // A class to decode PNG and JPEG file.
@@ -43,11 +47,9 @@ class ClipboardExtensionHelper {
   void OnImageDecodeCancel();
 
   std::unique_ptr<ClipboardImageDataDecoder> clipboard_image_data_decoder_;
-  base::Closure image_save_success_callback_;
-  base::Callback<void(const std::string&)> image_save_error_callback_;
+  base::OnceClosure image_save_success_callback_;
+  base::OnceCallback<void(const std::string&)> image_save_error_callback_;
   AdditionalDataItemList additonal_items_;
-
-  DISALLOW_COPY_AND_ASSIGN(ClipboardExtensionHelper);
 };
 
 }  // namespace extensions

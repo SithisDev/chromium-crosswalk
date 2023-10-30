@@ -1,57 +1,85 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/background_sync/periodic_background_sync_permission_context.h"
 
+#include "base/feature_list.h"
+#include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/installable/installable_utils.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/common/chrome_features.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "content/public/browser/browser_context.h"
+#include "components/search_engines/template_url.h"
+#include "components/search_engines/template_url_service.h"
 #include "content/public/browser/browser_thread.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom.h"
+#include "url/origin.h"
 
-#if defined(OS_ANDROID)
-#include "base/android/jni_string.h"
-#include "base/android/scoped_java_ref.h"
-#include "base/strings/utf_string_conversions.h"
-#include "chrome/android/chrome_jni_headers/BackgroundSyncPwaDetector_jni.h"
+#if BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/android/shortcut_helper.h"
 #endif
 
+namespace features {
+
+// If enabled, the installability criteria for granting PBS permission is
+// dropped and the content setting is checked. This only applies if the
+// requesting origin matches that of the browser's default search engine.
+const base::Feature kPeriodicSyncPermissionForDefaultSearchEngine{
+    "PeriodicSyncPermissionForDefaultSearchEngine",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+}  // namespace features
+
 PeriodicBackgroundSyncPermissionContext::
-    PeriodicBackgroundSyncPermissionContext(Profile* profile)
-    : PermissionContextBase(profile,
-                            CONTENT_SETTINGS_TYPE_PERIODIC_BACKGROUND_SYNC,
-                            blink::mojom::FeaturePolicyFeature::kNotFound) {}
+    PeriodicBackgroundSyncPermissionContext(
+        content::BrowserContext* browser_context)
+    : PermissionContextBase(browser_context,
+                            ContentSettingsType::PERIODIC_BACKGROUND_SYNC,
+                            blink::mojom::PermissionsPolicyFeature::kNotFound) {
+}
 
 PeriodicBackgroundSyncPermissionContext::
     ~PeriodicBackgroundSyncPermissionContext() = default;
 
 bool PeriodicBackgroundSyncPermissionContext::IsPwaInstalled(
-    const GURL& url) const {
-#if defined(OS_ANDROID)
-  JNIEnv* env = base::android::AttachCurrentThread();
-  base::android::ScopedJavaLocalRef<jstring> java_url =
-      base::android::ConvertUTF8ToJavaString(env, url.spec());
-  return Java_BackgroundSyncPwaDetector_isPwaInstalled(env, java_url);
-#else
-  return extensions::util::GetInstalledPwaForUrl(profile(), url);
-#endif
+    const GURL& origin) const {
+  // Because we're only passed the requesting origin from the permissions
+  // infrastructure, we can't match the scope of installed PWAs to the exact URL
+  // of the permission request. We instead look for any installed PWA for the
+  // requesting origin. With this logic, if there's already a PWA installed for
+  // google.com/travel, and a request to register Periodic Background Sync comes
+  // in from google.com/maps, this method will return true and registration will
+  // succeed, provided other required conditions are met.
+  return DoesOriginContainAnyInstalledWebApp(browser_context(), origin);
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 bool PeriodicBackgroundSyncPermissionContext::IsTwaInstalled(
-    const GURL& url) const {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  base::android::ScopedJavaLocalRef<jstring> java_url =
-      base::android::ConvertUTF8ToJavaString(env, url.spec());
-  return Java_BackgroundSyncPwaDetector_isTwaInstalled(env, java_url);
+    const GURL& origin) const {
+  return ShortcutHelper::DoesOriginContainAnyInstalledTrustedWebActivity(
+      origin);
 }
 #endif
 
 bool PeriodicBackgroundSyncPermissionContext::IsRestrictedToSecureOrigins()
     const {
   return true;
+}
+
+GURL PeriodicBackgroundSyncPermissionContext::GetDefaultSearchEngineUrl()
+    const {
+  auto* template_url_service = TemplateURLServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()));
+  DCHECK(template_url_service);
+
+  const TemplateURL* default_search_engine =
+      template_url_service->GetDefaultSearchProvider();
+  return default_search_engine ? default_search_engine->GenerateSearchURL(
+                                     template_url_service->search_terms_data())
+                               : GURL();
 }
 
 ContentSetting
@@ -61,50 +89,56 @@ PeriodicBackgroundSyncPermissionContext::GetPermissionStatusInternal(
     const GURL& embedding_origin) const {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (IsTwaInstalled(requesting_origin))
     return CONTENT_SETTING_ALLOW;
 #endif
 
-  if (!IsPwaInstalled(requesting_origin))
-    return CONTENT_SETTING_BLOCK;
+  bool can_bypass_install_requirement =
+      base::FeatureList::IsEnabled(
+          features::kPeriodicSyncPermissionForDefaultSearchEngine) &&
+      url::IsSameOriginWith(GetDefaultSearchEngineUrl(), requesting_origin);
 
-  // PWA installed. Check for one-shot Background Sync content setting.
+  if (!can_bypass_install_requirement && !IsPwaInstalled(requesting_origin)) {
+    return CONTENT_SETTING_BLOCK;
+  }
+
+  // |requesting_origin| either has an installed PWA or matches the default
+  // search engine's origin. Check one-shot Background Sync content setting.
   // Expected values are CONTENT_SETTING_BLOCK or CONTENT_SETTING_ALLOW.
   auto* host_content_settings_map =
-      HostContentSettingsMapFactory::GetForProfile(profile());
+      HostContentSettingsMapFactory::GetForProfile(browser_context());
   DCHECK(host_content_settings_map);
 
   auto content_setting = host_content_settings_map->GetContentSetting(
       requesting_origin, embedding_origin,
-      CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC,
-      /* resource_identifier= */ std::string());
+      ContentSettingsType::BACKGROUND_SYNC);
   DCHECK(content_setting == CONTENT_SETTING_BLOCK ||
          content_setting == CONTENT_SETTING_ALLOW);
   return content_setting;
 }
 
 void PeriodicBackgroundSyncPermissionContext::DecidePermission(
-    content::WebContents* web_contents,
-    const PermissionRequestID& id,
+    const permissions::PermissionRequestID& id,
     const GURL& requesting_origin,
     const GURL& embedding_origin,
     bool user_gesture,
-    BrowserPermissionCallback callback) {
+    permissions::BrowserPermissionCallback callback) {
   // The user should never be prompted to authorize Periodic Background Sync
   // from PeriodicBackgroundSyncPermissionContext.
   NOTREACHED();
 }
 
 void PeriodicBackgroundSyncPermissionContext::NotifyPermissionSet(
-    const PermissionRequestID& id,
+    const permissions::PermissionRequestID& id,
     const GURL& requesting_origin,
     const GURL& embedding_origin,
-    BrowserPermissionCallback callback,
+    permissions::BrowserPermissionCallback callback,
     bool persist,
-    ContentSetting content_setting) {
+    ContentSetting content_setting,
+    bool is_one_time) {
   DCHECK(!persist);
-  PermissionContextBase::NotifyPermissionSet(
+  permissions::PermissionContextBase::NotifyPermissionSet(
       id, requesting_origin, embedding_origin, std::move(callback), persist,
-      content_setting);
+      content_setting, is_one_time);
 }

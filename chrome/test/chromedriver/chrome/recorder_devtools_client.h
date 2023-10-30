@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,6 @@
 
 #include "base/values.h"
 #include "chrome/test/chromedriver/chrome/stub_devtools_client.h"
-
-namespace base {
-class DictionaryValue;
-}
 
 class Status;
 
@@ -27,7 +23,7 @@ struct Command {
   }
   Command& operator=(const Command& command) {
     method = command.method;
-    params.Clear();
+    params.DictClear();
     params.MergeDictionary(&command.params);
     return *this;
   }
@@ -43,10 +39,9 @@ class RecorderDevToolsClient : public StubDevToolsClient {
   ~RecorderDevToolsClient() override;
 
   // Overridden from StubDevToolsClient:
-  Status SendCommandAndGetResult(
-      const std::string& method,
-      const base::DictionaryValue& params,
-      std::unique_ptr<base::DictionaryValue>* result) override;
+  Status SendCommandAndGetResult(const std::string& method,
+                                 const base::DictionaryValue& params,
+                                 base::Value* result) override;
 
   std::vector<Command> commands_;
 };

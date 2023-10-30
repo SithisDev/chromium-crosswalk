@@ -1,22 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_GLOBAL_ERROR_GLOBAL_ERROR_H_
 #define CHROME_BROWSER_UI_GLOBAL_ERROR_GLOBAL_ERROR_H_
 
+#include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
+#include "ui/base/models/image_model.h"
 
 class Browser;
 class GlobalErrorBubbleViewBase;
-
-namespace gfx {
-class Image;
-}
 
 // This object describes a single global error.
 class GlobalError {
@@ -40,9 +37,9 @@ class GlobalError {
   // Returns the command ID for the menu item.
   virtual int MenuItemCommandID() = 0;
   // Returns the label for the menu item.
-  virtual base::string16 MenuItemLabel() = 0;
+  virtual std::u16string MenuItemLabel() = 0;
   // Returns the menu item icon.
-  virtual gfx::Image MenuItemIcon();
+  virtual ui::ImageModel MenuItemIcon();
   // Called when the user clicks on the menu item.
   virtual void ExecuteMenuItem(Browser* browser) = 0;
 
@@ -64,50 +61,29 @@ class GlobalErrorWithStandardBubble
       public base::SupportsWeakPtr<GlobalErrorWithStandardBubble> {
  public:
   GlobalErrorWithStandardBubble();
+
+  GlobalErrorWithStandardBubble(const GlobalErrorWithStandardBubble&) = delete;
+  GlobalErrorWithStandardBubble& operator=(
+      const GlobalErrorWithStandardBubble&) = delete;
+
   ~GlobalErrorWithStandardBubble() override;
 
-  // Returns an icon to use for the bubble view.
-  virtual gfx::Image GetBubbleViewIcon();
-
-  // Returns the title for the bubble view.
-  virtual base::string16 GetBubbleViewTitle() = 0;
-  // Returns the messages for the bubble view, one per line. Multiple messages
-  // are only supported on Views.
-  // TODO(yoz): Add multi-line support for GTK and Cocoa.
-  virtual std::vector<base::string16> GetBubbleViewMessages() = 0;
-  // Returns the accept button label for the bubble view.
-  virtual base::string16 GetBubbleViewAcceptButtonLabel() = 0;
-  // Returns true if the bubble needs a close(x) button.
+  // Override these methods to customize the contents of the error bubble:
+  virtual std::u16string GetBubbleViewTitle() = 0;
+  virtual std::vector<std::u16string> GetBubbleViewMessages() = 0;
+  virtual std::u16string GetBubbleViewAcceptButtonLabel() = 0;
   virtual bool ShouldShowCloseButton() const;
-  // Returns true if the accept button needs elevation icon (only effective
-  // on Windows platform).
   virtual bool ShouldAddElevationIconToAcceptButton();
-  // Returns the cancel button label for the bubble view. To hide the cancel
-  // button return an empty string.
-  virtual base::string16 GetBubbleViewCancelButtonLabel() = 0;
-  // Returns the default dialog button. Default behavior is to return
-  // ui::DIALOG_BUTTON_OK. Do not return ui::DIALOG_BUTTON_CANCEL if hiding the
-  // cancel button.
+  virtual std::u16string GetBubbleViewCancelButtonLabel() = 0;
   virtual int GetDefaultDialogButton() const;
-  // Called when the bubble view is closed. |browser| is the Browser that the
-  // bubble view was shown on.
-  virtual void BubbleViewDidClose(Browser* browser);
-  // Notifies subclasses that the bubble view is closed. |browser| is the
-  // Browser that the bubble view was shown on.
-  virtual void OnBubbleViewDidClose(Browser* browser) = 0;
-  // Called when the user clicks on the accept button. |browser| is the
-  // Browser that the bubble view was shown on.
-  virtual void BubbleViewAcceptButtonPressed(Browser* browser) = 0;
-  // Called when the user clicks the cancel button. |browser| is the
-  // Browser that the bubble view was shown on.
-  virtual void BubbleViewCancelButtonPressed(Browser* browser) = 0;
-  // Returns true if the bubble should close when focus is lost. If false, the
-  // bubble will stick around until the user explicitly acknowledges it.
-  // Defaults to true.
   virtual bool ShouldCloseOnDeactivate() const;
-  // Return true if 'cancel' button should be created as an extra view placed on
-  // the left edge across from the 'ok' button.
-  virtual bool ShouldUseExtraView() const;
+  virtual std::u16string GetBubbleViewDetailsButtonLabel();
+
+  // Override these methods to be notified when events happen on the bubble:
+  virtual void OnBubbleViewDidClose(Browser* browser) = 0;
+  virtual void BubbleViewAcceptButtonPressed(Browser* browser) = 0;
+  virtual void BubbleViewCancelButtonPressed(Browser* browser) = 0;
+  virtual void BubbleViewDetailsButtonPressed(Browser* browser);
 
   // GlobalError overrides:
   bool HasBubbleView() override;
@@ -115,11 +91,14 @@ class GlobalErrorWithStandardBubble
   void ShowBubbleView(Browser* browser) override;
   GlobalErrorBubbleViewBase* GetBubbleView() override;
 
- private:
-  bool has_shown_bubble_view_;
-  GlobalErrorBubbleViewBase* bubble_view_;
+  // This method is used by the View to notify this object that the bubble has
+  // closed. Do not call it. It is only virtual for unit tests; do not override
+  // it either.
+  virtual void BubbleViewDidClose(Browser* browser);
 
-  DISALLOW_COPY_AND_ASSIGN(GlobalErrorWithStandardBubble);
+ private:
+  bool has_shown_bubble_view_ = false;
+  raw_ptr<GlobalErrorBubbleViewBase> bubble_view_ = nullptr;
 };
 
 #endif  // CHROME_BROWSER_UI_GLOBAL_ERROR_GLOBAL_ERROR_H_

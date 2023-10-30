@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,16 +18,21 @@
 
 using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
+using contextual_search::UnhandledTapWebContentsObserver;
 
 ContextualSearchTabHelper::ContextualSearchTabHelper(JNIEnv* env,
                                                      jobject obj,
                                                      Profile* profile)
     : weak_java_ref_(env, obj),
-      pref_change_registrar_(new PrefChangeRegistrar()),
-      weak_factory_(this) {
+      pref_change_registrar_(new PrefChangeRegistrar()) {
   pref_change_registrar_->Init(profile->GetPrefs());
   pref_change_registrar_->Add(
       prefs::kContextualSearchEnabled,
+      base::BindRepeating(
+          &ContextualSearchTabHelper::OnContextualSearchPrefChanged,
+          weak_factory_.GetWeakPtr()));
+  pref_change_registrar_->Add(
+      prefs::kContextualSearchWasFullyPrivacyEnabled,
       base::BindRepeating(
           &ContextualSearchTabHelper::OnContextualSearchPrefChanged,
           weak_factory_.GetWeakPtr()));
@@ -43,15 +48,12 @@ void ContextualSearchTabHelper::OnContextualSearchPrefChanged() {
   Java_ContextualSearchTabHelper_onContextualSearchPrefChanged(env, jobj);
 }
 
-void ContextualSearchTabHelper::OnShowUnhandledTapUIIfNeeded(
-    int x_px,
-    int y_px,
-    int font_size_dips,
-    int text_run_length) {
+void ContextualSearchTabHelper::OnShowUnhandledTapUIIfNeeded(int x_px,
+                                                             int y_px) {
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jobject> jobj = weak_java_ref_.get(env);
-  Java_ContextualSearchTabHelper_onShowUnhandledTapUIIfNeeded(
-      env, jobj, x_px, y_px, font_size_dips, text_run_length);
+  Java_ContextualSearchTabHelper_onShowUnhandledTapUIIfNeeded(env, jobj, x_px,
+                                                              y_px);
 }
 
 void ContextualSearchTabHelper::InstallUnhandledTapNotifierIfNeeded(
@@ -63,15 +65,21 @@ void ContextualSearchTabHelper::InstallUnhandledTapNotifierIfNeeded(
   content::WebContents* base_web_contents =
       content::WebContents::FromJavaWebContents(j_base_web_contents);
   DCHECK(base_web_contents);
-  if (!unhandled_tap_web_contents_observer_ ||
-      base_web_contents !=
-          unhandled_tap_web_contents_observer_->web_contents()) {
-    unhandled_tap_web_contents_observer_.reset(
-        new contextual_search::UnhandledTapWebContentsObserver(
-            base_web_contents, device_scale_factor,
-            base::BindRepeating(
-                &ContextualSearchTabHelper::OnShowUnhandledTapUIIfNeeded,
-                weak_factory_.GetWeakPtr())));
+
+  if (!UnhandledTapWebContentsObserver::FromWebContents(base_web_contents)) {
+    // Create an UnhandledTapWebContentsObserver owned by |base_web_contents|.
+    UnhandledTapWebContentsObserver::CreateForWebContents(base_web_contents);
+
+    // As per WebContentsUserData::CreateForWebContents(), the constructor of
+    // UnhandledTapWebContentsObserver must only accept one parameter holding a
+    // pointer to the WebContents that will own it (i.e. |base_web_contents|),
+    // forcing us to defer the rest of the initialization to the setters below.
+    auto* utwc_observer =
+        UnhandledTapWebContentsObserver::FromWebContents(base_web_contents);
+    utwc_observer->set_device_scale_factor(device_scale_factor);
+    utwc_observer->set_unhandled_tap_callback(base::BindRepeating(
+        &ContextualSearchTabHelper::OnShowUnhandledTapUIIfNeeded,
+        weak_factory_.GetWeakPtr()));
   }
 }
 

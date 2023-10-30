@@ -1,14 +1,16 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/tabs/tab_strip_layout.h"
 
 #include <stddef.h>
+#include <string>
 
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "chrome/browser/ui/views/tabs/tab_animation_state.h"
+#include "chrome/browser/ui/tabs/tab_types.h"
+#include "chrome/browser/ui/views/tabs/tab_layout_state.h"
+#include "chrome/browser/ui/views/tabs/tab_width_constraints.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -46,34 +48,35 @@ struct TestCase {
 };
 
 constexpr int kStandardWidth = 100;
-constexpr int kStandardHeight = 10;
+constexpr int kTabHeight = 10;
 constexpr int kMinActiveWidth = 20;
 constexpr int kMinInactiveWidth = 14;
 constexpr int kPinnedWidth = 10;
 constexpr int kTabOverlap = 4;
 
 std::vector<gfx::Rect> CalculateTabBounds(TestCase test_case) {
+  TabLayoutConstants layout_constants;
+  layout_constants.tab_height = kTabHeight;
+  layout_constants.tab_overlap = kTabOverlap;
+
   TabSizeInfo size_info;
   size_info.pinned_tab_width = kPinnedWidth;
   size_info.min_active_width = kMinActiveWidth;
   size_info.min_inactive_width = kMinInactiveWidth;
-  size_info.standard_size = gfx::Size(kStandardWidth, kStandardHeight);
-  size_info.tab_overlap = kTabOverlap;
+  size_info.standard_width = kStandardWidth;
 
-  std::vector<TabAnimationState> ideal_animation_states;
+  std::vector<TabWidthConstraints> tab_states;
   for (int tab_index = 0; tab_index < test_case.num_tabs; tab_index++) {
-    ideal_animation_states.push_back(TabAnimationState::ForIdealTabState(
-        TabAnimationState::TabOpenness::kOpen,
-        tab_index < test_case.num_pinned_tabs
-            ? TabAnimationState::TabPinnedness::kPinned
-            : TabAnimationState::TabPinnedness::kUnpinned,
-        tab_index == test_case.active_index
-            ? TabAnimationState::TabActiveness::kActive
-            : TabAnimationState::TabActiveness::kInactive,
-        0));
+    TabLayoutState ideal_animation_state = TabLayoutState(
+        TabOpen::kOpen,
+        tab_index < test_case.num_pinned_tabs ? TabPinned::kPinned
+                                              : TabPinned::kUnpinned,
+        tab_index == test_case.active_index ? TabActive::kActive
+                                            : TabActive::kInactive);
+    tab_states.emplace_back(ideal_animation_state, layout_constants, size_info);
   }
 
-  return CalculateTabBounds(size_info, ideal_animation_states,
+  return CalculateTabBounds(layout_constants, tab_states,
                             test_case.tabstrip_width);
 }
 
@@ -99,7 +102,7 @@ TEST(TabStripLayoutTest, Basics) {
   EXPECT_EQ("0 96 192", TabXPositionsAsString(bounds));
   for (const auto& b : bounds) {
     EXPECT_EQ(0, b.y());
-    EXPECT_EQ(kStandardHeight, b.height());
+    EXPECT_EQ(kTabHeight, b.height());
   }
 }
 

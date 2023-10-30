@@ -1,12 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/external_pref_loader.h"
 
+#include <set>
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -15,26 +17,31 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/lazy_task_runner.h"
-#include "base/task/post_task.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/apps/user_type_filter.h"
-#include "chrome/browser/defaults.h"
-#include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/chrome_paths.h"
+#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
+#include "extensions/browser/extension_file_task_runner.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/constants/ash_features.h"
+#include "ash/constants/ash_pref_names.h"
+#include "ash/constants/ash_switches.h"
+#include "chrome/browser/prefs/pref_service_syncable_util.h"
+#include "chrome/browser/sync/sync_service_factory.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_service_observer.h"
 #include "components/sync/driver/sync_user_settings.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "components/sync_preferences/pref_service_syncable_observer.h"
-#include "content/public/browser/browser_task_traits.h"
-#include "content/public/browser/browser_thread.h"
-#include "extensions/browser/extension_file_task_runner.h"
+#endif
 
 using content::BrowserThread;
 
@@ -43,8 +50,31 @@ namespace {
 constexpr base::FilePath::CharType kExternalExtensionJson[] =
     FILE_PATH_LITERAL("external_extensions.json");
 
+// Extension installations are skipped here as excluding these in the overlay
+// is a bit complicated.
+// TODO(crbug.com/1023268) This is a temporary measure and should be replaced.
+bool SkipInstallForChromeOSTablet(const base::FilePath& file_path) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  if (!ash::switches::IsTabletFormFactor())
+    return false;
+
+  constexpr char const* kIdsNotToBeInstalledOnTabletFormFactor[] = {
+      "blpcfgokakmgnkcojhhkbfbldkacnbeo.json",  // Youtube file name.
+      "ejjicmeblgpmajnghnpcppodonldlgfn.json",  // Calendar file name.
+      "hcglmfcclpfgljeaiahehebeoaiicbko.json",  // Google Photos file name.
+      "lneaknkopdijkpnocmklfnjbeapigfbh.json",  // Google Maps file name.
+      "pjkljhegncpnkpknbcohdijeoejaedia.json",  // Gmail file name.
+  };
+
+  return base::Contains(kIdsNotToBeInstalledOnTabletFormFactor,
+                        file_path.BaseName().value());
+#else
+  return false;
+#endif
+}
+
 std::set<base::FilePath> GetPrefsCandidateFilesFromFolder(
-      const base::FilePath& external_extension_search_path) {
+    const base::FilePath& external_extension_search_path) {
   std::set<base::FilePath> external_extension_paths;
 
   if (!base::PathExists(external_extension_search_path)) {
@@ -56,9 +86,9 @@ std::set<base::FilePath> GetPrefsCandidateFilesFromFolder(
       external_extension_search_path,
       false,  // Recursive.
       base::FileEnumerator::FILES);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   base::FilePath::StringType extension = base::UTF8ToWide(".json");
-#elif defined(OS_POSIX)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   base::FilePath::StringType extension(".json");
 #endif
   do {
@@ -68,6 +98,8 @@ std::set<base::FilePath> GetPrefsCandidateFilesFromFolder(
     if (file.empty())
       break;
     if (file.MatchesExtension(extension)) {
+      if (SkipInstallForChromeOSTablet(file))
+        continue;
       external_extension_paths.insert(file.BaseName());
     } else {
       DVLOG(1) << "Not considering: " << file.LossyDisplayName()
@@ -82,17 +114,20 @@ std::set<base::FilePath> GetPrefsCandidateFilesFromFolder(
 
 namespace extensions {
 
-// Helper class to wait for priority sync to be ready.
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+// Helper class to wait for priority pref sync to be ready.
 class ExternalPrefLoader::PrioritySyncReadyWaiter
     : public sync_preferences::PrefServiceSyncableObserver,
       public syncer::SyncServiceObserver {
  public:
-  explicit PrioritySyncReadyWaiter(Profile* profile)
-      : profile_(profile),
-        syncable_pref_observer_(this),
-        sync_service_observer_(this) {}
+  explicit PrioritySyncReadyWaiter(Profile* profile) : profile_(profile) {
+    DCHECK(profile_);
+  }
 
-  ~PrioritySyncReadyWaiter() override {}
+  PrioritySyncReadyWaiter(const PrioritySyncReadyWaiter&) = delete;
+  PrioritySyncReadyWaiter& operator=(const PrioritySyncReadyWaiter&) = delete;
+
+  ~PrioritySyncReadyWaiter() override = default;
 
   void Start(base::OnceClosure done_closure) {
     if (IsPrioritySyncing()) {
@@ -100,20 +135,21 @@ class ExternalPrefLoader::PrioritySyncReadyWaiter
       // Note: |this| is deleted here.
       return;
     }
-    // Start observing sync changes.
-    DCHECK(profile_);
-    syncer::SyncService* service =
-        ProfileSyncServiceFactory::GetForProfile(profile_);
+    DCHECK(!done_closure_);
+    done_closure_ = std::move(done_closure);
+    MaybeObserveSyncStart();
+  }
+
+ private:
+  void MaybeObserveSyncStart() {
+    syncer::SyncService* service = SyncServiceFactory::GetForProfile(profile_);
     DCHECK(service);
-    if (service->CanSyncFeatureStart() &&
-        (service->GetUserSettings()->IsFirstSetupComplete() ||
-         browser_defaults::kSyncAutoStarts)) {
-      done_closure_ = std::move(done_closure);
-      AddObservers();
-    } else {
-      std::move(done_closure).Run();
-      // Note: |this| is deleted here.
+    if (!service->CanSyncFeatureStart()) {
+      Finish();
+      // Note: |this| is deleted.
+      return;
     }
+    AddObservers();
   }
 
   // sync_preferences::PrefServiceSyncableObserver:
@@ -132,24 +168,30 @@ class ExternalPrefLoader::PrioritySyncReadyWaiter
       Finish();
   }
 
- private:
+  void OnSyncShutdown(syncer::SyncService* sync) override {
+    DCHECK(sync_service_observation_.IsObservingSource(sync));
+    sync_service_observation_.Reset();
+  }
+
   bool IsPrioritySyncing() {
-    DCHECK(profile_);
     sync_preferences::PrefServiceSyncable* prefs =
         PrefServiceSyncableFromProfile(profile_);
     DCHECK(prefs);
-    return prefs->IsPrioritySyncing();
+    // SyncSettingsCategorization moves prefs like language and keyboard/mouse
+    // config to OS priority prefs.
+    return chromeos::features::IsSyncSettingsCategorizationEnabled()
+               ? prefs->AreOsPriorityPrefsSyncing()
+               : prefs->IsPrioritySyncing();
   }
 
   void AddObservers() {
     sync_preferences::PrefServiceSyncable* prefs =
         PrefServiceSyncableFromProfile(profile_);
     DCHECK(prefs);
-    syncable_pref_observer_.Add(prefs);
+    syncable_pref_observation_.Observe(prefs);
 
-    syncer::SyncService* service =
-        ProfileSyncServiceFactory::GetForProfile(profile_);
-    sync_service_observer_.Add(service);
+    syncer::SyncService* service = SyncServiceFactory::GetForProfile(profile_);
+    sync_service_observation_.Observe(service);
   }
 
   void Finish() { std::move(done_closure_).Run(); }
@@ -159,14 +201,13 @@ class ExternalPrefLoader::PrioritySyncReadyWaiter
   base::OnceClosure done_closure_;
 
   // Used for registering observer for sync_preferences::PrefServiceSyncable.
-  ScopedObserver<sync_preferences::PrefServiceSyncable,
-                 sync_preferences::PrefServiceSyncableObserver>
-      syncable_pref_observer_;
-  ScopedObserver<syncer::SyncService, syncer::SyncServiceObserver>
-      sync_service_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(PrioritySyncReadyWaiter);
+  base::ScopedObservation<sync_preferences::PrefServiceSyncable,
+                          sync_preferences::PrefServiceSyncableObserver>
+      syncable_pref_observation_{this};
+  base::ScopedObservation<syncer::SyncService, syncer::SyncServiceObserver>
+      sync_service_observation_{this};
 };
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 ExternalPrefLoader::ExternalPrefLoader(int base_path_id,
                                        int options,
@@ -190,19 +231,23 @@ const base::FilePath ExternalPrefLoader::GetBaseCrxFilePath() {
 
 void ExternalPrefLoader::StartLoading() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if ((options_ & DELAY_LOAD_UNTIL_PRIORITY_SYNC) &&
-      (profile_ && profile_->IsSyncAllowed())) {
+      (profile_ && SyncServiceFactory::IsSyncAllowed(profile_))) {
     pending_waiter_list_.push_back(
         std::make_unique<PrioritySyncReadyWaiter>(profile_));
     PrioritySyncReadyWaiter* waiter_ptr = pending_waiter_list_.back().get();
     waiter_ptr->Start(base::BindOnce(&ExternalPrefLoader::OnPrioritySyncReady,
                                      this, waiter_ptr));
-  } else {
-    GetExtensionFileTaskRunner()->PostTask(
-        FROM_HERE, base::BindOnce(&ExternalPrefLoader::LoadOnFileThread, this));
+    return;
   }
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+  GetExtensionFileTaskRunner()->PostTask(
+      FROM_HERE, base::BindOnce(&ExternalPrefLoader::LoadOnFileThread, this));
 }
 
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void ExternalPrefLoader::OnPrioritySyncReady(
     ExternalPrefLoader::PrioritySyncReadyWaiter* waiter) {
   // Delete |waiter| from |pending_waiter_list_|.
@@ -215,6 +260,7 @@ void ExternalPrefLoader::OnPrioritySyncReady(
   GetExtensionFileTaskRunner()->PostTask(
       FROM_HERE, base::BindOnce(&ExternalPrefLoader::LoadOnFileThread, this));
 }
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 // static.
 std::unique_ptr<base::DictionaryValue>
@@ -222,7 +268,7 @@ ExternalPrefLoader::ExtractExtensionPrefs(base::ValueDeserializer* deserializer,
                                           const base::FilePath& path) {
   std::string error_msg;
   std::unique_ptr<base::Value> extensions =
-      deserializer->Deserialize(NULL, &error_msg);
+      deserializer->Deserialize(nullptr, &error_msg);
   if (!extensions) {
     LOG(WARNING) << "Unable to deserialize json data: " << error_msg
                  << " in file " << path.value() << ".";
@@ -250,7 +296,7 @@ void ExternalPrefLoader::LoadOnFileThread() {
   if (base::PathService::Get(base_path_id_, &base_path_)) {
     ReadExternalExtensionPrefFile(prefs.get());
 
-    if (!prefs->empty())
+    if (!prefs->DictEmpty())
       LOG(WARNING) << "You are using an old-style extension deployment method "
                       "(external_extensions.json), which will soon be "
                       "deprecated. (see http://developer.chrome.com/"
@@ -260,22 +306,22 @@ void ExternalPrefLoader::LoadOnFileThread() {
   }
 
   if (base_path_id_ == chrome::DIR_EXTERNAL_EXTENSIONS)
-    UMA_HISTOGRAM_COUNTS_100("Extensions.ExternalJsonCount", prefs->size());
+    UMA_HISTOGRAM_COUNTS_100("Extensions.ExternalJsonCount", prefs->DictSize());
 
   // If we have any records to process, then we must have
   // read at least one .json file.  If so, then we should have
   // set |base_path_|.
-  if (!prefs->empty())
+  if (!prefs->DictEmpty())
     CHECK(!base_path_.empty());
 
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                           base::BindOnce(&ExternalPrefLoader::LoadFinished,
-                                          this, std::move(prefs)));
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&ExternalPrefLoader::LoadFinished, this,
+                                std::move(prefs)));
 }
 
 void ExternalPrefLoader::ReadExternalExtensionPrefFile(
     base::DictionaryValue* prefs) {
-  CHECK(NULL != prefs);
+  CHECK(nullptr != prefs);
 
   base::FilePath json_file = base_path_.Append(kExternalExtensionJson);
 
@@ -285,7 +331,7 @@ void ExternalPrefLoader::ReadExternalExtensionPrefFile(
   }
 
   if (IsOptionSet(ENSURE_PATH_CONTROLLED_BY_ADMIN)) {
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
     if (!base::VerifyPathControlledByAdmin(json_file)) {
       LOG(ERROR) << "Can not read external extensions source.  The file "
                  << json_file.value() << " and every directory in its path, "
@@ -300,7 +346,7 @@ void ExternalPrefLoader::ReadExternalExtensionPrefFile(
     // you need to implement base::VerifyPathControlledByAdmin() for
     // that platform.
     NOTREACHED();
-#endif  // defined(OS_MACOSX)
+#endif  // BUILDFLAG(IS_MAC)
   }
 
   JSONFileValueDeserializer deserializer(json_file);
@@ -312,11 +358,11 @@ void ExternalPrefLoader::ReadExternalExtensionPrefFile(
 
 void ExternalPrefLoader::ReadStandaloneExtensionPrefFiles(
     base::DictionaryValue* prefs) {
-  CHECK(NULL != prefs);
+  CHECK(nullptr != prefs);
 
   // First list the potential .json candidates.
-  std::set<base::FilePath>
-      candidates = GetPrefsCandidateFilesFromFolder(base_path_);
+  std::set<base::FilePath> candidates =
+      GetPrefsCandidateFilesFromFolder(base_path_);
   if (candidates.empty()) {
     DVLOG(1) << "Extension candidates list empty";
     return;
@@ -326,8 +372,7 @@ void ExternalPrefLoader::ReadStandaloneExtensionPrefFiles(
   std::unique_ptr<base::ListValue> default_user_types;
   if (options_ & USE_USER_TYPE_PROFILE_FILTER) {
     default_user_types = std::make_unique<base::ListValue>();
-    default_user_types->GetList().push_back(
-        base::Value(apps::kUserTypeUnmanaged));
+    default_user_types->Append(base::Value(apps::kUserTypeUnmanaged));
   }
 
   // For each file read the json description & build the proper
@@ -336,10 +381,10 @@ void ExternalPrefLoader::ReadStandaloneExtensionPrefFiles(
     base::FilePath extension_candidate_path = base_path_.Append(*it);
 
     const std::string id =
-#if defined(OS_WIN)
-        base::UTF16ToASCII(
+#if BUILDFLAG(IS_WIN)
+        base::WideToASCII(
             extension_candidate_path.RemoveExtension().BaseName().value());
-#elif defined(OS_POSIX)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
         extension_candidate_path.RemoveExtension().BaseName().value();
 #endif
 
@@ -361,7 +406,7 @@ void ExternalPrefLoader::ReadStandaloneExtensionPrefFiles(
     }
 
     DVLOG(1) << "Adding extension with id: " << id;
-    prefs->Set(id, std::move(ext_prefs));
+    prefs->SetKey(id, base::Value::FromUniquePtrValue(std::move(ext_prefs)));
   }
 }
 

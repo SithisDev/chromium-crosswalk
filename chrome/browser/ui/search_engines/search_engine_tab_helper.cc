@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "chrome/browser/search_engines/template_url_fetcher_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/search_engines/edit_search_engine_controller.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_fetcher.h"
@@ -24,7 +23,8 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/resource_type.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/network/public/mojom/url_loader_factory.mojom.h"
 
 using content::NavigationController;
 using content::NavigationEntry;
@@ -38,11 +38,39 @@ bool IsFormSubmit(NavigationEntry* entry) {
                                       ui::PAGE_TRANSITION_FORM_SUBMIT);
 }
 
-base::string16 GenerateKeywordFromNavigationEntry(NavigationEntry* entry) {
+}  // namespace
+
+// static
+void SearchEngineTabHelper::BindOpenSearchDescriptionDocumentHandler(
+    mojo::PendingAssociatedReceiver<
+        chrome::mojom::OpenSearchDescriptionDocumentHandler> receiver,
+    content::RenderFrameHost* rfh) {
+  auto* web_contents = content::WebContents::FromRenderFrameHost(rfh);
+  if (!web_contents)
+    return;
+  auto* tab_helper = SearchEngineTabHelper::FromWebContents(web_contents);
+  if (!tab_helper)
+    return;
+  tab_helper->osdd_handler_receivers_.Bind(rfh, std::move(receiver));
+}
+
+SearchEngineTabHelper::~SearchEngineTabHelper() = default;
+
+void SearchEngineTabHelper::DidFinishNavigation(
+    content::NavigationHandle* handle) {
+  GenerateKeywordIfNecessary(handle);
+}
+
+void SearchEngineTabHelper::WebContentsDestroyed() {
+  favicon_driver_observation_.Reset();
+}
+
+std::u16string SearchEngineTabHelper::GenerateKeywordFromNavigationEntry(
+    NavigationEntry* entry) {
   // Don't autogenerate keywords for pages that are the result of form
   // submissions.
   if (IsFormSubmit(entry))
-    return base::string16();
+    return std::u16string();
 
   // We want to use the user typed URL if available since that represents what
   // the user typed to get here, and fall back on the regular URL if not.
@@ -50,7 +78,7 @@ base::string16 GenerateKeywordFromNavigationEntry(NavigationEntry* entry) {
   if (!url.is_valid()) {
     url = entry->GetURL();
     if (!url.is_valid())
-      return base::string16();
+      return std::u16string();
   }
 
   // Don't autogenerate keywords for referrers that
@@ -62,33 +90,20 @@ base::string16 GenerateKeywordFromNavigationEntry(NavigationEntry* entry) {
   // See http://b/issue?id=863583.
   if (!(url.SchemeIs(url::kHttpScheme) || url.SchemeIs(url::kHttpsScheme)) ||
       (url.path().length() > 1)) {
-    return base::string16();
+    return std::u16string();
   }
 
   return TemplateURL::GenerateKeyword(url);
 }
 
-}  // namespace
-
-SearchEngineTabHelper::~SearchEngineTabHelper() {
-}
-
-void SearchEngineTabHelper::DidFinishNavigation(
-    content::NavigationHandle* handle) {
-  GenerateKeywordIfNecessary(handle);
-}
-
-void SearchEngineTabHelper::WebContentsDestroyed() {
-  favicon_driver_observer_.RemoveAll();
-}
-
 SearchEngineTabHelper::SearchEngineTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      osdd_handler_bindings_(web_contents, this) {
+      content::WebContentsUserData<SearchEngineTabHelper>(*web_contents),
+      osdd_handler_receivers_(web_contents, this) {
   DCHECK(web_contents);
 
   favicon::CreateContentFaviconDriverForWebContents(web_contents);
-  favicon_driver_observer_.Add(
+  favicon_driver_observation_.Observe(
       favicon::ContentFaviconDriver::FromWebContents(web_contents));
 }
 
@@ -100,8 +115,8 @@ void SearchEngineTabHelper::PageHasOpenSearchDescriptionDocument(
   // keyword.
 
   // Only accept messages from the main frame.
-  if (osdd_handler_bindings_.GetCurrentTargetFrame() !=
-      web_contents()->GetMainFrame())
+  if (osdd_handler_receivers_.GetCurrentTargetFrame() !=
+      web_contents()->GetPrimaryMainFrame())
     return;
 
   // Make sure that the page is the current page and other basic checks.
@@ -131,22 +146,22 @@ void SearchEngineTabHelper::PageHasOpenSearchDescriptionDocument(
 
   // Autogenerate a keyword for the autodetected case; in the other cases we'll
   // generate a keyword later after fetching the OSDD.
-  base::string16 keyword = GenerateKeywordFromNavigationEntry(entry);
+  std::u16string keyword = GenerateKeywordFromNavigationEntry(entry);
   if (keyword.empty())
     return;
 
-  auto* frame = web_contents()->GetMainFrame();
-  network::mojom::URLLoaderFactoryPtr url_loader_factory;
+  auto* frame = web_contents()->GetPrimaryMainFrame();
+  mojo::Remote<network::mojom::URLLoaderFactory> url_loader_factory;
   frame->CreateNetworkServiceDefaultFactory(
-      mojo::MakeRequest(&url_loader_factory));
+      url_loader_factory.BindNewPipeAndPassReceiver());
 
   // Download the OpenSearch description document. If this is successful, a
   // new keyword will be created when done.
   TemplateURLFetcherFactory::GetForProfile(profile)->ScheduleDownload(
       keyword, osdd_url, entry->GetFavicon().url,
-      url::Origin::Create(web_contents()->GetURL()), url_loader_factory.get(),
+      frame->GetLastCommittedOrigin(), url_loader_factory.get(),
       frame->GetRoutingID(),
-      static_cast<int>(content::ResourceType::kSubResource));
+      content::GlobalRequestID::MakeBrowserInitiated().request_id);
 }
 
 void SearchEngineTabHelper::OnFaviconUpdated(
@@ -165,7 +180,8 @@ void SearchEngineTabHelper::OnFaviconUpdated(
 
 void SearchEngineTabHelper::GenerateKeywordIfNecessary(
     content::NavigationHandle* handle) {
-  if (!handle->IsInMainFrame() || !handle->GetSearchableFormURL().is_valid())
+  if (!handle->IsInPrimaryMainFrame() ||
+      !handle->GetSearchableFormURL().is_valid())
     return;
 
   Profile* profile =
@@ -182,7 +198,7 @@ void SearchEngineTabHelper::GenerateKeywordIfNecessary(
   if (last_index <= 0)
     return;
 
-  base::string16 keyword(GenerateKeywordFromNavigationEntry(
+  std::u16string keyword(GenerateKeywordFromNavigationEntry(
       controller.GetEntryAtIndex(last_index - 1)));
   if (keyword.empty())
     return;
@@ -197,19 +213,9 @@ void SearchEngineTabHelper::GenerateKeywordIfNecessary(
     return;
   }
 
-  const TemplateURL* current_url;
   GURL url = handle->GetSearchableFormURL();
-  if (!url_service->CanAddAutogeneratedKeyword(keyword, url, &current_url))
+  if (!url_service->CanAddAutogeneratedKeyword(keyword, url))
     return;
-
-  if (current_url) {
-    if (current_url->originating_url().is_valid()) {
-      // The existing keyword was generated from an OpenSearch description
-      // document, don't regenerate.
-      return;
-    }
-    url_service->Remove(current_url);
-  }
 
   TemplateURLData data;
   data.SetShortName(keyword);
@@ -231,7 +237,11 @@ void SearchEngineTabHelper::GenerateKeywordIfNecessary(
   }
   data.safe_for_autoreplace = true;
   data.input_encodings.push_back(handle->GetSearchableFormEncoding());
+
+  // This Add() call may displace the previously auto-generated TemplateURL.
+  // But it will never displace the Default Search Engine, nor will it displace
+  // any OpenSearch document derived engines, which outrank this one.
   url_service->Add(std::make_unique<TemplateURL>(data));
 }
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(SearchEngineTabHelper)
+WEB_CONTENTS_USER_DATA_KEY_IMPL(SearchEngineTabHelper);

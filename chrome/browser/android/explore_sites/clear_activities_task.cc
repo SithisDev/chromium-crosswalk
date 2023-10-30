@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,11 +36,7 @@ ClearActivitiesTask::ClearActivitiesTask(ExploreSitesStore* store,
                                          base::Time begin,
                                          base::Time end,
                                          BooleanCallback callback)
-    : store_(store),
-      begin_(begin),
-      end_(end),
-      callback_(std::move(callback)),
-      weak_factory_(this) {}
+    : store_(store), begin_(begin), end_(end), callback_(std::move(callback)) {}
 
 ClearActivitiesTask::~ClearActivitiesTask() = default;
 

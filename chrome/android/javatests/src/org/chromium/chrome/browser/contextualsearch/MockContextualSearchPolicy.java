@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@ package org.chromium.chrome.browser.contextualsearch;
  * TODO(mdjones): Allow the return values of these function to be set.
  */
 public class MockContextualSearchPolicy extends ContextualSearchPolicy {
-    public MockContextualSearchPolicy() {
-        super(null, null);
+    public MockContextualSearchPolicy(ContextualSearchSelectionController selectionController) {
+        super(selectionController, null);
     }
 
     @Override
@@ -19,17 +19,27 @@ public class MockContextualSearchPolicy extends ContextualSearchPolicy {
     }
 
     @Override
-    public boolean maySendBasePageUrl() {
-        return false;
-    }
-
-    @Override
-    public boolean shouldAnimateSearchProviderIcon() {
+    public boolean doSendBasePageUrl() {
         return false;
     }
 
     @Override
     public boolean isPromoAvailable() {
         return false;
+    }
+
+    @Override
+    public boolean isUserUndecided() {
+        return false;
+    }
+
+    @Override
+    public boolean shouldPreviousGestureResolve() {
+        return true;
+    }
+
+    @Override
+    public boolean canSendSurroundings() {
+        return true;
     }
 }

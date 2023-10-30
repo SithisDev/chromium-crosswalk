@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@
 
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
-#include "base/logging.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "chrome/android/chrome_jni_headers/NotificationSuspender_jni.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
@@ -56,7 +57,7 @@ std::vector<blink::NotificationResources> ParseResources(
 }
 
 PlatformNotificationContext* GetContext(Profile* profile, const GURL& origin) {
-  auto* partition = BrowserContext::GetStoragePartitionForSite(profile, origin);
+  auto* partition = profile->GetStoragePartitionForUrl(origin);
   auto* context = partition->GetPlatformNotificationContext();
   DCHECK(context);
   return context;
@@ -98,9 +99,9 @@ static void JNI_NotificationSuspender_StoreNotificationResources(
     GURL origin(std::move(origin_strings[i]));
     if (!origin.is_valid() || !origin.SchemeIsHTTPOrHTTPS())
       continue;
-    resources_by_context[GetContext(profile, origin)].emplace_back(
-        NotificationResourceData{std::move(id_strings[i]), std::move(origin),
-                                 std::move(resources[i])});
+    PlatformNotificationContext* context = GetContext(profile, origin);
+    resources_by_context[context].emplace_back(NotificationResourceData{
+        std::move(id_strings[i]), std::move(origin), std::move(resources[i])});
   }
 
   // Store resources in each context.

@@ -1,19 +1,21 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.contextualsearch;
 
 import android.os.Build;
-import android.support.annotation.Nullable;
-import android.support.annotation.VisibleForTesting;
 import android.view.textclassifier.TextClassifier;
 
-import org.chromium.chrome.browser.ChromeFeatureList;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
+import org.chromium.content_public.browser.SelectAroundCaretResult;
 import org.chromium.content_public.browser.SelectionClient;
-import org.chromium.content_public.browser.SelectionMetricsLogger;
+import org.chromium.content_public.browser.SelectionEventProcessor;
 import org.chromium.content_public.browser.SelectionPopupController;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.ui.touch_selection.SelectionEventType;
 
 /**
  * Manages the current {@link SelectionClient} instances, with support for 0-2 instances.
@@ -43,11 +45,7 @@ public class SelectionClientManager {
      * @param webContents The {@link WebContents} that will show popups for this client.
      */
     SelectionClientManager(WebContents webContents) {
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.CHROME_SMART_SELECTION)
-                // TODO(donnd): revert this line when crbug.com/956277 is fixed.
-                && !ChromeFeatureList.isEnabled(
-                        ChromeFeatureList.CONTEXTUAL_SEARCH_LONGPRESS_RESOLVE)
-                && Build.VERSION.SDK_INT > Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.O) {
             assert webContents != null;
             mOptionalSelectionClient = SelectionClient.createSmartSelectionClient(webContents);
             SelectionPopupController controller =
@@ -62,11 +60,6 @@ public class SelectionClientManager {
     SelectionClientManager(SelectionClient optionalSelectionClient, boolean enableSmartSelection) {
         mOptionalSelectionClient = optionalSelectionClient;
         mIsSmartSelectionEnabledInChrome = enableSmartSelection;
-    }
-
-    /** @return Whether Smart Text Selection is currently enabled in Chrome. */
-    boolean isSmartSelectionEnabledInChrome() {
-        return mIsSmartSelectionEnabledInChrome;
     }
 
     /**
@@ -159,16 +152,16 @@ public class SelectionClientManager {
         }
 
         @Override
-        public void onSelectionEvent(int eventType, float posXPix, float posYPix) {
+        public void onSelectionEvent(
+                @SelectionEventType int eventType, float posXPix, float posYPix) {
             mSmartSelectionClient.onSelectionEvent(eventType, posXPix, posYPix);
             mContextualSearchSelectionClient.onSelectionEvent(eventType, posXPix, posYPix);
         }
 
         @Override
-        public void selectWordAroundCaretAck(boolean didSelect, int startAdjust, int endAdjust) {
-            mSmartSelectionClient.selectWordAroundCaretAck(didSelect, startAdjust, endAdjust);
-            mContextualSearchSelectionClient.selectWordAroundCaretAck(
-                    didSelect, startAdjust, endAdjust);
+        public void selectAroundCaretAck(@Nullable SelectAroundCaretResult result) {
+            mSmartSelectionClient.selectAroundCaretAck(result);
+            mContextualSearchSelectionClient.selectAroundCaretAck(result);
         }
 
         @Override
@@ -199,8 +192,8 @@ public class SelectionClientManager {
         }
 
         @Override
-        public SelectionMetricsLogger getSelectionMetricsLogger() {
-            return mSmartSelectionClient.getSelectionMetricsLogger();
+        public SelectionEventProcessor getSelectionEventProcessor() {
+            return mSmartSelectionClient.getSelectionEventProcessor();
         }
     }
 }

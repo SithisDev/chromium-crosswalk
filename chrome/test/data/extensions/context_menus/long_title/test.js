@@ -1,15 +1,16 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Make a 1000-character long title.
-var title = "";
+var longTitle = '';
 for (var i = 0; i < 1000; i++) {
-  title += "x";
+  longTitle += 'x';
 }
-chrome.test.log("creating item");
-chrome.contextMenus.create({"title":title}, function() {
-  if (!chrome.runtime.lastError) {
-    chrome.test.sendMessage("created");
-  }
-});
+
+chrome.runtime.onInstalled.addListener(function(details) {
+  chrome.contextMenus.create({title: longTitle, id: 'my_id'}, function() {
+    if (!chrome.runtime.lastError) {
+      chrome.test.sendMessage('created');
+    }
+  })});

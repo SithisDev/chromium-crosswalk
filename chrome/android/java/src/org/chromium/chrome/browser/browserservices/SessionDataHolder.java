@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,11 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
-import android.support.customtabs.CustomTabsSessionToken;
 import android.util.SparseArray;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.browser.customtabs.CustomTabsSessionToken;
 
 import org.chromium.base.Callback;
 import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
@@ -32,7 +33,7 @@ public class SessionDataHolder {
     private final SparseArray<SessionData> mTaskIdToSessionData = new SparseArray<>();
 
     @Nullable
-    private SessionHandler mActiveContentHandler;
+    private SessionHandler mActiveSessionHandler;
 
     @Nullable
     private Callback<CustomTabsSessionToken> mSessionDisconnectCallback;
@@ -48,7 +49,7 @@ public class SessionDataHolder {
     private static class SessionData {
         public final CustomTabsSessionToken session;
 
-        // Content handlers can reside in Activities of different types, so we need to store the
+        // Session handlers can reside in Activities of different types, so we need to store the
         // Activity class to be able to route new intents into it.
         public final Class<? extends Activity> activityClass;
 
@@ -61,25 +62,25 @@ public class SessionDataHolder {
 
     /**
      * Sets the currently active {@link SessionHandler} in focus.
-     * @param contentHandler {@link SessionHandler} to set.
+     * @param sessionHandler {@link SessionHandler} to set.
      */
-    public void setActiveHandler(@NonNull SessionHandler contentHandler) {
-        mActiveContentHandler = contentHandler;
-        CustomTabsSessionToken session = contentHandler.getSession();
+    public void setActiveHandler(@NonNull SessionHandler sessionHandler) {
+        mActiveSessionHandler = sessionHandler;
+        CustomTabsSessionToken session = sessionHandler.getSession();
         if (session == null) return;
 
-        mTaskIdToSessionData.append(contentHandler.getTaskId(),
-                new SessionData(session, contentHandler.getActivityClass()));
+        mTaskIdToSessionData.append(sessionHandler.getTaskId(),
+                new SessionData(session, sessionHandler.getActivityClass()));
         ensureSessionCleanUpOnDisconnects();
     }
 
     /**
      * Notifies that given {@link SessionHandler} no longer has focus.
      */
-    public void removeActiveHandler(SessionHandler contentHandler) {
-        if (mActiveContentHandler == contentHandler) {
-            mActiveContentHandler = null;
-        } // else this contentHandler has already been replaced.
+    public void removeActiveHandler(SessionHandler sessionHandler) {
+        if (mActiveSessionHandler == sessionHandler) {
+            mActiveSessionHandler = null;
+        } // else this sessionHandler has already been replaced.
 
         // Intentionally not removing from mTaskIdToSessionData to handle cases when the task is
         // brought to foreground by a new intent - the CCT might not be able to call
@@ -128,10 +129,10 @@ public class SessionDataHolder {
      */
     @Nullable
     public SessionHandler getActiveHandler(@Nullable CustomTabsSessionToken session) {
-        if (mActiveContentHandler == null) return null;
-        CustomTabsSessionToken activeSession = mActiveContentHandler.getSession();
+        if (mActiveSessionHandler == null) return null;
+        CustomTabsSessionToken activeSession = mActiveSessionHandler.getSession();
         if (activeSession == null || !activeSession.equals(session)) return null;
-        return mActiveContentHandler;
+        return mActiveSessionHandler;
     }
 
     @Nullable
@@ -140,43 +141,20 @@ public class SessionDataHolder {
     }
 
     /**
-     * Checks whether the given referrer can be used as valid within the Activity launched by the
-     * given intent. For this to be true, the intent should be for a {@link CustomTabsSessionToken}
-     * that is the currently in focus custom tab and also the related client should have a verified
-     * relationship with the referrer origin. This can only be true for https:// origins.
+     * Checks whether the given referrer can be used as valid within the Activity launched with the
+     * given {@link CustomTabsSessionToken}. For this to be true the token should correspond to the
+     * currently in focus custom tab and also the related client should have a verified relationship
+     * with the referrer origin. This can only be true for https:// origins.
      *
-     * @param intent The intent that was used to launch the Activity in question.
+     * @param token The session token specified in the activity launch intent.
      * @param referrer The referrer url that is to be used.
      * @return Whether the given referrer is a valid first party url to the client that launched
      *         the activity.
      */
-    public boolean canActiveHandlerUseReferrer(Intent intent, Uri referrer) {
-        SessionHandler handler = getActiveHandlerForIntent(intent);
+    public boolean canActiveHandlerUseReferrer(
+            @Nullable CustomTabsSessionToken token, Uri referrer) {
+        SessionHandler handler = getActiveHandler(token);
         return handler != null && handler.canUseReferrer(referrer);
-    }
-
-    /**
-     * @return The url for the page displayed using the current {@link
-     * SessionHandler}.
-     *
-     * @deprecated This will be removed once downstream usages change.
-     */
-    @Deprecated
-    public String getCurrentUrlForActiveBrowserSession() {
-        if (mActiveContentHandler == null) return null;
-        return mActiveContentHandler.getCurrentUrl();
-    }
-
-    /**
-     * @return The pending url for the page about to be displayed using the current {@link
-     * SessionHandler}.
-     *
-     * @deprecated This will be removed once downstream usages change.
-     */
-    @Deprecated
-    public String getPendingUrlForActiveBrowserSession() {
-        if (mActiveContentHandler == null) return null;
-        return mActiveContentHandler.getPendingUrl();
     }
 
     private void ensureSessionCleanUpOnDisconnects() {

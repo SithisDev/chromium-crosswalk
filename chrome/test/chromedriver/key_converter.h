@@ -1,14 +1,13 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_CHROMEDRIVER_KEY_CONVERTER_H_
 #define CHROME_TEST_CHROMEDRIVER_KEY_CONVERTER_H_
 
-#include <list>
 #include <string>
+#include <vector>
 
-#include "base/strings/string16.h"
 #include "base/values.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
@@ -20,10 +19,10 @@ class Status;
 // an error message. If |release_modifiers| is true, all modifiers would be
 // depressed. |modifiers| acts both an input and an output, however, only when
 // the conversion process is successful will |modifiers| be changed.
-Status ConvertKeysToKeyEvents(const base::string16& keys,
+Status ConvertKeysToKeyEvents(const std::u16string& keys,
                               bool release_modifiers,
                               int* modifiers,
-                              std::list<KeyEvent>* key_events);
+                              std::vector<KeyEvent>* key_events);
 
 Status ConvertKeyActionToKeyEvent(const base::DictionaryValue* action_object,
                                   base::DictionaryValue* input_state,

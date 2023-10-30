@@ -1,11 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/chrome_cleaner/mojom/typemaps/pup_mojom_traits.h"
 
 #include "chrome/chrome_cleaner/logging/proto/shared_data.pb.h"
-#include "components/chrome_cleaner/public/typemaps/chrome_prompt_mojom_traits.h"
+#include "chrome/chrome_cleaner/mojom/typemaps/footprints_mojom_traits.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
 
 namespace mojo {

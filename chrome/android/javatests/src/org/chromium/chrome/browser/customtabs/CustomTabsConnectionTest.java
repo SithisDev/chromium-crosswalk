@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,14 +13,15 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Process;
-import android.support.customtabs.CustomTabsCallback;
-import android.support.customtabs.CustomTabsClient;
-import android.support.customtabs.CustomTabsService;
-import android.support.customtabs.CustomTabsServiceConnection;
-import android.support.customtabs.CustomTabsSession;
-import android.support.customtabs.CustomTabsSessionToken;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.browser.customtabs.CustomTabsCallback;
+import androidx.browser.customtabs.CustomTabsClient;
+import androidx.browser.customtabs.CustomTabsService;
+import androidx.browser.customtabs.CustomTabsServiceConnection;
+import androidx.browser.customtabs.CustomTabsSession;
+import androidx.browser.customtabs.CustomTabsSessionToken;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -30,15 +31,14 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.library_loader.LibraryLoader;
-import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Restriction;
-import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.WarmupManager;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.prefetch.settings.PreloadPagesSettingsBridge;
+import org.chromium.chrome.browser.prefetch.settings.PreloadPagesState;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -60,13 +60,13 @@ public class CustomTabsConnectionTest {
     private static final String INVALID_SCHEME_URL = "intent://www.google.com";
 
     @Before
-    public void setUp() throws Exception {
-        LibraryLoader.getInstance().ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
+    public void setUp() {
+        LibraryLoader.getInstance().ensureInitialized();
         mCustomTabsConnection = CustomTabsTestUtils.setUpConnection();
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         CustomTabsTestUtils.cleanupSessions(mCustomTabsConnection);
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> WarmupManager.getInstance().destroySpareWebContents());
@@ -167,8 +167,7 @@ public class CustomTabsConnectionTest {
         mCustomTabsConnection.setShouldSpeculateLoadOnCellularForSession(token, true);
         assertWarmupAndMayLaunchUrl(token, URL, true);
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            String referrer =
-                    mCustomTabsConnection.getReferrerForSession(token).getUrl();
+            String referrer = mCustomTabsConnection.getDefaultReferrerForSession(token).getUrl();
             Assert.assertFalse(WarmupManager.getInstance().hasSpareWebContents());
         });
     }
@@ -219,7 +218,6 @@ public class CustomTabsConnectionTest {
     @SmallTest
     @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
     @CommandLineFlags.Add(ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE)
-    @RetryOnFailure
     public void testOnlyOneHiddenTab() throws Exception {
         Assert.assertTrue("Failed warmup()", mCustomTabsConnection.warmup(0));
         CustomTabsSessionToken token = CustomTabsSessionToken.createMockSessionTokenForTesting();
@@ -270,7 +268,6 @@ public class CustomTabsConnectionTest {
     @SmallTest
     @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
     @CommandLineFlags.Add(ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE)
-    @RetryOnFailure
     public void testKillHiddenTabRenderer() throws Exception {
         Assert.assertTrue("Failed warmup()", mCustomTabsConnection.warmup(0));
         CustomTabsSessionToken token = CustomTabsSessionToken.createMockSessionTokenForTesting();
@@ -290,7 +287,7 @@ public class CustomTabsConnectionTest {
                     tabDestroyedHelper.notifyCalled();
                 }
             });
-            WebContentsUtils.simulateRendererKilled(speculationTab.getWebContents(), false);
+            WebContentsUtils.simulateRendererKilled(speculationTab.getWebContents());
         });
         tabDestroyedHelper.waitForCallback("The speculated tab was not destroyed", 0);
     }
@@ -481,15 +478,15 @@ public class CustomTabsConnectionTest {
     @Test
     @SmallTest
     public void testGetSchedulerGroup() throws Exception {
-        Assume.assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP);
+        // After M, /proc is mounted with hidepid=2, so even though the test still passes, it
+        // is not useful in practice. See crbug.com/973368 for details.
+        Assume.assumeTrue(Build.VERSION.SDK_INT < Build.VERSION_CODES.M);
         Assert.assertNotNull(CustomTabsConnection.getSchedulerGroup(Process.myPid()));
         String cgroup = CustomTabsConnection.getSchedulerGroup(Process.myPid());
         // Tests run in the foreground. Last two are from Android O.
         List<String> foregroundGroups = Arrays.asList("/", "/apps", "/top-app", "/foreground");
         Assert.assertTrue(foregroundGroups.contains(cgroup));
 
-        // On O, a background thread is still in the foreground cgroup.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) return;
         final AtomicReference<String> backgroundThreadCgroup = new AtomicReference<>();
         Thread backgroundThread = new Thread(() -> {
             int tid = Process.myTid();
@@ -604,11 +601,12 @@ public class CustomTabsConnectionTest {
         CustomTabsTestUtils.warmUpAndWait();
 
         // Needs the browser process to be initialized.
-        boolean enabled = TestThreadUtils.runOnUiThreadBlocking(() -> {
-            PrefServiceBridge prefs = PrefServiceBridge.getInstance();
-            boolean oldEnabled = prefs.getNetworkPredictionEnabled();
-            prefs.setNetworkPredictionEnabled(false);
-            return oldEnabled;
+        @PreloadPagesState
+        int state = TestThreadUtils.runOnUiThreadBlocking(() -> {
+            @PreloadPagesState
+            int oldState = PreloadPagesSettingsBridge.getState();
+            PreloadPagesSettingsBridge.setState(PreloadPagesState.NO_PRELOADING);
+            return oldState;
         });
 
         try {
@@ -616,15 +614,13 @@ public class CustomTabsConnectionTest {
                     mCustomTabsConnection.mayLaunchUrl(token, Uri.parse(URL), null, null));
             TestThreadUtils.runOnUiThreadBlocking(this::assertSpareWebContentsNotNullAndDestroy);
         } finally {
-            TestThreadUtils.runOnUiThreadBlocking(
-                    () -> PrefServiceBridge.getInstance().setNetworkPredictionEnabled(enabled));
+            TestThreadUtils.runOnUiThreadBlocking(() -> PreloadPagesSettingsBridge.setState(state));
         }
     }
 
     @Test
     @SmallTest
     @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
-    @RetryOnFailure
     public void testHiddenTabTakesSpareRenderer() throws Exception {
         CustomTabsSessionToken token = CustomTabsSessionToken.createMockSessionTokenForTesting();
         Assert.assertTrue(mCustomTabsConnection.newSession(token));

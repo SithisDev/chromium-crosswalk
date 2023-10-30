@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@ class IncidentReceiver;
 // step. The callback will be run after some delay following process launch in
 // the blocking pool. The argument is a receiver by which the consumer can add
 // incidents to the incident reporting service.
-typedef base::Callback<void(std::unique_ptr<IncidentReceiver>)>
+typedef base::OnceCallback<void(std::unique_ptr<IncidentReceiver>)>
     DelayedAnalysisCallback;
 
 }  // namespace safe_browsing

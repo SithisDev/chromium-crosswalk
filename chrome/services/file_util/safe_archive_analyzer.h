@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define CHROME_SERVICES_FILE_UTIL_SAFE_ARCHIVE_ANALYZER_H_
 
 #include "chrome/services/file_util/public/mojom/safe_archive_analyzer.mojom.h"
-#include "services/service_manager/public/cpp/service_context_ref.h"
 
 namespace base {
 class File;
@@ -14,8 +13,11 @@ class File;
 
 class SafeArchiveAnalyzer : public chrome::mojom::SafeArchiveAnalyzer {
  public:
-  explicit SafeArchiveAnalyzer(
-      std::unique_ptr<service_manager::ServiceContextRef> service_ref);
+  SafeArchiveAnalyzer();
+
+  SafeArchiveAnalyzer(const SafeArchiveAnalyzer&) = delete;
+  SafeArchiveAnalyzer& operator=(const SafeArchiveAnalyzer&) = delete;
+
   ~SafeArchiveAnalyzer() override;
 
  private:
@@ -28,10 +30,6 @@ class SafeArchiveAnalyzer : public chrome::mojom::SafeArchiveAnalyzer {
   void AnalyzeRarFile(base::File rar_file,
                       base::File temporary_file,
                       AnalyzeRarFileCallback callback) override;
-
-  const std::unique_ptr<service_manager::ServiceContextRef> service_ref_;
-
-  DISALLOW_COPY_AND_ASSIGN(SafeArchiveAnalyzer);
 };
 
 #endif  // CHROME_SERVICES_FILE_UTIL_SAFE_ARCHIVE_ANALYZER_H_

@@ -1,9 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/services/cups_proxy/public/cpp/cups_util.h"
 
+#include <map>
+#include <queue>
 #include <string>
 #include <utility>
 
@@ -15,7 +17,7 @@
 
 namespace cups_proxy {
 
-base::Optional<IppResponse> BuildGetDestsResponse(
+absl::optional<IppResponse> BuildGetDestsResponse(
     const IppRequest& request,
     const std::vector<chromeos::Printer>& printers) {
   IppResponse ret;
@@ -34,14 +36,17 @@ base::Optional<IppResponse> BuildGetDestsResponse(
   // Fill in IPP attributes.
   ret.ipp = printing::WrapIpp(ippNewResponse(request.ipp.get()));
   for (const auto& printer : printers) {
-    std::string printer_uri = printing::PrinterUriFromName(printer.id());
-
     // Setting the printer-uri.
+    std::string printer_uri = printing::PrinterUriFromName(printer.id());
     ippAddString(ret.ipp.get(), IPP_TAG_PRINTER, IPP_TAG_TEXT,
                  "printer-uri-supported", nullptr, printer_uri.c_str());
 
-    // Setting the display name.
+    // Setting the printer uuid.
     ippAddString(ret.ipp.get(), IPP_TAG_PRINTER, IPP_TAG_NAME, "printer-name",
+                 nullptr, printer.id().c_str());
+
+    // Setting the display name.
+    ippAddString(ret.ipp.get(), IPP_TAG_PRINTER, IPP_TAG_TEXT, "printer-info",
                  nullptr, printer.display_name().c_str());
 
     // Optional setting of the make_and_model, if known.
@@ -50,6 +55,8 @@ base::Optional<IppResponse> BuildGetDestsResponse(
                    "printer-make-and-model", nullptr,
                    printer.make_and_model().c_str());
     }
+
+    ippAddSeparator(ret.ipp.get());
   }
 
   // Add the final content length into headers
@@ -64,26 +71,31 @@ base::Optional<IppResponse> BuildGetDestsResponse(
       ret.status_line.http_version, ret.status_line.status_code,
       ret.status_line.reason_phrase, ret.headers, ret.ipp.get(), ret.ipp_data);
   if (!response_buffer) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   ret.buffer = std::move(*response_buffer);
   return ret;
 }
 
-base::Optional<std::string> GetPrinterId(ipp_t* ipp) {
+absl::optional<std::string> GetPrinterId(ipp_t* ipp) {
   // We expect the printer id to be embedded in the printer-uri.
   ipp_attribute_t* printer_uri_attr =
       ippFindAttribute(ipp, "printer-uri", IPP_TAG_URI);
   if (!printer_uri_attr) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   // Only care about the resource, throw everything else away
   char resource[HTTP_MAX_URI], unwanted_buffer[HTTP_MAX_URI];
   int unwanted_port;
 
-  std::string printer_uri = ippGetString(printer_uri_attr, 0, NULL);
+  std::string printer_uri;
+  const char* printer_uri_ptr = ippGetString(printer_uri_attr, 0, nullptr);
+  if (printer_uri_ptr) {
+    printer_uri = printer_uri_ptr;
+  }
+
   httpSeparateURI(HTTP_URI_CODING_RESOURCE, printer_uri.data(), unwanted_buffer,
                   HTTP_MAX_URI, unwanted_buffer, HTTP_MAX_URI, unwanted_buffer,
                   HTTP_MAX_URI, &unwanted_port, resource, HTTP_MAX_URI);
@@ -91,23 +103,48 @@ base::Optional<std::string> GetPrinterId(ipp_t* ipp) {
   // The printer id should be the last component of the resource.
   base::StringPiece uuid(resource);
   auto uuid_start = uuid.find_last_of('/');
-  if (uuid_start == base::StringPiece::npos) {
-    return base::nullopt;
+  if (uuid_start == base::StringPiece::npos || uuid_start + 1 >= uuid.size()) {
+    return absl::nullopt;
   }
 
-  return uuid.substr(uuid_start + 1).as_string();
+  return std::string(uuid.substr(uuid_start + 1));
 }
 
-base::Optional<std::string> ParseEndpointForPrinterId(
+absl::optional<std::string> ParseEndpointForPrinterId(
     base::StringPiece endpoint) {
   size_t last_path = endpoint.find_last_of('/');
   if (last_path == base::StringPiece::npos ||
       last_path + 1 >= endpoint.size()) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
-  endpoint.remove_prefix(last_path + 1);
-  return endpoint.as_string();
+  return std::string(endpoint.substr(last_path + 1));
+}
+
+std::vector<chromeos::Printer> FilterPrintersForPluginVm(
+    const std::vector<chromeos::Printer>& saved,
+    const std::vector<chromeos::Printer>& enterprise,
+    const std::vector<std::string>& recent) {
+  std::vector<std::string> ids(recent);
+  std::map<std::string, const chromeos::Printer*> printers;
+  for (const auto* category : {&saved, &enterprise}) {
+    for (const auto& printer : *category) {
+      ids.push_back(printer.id());
+      printers[printer.id()] = &printer;
+    }
+  }
+  std::vector<chromeos::Printer> ret;
+  for (const std::string& id : ids) {
+    auto it = printers.find(id);
+    if (it != printers.end()) {
+      ret.push_back(*it->second);
+      printers.erase(it);
+      if (ret.size() == kPluginVmPrinterLimit) {
+        break;
+      }
+    }
+  }
+  return ret;
 }
 
 }  // namespace cups_proxy

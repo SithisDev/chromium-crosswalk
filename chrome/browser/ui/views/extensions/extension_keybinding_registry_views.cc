@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,8 +50,8 @@ void ExtensionKeybindingRegistryViews::AddExtensionKeybindings(
       continue;
     const ui::Accelerator &accelerator = iter->second.accelerator();
     if (!IsAcceleratorRegistered(accelerator)) {
-      focus_manager_->RegisterAccelerator(
-          accelerator, GetAcceleratorPriority(accelerator, extension), this);
+      focus_manager_->RegisterAccelerator(accelerator,
+                                          kExtensionAcceleratorPriority, this);
     }
 
     AddEventTarget(accelerator, extension->id(), iter->second.command_name());
@@ -71,14 +71,7 @@ void ExtensionKeybindingRegistryViews::OnShortcutHandlingSuspended(
 
 bool ExtensionKeybindingRegistryViews::AcceleratorPressed(
     const ui::Accelerator& accelerator) {
-  std::string extension_id, command_name;
-  GetFirstTarget(accelerator, &extension_id, &command_name);
-  const ui::AcceleratorManager::HandlerPriority priority =
-      GetAcceleratorPriorityById(accelerator, extension_id, browser_context());
-  // Normal priority shortcuts must be handled via standard browser commands to
-  // be processed at the proper time.
-  return (priority == ui::AcceleratorManager::kHighPriority) &&
-      ExtensionKeybindingRegistry::NotifyEventTargets(accelerator);
+  return ExtensionKeybindingRegistry::NotifyEventTargets(accelerator);
 }
 
 bool ExtensionKeybindingRegistryViews::CanHandleAccelerators() const {

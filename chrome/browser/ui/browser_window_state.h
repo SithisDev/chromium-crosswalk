@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@ class Browser;
 
 namespace base {
 class CommandLine;
-class DictionaryValue;
+class Value;
 }  // namespace base
 
 namespace gfx {
@@ -36,7 +36,7 @@ std::unique_ptr<DictionaryPrefUpdate> GetWindowPlacementDictionaryReadWrite(
     PrefService* prefs);
 // Returns NULL if the window corresponds to an app that doesn't have placement
 // information stored in the preferences system.
-const base::DictionaryValue* GetWindowPlacementDictionaryReadOnly(
+const base::Value::Dict* GetWindowPlacementDictionaryReadOnly(
     const std::string& window_name,
     PrefService* prefs);
 
@@ -51,6 +51,9 @@ void SaveWindowPlacement(const Browser* browser,
                          ui::WindowShowState show_state);
 
 void SaveWindowWorkspace(const Browser* browser, const std::string& workspace);
+
+void SaveWindowVisibleOnAllWorkspaces(const Browser* browser,
+                                      bool visible_on_all_workspaces);
 
 // Return the |bounds| for the browser window to be used upon creation.
 // The |show_state| variable will receive the desired initial show state for

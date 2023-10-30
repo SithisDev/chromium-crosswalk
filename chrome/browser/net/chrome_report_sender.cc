@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,10 @@
 
 #include "base/bind.h"
 #include "net/url_request/report_sender.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace {
 
@@ -46,7 +48,7 @@ class SimpleURLLoaderOwner {
   ~SimpleURLLoaderOwner() = default;
 
   void OnResponseStarted(const GURL& final_url,
-                         const network::ResourceResponseHead& response_head) {
+                         const network::mojom::URLResponseHead& response_head) {
     OnDone(&response_head, net::OK);
   }
 
@@ -54,7 +56,7 @@ class SimpleURLLoaderOwner {
     OnDone(loader_->ResponseInfo(), loader_->NetError());
   }
 
-  void OnDone(const network::ResourceResponseHead* response_head,
+  void OnDone(const network::mojom::URLResponseHead* response_head,
               int net_error) {
     if (net_error == net::OK) {
       if (success_callback_)
@@ -87,6 +89,7 @@ void SendReport(
   resource_request->url = report_uri;
   resource_request->method = "POST";
   resource_request->load_flags = net::ReportSender::kLoadFlags;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   auto loader = network::SimpleURLLoader::Create(std::move(resource_request),
                                                  traffic_annotation);

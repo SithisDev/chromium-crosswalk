@@ -1,16 +1,17 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_ANDROID_HISTORY_REPORT_DATA_OBSERVER_H_
 #define CHROME_BROWSER_ANDROID_HISTORY_REPORT_DATA_OBSERVER_H_
 
-#include <string>
-
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "base/time/time.h"
+#include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_model_observer.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/url_row.h"
@@ -29,13 +30,17 @@ class UsageReportsBufferService;
 class DataObserver : public bookmarks::BookmarkModelObserver,
                      public history::HistoryServiceObserver {
  public:
-  DataObserver(base::Callback<void(void)> data_changed_callback,
-               base::Callback<void(void)> data_cleared_callback,
-               base::Callback<void(void)> stop_reporting_callback,
+  DataObserver(base::RepeatingCallback<void(void)> data_changed_callback,
+               base::RepeatingCallback<void(void)> data_cleared_callback,
+               base::RepeatingCallback<void(void)> stop_reporting_callback,
                DeltaFileService* delta_file_service,
                UsageReportsBufferService* usage_reports_buffer_service,
                bookmarks::BookmarkModel* bookmark_model,
                history::HistoryService* history_service);
+
+  DataObserver(const DataObserver&) = delete;
+  DataObserver& operator=(const DataObserver&) = delete;
+
   ~DataObserver() override;
 
   // BookmarkModelObserver implementation.
@@ -49,7 +54,8 @@ class DataObserver : public bookmarks::BookmarkModelObserver,
                          size_t new_index) override;
   void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
                          const bookmarks::BookmarkNode* parent,
-                         size_t index) override;
+                         size_t index,
+                         bool added_by_user) override;
   void BookmarkNodeRemoved(bookmarks::BookmarkModel* model,
                            const bookmarks::BookmarkNode* parent,
                            size_t old_index,
@@ -68,26 +74,27 @@ class DataObserver : public bookmarks::BookmarkModelObserver,
 
   // HistoryServiceObserver implementation.
   void OnURLVisited(history::HistoryService* history_service,
-                    ui::PageTransition transition,
-                    const history::URLRow& row,
-                    const history::RedirectList& redirects,
-                    base::Time visit_time) override;
-  void OnURLsModified(history::HistoryService* history_service,
-                      const history::URLRows& changed_urls) override;
+                    const history::URLRow& url_row,
+                    const history::VisitRow& new_visit) override;
   void OnURLsDeleted(history::HistoryService* history_service,
                      const history::DeletionInfo& deletion_info) override;
+  void HistoryServiceBeingDeleted(
+      history::HistoryService* history_service) override;
 
  private:
   void DeleteBookmarks(const std::set<GURL>& removed_urls);
 
-  bookmarks::BookmarkModel* bookmark_model_;
-  base::Callback<void(void)> data_changed_callback_;
-  base::Callback<void(void)> data_cleared_callback_;
-  base::Callback<void(void)> stop_reporting_callback_;
-  DeltaFileService* delta_file_service_;
-  UsageReportsBufferService* usage_reports_buffer_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(DataObserver);
+  base::ScopedObservation<bookmarks::BookmarkModel,
+                          bookmarks::BookmarkModelObserver>
+      scoped_bookmark_model_observer_{this};
+  base::ScopedObservation<history::HistoryService,
+                          history::HistoryServiceObserver>
+      scoped_history_service_observer_{this};
+  base::RepeatingCallback<void(void)> data_changed_callback_;
+  base::RepeatingCallback<void(void)> data_cleared_callback_;
+  base::RepeatingCallback<void(void)> stop_reporting_callback_;
+  raw_ptr<DeltaFileService> delta_file_service_;
+  raw_ptr<UsageReportsBufferService> usage_reports_buffer_service_;
 };
 
 }  // namespace history_report

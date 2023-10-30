@@ -1,14 +1,21 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/app_list/md_icon_normalizer.h"
 
+#include <algorithm>
+#include <cmath>
+#include <utility>
+#include <vector>
+
+#include "base/numerics/math_constants.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
+#include "ui/gfx/image/image_skia_rep.h"
 
 // The implementation is copied and adapted from the Android Launcher.
 // See com.android.launcher3.graphics.IconNormalizer.java in the Android source.
@@ -26,7 +33,7 @@ constexpr float kMaxSquareAreaFactor = 361.0f / 576;
 // Ratio of icon visible area to full icon size for a circular shaped icon.
 constexpr float kMaxCircleAreaFactor = 380.0f / 576;
 
-constexpr float kCircleAreaByRect = static_cast<float>(M_PI) / 4;
+constexpr float kCircleAreaByRect = base::kPiFloat / 4;
 
 // Slope used to calculate icon visible area to full icon size for any generic
 // shaped icon.
@@ -86,7 +93,7 @@ float GetMdIconScale(const SkBitmap& bitmap) {
   // square and scale accordingly.
   if (pixmap.alphaType() == kUnknown_SkAlphaType ||
       pixmap.alphaType() == kOpaque_SkAlphaType) {
-    return (float)std::sqrt(kMaxSquareAreaFactor);
+    return std::sqrt(kMaxSquareAreaFactor);
   }
 
   bool const nativeColorType = pixmap.colorType() == kN32_SkColorType;
@@ -176,9 +183,8 @@ float GetMdIconScale(const SkBitmap& bitmap) {
   float area_scale = area / (width * height);
   // Use sqrt of the final ratio as the image is scaled across both width and
   // height.
-  return area_scale > scale_required
-             ? (float)std::sqrt(scale_required / area_scale)
-             : 1;
+  return area_scale > scale_required ? std::sqrt(scale_required / area_scale)
+                                     : 1.0f;
 }
 
 }  // namespace
@@ -214,8 +220,8 @@ void MaybeResizeAndPad(const gfx::Size& required_size,
   }
 
   // Add padding.
-  gfx::Canvas canvas(required_size, 1, /* transparent */ false);
-  canvas.DrawImageInt(gfx::ImageSkia(gfx::ImageSkiaRep(resized, 1)),
+  gfx::Canvas canvas(required_size, 1, /*transparent=*/false);
+  canvas.DrawImageInt(gfx::ImageSkia::CreateFromBitmap(resized, 1),
                       padding.width(), padding.height());
   *bitmap_out = canvas.GetBitmap();
   return;
@@ -240,7 +246,7 @@ void MaybeResizeAndPadIconForMd(const gfx::Size& required_size_dip,
 
     if (required_size_px.width() != bitmap.width() ||
         required_size_px.height() != bitmap.height() ||
-        padding_px.width() != 0 || padding_px.width() != 0) {
+        padding_px.width() != 0 || padding_px.height() != 0) {
       transformation_required = true;
     }
   }

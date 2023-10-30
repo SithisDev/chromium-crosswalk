@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,10 +56,7 @@ bool RecordSiteClickTaskSync(std::string url,
 RecordSiteClickTask::RecordSiteClickTask(ExploreSitesStore* store,
                                          std::string url,
                                          int category_type)
-    : store_(store),
-      url_(url),
-      category_type_(category_type),
-      weak_ptr_factory_(this) {}
+    : store_(store), url_(url), category_type_(category_type) {}
 
 RecordSiteClickTask::~RecordSiteClickTask() = default;
 

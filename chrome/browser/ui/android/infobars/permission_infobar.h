@@ -1,32 +1,31 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_ANDROID_INFOBARS_PERMISSION_INFOBAR_H_
 #define CHROME_BROWSER_UI_ANDROID_INFOBARS_PERMISSION_INFOBAR_H_
 
-#include <vector>
+#include "components/infobars/android/confirm_infobar.h"
 
-#include "base/android/scoped_java_ref.h"
-#include "base/macros.h"
+class PermissionInfoBarDelegate;
 
-// TODO(timloh): Rename GroupedPermissionInfoBar to PermissionInfoBar and move
-// these functions into it.
-class PermissionInfoBar {
+class PermissionInfoBar : public infobars::ConfirmInfoBar {
  public:
-  static base::android::ScopedJavaLocalRef<jobject> CreateRenderInfoBarHelper(
-      JNIEnv* env,
-      int enumerated_icon_id,
-      const base::android::JavaRef<jobject>& tab,
-      const base::android::ScopedJavaLocalRef<jobject>& icon_bitmap,
-      const base::string16& message_text,
-      const base::string16& link_text,
-      const base::string16& ok_button_text,
-      const base::string16& cancel_button_text,
-      std::vector<int>& content_settings);
+  explicit PermissionInfoBar(
+      std::unique_ptr<PermissionInfoBarDelegate> delegate);
+
+  PermissionInfoBar(const PermissionInfoBar&) = delete;
+  PermissionInfoBar& operator=(const PermissionInfoBar&) = delete;
+
+  ~PermissionInfoBar() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PermissionInfoBar);
+  // infobars::InfoBarAndroid:
+  base::android::ScopedJavaLocalRef<jobject> CreateRenderInfoBar(
+      JNIEnv* env,
+      const ResourceIdMapper& resource_id_mapper) override;
+
+  PermissionInfoBarDelegate* GetDelegate();
 };
 
 #endif  // CHROME_BROWSER_UI_ANDROID_INFOBARS_PERMISSION_INFOBAR_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,16 +19,16 @@
 
 namespace chrome {
 
-MessageBoxResult ShowMessageBoxCocoa(const base::string16& message,
+MessageBoxResult ShowMessageBoxCocoa(const std::u16string& message,
                                      MessageBoxType type,
-                                     const base::string16& checkbox_text) {
+                                     const std::u16string& checkbox_text) {
   startup_metric_utils::SetNonBrowserUIDisplayed();
   if (internal::g_should_skip_message_box_for_test)
     return MESSAGE_BOX_RESULT_YES;
 
   NSAlert* alert = [[[NSAlert alloc] init] autorelease];
   [alert setMessageText:base::SysUTF16ToNSString(message)];
-  [alert setAlertStyle:NSWarningAlertStyle];
+  [alert setAlertStyle:NSAlertStyleWarning];
   if (type == MESSAGE_BOX_TYPE_QUESTION) {
     [alert addButtonWithTitle:l10n_util::GetNSString(
                                   IDS_CONFIRM_MESSAGEBOX_YES_BUTTON_LABEL)];

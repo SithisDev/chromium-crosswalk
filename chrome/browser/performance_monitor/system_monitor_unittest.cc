@@ -1,11 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/performance_monitor/system_monitor.h"
 
 #include "base/memory/ptr_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -19,13 +19,11 @@ using SystemObserver = SystemMonitor::SystemObserver;
 using MetricsRefreshFrequencies = SystemObserver::MetricRefreshFrequencies;
 
 const int kFakeFreePhysMemoryMb = 42;
-const float kFakeDiskIdleTimePercent = 0.07;
 
 class MockMetricsMonitorObserver : public SystemObserver {
  public:
   ~MockMetricsMonitorObserver() override {}
   MOCK_METHOD1(OnFreePhysicalMemoryMbSample, void(int free_phys_memory_mb));
-  MOCK_METHOD1(OnDiskIdleTimePercent, void(float disk_idle_time_percent));
   MOCK_METHOD1(OnSystemMetricsStruct,
                void(const base::SystemMetrics& system_metrics));
 };
@@ -34,18 +32,16 @@ class MockMetricsMonitorObserver : public SystemObserver {
 class TestMetricEvaluatorsHelper : public MetricEvaluatorsHelper {
  public:
   TestMetricEvaluatorsHelper() = default;
+
+  TestMetricEvaluatorsHelper(const TestMetricEvaluatorsHelper&) = delete;
+  TestMetricEvaluatorsHelper& operator=(const TestMetricEvaluatorsHelper&) =
+      delete;
+
   ~TestMetricEvaluatorsHelper() override = default;
 
-  base::Optional<int> GetFreePhysicalMemoryMb() override {
+  absl::optional<int> GetFreePhysicalMemoryMb() override {
     return kFakeFreePhysMemoryMb;
   }
-
-  base::Optional<float> GetDiskIdleTimePercent() override {
-    return kFakeDiskIdleTimePercent;
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestMetricEvaluatorsHelper);
 };
 
 }  // namespace
@@ -56,8 +52,10 @@ class SystemMonitorTest : public testing::Test {
   using MetricMetadata = SystemMonitor::MetricMetadata;
 
   SystemMonitorTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME) {}
+      : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
+
+  SystemMonitorTest(const SystemMonitorTest&) = delete;
+  SystemMonitorTest& operator=(const SystemMonitorTest&) = delete;
 
   void SetUp() override {
     EXPECT_EQ(nullptr, SystemMonitor::Get());
@@ -70,20 +68,15 @@ class SystemMonitorTest : public testing::Test {
   void EnsureMetricsAreObservedAtExpectedFrequency(
       SamplingFrequency expected_free_memory_mb_freq =
           SamplingFrequency::kNoSampling,
-      SamplingFrequency expected_disk_idle_time_percent_freq =
-          SamplingFrequency::kNoSampling,
       SamplingFrequency expected_system_metrics_struct_freq =
           SamplingFrequency::kNoSampling) {
     const auto& observed_metrics_and_frequencies =
         system_monitor_->GetMetricSamplingFrequencyArrayForTesting();
 
-    EXPECT_EQ(3U, observed_metrics_and_frequencies.size());
+    EXPECT_EQ(2U, observed_metrics_and_frequencies.size());
     EXPECT_EQ(expected_free_memory_mb_freq,
               observed_metrics_and_frequencies[static_cast<size_t>(
                   SystemMonitor::MetricEvaluator::Type::kFreeMemoryMb)]);
-    EXPECT_EQ(expected_disk_idle_time_percent_freq,
-              observed_metrics_and_frequencies[static_cast<size_t>(
-                  SystemMonitor::MetricEvaluator::Type::kDiskIdleTimePercent)]);
     EXPECT_EQ(expected_system_metrics_struct_freq,
               observed_metrics_and_frequencies[static_cast<size_t>(
                   SystemMonitor::MetricEvaluator::Type::kSystemMetricsStruct)]);
@@ -92,9 +85,7 @@ class SystemMonitorTest : public testing::Test {
   std::unique_ptr<SystemMonitor> system_monitor_;
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-
-  DISALLOW_COPY_AND_ASSIGN(SystemMonitorTest);
+  base::test::TaskEnvironment task_environment_;
 };
 
 TEST_F(SystemMonitorTest, GetReturnsSingleInstance) {
@@ -124,12 +115,13 @@ TEST_F(SystemMonitorTest, AddAndUpdateObservers) {
   EnsureMetricsAreObservedAtExpectedFrequency(
       SamplingFrequency::kDefaultFrequency);
 
-  // Add a third observer that observes the amount of free memory and the disk
-  // idle time at the default frequency.
+  // Add a third observer that observes the amount of free memory and the system
+  // metrics at the default frequency.
   MetricsRefreshFrequencies obs3_metrics_frequencies =
       MetricsRefreshFrequencies::Builder()
           .SetFreePhysMemoryMbFrequency(SamplingFrequency::kDefaultFrequency)
-          .SetDiskIdleTimePercentFrequency(SamplingFrequency::kDefaultFrequency)
+          .SetSystemMetricsSamplingFrequency(
+              SamplingFrequency::kDefaultFrequency)
           .Build();
   system_monitor_->AddOrUpdateObserver(&obs3, obs3_metrics_frequencies);
   EnsureMetricsAreObservedAtExpectedFrequency(
@@ -139,7 +131,7 @@ TEST_F(SystemMonitorTest, AddAndUpdateObservers) {
   // Stop observing any metric with the second observer.
   obs2_metrics_frequencies.free_phys_memory_mb_frequency =
       SamplingFrequency::kNoSampling;
-  obs2_metrics_frequencies.disk_idle_time_percent_frequency =
+  obs2_metrics_frequencies.system_metrics_sampling_frequency =
       SamplingFrequency::kNoSampling;
   system_monitor_->AddOrUpdateObserver(&obs2, obs2_metrics_frequencies);
   EnsureMetricsAreObservedAtExpectedFrequency(
@@ -163,13 +155,11 @@ TEST_F(SystemMonitorTest, ObserverGetsCalled) {
   system_monitor_->AddOrUpdateObserver(
       &mock_observer_2,
       MetricsRefreshFrequencies::Builder()
-          .SetDiskIdleTimePercentFrequency(SamplingFrequency::kDefaultFrequency)
           .SetSystemMetricsSamplingFrequency(
               SamplingFrequency::kDefaultFrequency)
           .Build());
 
   EnsureMetricsAreObservedAtExpectedFrequency(
-      SamplingFrequency::kDefaultFrequency,
       SamplingFrequency::kDefaultFrequency,
       SamplingFrequency::kDefaultFrequency);
 
@@ -178,15 +168,13 @@ TEST_F(SystemMonitorTest, ObserverGetsCalled) {
               OnFreePhysicalMemoryMbSample(kFakeFreePhysMemoryMb))
       .Times(2);
 
-  EXPECT_CALL(mock_observer_2, OnDiskIdleTimePercent(kFakeDiskIdleTimePercent))
-      .Times(2);
   EXPECT_CALL(mock_observer_2, OnSystemMetricsStruct(::testing::_)).Times(2);
 
   // Fast forward by enough time to get multiple samples and wait for the tasks
   // to complete.
-  scoped_task_environment_.FastForwardBy(
+  task_environment_.FastForwardBy(
       2 * system_monitor_->refresh_timer_for_testing().GetCurrentDelay());
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   ::testing::Mock::VerifyAndClear(&mock_observer_1);
   ::testing::Mock::VerifyAndClear(&mock_observer_2);

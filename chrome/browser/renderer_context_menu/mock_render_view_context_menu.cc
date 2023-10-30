@@ -1,8 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/renderer_context_menu/mock_render_view_context_menu.h"
+
+#include <algorithm>
 
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
@@ -13,6 +15,8 @@
 #include "content/public/browser/browser_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/color_palette.h"
+#include "ui/gfx/paint_vector_icon.h"
 
 MockRenderViewContextMenu::MockMenuItem::MockMenuItem()
     : command_id(0), enabled(false), checked(false), hidden(true) {}
@@ -29,7 +33,8 @@ MockRenderViewContextMenu::MockMenuItem::operator=(const MockMenuItem& other) =
 MockRenderViewContextMenu::MockRenderViewContextMenu(bool incognito)
     : observer_(nullptr),
       original_profile_(TestingProfile::Builder().Build()),
-      profile_(incognito ? original_profile_->GetOffTheRecordProfile()
+      profile_(incognito ? original_profile_->GetPrimaryOTRProfile(
+                               /*create_if_needed=*/true)
                          : original_profile_.get()) {}
 
 MockRenderViewContextMenu::~MockRenderViewContextMenu() {}
@@ -48,7 +53,7 @@ void MockRenderViewContextMenu::ExecuteCommand(int command_id,
 }
 
 void MockRenderViewContextMenu::AddMenuItem(int command_id,
-                                            const base::string16& title) {
+                                            const std::u16string& title) {
   MockMenuItem item;
   item.command_id = command_id;
   item.enabled = observer_->IsCommandIdEnabled(command_id);
@@ -60,20 +65,20 @@ void MockRenderViewContextMenu::AddMenuItem(int command_id,
 
 void MockRenderViewContextMenu::AddMenuItemWithIcon(
     int command_id,
-    const base::string16& title,
-    const gfx::ImageSkia& image) {
+    const std::u16string& title,
+    const ui::ImageModel& icon) {
   MockMenuItem item;
   item.command_id = command_id;
   item.enabled = observer_->IsCommandIdEnabled(command_id);
   item.checked = false;
   item.hidden = false;
   item.title = title;
-  item.icon = gfx::Image(image);
+  item.icon = icon;
   items_.push_back(item);
 }
 
 void MockRenderViewContextMenu::AddCheckItem(int command_id,
-                                             const base::string16& title) {
+                                             const std::u16string& title) {
   MockMenuItem item;
   item.command_id = command_id;
   item.enabled = observer_->IsCommandIdEnabled(command_id);
@@ -93,7 +98,7 @@ void MockRenderViewContextMenu::AddSeparator() {
 }
 
 void MockRenderViewContextMenu::AddSubMenu(int command_id,
-                                           const base::string16& label,
+                                           const std::u16string& label,
                                            ui::MenuModel* model) {
   MockMenuItem item;
   item.command_id = command_id;
@@ -110,14 +115,14 @@ void MockRenderViewContextMenu::AddSubMenuWithStringIdAndIcon(
     int command_id,
     int message_id,
     ui::MenuModel* model,
-    const gfx::ImageSkia& image) {
+    const ui::ImageModel& icon) {
   MockMenuItem item;
   item.command_id = command_id;
   item.enabled = observer_->IsCommandIdEnabled(command_id);
   item.checked = observer_->IsCommandIdChecked(command_id);
   item.hidden = false;
   item.title = l10n_util::GetStringUTF16(message_id);
-  item.icon = gfx::Image(image);
+  item.icon = icon;
   items_.push_back(item);
 
   AppendSubMenuItems(model);
@@ -131,13 +136,13 @@ void MockRenderViewContextMenu::AppendSubMenuItems(ui::MenuModel* model) {
   // them. This works in non-mock because of toolkit_delegate_ in RVCMBase.
   // TODO(yusukes,lazyboy): This is a hack. RVCMProxy should neither directly
   // know about but submenu items nor it should update them.
-  for (int i = 0; i < model->GetItemCount(); ++i) {
+  for (size_t i = 0; i < model->GetItemCount(); ++i) {
     MockMenuItem sub_item;
     sub_item.command_id = model->GetCommandIdAt(i);
     sub_item.enabled = model->IsEnabledAt(i);
     sub_item.checked = model->IsItemCheckedAt(i);
     sub_item.hidden = false;
-    sub_item.title = model->GetSublabelAt(i);
+    sub_item.title = model->GetLabelAt(i);
     items_.push_back(sub_item);
   }
 }
@@ -145,7 +150,7 @@ void MockRenderViewContextMenu::AppendSubMenuItems(ui::MenuModel* model) {
 void MockRenderViewContextMenu::UpdateMenuItem(int command_id,
                                                bool enabled,
                                                bool hidden,
-                                               const base::string16& title) {
+                                               const std::u16string& title) {
   for (auto& item : items_) {
     if (item.command_id == command_id) {
       item.enabled = enabled;
@@ -154,16 +159,13 @@ void MockRenderViewContextMenu::UpdateMenuItem(int command_id,
       return;
     }
   }
-
-  FAIL() << "Menu observer is trying to change a menu item it doesn't own."
-         << " command_id: " << command_id;
 }
 
 void MockRenderViewContextMenu::UpdateMenuIcon(int command_id,
-                                               const gfx::Image& image) {
+                                               const ui::ImageModel& icon) {
   for (auto& item : items_) {
     if (item.command_id == command_id) {
-      item.icon = image;
+      item.icon = icon;
       return;
     }
   }
@@ -172,9 +174,41 @@ void MockRenderViewContextMenu::UpdateMenuIcon(int command_id,
          << " command_id: " << command_id;
 }
 
-void MockRenderViewContextMenu::RemoveMenuItem(int command_id) {}
+void MockRenderViewContextMenu::RemoveMenuItem(int command_id) {
+  auto old_end = items_.end();
+  auto new_end = std::remove_if(
+      items_.begin(), old_end,
+      [command_id](const auto& item) { return item.command_id == command_id; });
+
+  if (new_end == old_end) {
+    FAIL() << "Menu observer is trying to remove a menu item it doesn't own."
+           << " command_id: " << command_id;
+  }
+
+  items_.erase(new_end, old_end);
+}
 
 void MockRenderViewContextMenu::RemoveAdjacentSeparators() {}
+
+void MockRenderViewContextMenu::RemoveSeparatorBeforeMenuItem(int command_id) {
+  auto iter = std::find_if(
+      items_.begin(), items_.end(),
+      [command_id](const auto& item) { return item.command_id == command_id; });
+
+  if (iter == items_.end()) {
+    FAIL() << "Menu observer is trying to remove a separator before a "
+              "non-existent item."
+           << " command_id: " << command_id;
+  }
+
+  if (iter == items_.begin()) {
+    FAIL() << "Menu observer is trying to remove a separator before a "
+              "the first menu item."
+           << " command_id: " << command_id;
+  }
+
+  items_.erase(iter - 1);
+}
 
 void MockRenderViewContextMenu::AddSpellCheckServiceItem(bool is_checked) {
   AddCheckItem(

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <tuple>
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "chrome/browser/android/explore_sites/explore_sites_schema.h"
 #include "sql/database.h"
 #include "sql/meta_table.h"
@@ -18,18 +19,18 @@ namespace {
 
 const char kSelectCategoryImagesSql[] = R"(SELECT favicon
 FROM sites
-LEFT JOIN site_blacklist ON (sites.url = site_blacklist.url)
+LEFT JOIN site_blocklist ON (sites.url = site_blocklist.url)
 WHERE category_id = ? AND LENGTH(favicon) > 0 AND NOT removed
-AND site_blacklist.url IS NULL
+AND site_blocklist.url IS NULL
 LIMIT ?;)";
 
 const char kSelectSummaryImagesSql[] = R"(SELECT favicon
 FROM sites
 INNER JOIN categories ON (sites.category_id = categories.category_id)
-LEFT JOIN site_blacklist ON (sites.url = site_blacklist.url)
+LEFT JOIN site_blocklist ON (sites.url = site_blocklist.url)
 WHERE LENGTH(favicon) > 0 AND NOT removed
 AND version_token = ?
-AND site_blacklist.url IS NULL
+AND site_blocklist.url IS NULL
 ORDER BY sites.category_id ASC, sites.site_id ASC
 LIMIT ?;)";
 
@@ -50,8 +51,7 @@ EncodedImageList GetCategoryImagesSync(int category_id,
 
   EncodedImageList result;
   while (category_statement.Step()) {
-    int byte_length = category_statement.ColumnByteLength(0);
-    result.push_back(std::make_unique<std::vector<uint8_t>>(byte_length));
+    result.push_back(std::make_unique<std::vector<uint8_t>>());
     category_statement.ColumnBlobAsVector(0, result.back().get());
   }
   if (!category_statement.Succeeded())
@@ -80,8 +80,7 @@ EncodedImageList GetSummaryImagesSync(int max_images, sql::Database* db) {
 
   EncodedImageList result;
   while (category_statement.Step()) {
-    int byte_length = category_statement.ColumnByteLength(0);
-    result.push_back(std::make_unique<std::vector<uint8_t>>(byte_length));
+    result.push_back(std::make_unique<std::vector<uint8_t>>());
     category_statement.ColumnBlobAsVector(0, result.back().get());
   }
   if (!category_statement.Succeeded())
@@ -98,8 +97,7 @@ EncodedImageList GetSiteImageSync(int site_id, sql::Database* db) {
 
   EncodedImageList result;
   while (site_statement.Step()) {
-    int byte_length = site_statement.ColumnByteLength(0);
-    result.push_back(std::make_unique<std::vector<uint8_t>>(byte_length));
+    result.push_back(std::make_unique<std::vector<uint8_t>>());
     site_statement.ColumnBlobAsVector(0, result.back().get());
   }
   if (!site_statement.Succeeded())
@@ -114,8 +112,7 @@ GetImagesTask::GetImagesTask(ExploreSitesStore* store,
       data_type_(DataType::kSite),
       id_(site_id),
       max_results_(1),
-      callback_(std::move(callback)),
-      weak_ptr_factory_(this) {}
+      callback_(std::move(callback)) {}
 
 GetImagesTask::GetImagesTask(ExploreSitesStore* store,
                              int category_id,
@@ -125,8 +122,7 @@ GetImagesTask::GetImagesTask(ExploreSitesStore* store,
       data_type_(DataType::kCategory),
       id_(category_id),
       max_results_(max_images),
-      callback_(std::move(callback)),
-      weak_ptr_factory_(this) {}
+      callback_(std::move(callback)) {}
 
 GetImagesTask::GetImagesTask(ExploreSitesStore* store,
                              DataType data_type,
@@ -136,8 +132,7 @@ GetImagesTask::GetImagesTask(ExploreSitesStore* store,
       data_type_(data_type),
       id_(0),
       max_results_(max_images),
-      callback_(std::move(callback)),
-      weak_ptr_factory_(this) {}
+      callback_(std::move(callback)) {}
 
 GetImagesTask::~GetImagesTask() = default;
 

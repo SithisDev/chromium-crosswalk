@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,17 +18,18 @@
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia_operations.h"
+#include "ui/gfx/image/image_skia_rep.h"
 
 using content::BrowserThread;
 
 namespace app_list {
 
-UrlIconSource::UrlIconSource(const IconLoadedCallback& icon_loaded_callback,
+UrlIconSource::UrlIconSource(IconLoadedCallback icon_loaded_callback,
                              content::BrowserContext* browser_context,
                              const GURL& icon_url,
                              int icon_size,
                              int default_icon_resource_id)
-    : icon_loaded_callback_(icon_loaded_callback),
+    : icon_loaded_callback_(std::move(icon_loaded_callback)),
       browser_context_(browser_context),
       icon_url_(icon_url),
       icon_size_(icon_size),
@@ -45,23 +46,22 @@ void UrlIconSource::StartIconFetch() {
 
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = icon_url_;
-  resource_request->load_flags = net::LOAD_DO_NOT_SAVE_COOKIES;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   net::NetworkTrafficAnnotationTag traffic_annotation =
       net::DefineNetworkTrafficAnnotation("url_icon_source_fetch", R"(
           semantics {
             sender: "URL Icon Source"
             description:
-              "Chrome OS downloads an icon for a web store result."
+              "Chrome OS downloads an app icon for display in the app list."
             trigger:
-              "When a user initiates a web store search and views results. "
+              "An icon/image needs to be downloaded to be displayed."
             data:
-              "URL of the icon. "
+              "URL of the icon/image. "
               "No user information is sent."
             destination: WEBSITE
           }
           policy {
-            cookies_allowed: YES
-            cookies_store: "user"
+            cookies_allowed: NO
             setting: "Unconditionally enabled on Chrome OS."
             policy_exception_justification:
               "Not implemented, considered not useful."
@@ -69,7 +69,7 @@ void UrlIconSource::StartIconFetch() {
   simple_loader_ = network::SimpleURLLoader::Create(std::move(resource_request),
                                                     traffic_annotation);
   network::mojom::URLLoaderFactory* loader_factory =
-      content::BrowserContext::GetDefaultStoragePartition(browser_context_)
+      browser_context_->GetDefaultStoragePartition()
           ->GetURLLoaderFactoryForBrowserProcess()
           .get();
   simple_loader_->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
@@ -96,16 +96,14 @@ void UrlIconSource::OnSimpleLoaderComplete(
 
   // Call start to begin decoding.  The ImageDecoder will call OnImageDecoded
   // with the data when it is done.
-  ImageDecoder::Start(this, *response_body);
+  ImageDecoder::Start(this, std::move(*response_body));
 }
 
 void UrlIconSource::OnImageDecoded(const SkBitmap& decoded_image) {
-  icon_ = gfx::ImageSkiaOperations::CreateResizedImage(
-      gfx::ImageSkia::CreateFrom1xBitmap(decoded_image),
-      skia::ImageOperations::RESIZE_BEST,
-      gfx::Size(icon_size_, icon_size_));
-
-  icon_loaded_callback_.Run();
+  const float scale = decoded_image.width() / icon_size_;
+  icon_ = gfx::ImageSkia::CreateFromBitmap(decoded_image, scale);
+  DCHECK(!icon_loaded_callback_.is_null());
+  std::move(icon_loaded_callback_).Run();
 }
 
 void UrlIconSource::OnDecodeImageFailed() {

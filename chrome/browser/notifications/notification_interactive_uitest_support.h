@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,17 @@
 
 #include "base/command_line.h"
 #include "base/test/scoped_feature_list.h"
-#include "chrome/browser/permissions/permission_request_manager.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "components/permissions/permission_request_manager.h"
 #include "ui/message_center/message_center_observer.h"
 
 class MessageCenterChangeObserver {
  public:
   MessageCenterChangeObserver();
+  MessageCenterChangeObserver(const MessageCenterChangeObserver&) = delete;
+  MessageCenterChangeObserver& operator=(const MessageCenterChangeObserver&) =
+      delete;
   ~MessageCenterChangeObserver();
 
   bool Wait();
@@ -22,13 +25,14 @@ class MessageCenterChangeObserver {
  private:
   class Impl;
   std::unique_ptr<Impl> impl_;
-
-  DISALLOW_COPY_AND_ASSIGN(MessageCenterChangeObserver);
 };
 
 class TestMessageCenterObserver : public message_center::MessageCenterObserver {
  public:
   TestMessageCenterObserver() = default;
+  TestMessageCenterObserver(const TestMessageCenterObserver&) = delete;
+  TestMessageCenterObserver& operator=(const TestMessageCenterObserver&) =
+      delete;
 
   // MessageCenterObserver:
   void OnNotificationDisplayed(
@@ -39,18 +43,13 @@ class TestMessageCenterObserver : public message_center::MessageCenterObserver {
 
  private:
   std::string last_displayed_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestMessageCenterObserver);
 };
 
 class NotificationsTest : public InProcessBrowserTest {
  public:
-  NotificationsTest() {}
+  NotificationsTest();
 
  protected:
-  // InProcessBrowserTest overrides.
-  void SetUpDefaultCommandLine(base::CommandLine* command_line) override;
-
   int GetNotificationCount();
   int GetNotificationPopupCount();
 
@@ -86,15 +85,19 @@ class NotificationsTest : public InProcessBrowserTest {
   GURL GetTestPageURL() const;
   content::WebContents* GetActiveWebContents(Browser* browser);
 
- protected:
-  void EnablePermissionsEmbargo(
-      base::test::ScopedFeatureList* scoped_feature_list);
-
  private:
   std::string RequestAndRespondToPermission(
       Browser* browser,
-      PermissionRequestManager::AutoResponseType bubble_response);
+      permissions::PermissionRequestManager::AutoResponseType bubble_response);
 
+  base::test::ScopedFeatureList feature_list_;
+};
+
+class NotificationsTestWithPermissionsEmbargo : public NotificationsTest {
+ public:
+  NotificationsTestWithPermissionsEmbargo();
+
+ private:
   base::test::ScopedFeatureList feature_list_;
 };
 

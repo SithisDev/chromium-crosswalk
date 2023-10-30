@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@ var allTests = [
   function testDetailsReverseRelations() {
     var detailsFrom = rootNode.find({attributes: {name: 'DetailsFrom'}});
     var detailsTo = rootNode.find({attributes: {name: 'DetailsTo'}});
-    assertEq(detailsFrom.details, detailsTo);
+    assertEq(detailsFrom.details[0], detailsTo);
     assertEq(detailsTo.detailsFor.length, 1);
     assertEq(detailsTo.detailsFor[0], detailsFrom);
     chrome.test.succeed();

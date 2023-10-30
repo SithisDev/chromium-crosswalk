@@ -1,9 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.content;
 
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.content_public.browser.WebContents;
 
 /**
@@ -14,7 +15,7 @@ public class ContentUtils {
      * @return The user agent string of Chrome.
      */
     public static String getBrowserUserAgent() {
-        return nativeGetBrowserUserAgent();
+        return ContentUtilsJni.get().getBrowserUserAgent();
     }
 
     /**
@@ -23,10 +24,13 @@ public class ContentUtils {
      * for "Request desktop site". Set it for WebContents so that it is available
      * when a NavigationEntry requires the user agent to be overridden.
      */
-    public static void setUserAgentOverride(WebContents webContents) {
-        nativeSetUserAgentOverride(webContents);
+    public static void setUserAgentOverride(WebContents webContents, boolean overrideInNewTabs) {
+        ContentUtilsJni.get().setUserAgentOverride(webContents, overrideInNewTabs);
     }
 
-    private static native String nativeGetBrowserUserAgent();
-    private static native void nativeSetUserAgentOverride(WebContents webContents);
+    @NativeMethods
+    interface Natives {
+        String getBrowserUserAgent();
+        void setUserAgentOverride(WebContents webContents, boolean overrideInNewTabs);
+    }
 }

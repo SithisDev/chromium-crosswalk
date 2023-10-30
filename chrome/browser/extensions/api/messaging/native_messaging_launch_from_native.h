@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_API_MESSAGING_NATIVE_MESSAGING_LAUNCH_FROM_NATIVE_H_
 
 #include <string>
-#include "base/macros.h"
+#include "base/time/time.h"
 
 class Profile;
 
@@ -24,21 +24,43 @@ bool ExtensionSupportsConnectionFromNativeApp(const std::string& extension_id,
 // |host_id|.
 void LaunchNativeMessageHostFromNativeApp(const std::string& extension_id,
                                           const std::string& host_id,
+                                          const std::string& connection_id,
                                           Profile* profile);
 
 class ScopedAllowNativeAppConnectionForTest {
  public:
   explicit ScopedAllowNativeAppConnectionForTest(bool allow);
+
+  ScopedAllowNativeAppConnectionForTest(
+      const ScopedAllowNativeAppConnectionForTest&) = delete;
+  ScopedAllowNativeAppConnectionForTest& operator=(
+      const ScopedAllowNativeAppConnectionForTest&) = delete;
+
   ~ScopedAllowNativeAppConnectionForTest();
 
   bool allow() const { return allow_; }
 
  private:
   const bool allow_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedAllowNativeAppConnectionForTest);
 };
 
+class ScopedNativeMessagingErrorTimeoutOverrideForTest {
+ public:
+  explicit ScopedNativeMessagingErrorTimeoutOverrideForTest(
+      base::TimeDelta timeout);
+
+  ScopedNativeMessagingErrorTimeoutOverrideForTest(
+      const ScopedNativeMessagingErrorTimeoutOverrideForTest&) = delete;
+  ScopedNativeMessagingErrorTimeoutOverrideForTest& operator=(
+      const ScopedNativeMessagingErrorTimeoutOverrideForTest&) = delete;
+
+  ~ScopedNativeMessagingErrorTimeoutOverrideForTest();
+
+  base::TimeDelta timeout() const { return timeout_; }
+
+ private:
+  const base::TimeDelta timeout_;
+};
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_MESSAGING_NATIVE_MESSAGING_LAUNCH_FROM_NATIVE_H_

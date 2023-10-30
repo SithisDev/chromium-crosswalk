@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,123 +6,122 @@
 
 #include <string>
 
+#include "base/bind.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
+#include "base/metrics/user_metrics_action.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/defaults.h"
+#include "chrome/browser/feature_engagement/tracker_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_stats.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_element_identifiers.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view.h"
-#include "chrome/browser/ui/views/feature_promos/feature_promo_bubble_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/bookmarks/common/bookmark_pref_names.h"
+#include "components/feature_engagement/public/event_constants.h"
+#include "components/feature_engagement/public/feature_constants.h"
+#include "components/feature_engagement/public/tracker.h"
 #include "components/omnibox/browser/vector_icons.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/user_education/common/user_education_class_properties.h"
 #include "components/variations/variations_associated_data.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/views/widget/widget_observer.h"
-
-namespace {
-
-// For bookmark in-product help.
-int GetBookmarkPromoStringSpecifier() {
-  static constexpr int kTextIds[] = {IDS_BOOKMARK_PROMO_0, IDS_BOOKMARK_PROMO_1,
-                                     IDS_BOOKMARK_PROMO_2};
-  const std::string& str = variations::GetVariationParamValue(
-      "BookmarkInProductHelp", "x_promo_string");
-  size_t text_specifier;
-  if (!base::StringToSizeT(str, &text_specifier) ||
-      text_specifier >= base::size(kTextIds)) {
-    text_specifier = 0;
-  }
-
-  return kTextIds[text_specifier];
-}
-
-}  // namespace
+#include "ui/views/animation/ink_drop.h"
+#include "ui/views/bubble/bubble_dialog_delegate_view.h"
+#include "ui/views/view_class_properties.h"
 
 StarView::StarView(CommandUpdater* command_updater,
                    Browser* browser,
-                   PageActionIconView::Delegate* delegate)
-    : PageActionIconView(command_updater, IDC_BOOKMARK_PAGE, delegate),
-      browser_(browser),
-      bookmark_promo_observer_(this) {
+                   IconLabelBubbleView::Delegate* icon_label_bubble_delegate,
+                   PageActionIconView::Delegate* page_action_icon_delegate)
+    : PageActionIconView(command_updater,
+                         IDC_BOOKMARK_THIS_TAB,
+                         icon_label_bubble_delegate,
+                         page_action_icon_delegate,
+                         "BookmarksStar",
+                         false),
+      browser_(browser) {
+  DCHECK(browser_);
+
+  edit_bookmarks_enabled_.Init(
+      bookmarks::prefs::kEditBookmarksEnabled, browser_->profile()->GetPrefs(),
+      base::BindRepeating(&StarView::EditBookmarksPrefUpdated,
+                          base::Unretained(this)));
   SetID(VIEW_ID_STAR_BUTTON);
-  SetToggled(false);
+  SetProperty(views::kElementIdentifierKey, kBookmarkStarViewElementId);
+  SetActive(false);
 }
 
-StarView::~StarView() {}
+StarView::~StarView() = default;
 
-void StarView::SetToggled(bool on) {
-  PageActionIconView::SetActiveInternal(on);
-}
-
-void StarView::ShowPromo() {
-  FeaturePromoBubbleView* bookmark_promo_bubble =
-      FeaturePromoBubbleView::CreateOwned(
-          this, views::BubbleBorder::TOP_RIGHT,
-          FeaturePromoBubbleView::ActivationAction::ACTIVATE,
-          GetBookmarkPromoStringSpecifier());
-  if (!bookmark_promo_observer_.IsObserving(
-          bookmark_promo_bubble->GetWidget())) {
-    bookmark_promo_observer_.Add(bookmark_promo_bubble->GetWidget());
-    SetActiveInternal(false);
-    UpdateIconImage();
+void StarView::AfterPropertyChange(const void* key, int64_t old_value) {
+  View::AfterPropertyChange(key, old_value);
+  if (key == user_education::kHasInProductHelpPromoKey) {
+    views::InkDropState next_state;
+    if (GetProperty(user_education::kHasInProductHelpPromoKey) ||
+        GetVisible()) {
+      next_state = views::InkDropState::ACTIVATED;
+    } else {
+      next_state = views::InkDropState::DEACTIVATED;
+    }
+    views::InkDrop::Get(this)->GetInkDrop()->AnimateToState(next_state);
   }
+}
+
+void StarView::UpdateImpl() {
+  SetVisible(browser_defaults::bookmarks_enabled &&
+             edit_bookmarks_enabled_.GetValue());
 }
 
 void StarView::OnExecuting(PageActionIconView::ExecuteSource execute_source) {
-  BookmarkEntryPoint entry_point = BOOKMARK_ENTRY_POINT_STAR_MOUSE;
+  BookmarkEntryPoint entry_point = BookmarkEntryPoint::kStarMouse;
   switch (execute_source) {
     case EXECUTE_SOURCE_MOUSE:
-      entry_point = BOOKMARK_ENTRY_POINT_STAR_MOUSE;
+      entry_point = BookmarkEntryPoint::kStarMouse;
       break;
     case EXECUTE_SOURCE_KEYBOARD:
-      entry_point = BOOKMARK_ENTRY_POINT_STAR_KEY;
+      entry_point = BookmarkEntryPoint::kStarKey;
       break;
     case EXECUTE_SOURCE_GESTURE:
-      entry_point = BOOKMARK_ENTRY_POINT_STAR_GESTURE;
+      entry_point = BookmarkEntryPoint::kStarGesture;
       break;
   }
-  UMA_HISTOGRAM_ENUMERATION("Bookmarks.EntryPoint", entry_point,
-                            BOOKMARK_ENTRY_POINT_LIMIT);
+  UMA_HISTOGRAM_ENUMERATION("Bookmarks.EntryPoint", entry_point);
 }
 
 void StarView::ExecuteCommand(ExecuteSource source) {
-  if (browser_) {
-    OnExecuting(source);
-    chrome::BookmarkCurrentPageIgnoringExtensionOverrides(browser_);
-  } else {
-    PageActionIconView::ExecuteCommand(source);
-  }
+  OnExecuting(source);
+  chrome::BookmarkCurrentTab(browser_);
 }
 
-views::BubbleDialogDelegateView* StarView::GetBubble() const {
+views::BubbleDialogDelegate* StarView::GetBubble() const {
   return BookmarkBubbleView::bookmark_bubble();
 }
 
 const gfx::VectorIcon& StarView::GetVectorIcon() const {
-  return active() ? omnibox::kStarActiveIcon : omnibox::kStarIcon;
+  return GetActive() ? omnibox::kStarActiveIcon : omnibox::kStarIcon;
 }
 
-base::string16 StarView::GetTextForTooltipAndAccessibleName() const {
-  return l10n_util::GetStringUTF16(active() ? IDS_TOOLTIP_STARRED
-                                            : IDS_TOOLTIP_STAR);
+std::u16string StarView::GetTextForTooltipAndAccessibleName() const {
+  return l10n_util::GetStringUTF16(GetActive() ? IDS_TOOLTIP_STARRED
+                                               : IDS_TOOLTIP_STAR);
 }
 
-SkColor StarView::GetInkDropBaseColor() const {
-  return bookmark_promo_observer_.IsObservingSources()
-             ? GetNativeTheme()->GetSystemColor(
-                   ui::NativeTheme::kColorId_ProminentButtonColor)
-             : PageActionIconView::GetInkDropBaseColor();
+void StarView::EditBookmarksPrefUpdated() {
+  Update();
 }
 
-void StarView::OnWidgetDestroying(views::Widget* widget) {
-  if (bookmark_promo_observer_.IsObserving(widget)) {
-    bookmark_promo_observer_.Remove(widget);
-    SetActiveInternal(false);
-    UpdateIconImage();
-  }
-}
+BEGIN_METADATA(StarView, PageActionIconView)
+END_METADATA

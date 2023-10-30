@@ -1,13 +1,15 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/api/messaging/native_messaging_test_util.h"
 
 #include <memory>
+#include <tuple>
 #include <utility>
 
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
@@ -18,7 +20,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/registry.h"
 #endif
 
@@ -31,27 +33,27 @@ void WriteTestNativeHostManifest(const base::FilePath& target_dir,
                                  const base::FilePath& host_path,
                                  bool user_level,
                                  bool supports_native_initiated_connections) {
-  std::unique_ptr<base::DictionaryValue> manifest(new base::DictionaryValue());
-  manifest->SetString("name", host_name);
-  manifest->SetString("description", "Native Messaging Echo Test");
-  manifest->SetString("type", "stdio");
-  manifest->SetString("path", host_path.AsUTF8Unsafe());
-  manifest->SetBoolean("supports_native_initiated_connections",
-                       supports_native_initiated_connections);
+  base::Value manifest(base::Value::Type::DICTIONARY);
+  manifest.SetStringKey("name", host_name);
+  manifest.SetStringKey("description", "Native Messaging Echo Test");
+  manifest.SetStringKey("type", "stdio");
+  manifest.SetStringKey("path", host_path.AsUTF8Unsafe());
+  manifest.SetBoolKey("supports_native_initiated_connections",
+                      supports_native_initiated_connections);
 
-  std::unique_ptr<base::ListValue> origins(new base::ListValue());
-  origins->AppendString(base::StringPrintf(
+  base::Value origins(base::Value::Type::LIST);
+  origins.Append(base::StringPrintf(
       "chrome-extension://%s/", ScopedTestNativeMessagingHost::kExtensionId));
-  manifest->Set("allowed_origins", std::move(origins));
+  manifest.SetKey("allowed_origins", std::move(origins));
 
   base::FilePath manifest_path = target_dir.AppendASCII(host_name + ".json");
   JSONFileValueSerializer serializer(manifest_path);
-  ASSERT_TRUE(serializer.Serialize(*manifest));
+  ASSERT_TRUE(serializer.Serialize(manifest));
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   HKEY root_key = user_level ? HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE;
-  base::string16 key = L"SOFTWARE\\Google\\Chrome\\NativeMessagingHosts\\" +
-                       base::UTF8ToUTF16(host_name);
+  std::wstring key = L"SOFTWARE\\Google\\Chrome\\NativeMessagingHosts\\" +
+                     base::UTF8ToWide(host_name);
   base::win::RegKey manifest_key(
       root_key, key.c_str(),
       KEY_SET_VALUE | KEY_CREATE_SUB_KEY | KEY_CREATE_LINK);
@@ -85,20 +87,29 @@ void ScopedTestNativeMessagingHost::RegisterTestHost(bool user_level) {
   test_user_data_dir = test_user_data_dir.AppendASCII("native_messaging")
                            .AppendASCII("native_hosts");
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   HKEY root_key = user_level ? HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE;
   ASSERT_NO_FATAL_FAILURE(registry_override_.OverrideRegistry(root_key));
 #else
-  path_override_.reset(new base::ScopedPathOverride(
+  path_override_ = std::make_unique<base::ScopedPathOverride>(
       user_level ? chrome::DIR_USER_NATIVE_MESSAGING
                  : chrome::DIR_NATIVE_MESSAGING,
-      temp_dir_.GetPath()));
+      temp_dir_.GetPath());
 #endif
 
-#if defined(OS_POSIX)
-  base::FilePath host_path = test_user_data_dir.AppendASCII("echo.py");
-#else
-  base::FilePath host_path = test_user_data_dir.AppendASCII("echo.bat");
+  base::CopyFile(test_user_data_dir.AppendASCII("echo.py"),
+                 temp_dir_.GetPath().AppendASCII("echo.py"));
+#if BUILDFLAG(IS_WIN)
+  base::FilePath host_path = temp_dir_.GetPath().AppendASCII("echo.bat");
+  base::CopyFile(test_user_data_dir.AppendASCII("echo.bat"), host_path);
+#endif
+
+#if BUILDFLAG(IS_POSIX)
+  base::FilePath host_path = temp_dir_.GetPath().AppendASCII("echo.py");
+  ASSERT_TRUE(base::SetPosixFilePermissions(
+      host_path, base::FILE_PERMISSION_READ_BY_USER |
+                     base::FILE_PERMISSION_WRITE_BY_USER |
+                     base::FILE_PERMISSION_EXECUTE_BY_USER));
 #endif
   ASSERT_NO_FATAL_FAILURE(WriteTestNativeHostManifest(
       temp_dir_.GetPath(), kHostName, host_path, user_level, false));
@@ -115,7 +126,7 @@ void ScopedTestNativeMessagingHost::RegisterTestHost(bool user_level) {
 
 ScopedTestNativeMessagingHost::~ScopedTestNativeMessagingHost() {
   base::ScopedAllowBlockingForTesting allow_blocking;
-  ignore_result(temp_dir_.Delete());
+  std::ignore = temp_dir_.Delete();
 }
 
 }  // namespace extensions

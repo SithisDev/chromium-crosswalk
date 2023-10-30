@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
-#include "base/macros.h"
-#include "chrome/browser/android/compositor/scene_layer/scene_layer.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
+#include "chrome/browser/ui/android/layouts/scene_layer.h"
 
 namespace cc {
 class Layer;
@@ -24,11 +24,20 @@ namespace android {
 
 class ContextualSearchLayer;
 
+// A native-side, cc::Layer-based representation of how a Contextual Search
+// scene should be drawn.
+// This class delegates to the ContextualSearchLayer
+// that does the actual rendering of the Contextual Search Bar and content.
 class ContextualSearchSceneLayer : public SceneLayer,
                                    public BitmapFetcherDelegate {
  public:
   ContextualSearchSceneLayer(JNIEnv* env,
                              const base::android::JavaRef<jobject>& jobj);
+
+  ContextualSearchSceneLayer(const ContextualSearchSceneLayer&) = delete;
+  ContextualSearchSceneLayer& operator=(const ContextualSearchSceneLayer&) =
+      delete;
+
   ~ContextualSearchSceneLayer() override;
 
   void CreateContextualSearchLayer(
@@ -47,15 +56,14 @@ class ContextualSearchSceneLayer : public SceneLayer,
       jint search_bar_shadow_resource_id,
       jint search_provider_icon_resource_id,
       jint quick_action_icon_resource_id,
-      jint arrow_up_resource_id,
       jint drag_handlebar_resource_id,
       jint open_tab_icon_resource_id,
       jint close_icon_resource_id,
       jint progress_bar_background_resource_id,
+      jint progress_bar_background_tint,
       jint progress_bar_resource_id,
+      jint progress_bar_tint,
       jint search_promo_resource_id,
-      jint bar_banner_ripple_resource_id,
-      jint bar_banner_text_resource_id,
       jfloat dp_to_px,
       jfloat layout_width,
       jfloat layout_height,
@@ -65,13 +73,16 @@ class ContextualSearchSceneLayer : public SceneLayer,
       jboolean search_promo_visible,
       jfloat search_promo_height,
       jfloat search_promo_opacity,
-      jint search_prmomo_background_color,
-      jboolean search_bar_banner_visible,
-      jfloat search_bar_banner_height,
-      jfloat search_bar_banner_padding,
-      jfloat search_bar_banner_ripple_width,
-      jfloat search_bar_banner_ripple_opacity,
-      jfloat search_bar_banner_text_opacity,
+      jint search_promo_background_color,
+      // Related Searches
+      jint related_searches_in_content_resource_id,
+      jboolean related_searches_in_content_visible,
+      jfloat related_searches_in_content_height,
+      jint related_searches_in_bar_resource_id,
+      jboolean related_searches_in_bar_visible,
+      jfloat related_searches_in_bar_height,
+      jfloat related_searches_in_bar_redundant_padding,
+      // Panel position etc
       jfloat search_panel_x,
       jfloat search_panel_y,
       jfloat search_panel_width,
@@ -87,8 +98,6 @@ class ContextualSearchSceneLayer : public SceneLayer,
       jboolean search_caption_visible,
       jboolean search_bar_border_visible,
       jfloat search_bar_border_height,
-      jboolean search_bar_shadow_visible,
-      jfloat search_bar_shadow_opacity,
       jboolean quick_action_icon_visible,
       jboolean thumbnail_visible,
       jstring j_thumbnail_url,
@@ -96,22 +105,17 @@ class ContextualSearchSceneLayer : public SceneLayer,
       jint bar_image_size,
       jint icon_color,
       jint drag_handlebar_color,
-      jfloat arrow_icon_opacity,
-      jfloat arrow_icon_rotation,
       jfloat close_icon_opacity,
       jboolean progress_bar_visible,
       jfloat progress_bar_height,
       jfloat progress_bar_opacity,
-      jint progress_bar_completion,
-      jfloat divider_line_visibility_percentage,
-      jfloat divider_line_width,
-      jfloat divider_line_height,
-      jint divider_line_color,
-      jfloat divider_line_x_offset,
+      jfloat progress_bar_completion,
       jboolean touch_highlight_visible,
       jfloat touch_highlight_x_offset,
       jfloat touch_highlight_width,
-      const base::android::JavaRef<jobject>& j_profile);
+      const base::android::JavaRef<jobject>& j_profile,
+      jint bar_background_resource_id,
+      jint separator_line_color);
 
   // Inherited from BitmapFetcherDelegate
   void OnFetchComplete(
@@ -130,7 +134,7 @@ class ContextualSearchSceneLayer : public SceneLayer,
  private:
   void FetchThumbnail(const base::android::JavaRef<jobject>& j_profile);
 
-  JNIEnv* env_;
+  raw_ptr<JNIEnv> env_;
   base::android::ScopedJavaGlobalRef<jobject> object_;
   std::string thumbnail_url_;
   std::unique_ptr<BitmapFetcher> fetcher_;
@@ -139,8 +143,6 @@ class ContextualSearchSceneLayer : public SceneLayer,
   // Responsible for fading the base page content.
   scoped_refptr<cc::SolidColorLayer> color_overlay_;
   scoped_refptr<cc::Layer> content_container_;
-
-  DISALLOW_COPY_AND_ASSIGN(ContextualSearchSceneLayer);
 };
 
 }  // namespace android

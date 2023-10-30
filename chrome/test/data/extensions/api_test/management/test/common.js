@@ -1,9 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 var assertEq = chrome.test.assertEq;
 var assertFalse = chrome.test.assertFalse;
+var assertLastError = chrome.test.assertLastError;
 var assertNoLastError = chrome.test.assertNoLastError;
 var assertTrue = chrome.test.assertTrue;
 var fail = chrome.test.fail;

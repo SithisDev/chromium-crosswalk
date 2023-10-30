@@ -1,16 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_CHROME_CLEANER_UI_SILENT_MAIN_DIALOG_H_
 #define CHROME_CHROME_CLEANER_UI_SILENT_MAIN_DIALOG_H_
 
-#include <vector>
-
-#include "base/strings/string16.h"
-#include "chrome/chrome_cleaner/constants/uws_id.h"
 #include "chrome/chrome_cleaner/ui/main_dialog_api.h"
-#include "components/chrome_cleaner/public/constants/result_codes.h"
 
 namespace chrome_cleaner {
 
@@ -28,14 +23,11 @@ class SilentMainDialog : public MainDialogAPI {
   void NoPUPsFound() override;
   void CleanupDone(ResultCode cleanup_result) override;
   void Close() override;
-  void DisableExtensions(const std::vector<base::string16>& extensions,
-                         base::OnceCallback<void(bool)> on_disable) override;
 
  protected:
-  void ConfirmCleanup(
-      const std::vector<UwSId>& found_pups,
-      const FilePathSet& files_to_remove,
-      const std::vector<base::string16>& registry_keys) override;
+  void ConfirmCleanup(const std::vector<UwSId>& found_pups,
+                      const FilePathSet& files_to_remove,
+                      const std::vector<std::wstring>& registry_keys) override;
 };
 
 }  // namespace chrome_cleaner

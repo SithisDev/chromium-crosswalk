@@ -1,42 +1,62 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_LIFETIME_BROWSER_SHUTDOWN_H_
 #define CHROME_BROWSER_LIFETIME_BROWSER_SHUTDOWN_H_
 
+#include <stdint.h>
+
+#include "base/auto_reset.h"
 #include "build/build_config.h"
 
 class PrefRegistrySimple;
 
 namespace browser_shutdown {
 
-// Shutdown flags
-enum Flags {
-  NO_FLAGS = 0,
+#if !BUILDFLAG(IS_ANDROID)
 
-  // If |RESTART_LAST_SESSION| is set, the browser will attempt to restart in
-  // in the last session after the shutdown.
-  RESTART_LAST_SESSION = 1 << 0,
+// The type of restart to perform during shutdown; see ShutdownPostThreadsStop.
+enum class RestartMode {
+  // Do not restart the browser.
+  kNoRestart,
 
-  // Makes a panned restart happen in the background. The browser will just come
-  // up in the system tray but not open a new window after restarting. This flag
-  // has no effect if |RESTART_LAST_SESSION| is not set.
-  RESTART_IN_BACKGROUND = 1 << 1
+  // Restart the browser. This is typically used in conjunction with the
+  // prefs::kWasRestarted Local State preference to restore the user's browsing
+  // session. Regardless of whether or not prefs::kWasRestarted is used,
+  // single-use switches (e.g., --app) and any URLs are stripped from the
+  // command line.
+  kRestartLastSession,
+
+  // Restart the browser into the background. The browser will appear in the
+  // system tray without opening any browser windows. This has no effect if
+  // |RESTART| is not also set.
+  kRestartInBackground,
+
+  // Restart the browser using the original command line. This is useful in
+  // cases where startup was interrupted and will continue in the new process.
+  // Restart loops are prevented by adding switches::kRelaunched to the command
+  // line of the new process.
+  kRestartThisSession,
 };
 
-enum ShutdownType {
-  // an uninitialized value
-  NOT_VALID = 0,
-  // the last browser window was closed
-  WINDOW_CLOSE,
-  // user clicked on the Exit menu item
-  BROWSER_EXIT,
-  // windows is logging off or shutting down
-  END_SESSION
-};
+#endif  // !BUILDFLAG(IS_ANDROID)
 
-constexpr int kNumShutdownTypes = END_SESSION + 1;
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class ShutdownType {
+  // An uninitialized value.
+  kNotValid = 0,
+  // The last browser window was closed.
+  kWindowClose = 1,
+  // The user clicked on the Exit menu item.
+  kBrowserExit = 2,
+  // User logoff or system shutdown.
+  kEndSession = 3,
+  // Exit without onbeforeunload or in-progress download prompts.
+  kSilentExit = 4,
+  kMaxValue = kSilentExit
+};
 
 void RegisterPrefs(PrefRegistrySimple* registry);
 
@@ -44,10 +64,21 @@ void RegisterPrefs(PrefRegistrySimple* registry);
 // time.
 void OnShutdownStarting(ShutdownType type);
 
+// Returns true if OnShutdownStarting has been called to note that shutdown has
+// started.
+// TODO (crbug/1155597): Make this work in sync with
+// BrowserProcessImpl::IsShuttingDown.
+bool HasShutdownStarted();
+
+// Returns true if OnShutdownStarting has been called and unload handlers (e.g.,
+// an in-progress download or a page's beforeunload handler) should be ignored.
+// This is true for kEndSession and kSilentExit shutdown types.
+bool ShouldIgnoreUnloadHandlers();
+
 // Get the current shutdown type.
 ShutdownType GetShutdownType();
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 // Performs the shutdown tasks that need to be done before
 // BrowserProcess and the various threads go away.
 //
@@ -60,9 +91,7 @@ bool RecordShutdownInfoPrefs();
 
 // Performs the remaining shutdown tasks after all threads but the
 // main thread have been stopped.  This includes deleting g_browser_process.
-//
-// See |browser_shutdown::Flags| for the possible flag values and their effects.
-void ShutdownPostThreadsStop(int shutdown_flags);
+void ShutdownPostThreadsStop(RestartMode restart_mode);
 #endif
 
 // Called at startup to create a histogram from our previous shutdown time.
@@ -88,6 +117,13 @@ void SetTryingToQuit(bool quitting);
 
 // General accessor.
 bool IsTryingToQuit();
+
+// Allows setting a fake shutdown type for testing purposes.
+base::AutoReset<ShutdownType> SetShutdownTypeForTesting(
+    ShutdownType shutdown_type);
+
+// Allows resetting the shutdown globals for testing purposes.
+void ResetShutdownGlobalsForTesting();
 
 }  // namespace browser_shutdown
 

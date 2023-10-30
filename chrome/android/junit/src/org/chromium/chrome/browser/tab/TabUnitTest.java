@@ -1,45 +1,63 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.tab;
 
 import static org.hamcrest.CoreMatchers.equalTo;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyObject;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import android.app.Activity;
 import android.content.Context;
-import android.support.test.filters.SmallTest;
+import android.view.View;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.base.test.util.JniMocker;
+import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.tab.state.CriticalPersistedTabData;
+import org.chromium.chrome.browser.tab.state.CriticalPersistedTabDataObserver;
+import org.chromium.chrome.browser.ui.native_page.NativePage;
+import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
 
 import java.lang.ref.WeakReference;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Tests for {@link Tab}.
  */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
+@Features.EnableFeatures("ShoppingAssist")
 public class TabUnitTest {
     private static final int TAB1_ID = 456;
     private static final int TAB2_ID = 789;
+
+    @Rule
+    public TestRule mFeaturesProcessorRule = new Features.JUnitProcessor();
+
+    @Rule
+    public JniMocker mocker = new JniMocker();
 
     @Mock
     private WindowAndroid mWindowAndroid;
@@ -55,11 +73,29 @@ public class TabUnitTest {
     private WeakReference<Activity> mWeakReferenceActivity;
     @Mock
     private Activity mActivity;
+    @Mock
+    private CriticalPersistedTabData mCriticalPersistedTabData;
+    @Mock
+    private CriticalPersistedTabDataObserver mCriticalPersistedTabDataObserver;
+    @Mock
+    private NativePage mNativePage;
+    @Mock
+    private TabDelegateFactory mDelegateFactory;
+    @Mock
+    private TabWebContentsDelegateAndroid mTabWebContentsDelegateAndroid;
+    @Mock
+    private WebContents mWebContents;
+    @Mock
+    private View mNativePageView;
+    @Mock
+    private ChromeActivity mChromeActivity;
+    @Mock
+    TabImpl.Natives mNativeMock;
 
-    private Tab mTab;
+    private TabImpl mTab;
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         MockitoAnnotations.initMocks(this);
 
         doReturn(mWeakReferenceActivity).when(mWindowAndroid).getActivity();
@@ -68,37 +104,74 @@ public class TabUnitTest {
         doReturn(mContext).when(mWeakReferenceContext).get();
         doReturn(mContext).when(mContext).getApplicationContext();
 
-        // Bypass feature checks.
-        Map<String, Boolean> features = new HashMap<>();
-        features.put("ShoppingAssist", true);
-        ChromeFeatureList.setTestFeatures(features);
-
-        mTab = new Tab(TAB1_ID, null, false, mWindowAndroid, null, null, mLoadUrlParams);
+        mTab = new TabImpl(TAB1_ID, false, null, null);
         mTab.addObserver(mObserver);
+        CriticalPersistedTabData.from(mTab).addObserver(mCriticalPersistedTabDataObserver);
     }
 
     @Test
     @SmallTest
-    public void testSetRootIdWithChange() throws Exception {
-        assertThat(mTab.getRootId(), equalTo(TAB1_ID));
+    public void testSetRootIdWithChange() {
+        assertThat(CriticalPersistedTabData.from(mTab).getRootId(), equalTo(TAB1_ID));
 
-        mTab.setRootId(TAB2_ID);
+        CriticalPersistedTabData.from(mTab).setRootId(TAB2_ID);
 
-        verify(mObserver).onRootIdChanged(mTab, TAB2_ID);
-        assertThat(mTab.getRootId(), equalTo(TAB2_ID));
-        assertThat(mTab.isTabStateDirty(), equalTo(true));
+        verify(mCriticalPersistedTabDataObserver).onRootIdChanged(mTab, TAB2_ID);
+
+        assertThat(CriticalPersistedTabData.from(mTab).getRootId(), equalTo(TAB2_ID));
+        assertThat(TabStateAttributes.from(mTab).isTabStateDirty(), equalTo(true));
     }
 
     @Test
     @SmallTest
-    public void testSetRootIdWithoutChange() throws Exception {
-        assertThat(mTab.getRootId(), equalTo(TAB1_ID));
-        mTab.setIsTabStateDirty(false);
+    public void testSetRootIdWithoutChange() {
+        assertThat(CriticalPersistedTabData.from(mTab).getRootId(), equalTo(TAB1_ID));
+        TabStateAttributes.from(mTab).setIsTabStateDirty(false);
 
-        mTab.setRootId(TAB1_ID);
+        CriticalPersistedTabData.from(mTab).setRootId(TAB1_ID);
 
-        verify(mObserver, never()).onRootIdChanged(any(Tab.class), anyInt());
-        assertThat(mTab.getRootId(), equalTo(TAB1_ID));
-        assertThat(mTab.isTabStateDirty(), equalTo(false));
+        verify(mCriticalPersistedTabDataObserver, never())
+                .onRootIdChanged(any(Tab.class), anyInt());
+        assertThat(CriticalPersistedTabData.from(mTab).getRootId(), equalTo(TAB1_ID));
+        assertThat(TabStateAttributes.from(mTab).isTabStateDirty(), equalTo(false));
+    }
+
+    @Test
+    @SmallTest
+    public void testFreezeDetachedNativePage() {
+        mocker.mock(TabImplJni.TEST_HOOKS, mNativeMock);
+
+        doReturn(mTabWebContentsDelegateAndroid)
+                .when(mDelegateFactory)
+                .createWebContentsDelegate(any(Tab.class));
+        doReturn(mNativePage)
+                .when(mDelegateFactory)
+                .createNativePage(any(String.class), anyObject(), any(Tab.class));
+        doReturn(false).when(mNativePage).isFrozen();
+        doReturn(mNativePageView).when(mNativePage).getView();
+        doReturn(mWindowAndroid).when(mWebContents).getTopLevelNativeWindow();
+        doReturn(mChromeActivity).when(mWeakReferenceContext).get();
+
+        mTab = new TabImpl(TAB1_ID, false, null, null) {
+            @Override
+            void updateWindowAndroid(WindowAndroid windowAndroid) {}
+            @Override
+            public WebContents getWebContents() {
+                return mWebContents;
+            }
+            @Override
+            public boolean isNativePage() {
+                return true;
+            }
+            @Override
+            void pushNativePageStateToNavigationEntry() {}
+        };
+        mTab.updateAttachment(mWindowAndroid, mDelegateFactory);
+
+        // A valid, non-null NativeFrozenPage object should be instantiated when a Tab is
+        // told to freeze its native page in a currently detached state.
+        assertEquals(mTab.getNativePage(), mNativePage);
+        mTab.freezeNativePage();
+        assertNotEquals(mTab.getNativePage(), mNativePage);
     }
 }

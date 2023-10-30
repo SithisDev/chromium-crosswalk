@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #ifndef CHROME_BROWSER_PROFILES_PROFILE_AVATAR_DOWNLOADER_H_
@@ -16,11 +16,10 @@ class Image;
 
 class ProfileAvatarDownloader : public BitmapFetcherDelegate {
  public:
-  using FetchCompleteCallback = base::RepeatingCallback<
+  using FetchCompleteCallback = base::OnceCallback<
       void(gfx::Image, const std::string&, const base::FilePath&)>;
 
-  ProfileAvatarDownloader(size_t icon_index,
-                          const FetchCompleteCallback& callback);
+  ProfileAvatarDownloader(size_t icon_index, FetchCompleteCallback callback);
   ~ProfileAvatarDownloader() override;
 
   void Start();

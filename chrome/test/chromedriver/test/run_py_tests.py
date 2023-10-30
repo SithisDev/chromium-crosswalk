@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright 2013 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 # is updated in Devil.
 
 import base64
+import imghdr
 import json
 import math
 import optparse
@@ -19,14 +20,16 @@ import os
 import re
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import unittest
-import urllib
-import urllib2
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 
 
@@ -43,7 +46,9 @@ sys.path.remove(_PARENT_DIR)
 
 sys.path.insert(1, _CLIENT_DIR)
 import chromedriver
+import websocket_connection
 import webelement
+import webshadowroot
 sys.path.remove(_CLIENT_DIR)
 
 sys.path.insert(1, _SERVER_DIR)
@@ -55,6 +60,10 @@ import unittest_util
 import webserver
 sys.path.remove(_TEST_DIR)
 
+sys.path.insert(0,os.path.join(chrome_paths.GetSrc(), 'third_party',
+                               'catapult', 'third_party', 'gsutil',
+                               'third_party', 'monotonic'))
+from monotonic import monotonic
 
 _TEST_DATA_DIR = os.path.join(chrome_paths.GetTestData(), 'chromedriver')
 
@@ -78,8 +87,15 @@ _NEGATIVE_FILTER = [
     'ChromeDriverTest.testAlertOnNewWindow',
     # https://bugs.chromium.org/p/chromedriver/issues/detail?id=2532
     'ChromeDriverPageLoadTimeoutTest.testRefreshWithPageLoadTimeout',
-    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=2965
-    'ChromeExtensionsCapabilityTest.testWaitsForExtensionToLoad'
+    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=3517
+    'ChromeDriverTest.testPrint',
+    'ChromeDriverTest.testPrintInvalidArgument',
+    # Flaky https://bugs.chromium.org/p/chromium/issues/detail?id=1143940
+    'ChromeDriverTest.testTakeLargeElementFullPageScreenshot',
+    # Flaky https://bugs.chromium.org/p/chromium/issues/detail?id=1306504
+    'ChromeSwitchesCapabilityTest.*',
+    'ChromeExtensionsCapabilityTest.*',
+    'MobileEmulationCapabilityTest.*',
 ]
 
 
@@ -87,31 +103,44 @@ _OS_SPECIFIC_FILTER = {}
 _OS_SPECIFIC_FILTER['win'] = [
     # https://bugs.chromium.org/p/chromedriver/issues/detail?id=299
     'ChromeLogPathCapabilityTest.testChromeLogPath',
-    # https://bugs.chromium.org/p/chromium/issues/detail?id=946704
-    'ChromeDownloadDirTest.testFileDownloadWithClick',
-    'ChromeDriverTest.testBackNavigationAfterClickElement',
-    'ChromeDriverTest.testCanClickInIframes',
-    'ChromeDriverTest.testClickElementAfterNavigation',
-    'ChromeDriverTest.testCloseWindow',
-    'ChromeDriverTest.testCloseWindowUsingJavascript',
-    'ChromeDriverTest.testGetLogOnClosedWindow',
-    'ChromeDriverTest.testGetWindowHandles',
-    'ChromeDriverTest.testShouldHandleNewWindowLoadingProperly',
-    'ChromeDriverTest.testSwitchToWindow',
+    # https://bugs.chromium.org/p/chromium/issues/detail?id=1196363
     'ChromeDownloadDirTest.testFileDownloadAfterTabHeadless',
     'ChromeDownloadDirTest.testFileDownloadWithClickHeadless',
     'ChromeDownloadDirTest.testFileDownloadWithGetHeadless',
+    'HeadlessChromeDriverTest.testNewTabDoesNotFocus',
+    'HeadlessChromeDriverTest.testNewWindowDoesNotFocus',
+    'HeadlessChromeDriverTest.testPrintHeadless',
+    'HeadlessChromeDriverTest.testPrintInvalidArgumentHeadless',
+    'HeadlessChromeDriverTest.testWindowFullScreen',
+    'HeadlessInvalidCertificateTest.testLoadsPage',
+    'HeadlessInvalidCertificateTest.testNavigateNewWindow',
+    'RemoteBrowserTest.testConnectToRemoteBrowserLiteralAddressHeadless',
+    # Timed out on Win7 bots: crbug.com/1306504.
+    'ChromeLoggingCapabilityTest.testDevToolsEventsLogger',
+    'ChromeLoggingCapabilityTest.testPerformanceLogger',
+    'JavaScriptTests.testAllJS',
+    'LaunchDesktopTest.testExistingDevToolsPortFile',
+    'RemoteBrowserTest.testConnectToRemoteBrowser',
+    'SessionHandlingTest.testQuitASessionMoreThanOnce',
+    'SupportIPv4AndIPv6.testSupportIPv4AndIPv6',
+    # Flaky on Win7 bots: crbug.com/1132559
+    'ChromeDriverTest.testTakeElementScreenshotInIframe',
 ]
 _OS_SPECIFIC_FILTER['linux'] = [
 ]
 _OS_SPECIFIC_FILTER['mac'] = [
-    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1927
-    'MobileEmulationCapabilityTest.testTapElement',
-    # https://bugs.chromium.org/p/chromium/issues/detail?id=946023
-    'ChromeDriverTest.testWindowFullScreen',
-    'ChromeDownloadDirTest.testFileDownloadAfterTabHeadless',
-    'ChromeDownloadDirTest.testFileDownloadWithClickHeadless',
-    'ChromeDownloadDirTest.testFileDownloadWithGetHeadless'
+    # https://bugs.chromium.org/p/chromium/issues/detail?id=1011225
+    'ChromeDriverTest.testActionsMultiTouchPoint',
+    # Flaky: https://crbug.com/1156576.
+    'ChromeDriverTestLegacy.testContextMenuEventFired',
+    # Flaky: https://crbug.com/1157533.
+    'ChromeDriverTest.testShadowDomFindElement',
+    # Flaky: https://crbug.com/1336871.
+    'ChromeDriverTest.testTakeElementScreenshot',
+    'ChromeDriverTest.testTakeElementScreenshotInIframe',
+    'ChromeDriverTest.testTakeElementScreenshotPartlyVisible',
+    'ChromeDriverTest.testTakeLargeElementScreenshot',
+    'ChromeDriverSiteIsolation.testCanClickOOPIF',
 ]
 
 _DESKTOP_NEGATIVE_FILTER = [
@@ -137,27 +166,9 @@ _INTEGRATION_NEGATIVE_FILTER = [
     # already tested by other test cases.
     'ChromeDriverTest.testGetCurrentWindowHandle',
     'ChromeDriverTest.testStartStop',
-    'ChromeDriverTest.testSendCommand*',
-    # https://crbug.com/867511
-    'ChromeDriverTest.testWindowMaximize',
-    # LaunchApp is an obsolete API.
-    'ChromeExtensionsCapabilityTest.testCanLaunchApp',
-    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=2278
-    # The following test uses the obsolete LaunchApp API, and is thus excluded.
-    # TODO(johnchen@chromium.org): Investigate feasibility of re-writing the
-    # test case without using LaunchApp.
-    'ChromeExtensionsCapabilityTest.testCanInspectBackgroundPage',
     # PerfTest takes a long time, requires extra setup, and adds little value
     # to integration testing.
     'PerfTest.*',
-    # HeadlessInvalidCertificateTest is sometimes flaky.
-    'HeadlessInvalidCertificateTest.*',
-    # Similar issues with HeadlessChromeDriverTest.
-    'HeadlessChromeDriverTest.*',
-    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=2277
-    # RemoteBrowserTest requires extra setup. TODO(johnchen@chromium.org):
-    # Modify the test so it runs correctly as isolated test.
-    'RemoteBrowserTest.*',
     # Flaky: https://crbug.com/899919
     'SessionHandlingTest.testGetSessions',
     # Flaky due to occasional timeout in starting Chrome
@@ -190,6 +201,7 @@ _ANDROID_NEGATIVE_FILTER['chrome'] = (
         'ChromeDriverTest.testWindowMaximize',
         'ChromeDriverTest.testWindowMinimize',
         'ChromeLogPathCapabilityTest.testChromeLogPath',
+        # Connecting to running browser is not supported on Android.
         'RemoteBrowserTest.*',
         # Don't enable perf testing on Android yet.
         'PerfTest.*',
@@ -197,8 +209,6 @@ _ANDROID_NEGATIVE_FILTER['chrome'] = (
         'SessionHandlingTest.testGetSessions',
         # Android doesn't use the chrome://print dialog.
         'ChromeDriverTest.testCanSwitchToPrintPreviewDialog',
-        # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1175
-        'ChromeDriverTest.testChromeDriverSendLargeData',
         # Chrome 44+ for Android doesn't dispatch the dblclick event
         'ChromeDriverTest.testMouseDoubleClick',
         # Page cannot be loaded from file:// URI in Android unless it
@@ -213,7 +223,10 @@ _ANDROID_NEGATIVE_FILTER['chrome'] = (
         'LaunchDesktopTest.*',
         # https://bugs.chromium.org/p/chromedriver/issues/detail?id=2737
         'ChromeDriverTest.testTakeElementScreenshot',
+        'ChromeDriverTest.testTakeElementScreenshotPartlyVisible',
         'ChromeDriverTest.testTakeElementScreenshotInIframe',
+        # setWindowBounds not supported on Android
+        'ChromeDriverTest.testTakeLargeElementScreenshot',
         # https://bugs.chromium.org/p/chromedriver/issues/detail?id=2786
         'ChromeDriverTest.testActionsTouchTap',
         'ChromeDriverTest.testTouchDownMoveUpElement',
@@ -223,8 +236,28 @@ _ANDROID_NEGATIVE_FILTER['chrome'] = (
         'ChromeDriverTest.testNewWindowDoesNotFocus',
         'ChromeDriverTest.testNewTabDoesNotFocus',
         # Android does not support the virtual authenticator environment.
-        'ChromeDriverSecureContextTest.testAddVirtualAuthenticator',
-        'ChromeDriverSecureContextTest.testRemoveVirtualAuthenticator',
+        'ChromeDriverSecureContextTest.*',
+        # Covered by Desktop tests; can't create 2 browsers in Android
+        'SupportIPv4AndIPv6.testSupportIPv4AndIPv6',
+        # Browser context management is not supported by Android
+        'ChromeDriverTest.testClipboardPermissions',
+        'ChromeDriverTest.testMidiPermissions',
+        'ChromeDriverTest.testMultiplePermissions',
+        'ChromeDriverTest.testNewWindowSameDomainHasSamePermissions',
+        'ChromeDriverTest.testPermissionStates',
+        'ChromeDriverTest.testPermissionsOpaqueOriginsThrowError',
+        'ChromeDriverTest.testPermissionsSameOrigin',
+        'ChromeDriverTest.testPermissionsSameOriginDoesNotAffectOthers',
+        'ChromeDriverTest.testPersistentStoragePermissions',
+        'ChromeDriverTest.testPushAndNotificationsPermissions',
+        'ChromeDriverTest.testSensorPermissions',
+        'ChromeDriverTest.testSettingPermissionDoesNotAffectOthers',
+        # Android does not allow changing window size
+        'JavaScriptTests.*',
+        # These tests are failing on Android
+        # https://bugs.chromium.org/p/chromedriver/issues/detail?id=3560
+        'ChromeDriverTest.testTakeLargeElementViewportScreenshot',
+        'ChromeDriverTest.testTakeLargeElementFullPageScreenshot'
     ]
 )
 _ANDROID_NEGATIVE_FILTER['chrome_stable'] = (
@@ -306,9 +339,22 @@ class ChromeDriverBaseTest(unittest.TestCase):
       except:
         pass
 
-  def CreateDriver(self, server_url=None, download_dir=None, **kwargs):
+  def CreateDriver(self, server_url=None, server_pid=None,
+                   download_dir=None, **kwargs):
     if server_url is None:
       server_url = _CHROMEDRIVER_SERVER_URL
+    if server_pid is None:
+      server_pid = _CHROMEDRIVER_SERVER_PID
+
+    if (not _ANDROID_PACKAGE_KEY and 'debugger_address' not in kwargs and
+          '_MINIDUMP_PATH' in globals() and _MINIDUMP_PATH):
+      # Environment required for minidump not supported on Android
+      # minidumpPath will fail parsing if debugger_address is set
+      if 'experimental_options' in kwargs:
+        if 'minidumpPath' not in kwargs['experimental_options']:
+          kwargs['experimental_options']['minidumpPath'] = _MINIDUMP_PATH
+      else:
+        kwargs['experimental_options'] = {'minidumpPath': _MINIDUMP_PATH}
 
     android_package = None
     android_activity = None
@@ -319,7 +365,7 @@ class ChromeDriverBaseTest(unittest.TestCase):
         android_activity = constants.PACKAGE_INFO[_ANDROID_PACKAGE_KEY].activity
         android_process = '%s:main' % android_package
 
-    driver = chromedriver.ChromeDriver(server_url,
+    driver = chromedriver.ChromeDriver(server_url, server_pid,
                                        chrome_binary=_CHROME_BINARY,
                                        android_package=android_package,
                                        android_activity=android_activity,
@@ -341,8 +387,8 @@ class ChromeDriverBaseTest(unittest.TestCase):
     Returns:
       Handle to a new window. None if timeout.
     """
-    deadline = time.time() + 20
-    while time.time() < deadline:
+    deadline = monotonic() + 20
+    while monotonic() < deadline:
       handles = driver.GetWindowHandles()
       if check_closed_windows:
         self.assertTrue(set(old_handles).issubset(handles))
@@ -358,8 +404,8 @@ class ChromeDriverBaseTest(unittest.TestCase):
     Args:
       predicate: A function that returns a boolean value.
     """
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    deadline = monotonic() + timeout
+    while monotonic() < deadline:
       if predicate():
         return True
       time.sleep(timestep)
@@ -372,42 +418,222 @@ class ChromeDriverBaseTestWithWebServer(ChromeDriverBaseTest):
   def GlobalSetUp():
     ChromeDriverBaseTestWithWebServer._http_server = webserver.WebServer(
         chrome_paths.GetTestData())
+    ChromeDriverBaseTestWithWebServer._sync_server = webserver.SyncWebServer()
+    cert_path = os.path.join(chrome_paths.GetTestData(),
+                             'chromedriver/invalid_ssl_cert.pem')
+    ChromeDriverBaseTestWithWebServer._https_server = webserver.WebServer(
+        chrome_paths.GetTestData(), cert_path)
+
+    def respondWithUserAgentString(request):
+      return {}, bytes("""
+        <html>
+        <body>%s</body>
+        </html>""" % request.GetHeader('User-Agent'), 'utf-8')
+
+    def respondWithUserAgentStringUseDeviceWidth(request):
+      return {}, bytes("""
+        <html>
+        <head>
+        <meta name="viewport" content="width=device-width,minimum-scale=1.0">
+        </head>
+        <body>%s</body>
+        </html>""" % request.GetHeader('User-Agent'), 'utf-8')
+
+    ChromeDriverBaseTestWithWebServer._http_server.SetCallbackForPath(
+        '/userAgent', respondWithUserAgentString)
+    ChromeDriverBaseTestWithWebServer._http_server.SetCallbackForPath(
+        '/userAgentUseDeviceWidth', respondWithUserAgentStringUseDeviceWidth)
+
+    if _ANDROID_PACKAGE_KEY:
+      ChromeDriverBaseTestWithWebServer._device = (
+          device_utils.DeviceUtils.HealthyDevices()[0])
+      http_host_port = (
+          ChromeDriverBaseTestWithWebServer._http_server._server.server_port)
+      sync_host_port = (
+          ChromeDriverBaseTestWithWebServer._sync_server._server.server_port)
+      https_host_port = (
+          ChromeDriverBaseTestWithWebServer._https_server._server.server_port)
+      forwarder.Forwarder.Map(
+          [(http_host_port, http_host_port), (sync_host_port, sync_host_port),
+           (https_host_port, https_host_port)],
+          ChromeDriverBaseTestWithWebServer._device)
 
   @staticmethod
   def GlobalTearDown():
+    if _ANDROID_PACKAGE_KEY:
+      forwarder.Forwarder.UnmapAllDevicePorts(ChromeDriverTest._device)
     ChromeDriverBaseTestWithWebServer._http_server.Shutdown()
+    ChromeDriverBaseTestWithWebServer._https_server.Shutdown()
 
   @staticmethod
   def GetHttpUrlForFile(file_path):
     return ChromeDriverBaseTestWithWebServer._http_server.GetUrl() + file_path
 
 
+class ChromeDriverTestWithCustomCapability(ChromeDriverBaseTestWithWebServer):
+
+  def testEagerMode(self):
+    send_response = threading.Event()
+    def waitAndRespond():
+        send_response.wait(10)
+        self._sync_server.RespondWithContent(b'#')
+    thread = threading.Thread(target=waitAndRespond)
+
+    self._http_server.SetDataForPath('/top.html',
+     bytes("""
+     <html><body>
+     <div id='top'>
+       <img src='%s'>
+     </div>
+     </body></html>""" % self._sync_server.GetUrl(), 'utf-8'))
+    eager_driver = self.CreateDriver(page_load_strategy='eager')
+    thread.start()
+    start_eager = monotonic()
+    eager_driver.Load(self._http_server.GetUrl() + '/top.html')
+    stop_eager = monotonic()
+    send_response.set()
+    eager_time = stop_eager - start_eager
+    self.assertTrue(eager_time < 9)
+    thread.join()
+
+  def testDoesntWaitWhenPageLoadStrategyIsNone(self):
+    class HandleRequest(object):
+      def __init__(self):
+        self.sent_hello = threading.Event()
+
+      def slowPage(self, request):
+        self.sent_hello.wait(2)
+        return {}, b"""
+        <html>
+        <body>hello</body>
+        </html>"""
+
+    handler = HandleRequest()
+    self._http_server.SetCallbackForPath('/slow', handler.slowPage)
+
+    driver = self.CreateDriver(page_load_strategy='none')
+    self.assertEqual('none', driver.capabilities['pageLoadStrategy'])
+
+    driver.Load(self._http_server.GetUrl() + '/chromedriver/empty.html')
+    start = monotonic()
+    driver.Load(self._http_server.GetUrl() + '/slow')
+    self.assertLess(monotonic() - start, 2,
+        'Loading `/slow` page should be fast enough')
+    handler.sent_hello.set()
+    self.WaitForCondition(lambda: 'hello' in driver.GetPageSource())
+    self.assertTrue('hello' in driver.GetPageSource())
+
+  def testUnsupportedPageLoadStrategyRaisesException(self):
+    self.assertRaises(chromedriver.InvalidArgument,
+                      self.CreateDriver, page_load_strategy="unsupported")
+
+  def testGetUrlOnInvalidUrl(self):
+    # Make sure we don't return 'chrome-error://chromewebdata/' (see
+    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1272).
+    # Block DNS resolution for all hosts so that the navigation results
+    # in a DNS lookup error.
+    driver = self.CreateDriver(
+        chrome_switches=['--host-resolver-rules=MAP * ~NOTFOUND'])
+    self.assertRaises(chromedriver.ChromeDriverException,
+                      driver.Load, 'http://invalid/')
+    self.assertEqual('http://invalid/', driver.GetCurrentUrl())
+
+class ChromeDriverWebSocketTest(ChromeDriverBaseTestWithWebServer):
+  @staticmethod
+  def composeWebSocketUrl(server_url, session_id):
+    return server_url.replace('http', 'ws') + '/session/' + session_id
+
+  def testDefaultSession(self):
+    driver = self.CreateDriver()
+    self.assertFalse('webSocketUrl' in driver.capabilities)
+    self.assertRaises(Exception, websocket_connection.WebSocketConnection,
+                      _CHROMEDRIVER_SERVER_URL, driver.GetSessionId())
+
+  def testWebSocketUrlFalse(self):
+    driver = self.CreateDriver(web_socket_url=False)
+    self.assertFalse('webSocketUrl' in driver.capabilities)
+    self.assertRaises(Exception, websocket_connection.WebSocketConnection,
+                      _CHROMEDRIVER_SERVER_URL, driver.GetSessionId())
+
+  def testWebSocketUrlTrue(self):
+    driver = self.CreateDriver(web_socket_url=True)
+    self.assertTrue('webSocketUrl' in driver.capabilities)
+    self.assertNotEqual(None, driver.GetSessionId())
+    self.assertEqual(driver.capabilities['webSocketUrl'],
+        self.composeWebSocketUrl(_CHROMEDRIVER_SERVER_URL,
+                                 driver.GetSessionId()))
+
+    websocket = websocket_connection.WebSocketConnection(
+        _CHROMEDRIVER_SERVER_URL, driver.GetSessionId())
+    self.assertIsNotNone(websocket)
+
+  def testWebSocketUrlInvalid(self):
+    self.assertRaises(chromedriver.InvalidArgument,
+        self.CreateDriver, web_socket_url='Invalid')
+
+  def testWebSocketOneConnectionPerSession(self):
+    driver = self.CreateDriver(web_socket_url=True)
+    websocket = websocket_connection.WebSocketConnection(
+        _CHROMEDRIVER_SERVER_URL, driver.GetSessionId())
+    self.assertNotEqual(None, websocket)
+    self.assertRaises(Exception, websocket_connection.WebSocketConnection,
+                      _CHROMEDRIVER_SERVER_URL, driver.GetSessionId())
+
+  def testWebSocketInvalidSessionId(self):
+    driver = self.CreateDriver(web_socket_url=True)
+    self.assertRaises(Exception, websocket_connection.WebSocketConnection,
+                      _CHROMEDRIVER_SERVER_URL, "random_session_id_123")
+
+  def testWebSocketClosedCanReconnect(self):
+    driver = self.CreateDriver(web_socket_url=True)
+    websocket = websocket_connection.WebSocketConnection(
+        _CHROMEDRIVER_SERVER_URL, driver.GetSessionId())
+    self.assertNotEqual(None, websocket)
+    websocket.Close()
+    websocket2 = websocket_connection.WebSocketConnection(
+        _CHROMEDRIVER_SERVER_URL, driver.GetSessionId())
+    self.assertNotEqual(None, websocket2)
+
 class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
   """End to end tests for ChromeDriver."""
-
-  @staticmethod
-  def GlobalSetUp():
-    ChromeDriverBaseTestWithWebServer.GlobalSetUp()
-    ChromeDriverTest._sync_server = webserver.SyncWebServer()
-    if _ANDROID_PACKAGE_KEY:
-      ChromeDriverTest._device = device_utils.DeviceUtils.HealthyDevices()[0]
-      http_host_port = ChromeDriverTest._http_server._server.server_port
-      sync_host_port = ChromeDriverTest._sync_server._server.server_port
-      forwarder.Forwarder.Map(
-          [(http_host_port, http_host_port), (sync_host_port, sync_host_port)],
-          ChromeDriverTest._device)
-
-  @staticmethod
-  def GlobalTearDown():
-    if _ANDROID_PACKAGE_KEY:
-      forwarder.Forwarder.UnmapAllDevicePorts(ChromeDriverTest._device)
-    ChromeDriverBaseTestWithWebServer.GlobalTearDown()
 
   def setUp(self):
     self._driver = self.CreateDriver()
 
   def testStartStop(self):
     pass
+
+  def testGetComputedAttributes(self):
+    self._driver.Load(
+      self.GetHttpUrlForFile('/chromedriver/accessibility.html'))
+
+    firstHeaderElement = self._driver.FindElement(
+      'css selector', '#first-header')
+
+    self.assertEqual(firstHeaderElement.GetComputedLabel(), 'header content')
+    self.assertEqual(firstHeaderElement.GetComputedRole(), 'heading')
+
+  def testGetComputedAttributesForIgnoredNode(self):
+    self._driver.Load(
+      self.GetHttpUrlForFile('/chromedriver/accessibility.html'))
+
+    ignoredHeaderElement = self._driver.FindElement(
+      'css selector', '#ignored-header')
+
+    # GetComputedLabel for ignored node should return empty string.
+    self.assertEqual(ignoredHeaderElement.GetComputedLabel(), '')
+    self.assertEqual(ignoredHeaderElement.GetComputedRole(), 'none')
+
+  def testGetComputedAttributesForUnrenderedNode(self):
+    self._driver.Load(
+      self.GetHttpUrlForFile('/chromedriver/accessibility.html'))
+
+    unrenderedHeaderElement = self._driver.FindElement(
+      'css selector', '#unrendered-header')
+
+    # GetComputedLabel for unrendered node should return empty string.
+    self.assertEqual(unrenderedHeaderElement.GetComputedLabel(), '')
+    self.assertEqual(unrenderedHeaderElement.GetComputedRole(), 'none')
 
   def testLoadUrl(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -436,7 +662,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
 
     self.assertTrue(new_window['handle'] not in current_handles)
     self.assertTrue(new_window['handle'] in self._driver.GetWindowHandles())
-    self.assertEquals(text, 'PASS')
+    self.assertEqual(text, 'PASS')
 
   def testNewWindowDoesNotFocus(self):
     self._newWindowDoesNotFocus(window_type='window')
@@ -451,24 +677,24 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     new_window_handle = self.WaitForNewWindow(self._driver, old_handles)
     self.assertNotEqual(None, new_window_handle)
     self._driver.SwitchToWindow(new_window_handle)
-    self.assertEquals(new_window_handle, self._driver.GetCurrentWindowHandle())
+    self.assertEqual(new_window_handle, self._driver.GetCurrentWindowHandle())
     self.assertRaises(chromedriver.NoSuchElement,
                       self._driver.FindElement, 'css selector', '#link')
     close_returned_handles = self._driver.CloseWindow()
     self.assertRaises(chromedriver.NoSuchWindow,
                       self._driver.GetCurrentWindowHandle)
     new_handles = self._driver.GetWindowHandles()
-    self.assertEquals(close_returned_handles, new_handles)
+    self.assertEqual(close_returned_handles, new_handles)
     for old_handle in old_handles:
       self.assertTrue(old_handle in new_handles)
     for handle in new_handles:
       self._driver.SwitchToWindow(handle)
-      self.assertEquals(handle, self._driver.GetCurrentWindowHandle())
+      self.assertEqual(handle, self._driver.GetCurrentWindowHandle())
       close_handles = self._driver.CloseWindow()
       # CloseWindow quits the session if on the last window.
       if handle is not new_handles[-1]:
         from_get_window_handles = self._driver.GetWindowHandles()
-        self.assertEquals(close_handles, from_get_window_handles)
+        self.assertEqual(close_handles, from_get_window_handles)
 
   def testCloseWindowUsingJavascript(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/page_test.html'))
@@ -477,7 +703,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     new_window_handle = self.WaitForNewWindow(self._driver, old_handles)
     self.assertNotEqual(None, new_window_handle)
     self._driver.SwitchToWindow(new_window_handle)
-    self.assertEquals(new_window_handle, self._driver.GetCurrentWindowHandle())
+    self.assertEqual(new_window_handle, self._driver.GetCurrentWindowHandle())
     self.assertRaises(chromedriver.NoSuchElement,
                       self._driver.FindElement, 'css selector', '#link')
     self._driver.ExecuteScript('window.close()')
@@ -497,7 +723,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
 
   def testSwitchToWindow(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/page_test.html'))
-    self.assertEquals(
+    self.assertEqual(
         1, self._driver.ExecuteScript('window.name = "oldWindow"; return 1;'))
     window1_handle = self._driver.GetCurrentWindowHandle()
     old_handles = self._driver.GetWindowHandles()
@@ -505,15 +731,15 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     new_window_handle = self.WaitForNewWindow(self._driver, old_handles)
     self.assertNotEqual(None, new_window_handle)
     self._driver.SwitchToWindow(new_window_handle)
-    self.assertEquals(new_window_handle, self._driver.GetCurrentWindowHandle())
+    self.assertEqual(new_window_handle, self._driver.GetCurrentWindowHandle())
     self.assertRaises(chromedriver.NoSuchElement,
                       self._driver.FindElement, 'css selector', '#link')
     self._driver.SwitchToWindow('oldWindow')
-    self.assertEquals(window1_handle, self._driver.GetCurrentWindowHandle())
+    self.assertEqual(window1_handle, self._driver.GetCurrentWindowHandle())
 
   def testEvaluateScript(self):
-    self.assertEquals(1, self._driver.ExecuteScript('return 1'))
-    self.assertEquals(None, self._driver.ExecuteScript(''))
+    self.assertEqual(1, self._driver.ExecuteScript('return 1'))
+    self.assertEqual(None, self._driver.ExecuteScript(''))
 
   def testEvaluateScriptWithArgs(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -521,7 +747,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
               'return {stuff: document.querySelectorAll("div")};')
     stuff = self._driver.ExecuteScript(script)['stuff']
     script = 'return arguments[0].innerHTML + arguments[1].innerHTML'
-    self.assertEquals(
+    self.assertEqual(
         'bc', self._driver.ExecuteScript(script, stuff[0], stuff[1]))
 
   def testEvaluateInvalidScript(self):
@@ -535,7 +761,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
         self._driver.ExecuteAsyncScript,
         'var callback = arguments[0];'
         'setTimeout(function(){callback(1);}, 10000);')
-    self.assertEquals(
+    self.assertEqual(
         2,
         self._driver.ExecuteAsyncScript(
             'var callback = arguments[0];'
@@ -550,7 +776,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
 
     # Regular script can still run afterwards.
     self._driver.SetTimeouts({'script': 1000})
-    self.assertEquals(
+    self.assertEqual(
         4,
         self._driver.ExecuteScript('return 4'))
 
@@ -615,6 +841,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.SwitchToFrame('id')
     self.assertTrue(self._driver.ExecuteScript('return window.top != window'))
     self._driver.ExecuteScript('parent.postMessage("remove", "*");')
+    self._driver.SwitchToMainFrame()
     self.assertTrue(self._driver.ExecuteScript('return window.top == window'))
 
   def testSwitchToStaleFrame(self):
@@ -631,12 +858,76 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
 
   def testGetTitle(self):
     script = 'document.title = "title"; return 1;'
-    self.assertEquals(1, self._driver.ExecuteScript(script))
-    self.assertEquals('title', self._driver.GetTitle())
+    self.assertEqual(1, self._driver.ExecuteScript(script))
+    self.assertEqual('title', self._driver.GetTitle())
 
   def testGetPageSource(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/page_test.html'))
     self.assertTrue('Link to empty.html' in self._driver.GetPageSource())
+
+  def testGetElementShadowRoot(self):
+    self._driver.Load(
+      self.GetHttpUrlForFile('/chromedriver/get_element_shadow_root.html'))
+    element = self._driver.FindElement('tag name', 'custom-checkbox-element')
+    shadow = element.GetElementShadowRoot()
+    self.assertTrue(isinstance(shadow, webshadowroot.WebShadowRoot))
+
+  def testGetElementShadowRootNotExists(self):
+    self._driver.Load(
+      self.GetHttpUrlForFile('/chromedriver/get_element_shadow_root.html'))
+    element = self._driver.FindElement('tag name', 'div')
+    with self.assertRaises(chromedriver.NoSuchShadowRoot):
+      element.GetElementShadowRoot()
+
+  def testFindElementFromShadowRoot(self):
+    self._driver.Load(
+      self.GetHttpUrlForFile('/chromedriver/get_element_shadow_root.html'))
+    element = self._driver.FindElement('tag name', 'custom-checkbox-element')
+    shadow = element.GetElementShadowRoot()
+    self.assertTrue(isinstance(shadow, webshadowroot.WebShadowRoot))
+    elementInShadow = shadow.FindElement('css selector', 'input')
+    self.assertTrue(isinstance(elementInShadow, webelement.WebElement))
+
+  def testFindElementFromShadowRootInvalidArgs(self):
+    self._driver.Load(
+      self.GetHttpUrlForFile('/chromedriver/get_element_shadow_root.html'))
+    element = self._driver.FindElement('tag name', 'custom-checkbox-element')
+    shadow = element.GetElementShadowRoot()
+    self.assertTrue(isinstance(shadow, webshadowroot.WebShadowRoot))
+    with self.assertRaises(chromedriver.InvalidArgument):
+      shadow.FindElement('tag name', 'input')
+    with self.assertRaises(chromedriver.InvalidArgument):
+      shadow.FindElement('xpath', '//')
+
+  def testDetachedShadowRootError(self):
+    self._driver.Load(
+      self.GetHttpUrlForFile('/chromedriver/get_element_shadow_root.html'))
+    element = self._driver.FindElement('tag name', 'custom-checkbox-element')
+    shadow = element.GetElementShadowRoot()
+    self._driver.Refresh()
+    with self.assertRaises(chromedriver.DetachedShadowRoot):
+      shadow.FindElement('css selector', 'input')
+
+  def testFindElementsFromShadowRoot(self):
+    self._driver.Load(
+      self.GetHttpUrlForFile('/chromedriver/get_element_shadow_root.html'))
+    element = self._driver.FindElement('tag name', 'custom-checkbox-element')
+    shadow = element.GetElementShadowRoot()
+    self.assertTrue(isinstance(shadow, webshadowroot.WebShadowRoot))
+    elementsInShadow = shadow.FindElements('css selector', 'input')
+    self.assertTrue(isinstance(elementsInShadow, list))
+    self.assertTrue(2, len(elementsInShadow))
+
+  def testFindElementsFromShadowRootInvalidArgs(self):
+    self._driver.Load(
+      self.GetHttpUrlForFile('/chromedriver/get_element_shadow_root.html'))
+    element = self._driver.FindElement('tag name', 'custom-checkbox-element')
+    shadow = element.GetElementShadowRoot()
+    self.assertTrue(isinstance(shadow, webshadowroot.WebShadowRoot))
+    with self.assertRaises(chromedriver.InvalidArgument):
+      shadow.FindElements('tag name', 'input')
+    with self.assertRaises(chromedriver.InvalidArgument):
+      shadow.FindElements('xpath', '//')
 
   def testFindElement(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -650,7 +941,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
     self._driver.ExecuteScript(
         'document.body.innerHTML = "<div>a</div><div>b</div>";')
-    self.assertRaisesRegexp(chromedriver.NoSuchElement,
+    self.assertRaisesRegex(chromedriver.NoSuchElement,
                             'no such element: Unable '
                             'to locate element: {"method":"tag name",'
                             '"selector":"divine"}',
@@ -663,7 +954,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
         'document.body.innerHTML = "<div>a</div><div>b</div>";')
     divs = self._driver.FindElements('tag name', 'div')
     self.assertTrue(isinstance(divs, list))
-    self.assertEquals(2, len(divs))
+    self.assertEqual(2, len(divs))
     for div in divs:
       self.assertTrue(isinstance(div, webelement.WebElement))
 
@@ -683,7 +974,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     element = self._driver.FindElement('tag name', 'div')
     brs = element.FindElements('tag name', 'br')
     self.assertTrue(isinstance(brs, list))
-    self.assertEquals(2, len(brs))
+    self.assertEqual(2, len(brs))
     for br in brs:
       self.assertTrue(isinstance(br, webelement.WebElement))
 
@@ -697,7 +988,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
         '});'
         'return div;')
     div.Click()
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'br')))
 
   def testClickElementInSubFrame(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/frame_test.html'))
@@ -714,6 +1005,141 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     alert_button.Click()
     self.assertTrue(self._driver.IsAlertOpen())
 
+  def testClickElementJustOutsidePage(self):
+    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=3878
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    windowHeight = self._driver.ExecuteScript('return window.innerHeight;')
+    self._driver.ExecuteScript(
+        '''
+        document.body.innerHTML = "<div style='height:%dpx'></div>" +
+          "<a href='#' onclick='return false;' id='link'>Click me</a>";
+        document.body.style.cssText = "padding:0.25px";
+        ''' % (2 * windowHeight))
+
+    link = self._driver.FindElement('css selector', '#link')
+    offsetTop = link.GetProperty('offsetTop')
+    targetScrollTop = offsetTop - windowHeight + 1
+    self._driver.ExecuteScript('window.scrollTo(0, %d);' % (targetScrollTop));
+    link.Click()
+
+  def testClickElementHavingSmallIntersectionWithindowObscuredByScrollBar(self):
+    # This is a regression test for chromedriver:3933.
+    # It relies on some internal knowledge on how ExecuteClickElement is
+    # implemented.
+    # See also: https://bugs.chromium.org/p/chromedriver/issues/detail?id=3933
+    # This is what happens if the bug exists in the code:
+    # Assume:
+    # bar.height = 50.5 (see the CSS from horizontal_scroller.html)
+    # x = 1.5 (can be any 1.5 <= x < 2.5)
+    # horizontalScrollBar.height = 15
+    # p = 36.5 <- position of #link relative to the viewport, calculated and
+    # scrolled to by webdriver::atoms::GET_LOCATION_IN_VIEW
+    # Assign:
+    # window.innerHeight = floor(bar.height + x) = 52
+    # Then:
+    # horizontalScrollBar.y
+    #   = window.innerHeight - horizontalScrollBar.height = 37
+    # clickPosition.y = p + (window.innerHeight - bar.height) / 2 = 37.25
+    #
+    # Condition clickPosition.y > horizontalScrollBar.y means that we are
+    # clicking the area obscured by horizontal scroll bar.
+    # It is worth mentioning that if x < 1.5 or x >= 2.5 then 'p' will be
+    # calculated differently and the bug will not reproduce.
+    testcaseUrl = self.GetHttpUrlForFile(
+        '/chromedriver/horizontal_scroller.html')
+    self._driver.Load(testcaseUrl)
+    self._driver.SetWindowRect(640, 480, None, None)
+    innerHeight = self._driver.ExecuteScript('return window.innerHeight;')
+    windowDecorationHeight = 480 - innerHeight
+    # The value of barHeight is 50.5
+    barHeight = self._driver.FindElement(
+        'css selector', '#bar').GetRect()['height']
+    # as mentioned above any number 1.5 <= x < 2.5 is ok provided
+    # scroll.height = 15
+    x = 1.5
+    windowHeight = barHeight + windowDecorationHeight + x
+
+    self._driver.SetWindowRect(640, windowHeight, None, None)
+    self._driver.Load(testcaseUrl)
+
+    link = self._driver.FindElement('css selector', '#link')
+    link.Click()
+
+    # Click must be registered
+    counter = self._driver.FindElement('css selector', '#click-counter')
+    self.assertEqual(1, int(counter.GetProperty('value')))
+
+  def testClickElementObscuredByScrollBar(self):
+    testcaseUrl = self.GetHttpUrlForFile(
+        '/chromedriver/horizontal_scroller.html')
+    self._driver.Load(testcaseUrl)
+    self._driver.SetWindowRect(640, 480, None, None)
+    innerHeight = self._driver.ExecuteScript('return window.innerHeight;')
+    windowDecorationHeight = 480 - innerHeight
+    viewportHeight = self._driver.ExecuteScript(
+        'return window.visualViewport.height;')
+    scrollbarHeight = innerHeight - viewportHeight
+    barHeight = self._driver.FindElement(
+        'css selector', '#bar').GetRect()['height']
+
+    # -1 is used to ensure that there is no space for link before the scroll
+    # bar.
+    self._driver.SetWindowRect(640, math.floor(
+        barHeight + windowDecorationHeight + scrollbarHeight - 1), None, None)
+    self._driver.Load(testcaseUrl)
+    newInnerHeight = self._driver.ExecuteScript('return window.innerHeight;')
+
+    link = self._driver.FindElement('css selector', '#link')
+    link.Click()
+
+    rc = self._driver.ExecuteScript(
+        'return document.getElementById("link").getBoundingClientRect();')
+    # As link was obscured it has to be brought into view
+    self.assertLess(0, rc['y'] + rc['height'])
+    self.assertLess(rc['y'], newInnerHeight - scrollbarHeight)
+    # Click must be registered
+    counter = self._driver.FindElement('css selector', '#click-counter')
+    self.assertEqual(1, int(counter.GetProperty('value')))
+
+  def testClickElementAlmostObscuredByScrollBar(self):
+    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=3933
+    # This test does not reproduce chromedriver:3933.
+    # However it fails if the implementation contains the bug that was
+    # responsible for the issue: incorrect calculation of the intersection
+    # between the element and the viewport led to scrolling where the element
+    # was positioned in such a way that it could not be clicked.
+    testcaseUrl = self.GetHttpUrlForFile(
+        '/chromedriver/horizontal_scroller.html')
+    self._driver.Load(testcaseUrl)
+    self._driver.SetWindowRect(640, 480, None, None)
+    innerHeight = self._driver.ExecuteScript('return window.innerHeight;')
+    windowDecorationHeight = 480 - innerHeight
+    viewportHeight = self._driver.ExecuteScript(
+        'return window.visualViewport.height;')
+    scrollbarHeight = innerHeight - viewportHeight
+    barHeight = self._driver.FindElement(
+        'css selector', '#bar').GetRect()['height']
+
+    # +1 is used in order to give some space for link before the scroll bar.
+    self._driver.SetWindowRect(640, math.floor(
+        barHeight + windowDecorationHeight + scrollbarHeight + 1), None, None)
+    self._driver.Load(testcaseUrl)
+
+    link = self._driver.FindElement('css selector', '#link')
+    rc = self._driver.ExecuteScript(
+        'return document.getElementById("link").getBoundingClientRect();')
+    oldY = rc['y']
+
+    link.Click()
+
+    rc = self._driver.ExecuteScript(
+        'return document.getElementById("link").getBoundingClientRect();')
+    # As link is only partially obscured it must stay in place
+    self.assertEqual(oldY, rc['y'])
+    # Click must be registered
+    counter = self._driver.FindElement('css selector', '#click-counter')
+    self.assertEqual(1, int(counter.GetProperty('value')))
+
   def testActionsMouseMove(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
     self._driver.ExecuteScript(
@@ -727,12 +1153,16 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
         '});'
         'return div;')
     actions = ({"actions": [{
+      "actions": [{"duration": 32, "type": "pause"}],
+      "id": "0",
+      "type": "none"
+      }, {
       "type":"pointer",
       "actions":[{"type": "pointerMove", "x": 10, "y": 10}],
       "parameters": {"pointerType": "mouse"},
       "id": "pointer1"}]})
     self._driver.PerformActions(actions)
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'br')))
 
   def testActionsMouseClick(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -754,7 +1184,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
       "parameters": {"pointerType": "mouse"},
       "id": "pointer1"}]})
     self._driver.PerformActions(actions)
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'br')))
 
   def testActionsMouseDoubleClick(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -778,7 +1208,86 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
       "parameters": {"pointerType": "mouse"},
       "id": "pointer1"}]})
     self._driver.PerformActions(actions)
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'br')))
+
+  def testActionsMouseTripleClick(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.ExecuteScript(
+        'document.body.innerHTML = "<div>old</div>";'
+        'var div = document.getElementsByTagName("div")[0];'
+        'div.style["width"] = "100px";'
+        'div.style["height"] = "100px";'
+        'window.click_counts = [];'
+        'div.addEventListener("click", event => {'
+        '  window.click_counts.push(event.detail);'
+        '});'
+        'return div;')
+    actions = ({"actions": [{
+      "type":"pointer",
+      "actions":[{"type": "pointerMove", "x": 10, "y": 10},
+                 {"type": "pointerDown", "button": 0},
+                 {"type": "pointerUp", "button": 0},
+                 {"type": "pointerDown", "button": 0},
+                 {"type": "pointerUp", "button": 0},
+                 {"type": "pointerDown", "button": 0},
+                 {"type": "pointerUp", "button": 0}],
+      "parameters": {"pointerType": "mouse"},
+      "id": "pointer1"}]})
+    self._driver.PerformActions(actions)
+    click_counts = self._driver.ExecuteScript('return window.click_counts')
+    self.assertEqual(3, len(click_counts))
+    self.assertEqual(1, click_counts[0])
+    self.assertEqual(2, click_counts[1])
+    self.assertEqual(3, click_counts[2])
+
+  def testActionsMouseResetCountOnOtherButton(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.ExecuteScript(
+        'document.body.innerHTML = "<div>old</div>";'
+        'var div = document.getElementsByTagName("div")[0];'
+        'div.style["width"] = "100px";'
+        'div.style["height"] = "100px";'
+        'div.addEventListener("dblclick", function() {'
+        '  var div = document.getElementsByTagName("div")[0];'
+        '  div.innerHTML="new<br>";'
+        '});'
+        'return div;')
+    actions = ({"actions": [{
+      "type":"pointer",
+      "actions":[{"type": "pointerMove", "x": 10, "y": 10},
+                 {"type": "pointerDown", "button": 0},
+                 {"type": "pointerUp", "button": 0},
+                 {"type": "pointerDown", "button": 1},
+                 {"type": "pointerUp", "button": 1}],
+      "parameters": {"pointerType": "mouse"},
+      "id": "pointer1"}]})
+    self._driver.PerformActions(actions)
+    self.assertEqual(0, len(self._driver.FindElements('tag name', 'br')))
+
+  def testActionsMouseResetCountOnMove(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.ExecuteScript(
+        'document.body.innerHTML = "<div>old</div>";'
+        'var div = document.getElementsByTagName("div")[0];'
+        'div.style["width"] = "100px";'
+        'div.style["height"] = "100px";'
+        'div.addEventListener("dblclick", function() {'
+        '  var div = document.getElementsByTagName("div")[0];'
+        '  div.innerHTML="new<br>";'
+        '});'
+        'return div;')
+    actions = ({"actions": [{
+      "type":"pointer",
+      "actions":[{"type": "pointerMove", "x": 10, "y": 10},
+                 {"type": "pointerDown", "button": 0},
+                 {"type": "pointerUp", "button": 0},
+                 {"type": "pointerMove", "x": 30, "y": 10},
+                 {"type": "pointerDown", "button": 0},
+                 {"type": "pointerUp", "button": 0}],
+      "parameters": {"pointerType": "mouse"},
+      "id": "pointer1"}]})
+    self._driver.PerformActions(actions)
+    self.assertEqual(0, len(self._driver.FindElements('tag name', 'br')))
 
   def testActionsMouseDrag(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/drag.html'))
@@ -786,45 +1295,89 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
 
     # Move to center of target element and drag it to a new location.
     actions = ({'actions': [{
+      "actions": [{"duration": 32, "type": "pause"},
+                  {"duration": 32, "type": "pause"},
+                  {"duration": 32, "type": "pause"}],
+      "id": "0",
+      "type": "none"
+      }, {
       'type': 'pointer',
       'actions': [
           {'type': 'pointerMove', 'x': 100, 'y': 100},
           {'type': 'pointerDown', 'button': 0},
-          {'type': 'pointerMove', 'x': 200, 'y': 250}
+          {'type': 'pointerMove', 'x': 150, 'y': 175}
       ],
       'parameters': {'pointerType': 'mouse'},
       'id': 'pointer1'}]})
+    time.sleep(1)
     self._driver.PerformActions(actions)
+    time.sleep(1)
     rect = target.GetRect()
-    self.assertEquals(150, rect['x'])
-    self.assertEquals(200, rect['y'])
+    self.assertAlmostEqual(100, rect['x'], delta=1)
+    self.assertAlmostEqual(125, rect['y'], delta=1)
 
     # Without releasing mouse button, should continue the drag.
     actions = ({'actions': [{
+      "actions": [{"duration": 32, "type": "pause"}],
+      "id": "0",
+      "type": "none"
+      }, {
       'type': 'pointer',
       'actions': [
-          {'type': 'pointerMove', 'x': 30, 'y': 40, 'origin': 'pointer'}
+          {'type': 'pointerMove', 'x': 15, 'y': 20, 'origin': 'pointer'}
       ],
       'parameters': {'pointerType': 'mouse'},
       'id': 'pointer1'}]})
+    time.sleep(1)
     self._driver.PerformActions(actions)
+    time.sleep(1)
     rect = target.GetRect()
-    self.assertEquals(180, rect['x'])
-    self.assertEquals(240, rect['y'])
+    self.assertAlmostEqual(115, rect['x'], delta=1)
+    self.assertAlmostEqual(145, rect['y'], delta=1)
 
     # Releasing mouse button stops the drag.
     actions = ({'actions': [{
+      "actions": [{"duration": 32, "type": "pause"},
+                  {"duration": 32, "type": "pause"}],
+      "id": "0",
+      "type": "none"
+      }, {
       'type': 'pointer',
       'actions': [
           {'type': 'pointerUp', 'button': 0},
-          {'type': 'pointerMove', 'x': 50, 'y': 50, 'origin': 'pointer'}
+          {'type': 'pointerMove', 'x': 25, 'y': 25, 'origin': 'pointer'}
       ],
       'parameters': {'pointerType': 'mouse'},
       'id': 'pointer1'}]})
+    time.sleep(1)
     self._driver.PerformActions(actions)
+    time.sleep(1)
     rect = target.GetRect()
-    self.assertEquals(180, rect['x'])
-    self.assertEquals(240, rect['y'])
+    self.assertAlmostEqual(115, rect['x'], delta=1)
+    self.assertAlmostEqual(145, rect['y'], delta=1)
+
+  def testActionsWheelScroll(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.ExecuteScript(
+        'document.body.innerHTML = "<div>old</div>";'
+        'var div = document.getElementsByTagName("div")[0];'
+        'div.style["width"] = "100px";'
+        'div.style["height"] = "1000px";'
+        'div.addEventListener("wheel", function() {'
+        '  var div = document.getElementsByTagName("div")[0];'
+        '  div.innerHTML="new<br>";'
+        '});'
+        'return div;')
+    time.sleep(1)
+    actions = ({"actions": [{
+      "type":"wheel",
+      "actions":[{"type": "scroll", "x": 10, "y": 10, "deltaX": 5,
+                  "deltaY": 15}],
+      "id": "wheel1"}]})
+    time.sleep(1)
+    self._driver.PerformActions(actions)
+    time.sleep(1)
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'br')))
 
   def testActionsTouchTap(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -846,7 +1399,57 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
       "parameters": {"pointerType": "touch"},
       "id": "pointer1"}]})
     self._driver.PerformActions(actions)
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'br')))
+
+  def testActionsMultiTouchPoint(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.ExecuteScript(
+        '''
+        document.body.innerHTML
+          = "<div id='div' autofocus style='width:200px; height:200px'>";
+        window.events = [];
+        const div = document.getElementById('div');
+        div.addEventListener('touchstart', event => {
+          window.events.push(
+              {type: event.type,
+               x: event.touches[event.touches.length - 1].clientX,
+               y: event.touches[event.touches.length - 1].clientY});
+        });
+        div.addEventListener('touchend', event => {
+          window.events.push(
+              {type: event.type});
+        });
+        ''')
+    time.sleep(1)
+
+    actions = ({"actions": [{
+      "type":"pointer",
+      "actions":[{"type": "pointerMove", "x": 50, "y": 50},
+                 {"type": "pointerDown"},
+                 {"type": "pointerUp"}],
+      "parameters": {"pointerType": "touch"},
+      "id": "pointer1"},
+      {
+      "type":"pointer",
+      "actions":[{"type": "pointerMove", "x": 60, "y": 60},
+                 {"type": "pointerDown"},
+                 {"type": "pointerUp"}],
+      "parameters": {"pointerType": "touch"},
+      "id": "pointer2"}]})
+    self._driver.PerformActions(actions)
+    time.sleep(1)
+    events = self._driver.ExecuteScript('return window.events')
+    self.assertEqual(4, len(events))
+    self.assertEqual("touchstart", events[0]['type'])
+    self.assertEqual("touchstart", events[1]['type'])
+    self.assertEqual("touchend", events[2]['type'])
+    self.assertEqual("touchend", events[3]['type'])
+    self.assertAlmostEqual(50, events[0]['x'], delta=1)
+    self.assertAlmostEqual(50, events[0]['y'], delta=1)
+    self.assertAlmostEqual(60, events[1]['x'], delta=1)
+    self.assertAlmostEqual(60, events[1]['y'], delta=1)
+
+    self._driver.ReleaseActions()
 
   def testActionsMulti(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -884,9 +1487,9 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
         }
     ]})
     events = self._driver.ExecuteScript('return window.events')
-    self.assertEquals(1, len(events))
-    self.assertEquals(50, events[0]['x'])
-    self.assertEquals(50, events[0]['y'])
+    self.assertEqual(1, len(events))
+    self.assertAlmostEqual(50, events[0]['x'], delta=1)
+    self.assertAlmostEqual(50, events[0]['y'], delta=1)
 
     # Clean up action states, move mouse back to (0, 0).
     self._driver.ReleaseActions()
@@ -904,11 +1507,113 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
         }
     ]})
     events = self._driver.ExecuteScript('return window.events')
-    self.assertEquals(2, len(events))
-    self.assertEquals(80, events[1]['x'])
-    self.assertEquals(80, events[1]['y'])
+    self.assertEqual(2, len(events))
+    self.assertAlmostEqual(80, events[1]['x'], delta=1)
+    self.assertAlmostEqual(80, events[1]['y'], delta=1)
 
     self._driver.ReleaseActions()
+
+  def testActionsPenPointerEventProperties(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.ExecuteScript(
+        '''
+        document.body.innerHTML = "<div>test</div>";
+        var div = document.getElementsByTagName("div")[0];
+        div.style["width"] = "100px";
+        div.style["height"] = "100px";
+        window.events = [];
+        div.addEventListener("pointerdown", event => {
+          window.events.push(
+              {type: event.type,
+               x: event.clientX,
+               y: event.clientY,
+               width: event.width,
+               height: event.height,
+               pressure: event.pressure,
+               tiltX: event.tiltX,
+               tiltY: event.tiltY,
+               twist: event.twist});
+        });
+        ''')
+    time.sleep(1)
+    actions = ({"actions": [{
+      "type":"pointer",
+      "actions":[{"type": "pointerMove", "x": 30, "y": 30},
+                 {"type": "pointerDown", "button": 0, "pressure":0.55,
+                  "tiltX":-36, "tiltY":83, "twist":266},
+                 {"type": "pointerMove", "x": 50, "y": 50},
+                 {"type": "pointerUp", "button": 0}],
+      "parameters": {"pointerType": "mouse"},
+      "id": "pointer1"}]})
+    self._driver.PerformActions(actions)
+    time.sleep(1)
+    events = self._driver.ExecuteScript('return window.events')
+    self.assertEqual(1, len(events))
+    self.assertEqual("pointerdown", events[0]['type'])
+    self.assertAlmostEqual(30, events[0]['x'], delta=1)
+    self.assertAlmostEqual(30, events[0]['y'], delta=1)
+    self.assertEqual(1.0, round(events[0]['width'], 2))
+    self.assertEqual(1.0, round(events[0]['height'], 2))
+    self.assertEqual(0.55, round(events[0]['pressure'], 2))
+    self.assertEqual(-36, events[0]['tiltX'])
+    self.assertEqual(83, events[0]['tiltY'])
+    self.assertEqual(266, events[0]['twist'])
+
+  def testActionsPenPointerEventPressure(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.ExecuteScript(
+        '''
+        document.body.innerHTML = "<div>test</div>";
+        var div = document.getElementsByTagName("div")[0];
+        div.style["width"] = "100px";
+        div.style["height"] = "100px";
+        window.events = [];
+        var event_list = ["pointerdown", "pointermove", "pointerup"];
+        for (var i = 0; i < event_list.length; i++) {
+          div.addEventListener(event_list[i], event => {
+            window.events.push(
+                {type: event.type,
+                 x: event.clientX,
+                 y: event.clientY,
+                 pressure: event.pressure,
+                 twist: event.twist});
+          });
+        }
+        ''')
+    time.sleep(1)
+    actions = ({"actions": [{
+      "type":"pointer",
+      "actions":[{"type": "pointerMove", "x": 30, "y": 30},
+                 {"type": "pointerDown", "button": 0,
+                  "twist":30},
+                 {"type": "pointerMove", "x": 50, "y": 50},
+                 {"type": "pointerUp", "button": 0}],
+      "parameters": {"pointerType": "pen"},
+      "id": "pointer1"}]})
+    self._driver.PerformActions(actions)
+    time.sleep(1)
+    events = self._driver.ExecuteScript('return window.events')
+    self.assertEqual(4, len(events))
+    self.assertEqual("pointermove", events[0]['type'])
+    self.assertAlmostEqual(30, events[0]['x'], delta=1)
+    self.assertAlmostEqual(30, events[0]['y'], delta=1)
+    self.assertEqual(0.0, round(events[0]['pressure'], 2))
+    self.assertEqual(0, events[0]['twist'])
+    self.assertEqual("pointerdown", events[1]['type'])
+    self.assertAlmostEqual(30, events[1]['x'], delta=1)
+    self.assertAlmostEqual(30, events[1]['y'], delta=1)
+    self.assertEqual(0.5, round(events[1]['pressure'], 2))
+    self.assertEqual(30, events[1]['twist'])
+    self.assertEqual("pointermove", events[2]['type'])
+    self.assertAlmostEqual(50, events[2]['x'], delta=1)
+    self.assertAlmostEqual(50, events[2]['y'], delta=1)
+    self.assertEqual(0.5, round(events[2]['pressure'], 2))
+    self.assertEqual(0, events[2]['twist'])
+    self.assertEqual("pointerup", events[3]['type'])
+    self.assertAlmostEqual(50, events[3]['x'], delta=1)
+    self.assertAlmostEqual(50, events[3]['y'], delta=1)
+    self.assertEqual(0.0, round(events[3]['pressure'], 2))
+    self.assertEqual(0, events[3]['twist'])
 
   def testActionsPause(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -971,7 +1676,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.PerformActions(actions)
     events = self._driver.ExecuteScript('return window.events')
     expected_events = ['mousedown', 'keydown', 'keyup', 'keydown', 'keyup']
-    self.assertEquals(len(expected_events), len(events))
+    self.assertEqual(len(expected_events), len(events))
     for i in range(len(events)):
       self.assertEqual(expected_events[i], events[i]['type'])
       if i > 0:
@@ -1022,50 +1727,104 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     ]})
 
     events = self._driver.ExecuteScript('return window.events')
-    self.assertEquals(2, len(events))
-    self.assertEquals('mousedown', events[0]['type'])
-    self.assertEquals(50, events[0]['x'])
-    self.assertEquals(50, events[0]['y'])
-    self.assertEquals('keydown', events[1]['type'])
-    self.assertEquals('KeyA', events[1]['code'])
+    self.assertEqual(2, len(events))
+    self.assertEqual('mousedown', events[0]['type'])
+    self.assertAlmostEqual(50, events[0]['x'], delta=1)
+    self.assertAlmostEqual(50, events[0]['y'], delta=1)
+    self.assertEqual('keydown', events[1]['type'])
+    self.assertEqual('KeyA', events[1]['code'])
 
     self._driver.ReleaseActions()
 
     events = self._driver.ExecuteScript('return window.events')
-    self.assertEquals(4, len(events))
-    self.assertEquals('keyup', events[2]['type'])
-    self.assertEquals('KeyA', events[2]['code'])
-    self.assertEquals('mouseup', events[3]['type'])
-    self.assertEquals(50, events[3]['x'])
-    self.assertEquals(50, events[3]['y'])
+    self.assertEqual(4, len(events))
+    self.assertEqual('keyup', events[2]['type'])
+    self.assertEqual('KeyA', events[2]['code'])
+    self.assertEqual('mouseup', events[3]['type'])
+    self.assertAlmostEqual(50, events[3]['x'], delta=1)
+    self.assertAlmostEqual(50, events[3]['y'], delta=1)
+
+  def testActionsCtrlCommandKeys(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.ExecuteScript('''
+        document.write('<input type="text" id="text1" value="Hello World" />');
+        document.write('<br/>')
+        document.write('<input type="text" id="text2">');
+        var text1 = document.getElementById("text1");
+        text1.addEventListener("click", function() {
+          var text1 = document.getElementById("text1");
+          text1.value="new text";
+        });
+        ''')
+    time.sleep(1)
+
+    elem1 = self._driver.FindElement('css selector', '#text1')
+    elem2 = self._driver.FindElement('css selector', '#text2')
+    self.assertEqual("Hello World", elem1.GetProperty('value'))
+
+    time.sleep(1)
+
+    platform = util.GetPlatformName()
+    modifier_key = '\uE009'
+    if platform == 'mac':
+      modifier_key = '\uE03D'
+
+    # This is a sequence of actions, first move the mouse to input field
+    # "elem1", then press ctrl/cmd key and 'a' key to select all the text in
+    # "elem1", and then press 'x' to cut the text and move the mouse to input
+    # field "elem2" and press 'v' to paste the text, and at the end, we check
+    # the texts in both input fields to see if the text are cut and pasted
+    # correctly from "elem1" to "elem2".
+    actions = ({'actions': [{
+        'type': 'key',
+        'id': 'key',
+        'actions': [
+            {'type': 'pause'},
+            {'type': 'pause'},
+            {'type': 'pause'},
+            {'type': 'keyDown', 'value': modifier_key},
+            {'type': 'keyDown', 'value': 'a'},
+            {'type': 'keyUp', 'value': 'a'},
+            {'type': 'keyDown', 'value': 'x'},
+            {'type': 'keyUp', 'value': 'x'},
+            {'type': 'keyUp', 'value': modifier_key},
+            {'type': 'pause'},
+            {'type': 'pause'},
+            {'type': 'pause'},
+            {'type': 'keyDown', 'value': modifier_key},
+            {'type': 'keyDown', 'value': 'v'},
+            {'type': 'keyUp', 'value': 'v'},
+            {'type': 'keyUp', 'value': modifier_key}
+        ]}, {
+        'type':'pointer',
+        'actions':[{'type': 'pointerMove', 'x': 0, 'y': 0, 'origin': elem1},
+                   {'type': 'pointerDown', 'button': 0},
+                   {'type': 'pointerUp', 'button': 0},
+                   {'type': 'pause'},
+                   {'type': 'pause'},
+                   {'type': 'pause'},
+                   {'type': 'pause'},
+                   {'type': 'pause'},
+                   {'type': 'pause'},
+                   {'type': 'pointerMove', 'x': 0, 'y': 0, 'origin': elem2},
+                   {'type': 'pointerDown', 'button': 0},
+                   {'type': 'pointerUp', 'button': 0},
+                   {'type': 'pause'},
+                   {'type': 'pause'},
+                   {'type': 'pause'},
+                   {'type': 'pause'}],
+        'parameters': {'pointerType': 'mouse'},
+        'id': 'pointer1'}
+        ]})
+    self._driver.PerformActions(actions)
+    time.sleep(1)
+    self.assertEqual("", elem1.GetProperty('value'))
+    self.assertEqual("new text", elem2.GetProperty('value'))
+    time.sleep(1)
 
   def testPageLoadStrategyIsNormalByDefault(self):
-    self.assertEquals('normal',
+    self.assertEqual('normal',
                       self._driver.capabilities['pageLoadStrategy'])
-
-  def testEagerMode(self):
-    send_response = threading.Event()
-    def waitAndRespond():
-        send_response.wait(10)
-        self._sync_server.RespondWithContent('#')
-    thread = threading.Thread(target=waitAndRespond)
-
-    self._http_server.SetDataForPath('/top.html',
-     """
-     <html><body>
-     <div id='top'>
-       <img src='%s'>
-     </div>
-     </body></html>""" % self._sync_server.GetUrl())
-    eager_driver = self.CreateDriver(page_load_strategy='eager')
-    thread.start()
-    start_eager = time.time()
-    eager_driver.Load(self._http_server.GetUrl() + '/top.html')
-    stop_eager = time.time()
-    send_response.set()
-    eager_time = stop_eager - start_eager
-    self.assertTrue(eager_time < 9)
-    thread.join()
 
   def testClearElement(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -1073,10 +1832,10 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
         'document.body.innerHTML = \'<input type="text" value="abc">\';'
         'return document.getElementsByTagName("input")[0];')
     value = self._driver.ExecuteScript('return arguments[0].value;', text)
-    self.assertEquals('abc', value)
+    self.assertEqual('abc', value)
     text.Clear()
     value = self._driver.ExecuteScript('return arguments[0].value;', text)
-    self.assertEquals('', value)
+    self.assertEqual('', value)
 
   def testSendKeysToInputFileElement(self):
     file_name = os.path.join(_TEST_DATA_DIR, 'anchor_download_test.png')
@@ -1087,36 +1846,46 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     text = self._driver.ExecuteScript(
         'var input = document.getElementById("id_file").value;'
         'return input;')
-    self.assertEquals('C:\\fakepath\\anchor_download_test.png', text);
+    self.assertEqual('C:\\fakepath\\anchor_download_test.png', text);
     if not _ANDROID_PACKAGE_KEY:
       self.assertRaises(chromedriver.InvalidArgument,
                                   elem.SendKeys, "/blah/blah/blah")
+
+  def testSendKeysToNonTypeableInputElement(self):
+    self._driver.Load("about:blank")
+    self._driver.ExecuteScript(
+         "document.body.innerHTML = '<input type=\"color\">';")
+    elem = self._driver.FindElement('tag name', 'input');
+    input_value = '#7fffd4'
+    elem.SendKeys(input_value)
+    value = elem.GetProperty('value')
+    self.assertEqual(input_value, value)
 
   def testGetElementAttribute(self):
     self._driver.Load(self.GetHttpUrlForFile(
         '/chromedriver/attribute_colon_test.html'))
     elem = self._driver.FindElement("css selector", "*[name='phones']")
-    self.assertEquals('3', elem.GetAttribute('size'))
+    self.assertEqual('3', elem.GetAttribute('size'))
 
   def testGetElementProperty(self):
     self._driver.Load(self.GetHttpUrlForFile(
         '/chromedriver/two_inputs.html'))
     elem = self._driver.FindElement("css selector", "#first")
-    self.assertEquals('text', elem.GetProperty('type'))
-    self.assertEquals('first', elem.GetProperty('id'))
+    self.assertEqual('text', elem.GetProperty('type'))
+    self.assertEqual('first', elem.GetProperty('id'))
 
   def testGetElementSpecialCharAttribute(self):
     self._driver.Load(self.GetHttpUrlForFile(
         '/chromedriver/attribute_colon_test.html'))
     elem = self._driver.FindElement("css selector", "*[name='phones']")
-    self.assertEquals('colonvalue', elem.GetAttribute('ext:qtip'))
+    self.assertEqual('colonvalue', elem.GetAttribute('ext:qtip'))
 
   def testGetCurrentUrl(self):
     url = self.GetHttpUrlForFile('/chromedriver/frame_test.html')
     self._driver.Load(url)
-    self.assertEquals(url, self._driver.GetCurrentUrl())
+    self.assertEqual(url, self._driver.GetCurrentUrl())
     self._driver.SwitchToFrame(self._driver.FindElement('tag name', 'iframe'))
-    self.assertEquals(url, self._driver.GetCurrentUrl())
+    self.assertEqual(url, self._driver.GetCurrentUrl())
 
   def testGoBackAndGoForward(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -1130,11 +1899,11 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.ExecuteScript('window.open("about:blank")')
     new_window = self.WaitForNewWindow(self._driver, old_windows)
     self._driver.SwitchToWindow(new_window)
-    self.assertEquals('about:blank', self._driver.GetCurrentUrl())
+    self.assertEqual('about:blank', self._driver.GetCurrentUrl())
     self._driver.GoBack()
-    self.assertEquals('about:blank', self._driver.GetCurrentUrl())
+    self.assertEqual('about:blank', self._driver.GetCurrentUrl())
     self._driver.GoForward()
-    self.assertEquals('about:blank', self._driver.GetCurrentUrl())
+    self.assertEqual('about:blank', self._driver.GetCurrentUrl())
 
   def testBackNavigationAfterClickElement(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/link_nav.html'))
@@ -1142,7 +1911,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     link.Click()
     self._driver.GoBack()
     self.assertNotEqual('data:,', self._driver.GetCurrentUrl())
-    self.assertEquals(self.GetHttpUrlForFile('/chromedriver/link_nav.html'),
+    self.assertEqual(self.GetHttpUrlForFile('/chromedriver/link_nav.html'),
                       self._driver.GetCurrentUrl())
 
   def testAlertHandlingOnPageUnload(self):
@@ -1162,10 +1931,10 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self.assertFalse(self._driver.IsAlertOpen())
     self._driver.ExecuteScript('window.confirmed = confirm(\'HI\');')
     self.assertTrue(self._driver.IsAlertOpen())
-    self.assertEquals('HI', self._driver.GetAlertMessage())
+    self.assertEqual('HI', self._driver.GetAlertMessage())
     self._driver.HandleAlert(False)
     self.assertFalse(self._driver.IsAlertOpen())
-    self.assertEquals(False,
+    self.assertEqual(False,
                       self._driver.ExecuteScript('return window.confirmed'))
 
   def testSendTextToAlert(self):
@@ -1173,7 +1942,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.ExecuteScript('prompt = window.prompt()')
     self.assertTrue(self._driver.IsAlertOpen())
     self._driver.HandleAlert(True, 'TextToPrompt')
-    self.assertEquals('TextToPrompt',
+    self.assertEqual('TextToPrompt',
                       self._driver.ExecuteScript('return prompt'))
     self._driver.ExecuteScript('window.confirmed = confirm(\'HI\');')
     self.assertRaises(chromedriver.ElementNotInteractable,
@@ -1204,12 +1973,12 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     """Tests that ChromeDriver determines loading correctly for new windows."""
     self._http_server.SetDataForPath(
         '/newwindow',
-        """
+        bytes("""
         <html>
         <body>
         <a href='%s' target='_blank'>new window/tab</a>
         </body>
-        </html>""" % self._sync_server.GetUrl())
+        </html>""" % self._sync_server.GetUrl(), 'utf-8'))
     self._driver.Load(self._http_server.GetUrl() + '/newwindow')
     old_windows = self._driver.GetWindowHandles()
     self._driver.FindElement('tag name', 'a').Click()
@@ -1219,7 +1988,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self.assertFalse(self._driver.IsLoading())
     self._driver.SwitchToWindow(new_window)
     self.assertTrue(self._driver.IsLoading())
-    self._sync_server.RespondWithContent('<html>new window</html>')
+    self._sync_server.RespondWithContent(b'<html>new window</html>')
     self._driver.ExecuteScript('return 1')  # Shouldn't hang.
 
   def testPopups(self):
@@ -1239,34 +2008,34 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
   def testWindowPosition(self):
     rect = self._driver.GetWindowRect()
     self._driver.SetWindowRect(None, None, rect[2], rect[3])
-    self.assertEquals(rect, self._driver.GetWindowRect())
+    self.assertEqual(rect, self._driver.GetWindowRect())
 
     # Resize so the window isn't moved offscreen.
     # See https://bugs.chromium.org/p/chromedriver/issues/detail?id=297.
     self._driver.SetWindowRect(640, 400, None, None)
 
     self._driver.SetWindowRect(None, None, 100, 200)
-    self.assertEquals([640, 400, 100, 200], self._driver.GetWindowRect())
+    self.assertEqual([640, 400, 100, 200], self._driver.GetWindowRect())
 
   def testWindowSize(self):
     rect = self._driver.GetWindowRect()
     self._driver.SetWindowRect(rect[0], rect[1], None, None)
-    self.assertEquals(rect, self._driver.GetWindowRect())
+    self.assertEqual(rect, self._driver.GetWindowRect())
 
     self._driver.SetWindowRect(640, 400, None, None)
-    self.assertEquals([640, 400, rect[2], rect[3]],
+    self.assertEqual([640, 400, rect[2], rect[3]],
                       self._driver.GetWindowRect())
 
   def testWindowRect(self):
     old_window_rect = self._driver.GetWindowRect()
     self._driver.SetWindowRect(*old_window_rect)
-    self.assertEquals(self._driver.GetWindowRect(), old_window_rect)
+    self.assertEqual(self._driver.GetWindowRect(), old_window_rect)
 
     target_window_rect = [640, 400, 100, 200]
     target_window_rect_dict = {'width': 640, 'height': 400, 'x': 100, 'y': 200}
     returned_window_rect = self._driver.SetWindowRect(*target_window_rect)
-    self.assertEquals(self._driver.GetWindowRect(), target_window_rect)
-    self.assertEquals(returned_window_rect, target_window_rect_dict)
+    self.assertEqual(self._driver.GetWindowRect(), target_window_rect)
+    self.assertEqual(returned_window_rect, target_window_rect_dict)
 
   def testWindowMaximize(self):
     old_rect_list = [640, 400, 100, 200]
@@ -1281,7 +2050,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self.assertNotEqual(old_rect_list, new_rect_list)
 
     self._driver.SetWindowRect(*old_rect_list)
-    self.assertEquals(old_rect_list, self._driver.GetWindowRect())
+    self.assertEqual(old_rect_list, self._driver.GetWindowRect())
 
   def testWindowMinimize(self):
     handle_prefix = "CDwindow-"
@@ -1289,21 +2058,21 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     target = handle[len(handle_prefix):]
     self._driver.SetWindowRect(640, 400, 100, 200)
     rect = self._driver.MinimizeWindow()
-    expected_rect = {u'y': 200, u'width': 640, u'height': 400, u'x': 100}
+    expected_rect = {'y': 200, 'width': 640, 'height': 400, 'x': 100}
 
     #check it returned the correct rect
     for key in expected_rect.keys():
-      self.assertEquals(expected_rect[key], rect[key])
+      self.assertEqual(expected_rect[key], rect[key])
 
     # check its minimized
     res = self._driver.SendCommandAndGetResult('Browser.getWindowForTarget',
                                                {'targetId': target})
-    self.assertEquals('minimized', res['bounds']['windowState'])
+    self.assertEqual('minimized', res['bounds']['windowState'])
 
   def testWindowFullScreen(self):
     old_rect_list = [640, 400, 100, 200]
     self._driver.SetWindowRect(*old_rect_list)
-    self.assertEquals(self._driver.GetWindowRect(), old_rect_list)
+    self.assertEqual(self._driver.GetWindowRect(), old_rect_list)
     new_rect = self._driver.FullScreenWindow()
     new_rect_list = [
         new_rect['width'],
@@ -1314,18 +2083,29 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self.assertNotEqual(old_rect_list, new_rect_list)
 
     self._driver.SetWindowRect(*old_rect_list)
-    self.assertEquals(old_rect_list, self._driver.GetWindowRect())
+    for i in range(10):
+      if old_rect_list == self._driver.GetWindowRect():
+        break
+      time.sleep(0.1)
+    self.assertEqual(old_rect_list, self._driver.GetWindowRect())
 
   def testConsoleLogSources(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/console_log.html'))
     logs = self._driver.GetLog('browser')
 
-    self.assertEqual('javascript', logs[0]['source'])
-    self.assertTrue('TypeError' in logs[0]['message'])
+    # The javascript and network logs can come in any order.
+    if logs[0]['source'] == 'javascript':
+        js_log = logs[0]
+        network_log = logs[1]
+    else:
+        network_log = logs[0]
+        js_log = logs[1]
+    self.assertEqual('javascript', js_log['source'])
+    self.assertTrue('TypeError' in js_log['message'])
 
-    self.assertEqual('network', logs[1]['source'])
-    self.assertTrue('nonexistent.png' in logs[1]['message'])
-    self.assertTrue('404' in logs[1]['message'])
+    self.assertEqual('network', network_log['source'])
+    self.assertTrue('nonexistent.png' in network_log['message'])
+    self.assertTrue('404' in network_log['message'])
 
     # Sometimes, we also get an error for a missing favicon.
     if len(logs) > 2:
@@ -1363,7 +2143,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     try:
       self._driver.GetLog('browser')
     except chromedriver.ChromeDriverException as e:
-      self.fail('exception while calling GetLog on a closed tab: ' + e.message)
+      self.fail('exception while calling GetLog on a closed tab: {}'.format(e))
 
   def testGetLogOnWindowWithAlert(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -1371,16 +2151,16 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     try:
       self._driver.GetLog('browser')
     except Exception as e:
-      self.fail(e.message)
+      self.fail(str(e))
 
   def testDoesntHangOnDebugger(self):
     self._driver.Load('about:blank')
     self._driver.ExecuteScript('debugger;')
 
   def testChromeDriverSendLargeData(self):
-    script = 'var s = ""; for (var i = 0; i < 10e6; i++) s += "0"; return s;'
+    script = 'return "0".repeat(10e6);'
     lots_of_data = self._driver.ExecuteScript(script)
-    self.assertEquals('0'.zfill(int(10e6)), lots_of_data)
+    self.assertEqual('0'.zfill(int(10e6)), lots_of_data)
 
   def testEmulateNetworkConditions(self):
     # Network conditions must be set before it can be retrieved.
@@ -1393,10 +2173,10 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.SetNetworkConditions(latency, throughput, throughput)
 
     network = self._driver.GetNetworkConditions()
-    self.assertEquals(latency, network['latency']);
-    self.assertEquals(throughput, network['download_throughput']);
-    self.assertEquals(throughput, network['upload_throughput']);
-    self.assertEquals(False, network['offline']);
+    self.assertEqual(latency, network['latency']);
+    self.assertEqual(throughput, network['download_throughput']);
+    self.assertEqual(throughput, network['upload_throughput']);
+    self.assertEqual(False, network['offline']);
 
     # Network Conditions again cannot be retrieved after they've been deleted.
     self._driver.DeleteNetworkConditions()
@@ -1410,15 +2190,15 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.SetNetworkConditionsName('DSL')
 
     network = self._driver.GetNetworkConditions()
-    self.assertEquals(5, network['latency']);
-    self.assertEquals(2048*1024, network['download_throughput']);
-    self.assertEquals(2048*1024, network['upload_throughput']);
-    self.assertEquals(False, network['offline']);
+    self.assertEqual(5, network['latency']);
+    self.assertEqual(2048*1024, network['download_throughput']);
+    self.assertEqual(2048*1024, network['upload_throughput']);
+    self.assertEqual(False, network['offline']);
 
   def testEmulateNetworkConditionsSpeed(self):
     # Warm up the browser.
     self._http_server.SetDataForPath(
-        '/', "<html><body>blank</body></html>")
+        '/', b"<html><body>blank</body></html>")
     self._driver.Load(self._http_server.GetUrl() + '/')
 
     # DSL: 2Mbps throughput, 5ms RTT
@@ -1431,10 +2211,10 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     _1_megabyte = _32_bytes * 32768
     self._http_server.SetDataForPath(
         '/1MB',
-        "<html><body>%s</body></html>" % _1_megabyte)
-    start = time.time()
+        bytes("<html><body>%s</body></html>" % _1_megabyte, 'utf-8'))
+    start = monotonic()
     self._driver.Load(self._http_server.GetUrl() + '/1MB')
-    finish = time.time()
+    finish = monotonic()
     duration = finish - start
     actual_throughput_kbps = 1024 / duration
     self.assertLessEqual(actual_throughput_kbps, throughput_kbps * 1.5)
@@ -1443,7 +2223,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
   def testEmulateNetworkConditionsNameSpeed(self):
     # Warm up the browser.
     self._http_server.SetDataForPath(
-        '/', "<html><body>blank</body></html>")
+        '/', b"<html><body>blank</body></html>")
     self._driver.Load(self._http_server.GetUrl() + '/')
 
     # DSL: 2Mbps throughput, 5ms RTT
@@ -1455,10 +2235,10 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     _1_megabyte = _32_bytes * 32768
     self._http_server.SetDataForPath(
         '/1MB',
-        "<html><body>%s</body></html>" % _1_megabyte)
-    start = time.time()
+        bytes("<html><body>%s</body></html>" % _1_megabyte, 'utf-8'))
+    start = monotonic()
     self._driver.Load(self._http_server.GetUrl() + '/1MB')
-    finish = time.time()
+    finish = monotonic()
     duration = finish - start
     actual_throughput_kbps = 1024 / duration
     self.assertLessEqual(actual_throughput_kbps, throughput_kbps * 1.5)
@@ -1468,23 +2248,13 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     # A workaround for crbug.com/177511; when setting offline, the throughputs
     # must be 0.
     self._driver.SetNetworkConditions(0, 0, 0, offline=True)
-    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/page_test.html'))
+    self.assertRaises(chromedriver.ChromeDriverException,
+                      self._driver.Load,
+                      self.GetHttpUrlForFile('/chromedriver/page_test.html'))
     # The "X is not available" title is set after the page load event fires, so
     # we have to explicitly wait for this to change. We can't rely on the
     # navigation tracker to block the call to Load() above.
     self.WaitForCondition(lambda: 'is not available' in self._driver.GetTitle())
-
-  def testSendCommand(self):
-    """Sends a custom command to the DevTools debugger"""
-    params = {}
-    res = self._driver.SendCommandAndGetResult('CSS.enable', params)
-    self.assertEqual({}, res)
-
-  def testSendCommandNoParams(self):
-    """Sends a custom command to the DevTools debugger without params"""
-    self.assertRaisesRegexp(
-            chromedriver.InvalidArgument, "params not passed",
-            self._driver.SendCommandAndGetResult, 'CSS.enable', None)
 
   def testSendCommandAndGetResult(self):
     """Sends a custom command to the DevTools debugger and gets the result"""
@@ -1619,21 +2389,21 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     location = target.GetLocation()
     self._driver.TouchDown(location['x'], location['y'])
     events = self._driver.FindElement('css selector', '#events')
-    self.assertEquals('events: touchstart', events.GetText())
+    self.assertEqual('events: touchstart', events.GetText())
     self._driver.TouchMove(location['x'] + 1, location['y'] + 1)
-    self.assertEquals('events: touchstart touchmove', events.GetText())
+    self.assertEqual('events: touchstart touchmove', events.GetText())
     self._driver.TouchUp(location['x'] + 1, location['y'] + 1)
-    self.assertEquals('events: touchstart touchmove touchend', events.GetText())
+    self.assertEqual('events: touchstart touchmove touchend', events.GetText())
 
   def testGetElementRect(self):
     self._driver.Load(self.GetHttpUrlForFile(
         '/chromedriver/absolute_position_element.html'))
     target = self._driver.FindElement('css selector', '#target')
     rect = target.GetRect()
-    self.assertEquals(18, rect['x'])
-    self.assertEquals(10, rect['y'])
-    self.assertEquals(200, rect['height'])
-    self.assertEquals(210, rect['width'])
+    self.assertEqual(18, rect['x'])
+    self.assertEqual(10, rect['y'])
+    self.assertEqual(200, rect['height'])
+    self.assertEqual(210, rect['width'])
 
   def testTouchFlickElement(self):
     dx = 3
@@ -1662,7 +2432,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
         '});'
         'return div;')
     self._driver.TouchFlick(div, dx, dy, speed)
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'br')))
 
   def testSwitchesToTopFrameAfterNavigation(self):
     self._driver.Load('about:blank')
@@ -1671,7 +2441,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.SwitchToFrame(frame)
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/outer.html'))
     p = self._driver.FindElement('tag name', 'p')
-    self.assertEquals('Two', p.GetText())
+    self.assertEqual('Two', p.GetText())
 
   def testSwitchesToTopFrameAfterRefresh(self):
     self._driver.Load('about:blank')
@@ -1680,7 +2450,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.SwitchToFrame(frame)
     self._driver.Refresh()
     p = self._driver.FindElement('tag name', 'p')
-    self.assertEquals('Two', p.GetText())
+    self.assertEqual('Two', p.GetText())
 
   def testSwitchesToTopFrameAfterGoingBack(self):
     self._driver.Load('about:blank')
@@ -1690,24 +2460,26 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/inner.html'))
     self._driver.GoBack()
     p = self._driver.FindElement('tag name', 'p')
-    self.assertEquals('Two', p.GetText())
+    self.assertEqual('Two', p.GetText())
 
   def testCanSwitchToPrintPreviewDialog(self):
     old_handles = self._driver.GetWindowHandles()
-    print >> sys.stdout, "Test debug: actual len of old_handles: " \
-                         + str(len(old_handles))
-    self.assertEquals(1, len(old_handles))
+    print("Test debug: actual len of old_handles: " + str(len(old_handles)),
+            file = sys.stdout)
+    self.assertEqual(1, len(old_handles))
     self._driver.ExecuteScript('setTimeout(function(){window.print();}, 0);')
     new_window_handle = self.WaitForNewWindow(self._driver, old_handles)
     if new_window_handle is None:
-      print >> sys.stdout, "Test debug: new_window_handle is None"
+      print("Test debug: new_window_handle is None", file = sys.stdout)
     else:
-      print >> sys.stdout, "Test debug: new_window_handle is not None"
+      print("Test debug: new_window_handle is not None", file = sys.stdout)
+
     self.assertNotEqual(None, new_window_handle)
     self._driver.SwitchToWindow(new_window_handle)
-    print >> sys.stdout, "Test debug: actual GetCurrentUrl: " \
-                         + self._driver.GetCurrentUrl()
-    self.assertEquals('chrome://print/', self._driver.GetCurrentUrl())
+    print("Test debug: actual GetCurrentUrl: " + self._driver.GetCurrentUrl(),
+            file = sys.stdout)
+
+    self.assertEqual('chrome://print/', self._driver.GetCurrentUrl())
 
   def testCanClickInIframes(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/nested.html'))
@@ -1727,14 +2499,14 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html#x'))
 
   def SetCookie(self, request):
-    return {'Set-Cookie': 'x=y; HttpOnly'}, "<!DOCTYPE html><html></html>"
+    return {'Set-Cookie': 'x=y; HttpOnly'}, b"<!DOCTYPE html><html></html>"
 
   def testGetHttpOnlyCookie(self):
     self._http_server.SetCallbackForPath('/setCookie', self.SetCookie)
     self._driver.Load(self.GetHttpUrlForFile('/setCookie'))
     self._driver.AddCookie({'name': 'a', 'value': 'b'})
     cookies = self._driver.GetCookies()
-    self.assertEquals(2, len(cookies))
+    self.assertEqual(2, len(cookies))
     for cookie in cookies:
       self.assertIn('name', cookie)
       if cookie['name'] == 'a':
@@ -1751,22 +2523,22 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.AddCookie({
         'name': 'x', 'value': 'y', 'path': '/chromedriver/long_url'})
     cookies = self._driver.GetCookies()
-    self.assertEquals(2, len(cookies))
+    self.assertEqual(2, len(cookies))
     for cookie in cookies:
       self.assertIn('path', cookie)
       if cookie['name'] == 'a':
-        self.assertEquals('/' , cookie['path'])
+        self.assertEqual('/' , cookie['path'])
       if cookie['name'] == 'x':
-        self.assertEquals('/chromedriver/long_url' , cookie['path'])
+        self.assertEqual('/chromedriver/long_url' , cookie['path'])
 
   def testGetNamedCookie(self):
     self._driver.Load(self.GetHttpUrlForFile(
         '/chromedriver/empty.html'))
     self._driver.AddCookie({'name': 'a', 'value': 'b'})
     named_cookie = self._driver.GetNamedCookie('a')
-    self.assertEquals('a' , named_cookie['name'])
-    self.assertEquals('b' , named_cookie['value'])
-    self.assertRaisesRegexp(
+    self.assertEqual('a' , named_cookie['name'])
+    self.assertEqual('b' , named_cookie['value'])
+    self.assertRaisesRegex(
         chromedriver.NoSuchCookie, "no such cookie",
         self._driver.GetNamedCookie, 'foo')
 
@@ -1777,26 +2549,38 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.AddCookie({'name': 'x', 'value': 'y'})
     self._driver.AddCookie({'name': 'p', 'value': 'q'})
     cookies = self._driver.GetCookies()
-    self.assertEquals(3, len(cookies))
+    self.assertEqual(3, len(cookies))
     self._driver.DeleteCookie('a')
-    self.assertEquals(2, len(self._driver.GetCookies()))
+    self.assertEqual(2, len(self._driver.GetCookies()))
     self._driver.DeleteAllCookies()
-    self.assertEquals(0, len(self._driver.GetCookies()))
+    self.assertEqual(0, len(self._driver.GetCookies()))
 
-  def testGetUrlOnInvalidUrl(self):
-    # Make sure we don't return 'chrome-error://chromewebdata/' (see
-    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1272). RFC 6761
-    # requires domain registrars to keep 'invalid.' unregistered (see
-    # https://tools.ietf.org/html/rfc6761#section-6.4).
-    self._driver.Load('http://invalid./')
-    self.assertEquals('http://invalid./', self._driver.GetCurrentUrl())
+  def testCookieForFrame(self):
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/cross_domain_iframe.html'))
+    self._driver.AddCookie({'name': 'outer', 'value': 'main context'})
+
+    frame = self._driver.FindElement('tag name', 'iframe')
+    self._driver.SwitchToFrame(frame)
+    self.assertTrue(self.WaitForCondition(
+        lambda: 'outer.html' in
+                self._driver.ExecuteScript('return window.location.href')))
+    self._driver.AddCookie({'name': 'inner', 'value': 'frame context'})
+    cookies = self._driver.GetCookies()
+    self.assertEqual(1, len(cookies))
+    self.assertEqual('inner', cookies[0]['name'])
+
+    self._driver.SwitchToMainFrame()
+    cookies = self._driver.GetCookies()
+    self.assertEqual(1, len(cookies))
+    self.assertEqual('outer', cookies[0]['name'])
 
   def testCanClickAlertInIframes(self):
     # This test requires that the page be loaded from a file:// URI, rather than
     # the test HTTP server.
     path = os.path.join(chrome_paths.GetTestData(), 'chromedriver',
       'page_with_frame.html')
-    url = 'file://' + urllib.pathname2url(path)
+    url = 'file://' + urllib.request.pathname2url(path)
     self._driver.Load(url)
     frame = self._driver.FindElement('css selector', '#frm')
     self._driver.SwitchToFrame(frame)
@@ -1806,7 +2590,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.HandleAlert(True)
 
   def testThrowErrorWithExecuteScript(self):
-    self.assertRaisesRegexp(
+    self.assertRaisesRegex(
         chromedriver.JavaScriptError, "some error",
         self._driver.ExecuteScript, 'throw new Error("some error")')
 
@@ -1836,21 +2620,21 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.FindElements('tag name', 'br')
     w3c_id_length = 36
     if (self._driver.w3c_compliant):
-      self.assertEquals(len(element._id), w3c_id_length)
+      self.assertEqual(len(element._id), w3c_id_length)
 
   def testFindElementWhenElementIsOverridden(self):
     self._driver.Load('about:blank')
     self._driver.ExecuteScript(
         'document.body.appendChild(document.createElement("a"));')
     self._driver.ExecuteScript('window.Element = {}')
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'a')))
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'a')))
 
   def testExecuteScriptWhenObjectPrototypeIsModified(self):
     # Some JavaScript libraries (e.g. MooTools) do things like this. For context
     # see https://bugs.chromium.org/p/chromedriver/issues/detail?id=1521
     self._driver.Load('about:blank')
     self._driver.ExecuteScript('Object.prototype.$family = undefined;')
-    self.assertEquals(1, self._driver.ExecuteScript('return 1;'))
+    self.assertEqual(1, self._driver.ExecuteScript('return 1;'))
 
   def testWebWorkerFrames(self):
     """Verify web worker frames are handled correctly.
@@ -1865,6 +2649,56 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.Load(self._http_server.GetUrl('localhost')
                       + '/chromedriver/empty.html')
 
+  def testWaitForCurrentFrameToLoad(self):
+    """Verify ChromeDriver waits for loading events of current frame
+    Regression test for bug
+    https://bugs.chromium.org/p/chromedriver/issues/detail?id=3164
+    Clicking element in frame triggers reload of that frame, click should not
+    return until loading is complete.
+    """
+    def waitAndRespond():
+      # test may not detect regression without small sleep.
+      # locally, .2 didn't fail before code change, .3 did
+      time.sleep(.5)
+      self._sync_server.RespondWithContent(
+          b"""
+          <html>
+            <body>
+              <p id='valueToRead'>11</p>
+            </body>
+          </html>
+          """)
+
+    self._http_server.SetDataForPath('/page10.html',
+      bytes("""
+      <html>
+        <head>
+          <title>
+            Frame
+          </title>
+          <script>
+            function reloadWith(i) {
+              window.location.assign('%s');
+            }
+          </script>
+        </head>
+        <body>
+          <button id='prev' onclick="reloadWith(9)">-1</button>
+          <button id='next' onclick="reloadWith(11)">+1</button>
+          <p id='valueToRead'>10</p>
+        </body>
+      </html>
+       """ % self._sync_server.GetUrl(), 'utf-8'))
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/page_for_next_iframe.html'))
+    frame = self._driver.FindElement('tag name', 'iframe')
+    self._driver.SwitchToFrame(frame);
+    thread = threading.Thread(target=waitAndRespond)
+    thread.start()
+    self._driver.FindElement('css selector', '#next').Click()
+    value_display = self._driver.FindElement('css selector', '#valueToRead')
+    self.assertEqual('11', value_display.GetText())
+
   def testSlowIFrame(self):
     """Verify ChromeDriver does not wait for slow frames to load.
     Regression test for bugs
@@ -1873,11 +2707,12 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     """
     def waitAndRespond():
       # Send iframe contents slowly
-      time.sleep(2)
-      self._sync_server.RespondWithContent('<html>IFrame contents</html>')
+      time.sleep(3)
+      self._sync_server.RespondWithContent(
+        b'<html><div id=iframediv>IFrame contents</div></html>')
 
     self._http_server.SetDataForPath('/top.html',
-        """
+        bytes("""
         <html><body>
         <div id='top'>
           <input id='button' type="button" onclick="run()" value='Click'>
@@ -1890,19 +2725,22 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
           document.body.appendChild(iframe);
         }
         </script>
-        </body></html>""" % self._sync_server.GetUrl())
+        </body></html>""" % self._sync_server.GetUrl(), 'utf-8'))
     self._driver.Load(self._http_server.GetUrl() + '/top.html')
     thread = threading.Thread(target=waitAndRespond)
     thread.start()
+    start = monotonic()
+    # Click should not wait for frame to load, so elapsed time from this
+    # command should be < 2 seconds.
     self._driver.FindElement('css selector', '#button').Click()
-    # Correct ChromeDriver behavior should not wait for iframe to
-    # load. Therefore, SwitchToFrame should fail, we remain in the top
-    # frame, and FindElement should succeed. If ChromeDriver incorrectly
-    # waits for slow iframe to load, then SwitchToFrame succeeds,
-    # and element with id='top' won't be found.
+    self.assertLess(monotonic() - start, 2.0)
     frame = self._driver.FindElement('css selector', '#iframe')
+    # WaitForPendingNavigations examines the load state of the current frame
+    # so ChromeDriver will wait for frame to load after SwitchToFrame
+    # start is reused because that began the pause for the frame load
     self._driver.SwitchToFrame(frame)
-    self._driver.FindElement('css selector', '#top')
+    self.assertGreaterEqual(monotonic() - start, 2.0)
+    self._driver.FindElement('css selector', '#iframediv')
     thread.join()
 
   @staticmethod
@@ -1962,38 +2800,34 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
   def testTakeElementScreenshot(self):
     self._driver.Load(self.GetHttpUrlForFile(
                       '/chromedriver/page_with_redbox.html'))
-    analysisResult = 'FAIL'
-    i = 0
+    # Wait for page to stabilize in case of Chrome showing top bars.
+    # See https://crbug.com/chromedriver/2986
+    time.sleep(1)
     redElement = self._driver.FindElement('css selector', '#box')
-    # In some cases (particularly on Mac),
-    # scrollbars are displayed briefly after scrolling,
-    # causing failures in verifying the screenshot.
-    # Retries until the scrollbars disappear.
-    while analysisResult != 'PASS' and i < 3:
-      analysisResult = self.takeScreenshotAndVerifyCorrect(redElement)
-      i += 1
-      if analysisResult != 'PASS':
-        time.sleep(0.5)
-    self.assertEquals('PASS', analysisResult)
+    analysisResult = self.takeScreenshotAndVerifyCorrect(redElement)
+    self.assertEqual('PASS', analysisResult)
+
+  def testTakeElementScreenshotPartlyVisible(self):
+    self._driver.Load(self.GetHttpUrlForFile(
+                      '/chromedriver/page_with_redbox_partly_visible.html'))
+    self._driver.SetWindowRect(500, 500, 0, 0)
+    # Wait for page to stabilize. See https://crbug.com/chromedriver/2986
+    time.sleep(1)
+    redElement = self._driver.FindElement('css selector', '#box')
+    analysisResult = self.takeScreenshotAndVerifyCorrect(redElement)
+    self.assertEqual('PASS', analysisResult)
 
   def testTakeElementScreenshotInIframe(self):
     self._driver.Load(self.GetHttpUrlForFile(
                       '/chromedriver/page_with_iframe_redbox.html'))
     frame = self._driver.FindElement('css selector', '#frm')
     self._driver.SwitchToFrame(frame)
-    analysisResult = 'FAIL'
-    i = 0
+    # Wait for page to stabilize in case of Chrome showing top bars.
+    # See https://crbug.com/chromedriver/2986
+    time.sleep(1)
     redElement = self._driver.FindElement('css selector', '#box')
-    # In some cases (particularly on Mac),
-    # scrollbars are displayed briefly after scrolling,
-    # causing failures in verifying the screenshot.
-    # Retries until the scrollbars disappear.
-    while analysisResult != 'PASS' and i < 3:
-      analysisResult = self.takeScreenshotAndVerifyCorrect(redElement)
-      i += 1
-      if analysisResult != 'PASS':
-        time.sleep(0.5)
-    self.assertEquals('PASS', analysisResult)
+    analysisResult = self.takeScreenshotAndVerifyCorrect(redElement)
+    self.assertEqual('PASS', analysisResult)
 
   def testTakeLargeElementScreenshot(self):
     self._driver.Load(self.GetHttpUrlForFile(
@@ -2003,7 +2837,117 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     time.sleep(1)
     redElement = self._driver.FindElement('css selector', '#A')
     analysisResult = self.takeScreenshotAndVerifyCorrect(redElement)
-    self.assertEquals('PASS', analysisResult)
+    self.assertEqual('PASS', analysisResult)
+
+  @staticmethod
+  def png_dimensions(png_data_in_base64):
+    image = base64.b64decode(png_data_in_base64)
+    width, height = struct.unpack('>LL', image[16:24])
+    return int(width), int(height)
+
+
+  def testTakeLargeElementViewportScreenshot(self):
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/large_element.html'))
+    self._driver.SetWindowRect(640, 400, 0, 0)
+    # Wait for page to stabilize. See https://crbug.com/chromedriver/2986
+    time.sleep(1)
+    viewportScreenshotPNGBase64  = self._driver.TakeScreenshot()
+    self.assertIsNotNone(viewportScreenshotPNGBase64)
+    mime_type = imghdr.what('', base64.b64decode(viewportScreenshotPNGBase64))
+    self.assertEqual('png', mime_type)
+    image_width, image_height = self.png_dimensions(viewportScreenshotPNGBase64)
+    viewport_width, viewport_height = self._driver.ExecuteScript(
+        '''
+        const {devicePixelRatio, innerHeight, innerWidth} = window;
+
+        return [
+          Math.floor(innerWidth * devicePixelRatio),
+          Math.floor(innerHeight * devicePixelRatio)
+        ];
+        ''')
+    self.assertEqual(image_width, viewport_width)
+    self.assertEqual(image_height, viewport_height)
+
+  def testTakeLargeElementFullPageScreenshot(self):
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/large_element.html'))
+    width = 640
+    height = 400
+    self._driver.SetWindowRect(width, height, 0, 0)
+    # Wait for page to stabilize. See https://crbug.com/chromedriver/2986
+    time.sleep(1)
+    fullpageScreenshotPNGBase64  = self._driver.TakeFullPageScreenshot()
+    self.assertIsNotNone(fullpageScreenshotPNGBase64)
+    mime_type = imghdr.what('', base64.b64decode(fullpageScreenshotPNGBase64))
+    self.assertEqual('png', mime_type)
+    image_width, image_height = self.png_dimensions(fullpageScreenshotPNGBase64)
+    # According to https://javascript.info/size-and-scroll-window,
+    # width/height of the whole document, with the scrolled out part
+    page_width, page_height = self._driver.ExecuteScript(
+        '''
+        const body = document.body;
+        const doc = document.documentElement;
+        const width = Math.max(body.scrollWidth, body.offsetWidth,\
+                               body.clientWidth, doc.scrollWidth,\
+                               doc.offsetWidth, doc.clientWidth);
+        const height = Math.max(body.scrollHeight, body.offsetHeight,\
+                                body.clientHeight, doc.scrollHeight,\
+                                doc.offsetHeight, doc.clientHeight);
+
+        return [
+          width,
+          height
+        ];
+        ''')
+    self.assertEqual(image_width, page_width)
+    self.assertEqual(image_height, page_height)
+
+    # Assert Window Rect size stay the same after taking fullpage screenshot
+    size = self._driver.GetWindowRect()
+    self.assertEqual(size[0], width)
+    self.assertEqual(size[1], height)
+
+    # Verify scroll bars presence after test
+    horizontal_scroll_bar, vertical_scroll_bar = self._driver.ExecuteScript(
+        '''
+        const doc = document.documentElement;
+
+        return [
+          doc.scrollWidth > doc.clientWidth,
+          doc.scrollHeight > doc.clientHeight
+        ];
+        ''')
+    self.assertEqual(horizontal_scroll_bar, True)
+    self.assertEqual(vertical_scroll_bar, True)
+
+  def testPrint(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    pdf = self._driver.PrintPDF({
+                                  'orientation': 'landscape',
+                                  'scale': 1.1,
+                                  'margin': {
+                                    'top': 1.1,
+                                    'bottom': 2.2,
+                                    'left': 3.3,
+                                    'right': 4.4
+                                  },
+                                  'background': True,
+                                  'shrinkToFit': False,
+                                  'pageRanges': [1],
+                                  'page': {
+                                    'width': 15.6,
+                                    'height': 20.6
+                                  }
+                                })
+    decoded_pdf = base64.b64decode(pdf)
+    self.assertTrue(decoded_pdf.startswith("%PDF"))
+    self.assertTrue(decoded_pdf.endswith("%%EOF"))
+
+  def testPrintInvalidArgument(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self.assertRaises(chromedriver.InvalidArgument,
+                      self._driver.PrintPDF, {'pageRanges': ['x-y']})
 
   def testGenerateTestReport(self):
     self._driver.Load(self.GetHttpUrlForFile(
@@ -2011,32 +2955,491 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self._driver.GenerateTestReport('test report message');
     report = self._driver.ExecuteScript('return window.result;')
 
-    self.assertEquals('test', report['type']);
-    self.assertEquals('test report message', report['body']['message']);
+    self.assertEqual('test', report['type']);
+    self.assertEqual('test report message', report['body']['message']);
+
+  def testSetTimeZone(self):
+    defaultTimeZoneScript = '''
+       return (new Intl.DateTimeFormat()).resolvedOptions().timeZone;
+       ''';
+    localHourScript = '''
+       return (new Date("2020-10-10T00:00:00Z")).getHours();
+       ''';
+
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+
+    # Test to switch to Taipei
+    self._driver.SetTimeZone('Asia/Taipei');
+    timeZone = self._driver.ExecuteScript(defaultTimeZoneScript)
+    self.assertEqual('Asia/Taipei', timeZone);
+    localHour = self._driver.ExecuteScript(localHourScript)
+    # Taipei time is GMT+8. Not observes DST.
+    self.assertEqual(8, localHour);
+
+    # Test to switch to Tokyo
+    self._driver.SetTimeZone('Asia/Tokyo');
+    timeZone = self._driver.ExecuteScript(defaultTimeZoneScript)
+    self.assertEqual('Asia/Tokyo', timeZone);
+    localHour = self._driver.ExecuteScript(localHourScript)
+    # Tokyo time is GMT+9. Not observes DST.
+    self.assertEqual(9, localHour);
+
+  def GetPermissionWithQuery(self, query):
+    script = """
+        let query = arguments[0];
+        let done = arguments[1];
+        console.log(done);
+        navigator.permissions.query(query)
+          .then(function(value) {
+              done({ status: 'success', value: value && value.state });
+            }, function(error) {
+              done({ status: 'error', value: error && error.message });
+            });
+    """
+    return self._driver.ExecuteAsyncScript(script, query)
+
+  def GetPermission(self, name):
+    return self.GetPermissionWithQuery({ 'name': name })
+
+  def CheckPermission(self, response, expected_state):
+    self.assertEqual(response['status'], 'success')
+    self.assertEqual(response['value'], expected_state)
+
+  def testPermissionsOpaqueOriginsThrowError(self):
+    """ Confirms that opaque origins cannot have overrides. """
+    self._driver.Load("about:blank")
+    self.assertRaises(chromedriver.InvalidArgument,
+      self._driver.SetPermission, {'descriptor': { 'name': 'geolocation' },
+        'state': 'denied'})
+
+  def testPermissionStates(self):
+    """ Confirms that denied, granted, and prompt can be set. """
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.SetPermission({
+      'descriptor': { 'name': 'geolocation' },
+      'state': 'denied'
+    })
+    self.CheckPermission(self.GetPermission('geolocation'), 'denied')
+    self._driver.SetPermission({
+      'descriptor': { 'name': 'geolocation' },
+      'state': 'granted'
+    })
+    self.CheckPermission(self.GetPermission('geolocation'), 'granted')
+    self._driver.SetPermission({
+      'descriptor': { 'name': 'geolocation' },
+      'state': 'prompt'
+    })
+    self.CheckPermission(self.GetPermission('geolocation'), 'prompt')
+
+  def testSettingPermissionDoesNotAffectOthers(self):
+    """ Confirm permissions do not affect unset permissions. """
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    response = self.GetPermission('geolocation')
+    self.assertEqual(response['status'], 'success')
+    status = response['value']
+    self._driver.SetPermission({
+      'descriptor': { 'name': 'background-sync' },
+      'state': 'denied'
+    })
+    self.CheckPermission(self.GetPermission('background-sync'), 'denied')
+    self.CheckPermission(self.GetPermission('geolocation'), status)
+
+  def testMultiplePermissions(self):
+    """ Confirms multiple custom permissions can be set simultaneously. """
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.SetPermission({
+      'descriptor': { 'name': 'geolocation' },
+      'state': 'denied'
+    })
+    self._driver.SetPermission({
+      'descriptor': { 'name': 'background-fetch' },
+      'state': 'prompt'
+    })
+    self._driver.SetPermission({
+      'descriptor': { 'name': 'background-sync' },
+      'state': 'granted'
+    })
+    self.CheckPermission(self.GetPermission('geolocation'), 'denied')
+    self.CheckPermission(self.GetPermission('background-fetch'), 'prompt')
+    self.CheckPermission(self.GetPermission('background-sync'), 'granted')
+
+  def testSensorPermissions(self):
+    """ Tests sensor permissions.
+
+    Currently, Chrome controls all sensor permissions (accelerometer,
+    magnetometer, gyroscope, ambient-light-sensor) with the 'sensors'
+    permission. This test demonstrates this internal implementation detail so
+    developers are aware of this behavior.
+    """
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    parameters = {
+      'descriptor': { 'name': 'magnetometer' },
+      'state': 'granted'
+    }
+    self._driver.SetPermission(parameters)
+    # Light sensor is not enabled by default, so it cannot be queried or set.
+    #self.CheckPermission(self.GetPermission('ambient-light-sensor'), 'granted')
+    self.CheckPermission(self.GetPermission('magnetometer'), 'granted')
+    self.CheckPermission(self.GetPermission('accelerometer'), 'granted')
+    self.CheckPermission(self.GetPermission('gyroscope'), 'granted')
+    parameters = {
+      'descriptor': { 'name': 'gyroscope' },
+      'state': 'denied'
+    }
+    self._driver.SetPermission(parameters)
+    #self.CheckPermission(self.GetPermission('ambient-light-sensor'), 'denied')
+    self.CheckPermission(self.GetPermission('magnetometer'), 'denied')
+    self.CheckPermission(self.GetPermission('accelerometer'), 'denied')
+    self.CheckPermission(self.GetPermission('gyroscope'), 'denied')
+
+  def testMidiPermissions(self):
+    """ Tests midi permission requirements.
+
+    MIDI, sysex: true, when granted, should automatically grant regular MIDI
+    permissions.
+    When regular MIDI is denied, this should also imply MIDI with sysex is
+    denied.
+    """
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    parameters = {
+      'descriptor': { 'name': 'midi', 'sysex': True },
+      'state': 'granted'
+    }
+    self._driver.SetPermission(parameters)
+    self.CheckPermission(self.GetPermissionWithQuery(parameters['descriptor']),
+                         'granted')
+    parameters['descriptor']['sysex'] = False
+    self.CheckPermission(self.GetPermissionWithQuery(parameters['descriptor']),
+                         'granted')
+
+    parameters = {
+      'descriptor': { 'name': 'midi', 'sysex': False },
+      'state': 'denied'
+    }
+    self._driver.SetPermission(parameters)
+    self.CheckPermission(self.GetPermissionWithQuery(parameters['descriptor']),
+                         'denied')
+    # While this should be denied, Chrome does not do this.
+    # parameters['descriptor']['sysex'] = True should be denied.
+
+  def testClipboardPermissions(self):
+    """ Tests clipboard permission requirements.
+
+    clipboard-read with allowWithoutSanitization: true or false, and
+    clipboard-write with allowWithoutSanitization: true are bundled together
+    into one CLIPBOARD_READ_WRITE permission.
+
+    clipboard write with allowWithoutSanitization: false is an auto-granted
+    permission.
+    """
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    parameters = {
+      'descriptor': {
+        'name': 'clipboard-read' ,
+        'allowWithoutSanitization': False
+      },
+      'state': 'granted'
+    }
+    raw_write_parameters = {
+      'descriptor': {
+        'name': 'clipboard-write',
+        'allowWithoutSanitization': True
+      }
+    }
+
+    self.CheckPermission(self.GetPermissionWithQuery(parameters['descriptor']),
+                        'prompt')
+    self.CheckPermission(self.GetPermissionWithQuery(
+                          raw_write_parameters['descriptor']), 'prompt')
+
+    self._driver.SetPermission(parameters)
+    self.CheckPermission(self.GetPermissionWithQuery(parameters['descriptor']),
+                        'granted')
+    parameters['descriptor']['allowWithoutSanitization'] = True
+    self.CheckPermission(self.GetPermissionWithQuery(parameters['descriptor']),
+                        'granted')
+    parameters['descriptor']['name'] = 'clipboard-write'
+    self.CheckPermission(self.GetPermissionWithQuery(parameters['descriptor']),
+                        'granted')
+
+    parameters = {
+      'descriptor': { 'name': 'clipboard-write' },
+      'state': 'prompt'
+    }
+    self._driver.SetPermission(parameters)
+    self.CheckPermission(self.GetPermission('clipboard-read'), 'granted')
+    self.CheckPermission(self.GetPermission('clipboard-write'), 'prompt')
+
+  def testPersistentStoragePermissions(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    parameters = {
+      'descriptor': { 'name': 'persistent-storage' },
+      'state': 'granted'
+    }
+    self._driver.SetPermission(parameters)
+    self.CheckPermission(self.GetPermission('persistent-storage'), 'granted')
+    parameters['state'] = 'denied'
+    self._driver.SetPermission(parameters)
+    self.CheckPermission(self.GetPermission('persistent-storage'), 'denied')
+
+  def testPushAndNotificationsPermissions(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    parameters = {
+      'descriptor': { 'name': 'notifications' },
+      'state': 'granted'
+    }
+    push_descriptor = {
+      'name': 'push',
+      'userVisibleOnly': True
+    }
+    self._driver.SetPermission(parameters)
+    self.CheckPermission(self.GetPermission('notifications'), 'granted')
+    self.CheckPermission(self.GetPermissionWithQuery(push_descriptor),
+                         'granted')
+    parameters['state'] = 'denied'
+    self._driver.SetPermission(parameters)
+    self.CheckPermission(self.GetPermission('notifications'), 'denied')
+    self.CheckPermission(self.GetPermissionWithQuery(push_descriptor), 'denied')
+    push_descriptor['userVisibleOnly'] = False
+    parameters = {
+      'descriptor': push_descriptor,
+      'state': 'prompt'
+    }
+    self.assertRaises(chromedriver.InvalidArgument,
+                      self._driver.SetPermission, parameters)
+
+  def testPermissionsSameOrigin(self):
+    """ Assures permissions are shared between same-domain windows. """
+    window_handle = self._driver.NewWindow()['handle']
+    self._driver.SwitchToWindow(window_handle)
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/link_nav.html'))
+    another_window_handle = self._driver.NewWindow()['handle']
+    self._driver.SwitchToWindow(another_window_handle)
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+
+    # Set permission.
+    parameters = { 'descriptor': { 'name': 'geolocation' }, 'state': 'granted' }
+
+    # Test that they are present across the same domain.
+    self._driver.SetPermission(parameters)
+    self.CheckPermission(self.GetPermission('geolocation'), 'granted')
+    self._driver.SwitchToWindow(window_handle)
+    self.CheckPermission(self.GetPermission('geolocation'), 'granted')
+
+  def testNewWindowSameDomainHasSamePermissions(self):
+    """ Assures permissions are shared between same-domain windows, even when
+    window is created after permissions are set. """
+    window_handle = self._driver.NewWindow()['handle']
+    self._driver.SwitchToWindow(window_handle)
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.SetPermission({ 'descriptor': { 'name': 'geolocation' },
+                                  'state': 'denied' })
+    self.CheckPermission(self.GetPermission('geolocation'), 'denied')
+    same_domain = self._driver.NewWindow()['handle']
+    self._driver.SwitchToWindow(same_domain)
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/link_nav.html'))
+    self.CheckPermission(self.GetPermission('geolocation'), 'denied')
+
+
+  def testPermissionsSameOriginDoesNotAffectOthers(self):
+    """ Tests whether permissions set between two domains affect others. """
+    window_handle = self._driver.NewWindow()['handle']
+    self._driver.SwitchToWindow(window_handle)
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/link_nav.html'))
+    another_window_handle = self._driver.NewWindow()['handle']
+    self._driver.SwitchToWindow(another_window_handle)
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    different_domain = self._driver.NewWindow()['handle']
+    self._driver.SwitchToWindow(different_domain)
+    self._driver.Load('https://google.com')
+    self._driver.SetPermission({ 'descriptor': {'name': 'geolocation'},
+                                  'state': 'denied' })
+
+    # Switch for permissions.
+    self._driver.SwitchToWindow(another_window_handle)
+
+    # Set permission.
+    parameters = { 'descriptor': { 'name': 'geolocation' }, 'state': 'prompt' }
+
+    # Test that they are present across the same domain.
+    self._driver.SetPermission(parameters)
+    self.CheckPermission(self.GetPermission('geolocation'), 'prompt')
+
+    self._driver.SwitchToWindow(window_handle)
+    self.CheckPermission(self.GetPermission('geolocation'), 'prompt')
+
+    # Assert different domain is not the same.
+    self._driver.SwitchToWindow(different_domain)
+    self.CheckPermission(self.GetPermission('geolocation'), 'denied')
+
+  # Tests that the webauthn capabilities are true on desktop and false on
+  # android.
+  def testWebauthnVirtualAuthenticatorsCapability(self):
+    is_desktop = _ANDROID_PACKAGE_KEY is None
+    self.assertEqual(
+        is_desktop,
+        self._driver.capabilities['webauthn:virtualAuthenticators'])
+    self.assertEqual(
+        is_desktop,
+        self._driver.capabilities['webauthn:extension:largeBlob'])
+
+  def testCanClickInIframesInShadow(self):
+    """Test that you can interact with a iframe within a shadow element.
+       See https://bugs.chromium.org/p/chromedriver/issues/detail?id=3445
+    """
+    self._driver.SetTimeouts({'implicit': 2000})
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_iframe.html'))
+    frame = self._driver.ExecuteScript(
+      '''return document.querySelector("#shadow")
+          .shadowRoot.querySelector("iframe")''')
+    self._driver.SwitchToFrame(frame)
+    message = self._driver.FindElement('css selector', '#message')
+    self.assertTrue('clicked' not in message.GetText())
+    button = self._driver.FindElement('tag name', 'button')
+    button.Click()
+    message = self._driver.FindElement('css selector', '#message.result')
+    self.assertTrue('clicked' in message.GetText())
+
+  def testCanClickInIframesInShadowScrolled(self):
+    """Test that you can interact with a scrolled iframe
+       within a scrolled shadow element.
+       See https://bugs.chromium.org/p/chromedriver/issues/detail?id=3445
+    """
+    self._driver.SetTimeouts({'implicit': 2000})
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_iframe.html'))
+    frame = self._driver.ExecuteScript(
+      '''return document.querySelector("#shadow_scroll")
+          .shadowRoot.querySelector("iframe")''')
+    self._driver.SwitchToFrame(frame)
+    message = self._driver.FindElement('css selector', '#message')
+    self.assertTrue('clicked' not in message.GetText())
+    button = self._driver.FindElement('tag name', 'button')
+    button.Click()
+    message = self._driver.FindElement('css selector', '#message.result')
+    self.assertTrue('clicked' in message.GetText())
+
+class ChromeDriverBackgroundTest(ChromeDriverBaseTestWithWebServer):
+  def setUp(self):
+    self._driver1 = self.CreateDriver()
+    self._driver2 = self.CreateDriver()
+
+  def testBackgroundScreenshot(self):
+    self._driver2.Load(self._http_server.GetUrl('localhost')
+                      + '/chromedriver/empty.html')
+    self._driver1.Load(self._http_server.GetUrl('localhost')
+                      + '/chromedriver/empty.html')
+
+    screenshotPNGBase64  = self._driver1.TakeScreenshot()
+    self.assertIsNotNone(screenshotPNGBase64)
 
 # Tests that require a secure context.
-class ChromeDriverSecureContextTest(ChromeDriverBaseTest):
-  @staticmethod
-  def GlobalSetUp():
-    cert_path = os.path.join(chrome_paths.GetTestData(),
-                             'chromedriver/invalid_ssl_cert.pem')
-    ChromeDriverSecureContextTest._https_server = webserver.WebServer(
-        chrome_paths.GetTestData(), cert_path)
-
-  @staticmethod
-  def GlobalTearDown():
-    ChromeDriverSecureContextTest._https_server.Shutdown()
+class ChromeDriverSecureContextTest(ChromeDriverBaseTestWithWebServer):
+  # The example attestation private key from the U2F spec at
+  # https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.html#registration-example
+  # PKCS.8 encoded without encryption, as a base64url string.
+  privateKey = ("MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg8_zMDQDYAxlU-Q"
+                "hk1Dwkf0v18GZca1DMF3SaJ9HPdmShRANCAASNYX5lyVCOZLzFZzrIKmeZ2jwU"
+                "RmgsJYxGP__fWN_S-j5sN4tT15XEpN_7QZnt14YvI6uvAgO0uJEboFaZlOEB")
 
   @staticmethod
   def GetHttpsUrlForFile(file_path, host=None):
     return ChromeDriverSecureContextTest._https_server.GetUrl(
         host) + file_path
 
+  # Encodes a string in URL-safe base64 with no padding.
+  @staticmethod
+  def URLSafeBase64Encode(string):
+    if isinstance(string, str):
+      string = string.encode('utf-8')
+    encoded = base64.urlsafe_b64encode(string)
+    while encoded[-1] == b"=":
+      encoded = encoded[0:-1]
+    return encoded.decode('utf-8')
+
+  # Decodes a base64 string with no padding.
+  @staticmethod
+  def UrlSafeBase64Decode(string):
+    if isinstance(string, str):
+      string = string.encode('utf-8')
+    if len(string) % 4 != 0:
+      string += b'=' * (4 - len(string) % 4)
+    return base64.urlsafe_b64decode(string).decode('utf-8')
+
   def setUp(self):
     self._driver = self.CreateDriver(
-        chrome_switches=['host-resolver-rules=MAP * 127.0.0.1'])
+        accept_insecure_certs=True,
+        chrome_switches=['host-resolver-rules=MAP * 127.0.0.1',
+            'enable-experimental-web-platform-features'])
 
   def testAddVirtualAuthenticator(self):
+    script = """
+      let done = arguments[0];
+      registerCredential({
+        authenticatorSelection: {
+          requireResidentKey: true,
+        },
+        extensions: {
+          largeBlob: {
+            support: 'preferred',
+          },
+        },
+      }).then(done);
+    """
+    self._driver.Load(self.GetHttpsUrlForFile(
+        '/chromedriver/webauthn_test.html', 'chromedriver.test'))
+    self._driver.AddVirtualAuthenticator(
+        protocol = 'ctap2_1',
+        transport = 'usb',
+        hasResidentKey = True,
+        hasUserVerification = True,
+        isUserConsenting = True,
+        isUserVerified = True,
+        extensions = ['largeBlob']
+    )
+    result = self._driver.ExecuteAsyncScript(script)
+    self.assertEqual('OK', result['status'])
+    self.assertEqual(['usb'], result['credential']['transports'])
+    self.assertEqual(True, result['extensions']['largeBlob']['supported'])
+
+  def testAddVirtualAuthenticatorProtocolVersion(self):
+    self._driver.Load(self.GetHttpsUrlForFile(
+        '/chromedriver/webauthn_test.html', 'chromedriver.test'))
+    for protocol in ['ctap1/u2f', 'ctap2', 'ctap2_1']:
+      authenticator_id = self._driver.AddVirtualAuthenticator(
+          protocol = protocol,
+          transport = 'usb',
+      )
+      self.assertTrue(len(authenticator_id) > 0)
+
+    self.assertRaisesRegex(
+        chromedriver.UnsupportedOperation,
+        'INVALID is not a recognized protocol version',
+        self._driver.AddVirtualAuthenticator,
+            protocol = 'INVALID',
+            transport = 'usb')
+
+  def testAddVirtualBadExtensions(self):
+    self.assertRaisesRegex(
+        chromedriver.InvalidArgument,
+        'extensions must be a list of strings',
+        self._driver.AddVirtualAuthenticator, protocol = 'ctap2', transport =
+        'usb', extensions = 'invalid')
+
+    self.assertRaisesRegex(
+        chromedriver.InvalidArgument,
+        'extensions must be a list of strings',
+        self._driver.AddVirtualAuthenticator, protocol = 'ctap2', transport =
+        'usb', extensions = [42])
+
+    self.assertRaisesRegex(
+        chromedriver.UnsupportedOperation,
+        'smolBlowbs is not a recognized extension',
+        self._driver.AddVirtualAuthenticator, protocol = 'ctap2', transport =
+        'usb', extensions = ['smolBlowbs'])
+
+  def testAddVirtualAuthenticatorDefaultParams(self):
     script = """
       let done = arguments[0];
       registerCredential().then(done);
@@ -2044,40 +3447,297 @@ class ChromeDriverSecureContextTest(ChromeDriverBaseTest):
     self._driver.Load(self.GetHttpsUrlForFile(
         '/chromedriver/webauthn_test.html', 'chromedriver.test'))
     self._driver.AddVirtualAuthenticator(
-        protocol = 'ctap2',
+        protocol = 'ctap1/u2f',
         transport = 'usb',
-        hasResidentKey = False,
-        hasUserVerification = False,
     )
     result = self._driver.ExecuteAsyncScript(script)
-    self.assertEquals('OK', result['status'])
-    self.assertEquals(['usb'], result['credential']['transports'])
+    self.assertEqual('OK', result['status'])
+    self.assertEqual(['usb'], result['credential']['transports'])
 
   def testRemoveVirtualAuthenticator(self):
     self._driver.Load(self.GetHttpsUrlForFile(
         '/chromedriver/webauthn_test.html', 'chromedriver.test'))
 
     # Removing a non existent virtual authenticator should fail.
-    self.assertRaisesRegexp(
+    self.assertRaisesRegex(
         chromedriver.InvalidArgument,
         'Could not find a Virtual Authenticator matching the ID',
         self._driver.RemoveVirtualAuthenticator, 'id')
 
     # Create an authenticator and try removing it.
-    response = self._driver.AddVirtualAuthenticator(
+    authenticatorId = self._driver.AddVirtualAuthenticator(
         protocol = 'ctap2',
         transport = 'usb',
         hasResidentKey = False,
         hasUserVerification = False,
     )
-    self._driver.RemoveVirtualAuthenticator(response['authenticatorId'])
+    self._driver.RemoveVirtualAuthenticator(authenticatorId)
 
     # Trying to remove the same authenticator should fail.
-    self.assertRaisesRegexp(
+    self.assertRaisesRegex(
         chromedriver.InvalidArgument,
         'Could not find a Virtual Authenticator matching the ID',
-        self._driver.RemoveVirtualAuthenticator, response['authenticatorId'])
+        self._driver.RemoveVirtualAuthenticator, authenticatorId)
 
+  def testAddCredential(self):
+    script = """
+      let done = arguments[0];
+      getCredential({
+        type: "public-key",
+        id: new TextEncoder().encode("cred-1"),
+        transports: ["usb"],
+      }).then(done);
+    """
+    self._driver.Load(self.GetHttpsUrlForFile(
+        '/chromedriver/webauthn_test.html', 'chromedriver.test'))
+
+    authenticatorId = self._driver.AddVirtualAuthenticator(
+        protocol = 'ctap2',
+        transport = 'usb',
+        hasResidentKey = False,
+        hasUserVerification = False,
+    )
+
+    # Register a credential and try authenticating with it.
+    self._driver.AddCredential(
+      authenticatorId = authenticatorId,
+      credentialId = self.URLSafeBase64Encode("cred-1"),
+      isResidentCredential=False,
+      rpId="chromedriver.test",
+      privateKey=self.privateKey,
+      signCount=1,
+    )
+
+    result = self._driver.ExecuteAsyncScript(script)
+    self.assertEqual('OK', result['status'])
+
+  def testAddCredentialLargeBlob(self):
+    script = """
+      let done = arguments[0];
+      getCredential({
+        type: "public-key",
+        id: new TextEncoder().encode("cred-1"),
+        transports: ["usb"],
+      }, {
+        extensions: {
+          largeBlob: {
+            read: true,
+          },
+        },
+      }).then(done);
+    """
+    self._driver.Load(self.GetHttpsUrlForFile(
+        '/chromedriver/webauthn_test.html', 'chromedriver.test'))
+
+    authenticatorId = self._driver.AddVirtualAuthenticator(
+        protocol = 'ctap2_1',
+        transport = 'usb',
+        hasResidentKey = True,
+        hasUserVerification = True,
+        isUserVerified = True,
+        extensions = ['largeBlob']
+    )
+
+    # Register a credential with a large blob and try reading it.
+    self._driver.AddCredential(
+      authenticatorId = authenticatorId,
+      credentialId = self.URLSafeBase64Encode('cred-1'),
+      userHandle = self.URLSafeBase64Encode('erina'),
+      largeBlob = self.URLSafeBase64Encode('large blob contents'),
+      isResidentCredential = True,
+      rpId = "chromedriver.test",
+      privateKey = self.privateKey,
+      signCount = 1,
+    )
+
+    result = self._driver.ExecuteAsyncScript(script)
+    self.assertEqual('OK', result['status'])
+    self.assertEqual('large blob contents', result['blob'])
+
+  def testAddCredentialBase64Errors(self):
+    # Test that AddCredential checks UrlBase64 parameteres.
+    self._driver.Load(self.GetHttpsUrlForFile(
+        '/chromedriver/webauthn_test.html', 'chromedriver.test'))
+
+    authenticatorId = self._driver.AddVirtualAuthenticator(
+        protocol = 'ctap2',
+        transport = 'usb',
+        hasResidentKey = False,
+        hasUserVerification = False,
+    )
+
+    # Try adding a credentialId that is encoded in vanilla base64.
+    self.assertRaisesRegex(
+        chromedriver.InvalidArgument,
+        'credentialId must be a base64url encoded string',
+        self._driver.AddCredential, authenticatorId, '_0n+wWqg=',
+        False, "chromedriver.test", self.privateKey, None, 1,
+    )
+
+    # Try adding a credentialId that is not a string.
+    self.assertRaisesRegex(
+        chromedriver.InvalidArgument,
+        'credentialId must be a base64url encoded string',
+        self._driver.AddCredential, authenticatorId, 1,
+        False, "chromedriver.test", self.privateKey, None, 1,
+    )
+
+  def testGetCredentials(self):
+    script = """
+      let done = arguments[0];
+      registerCredential({
+        authenticatorSelection: {
+          requireResidentKey: true,
+        },
+        extensions: {
+          largeBlob: {
+            support: "required",
+          },
+        },
+      }).then(attestation =>
+          getCredential({
+            type: "public-key",
+            id: Uint8Array.from(attestation.credential.rawId),
+            transports: ["usb"],
+          }, {
+            extensions: {
+              largeBlob: {
+                write: new TextEncoder().encode("large blob contents"),
+              },
+            },
+          })).then(done);
+    """
+    self._driver.Load(self.GetHttpsUrlForFile(
+        '/chromedriver/webauthn_test.html', 'chromedriver.test'))
+    authenticatorId = self._driver.AddVirtualAuthenticator(
+        protocol = 'ctap2_1',
+        transport = 'usb',
+        hasResidentKey = True,
+        hasUserVerification = True,
+        isUserVerified = True,
+        extensions = ['largeBlob']
+    )
+
+    # Register a credential via the webauthn API and set a large blob on it.
+    result = self._driver.ExecuteAsyncScript(script)
+    self.assertEqual('OK', result['status'])
+    self.assertEqual(True, result['extensions']['largeBlob']['written'])
+    credentialId = result['attestation']['id']
+
+    # GetCredentials should return the credential that was just created.
+    credentials = self._driver.GetCredentials(authenticatorId)
+    self.assertEqual(1, len(credentials))
+    self.assertEqual(credentialId, credentials[0]['credentialId'])
+    self.assertEqual(True, credentials[0]['isResidentCredential'])
+    self.assertEqual('chromedriver.test', credentials[0]['rpId'])
+    self.assertEqual(chr(1),
+                      self.UrlSafeBase64Decode(credentials[0]['userHandle']))
+    self.assertEqual(2, credentials[0]['signCount'])
+    self.assertTrue(credentials[0]['privateKey'])
+    self.assertEqual('large blob contents',
+            self.UrlSafeBase64Decode(credentials[0]['largeBlob']))
+
+  def testRemoveCredential(self):
+    script = """
+      let done = arguments[0];
+      registerCredential().then(done);
+    """
+    self._driver.Load(self.GetHttpsUrlForFile(
+        '/chromedriver/webauthn_test.html', 'chromedriver.test'))
+    authenticatorId = self._driver.AddVirtualAuthenticator(
+        protocol = 'ctap2',
+        transport = 'usb',
+    )
+
+    # Register two credentials.
+    result = self._driver.ExecuteAsyncScript(script)
+    self.assertEqual('OK', result['status'])
+    credential1Id = result['credential']['id']
+
+    result = self._driver.ExecuteAsyncScript(script)
+    self.assertEqual('OK', result['status'])
+    credential2Id = result['credential']['id']
+
+    # GetCredentials should return both credentials.
+    credentials = self._driver.GetCredentials(authenticatorId)
+    self.assertEqual(2, len(credentials))
+
+    # Removing the first credential should leave only the first one.
+    self._driver.RemoveCredential(authenticatorId, credential1Id)
+    credentials = self._driver.GetCredentials(authenticatorId)
+    self.assertEqual(1, len(credentials))
+    self.assertEqual(credential2Id, credentials[0]['credentialId'])
+
+  def testRemoveAllCredentials(self):
+    register_credential_script = """
+      let done = arguments[0];
+      registerCredential().then(done);
+    """
+    self._driver.Load(self.GetHttpsUrlForFile(
+        '/chromedriver/webauthn_test.html', 'chromedriver.test'))
+    authenticatorId = self._driver.AddVirtualAuthenticator(
+        protocol = 'ctap2',
+        transport = 'usb',
+    )
+
+    # Register a credential via the webauthn API.
+    result = self._driver.ExecuteAsyncScript(register_credential_script)
+    self.assertEqual('OK', result['status'])
+    credentialId = result['credential']['rawId']
+
+    # Attempting to register with the credential ID on excludeCredentials should
+    # fail.
+    exclude_credentials_script = """
+      let done = arguments[0];
+      registerCredential({
+        excludeCredentials: [{
+          type: "public-key",
+          id: Uint8Array.from(%s),
+          transports: ["usb"],
+        }],
+      }).then(done);
+    """ % (credentialId)
+    result = self._driver.ExecuteAsyncScript(exclude_credentials_script)
+    self.assertEqual("InvalidStateError: The user attempted to register an "
+                      "authenticator that contains one of the credentials "
+                      "already registered with the relying party.",
+                      result['status'])
+
+    # The registration should succeed after clearing the credentials.
+    self._driver.RemoveAllCredentials(authenticatorId)
+    result = self._driver.ExecuteAsyncScript(exclude_credentials_script)
+    self.assertEqual('OK', result['status'])
+
+  def testSetUserVerified(self):
+    register_uv_script = """
+      let done = arguments[0];
+      registerCredential({
+        authenticatorSelection: {
+          userVerification: "required",
+        },
+      }).then(done);
+    """
+    self._driver.Load(self.GetHttpsUrlForFile(
+        '/chromedriver/webauthn_test.html', 'chromedriver.test'))
+    authenticatorId = self._driver.AddVirtualAuthenticator(
+        protocol = 'ctap2',
+        transport = 'usb',
+        hasResidentKey = True,
+        hasUserVerification = True,
+    )
+
+    # Configure the virtual authenticator to fail user verification.
+    self._driver.SetUserVerified(authenticatorId, False)
+
+    # Attempting to register a credential with UV required should fail.
+    result = self._driver.ExecuteAsyncScript(register_uv_script)
+    self.assertTrue(result['status'].startswith("NotAllowedError"),
+                    "Expected %s to be a NotAllowedError" % (result['status']))
+
+    # Trying again after setting userVerified to True should succeed.
+    self._driver.SetUserVerified(authenticatorId, True)
+    result = self._driver.ExecuteAsyncScript(register_uv_script)
+    self.assertEqual("OK", result['status'])
 
 # Tests in the following class are expected to be moved to ChromeDriverTest
 # class when we no longer support the legacy mode.
@@ -2100,7 +3760,7 @@ class ChromeDriverW3cTest(ChromeDriverBaseTestWithWebServer):
     text.SendKeys('0123456789+-*/ Hi')
     text.SendKeys(', there!')
     value = self._driver.ExecuteScript('return arguments[0].value;', text)
-    self.assertEquals('0123456789+-*/ Hi, there!', value)
+    self.assertEqual('0123456789+-*/ Hi, there!', value)
 
   def testSendKeysToElementDoesNotAppend(self):
       self._driver.Load(self.GetHttpUrlForFile(
@@ -2117,7 +3777,7 @@ class ChromeDriverW3cTest(ChromeDriverBaseTestWithWebServer):
           element.SendKeys('hello')
           value = self._driver.ExecuteScript('return arguments[0].value;',
                                              element)
-          self.assertEquals('hellosend_this_value', value)
+          self.assertEqual('hellosend_this_value', value)
 
   def testSendKeysToEditableElement(self):
       self._driver.Load(self.GetHttpUrlForFile(
@@ -2127,10 +3787,9 @@ class ChromeDriverW3cTest(ChromeDriverBaseTestWithWebServer):
           '\'<p contentEditable="true"> <i>hello-></i> '
           '<b>send_this_value </b> </p>\';'
           'var input = document.getElementsByTagName("i")[0];'
-          'input.focus();'
           'return input;')
       element.SendKeys('hello')
-      self.assertEquals(u'hello->hello', element.GetText())
+      self.assertEqual('hello->hello', element.GetText())
 
       self._driver.Load(self.GetHttpUrlForFile(
           '/chromedriver/empty.html'))
@@ -2142,12 +3801,12 @@ class ChromeDriverW3cTest(ChromeDriverBaseTestWithWebServer):
           'input.focus();'
           'return input;')
       element.SendKeys('hello')
-      self.assertEquals(u'hello ->hello', element.GetText())
+      self.assertEqual('hellohello ->', element.GetText())
 
   def testUnexpectedAlertOpenExceptionMessage(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
     self._driver.ExecuteScript('window.alert("Hi");')
-    self.assertRaisesRegexp(chromedriver.UnexpectedAlertOpen,
+    self.assertRaisesRegex(chromedriver.UnexpectedAlertOpen,
                             '{Alert text : Hi}',
                             self._driver.FindElement, 'tag name', 'divine')
     # In W3C mode, the alert is dismissed by default.
@@ -2177,10 +3836,10 @@ class ChromeDriverTestLegacy(ChromeDriverBaseTestWithWebServer):
     self._driver.MouseMoveTo(drop)
     self._driver.MouseButtonUp()
     self.assertTrue(self._driver.IsAlertOpen())
-    self.assertEquals('GreenRectangle has been dropped into a folder.',
+    self.assertEqual('GreenRectangle has been dropped into a folder.',
                       self._driver.GetAlertMessage())
     self._driver.HandleAlert(True)
-    self.assertEquals('translate(300,55)', drag.GetAttribute("transform"))
+    self.assertEqual('translate(300,55)', drag.GetAttribute("transform"))
 
   def testMouseButtonDownAndUp(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -2199,9 +3858,9 @@ class ChromeDriverTestLegacy(ChromeDriverBaseTestWithWebServer):
         '});')
     self._driver.MouseMoveTo(None, 50, 50)
     self._driver.MouseButtonDown()
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'br')))
     self._driver.MouseButtonUp()
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'a')))
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'a')))
 
   def testMouseClick(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -2217,7 +3876,7 @@ class ChromeDriverTestLegacy(ChromeDriverBaseTestWithWebServer):
         'return div;')
     self._driver.MouseMoveTo(div)
     self._driver.MouseClick()
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'br')))
 
   def testMouseDoubleClick(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -2233,7 +3892,7 @@ class ChromeDriverTestLegacy(ChromeDriverBaseTestWithWebServer):
         'return div;')
     self._driver.MouseMoveTo(div, 1, 1)
     self._driver.MouseDoubleClick()
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'br')))
 
   def testMouseMoveTo(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -2248,7 +3907,7 @@ class ChromeDriverTestLegacy(ChromeDriverBaseTestWithWebServer):
         '});'
         'return div;')
     self._driver.MouseMoveTo(div, 10, 10)
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
+    self.assertEqual(1, len(self._driver.FindElements('tag name', 'br')))
 
   def testMoveToElementAndClick(self):
     # This page gets rendered differently depending on which platform the test
@@ -2262,7 +3921,7 @@ class ChromeDriverTestLegacy(ChromeDriverBaseTestWithWebServer):
     link = self._driver.FindElements('tag name', 'a')[0]
     client_rects = self._driver.ExecuteScript(
         'return arguments[0].getClientRects();', link)
-    self.assertEquals(2, len(client_rects))
+    self.assertEqual(2, len(client_rects))
     self.assertTrue(client_rects[0]['bottom'] <= client_rects[1]['top'])
 
     # Check that the center of the link's bounding ClientRect is outside the
@@ -2316,11 +3975,11 @@ class ChromeDriverTestLegacy(ChromeDriverBaseTestWithWebServer):
     second = self._driver.FindElement('css selector', '#second')
     first.Click()
     self._driver.SendKeys('snoopy')
-    self._driver.SendKeys(u'\uE004')
+    self._driver.SendKeys('\uE004')
     self._driver.SendKeys('prickly pete')
-    self.assertEquals('snoopy', self._driver.ExecuteScript(
+    self.assertEqual('snoopy', self._driver.ExecuteScript(
         'return arguments[0].value;', first))
-    self.assertEquals('prickly pete', self._driver.ExecuteScript(
+    self.assertEqual('prickly pete', self._driver.ExecuteScript(
         'return arguments[0].value;', second))
 
   def testMobileEmulationDisabledByDefault(self):
@@ -2338,12 +3997,12 @@ class ChromeDriverTestLegacy(ChromeDriverBaseTestWithWebServer):
     text.SendKeys('0123456789+-*/ Hi')
     text.SendKeys(', there!')
     value = self._driver.ExecuteScript('return arguments[0].value;', text)
-    self.assertEquals('0123456789+-*/ Hi, there!', value)
+    self.assertEqual('0123456789+-*/ Hi, there!', value)
 
   def testUnexpectedAlertOpenExceptionMessage(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
     self._driver.ExecuteScript('window.alert("Hi");')
-    self.assertRaisesRegexp(chromedriver.UnexpectedAlertOpen,
+    self.assertRaisesRegex(chromedriver.UnexpectedAlertOpen,
                             'unexpected alert open: {Alert text : Hi}',
                             self._driver.FindElement, 'tag name', 'divine')
 
@@ -2352,8 +4011,8 @@ class ChromeDriverTestLegacy(ChromeDriverBaseTestWithWebServer):
           '/chromedriver/touch_action_tests.html'))
     scroll_left = 'return document.documentElement.scrollLeft;'
     scroll_top = 'return document.documentElement.scrollTop;'
-    self.assertEquals(0, self._driver.ExecuteScript(scroll_left))
-    self.assertEquals(0, self._driver.ExecuteScript(scroll_top))
+    self.assertEqual(0, self._driver.ExecuteScript(scroll_left))
+    self.assertEqual(0, self._driver.ExecuteScript(scroll_top))
     target = self._driver.FindElement('css selector', '#target')
     self._driver.TouchScroll(target, 47, 53)
     # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1179
@@ -2366,7 +4025,7 @@ class ChromeDriverTestLegacy(ChromeDriverBaseTestWithWebServer):
     target = self._driver.FindElement('css selector', '#target')
     target.DoubleTap()
     events = self._driver.FindElement('css selector', '#events')
-    self.assertEquals('events: touchstart touchend touchstart touchend',
+    self.assertEqual('events: touchstart touchend touchstart touchend',
                         events.GetText())
 
   def testTouchLongPressElement(self):
@@ -2375,7 +4034,7 @@ class ChromeDriverTestLegacy(ChromeDriverBaseTestWithWebServer):
     target = self._driver.FindElement('css selector', '#target')
     target.LongPress()
     events = self._driver.FindElement('css selector', '#events')
-    self.assertEquals('events: touchstart touchcancel', events.GetText())
+    self.assertEqual('events: touchstart touchcancel', events.GetText())
 
   def testTouchSingleTapElement(self):
     self._driver.Load(self.GetHttpUrlForFile(
@@ -2383,7 +4042,101 @@ class ChromeDriverTestLegacy(ChromeDriverBaseTestWithWebServer):
     target = self._driver.FindElement('css selector', '#target')
     target.SingleTap()
     events = self._driver.FindElement('css selector', '#events')
-    self.assertEquals('events: touchstart touchend', events.GetText())
+    self.assertEqual('events: touchstart touchend', events.GetText())
+
+class ChromeDriverFencedFrame(ChromeDriverBaseTestWithWebServer):
+  def setUp(self):
+    super().setUp()
+    self._https_server.SetDataForPath('/main.html', bytes("""
+      <!DOCTYPE html>
+        <html>
+          <body>
+            <fencedframe src="/fencedframe.html"></fencedframe>
+          </body>
+        </html>
+      """, 'utf-8'))
+
+    self._https_server.SetDataForPath('/nesting.html', bytes("""
+      <!DOCTYPE html>
+        <html>
+          <body>
+            <iframe src="/main.html"></iframe>
+          </body>
+        </html>
+    """, 'utf-8'))
+
+    def respondWithFencedFrameContents(request):
+      return {'Supports-Loading-Mode': 'fenced-frame'}, bytes("""
+        <!DOCTYPE html>
+        <html>
+          <body>
+            <button></button>
+          </body>
+        </html>""", 'utf-8')
+    self._https_server.SetCallbackForPath('/fencedframe.html',
+                                          respondWithFencedFrameContents)
+
+  @staticmethod
+  def GetHttpsUrlForFile(file_path):
+    return ChromeDriverFencedFrame._https_server.GetUrl() + file_path
+
+  def tearDown(self):
+    super().tearDown()
+    self._https_server.SetDataForPath('/main.html', None)
+    self._https_server.SetDataForPath('/nesting.html', None)
+    self._https_server.SetCallbackForPath('/fencedframe.html', None)
+
+  def _initDriver(self, fenced_frame_implementation):
+    self._driver = self.CreateDriver(
+        accept_insecure_certs = True,
+        chrome_switches=['--site-per-process',
+            '--enable-features=FencedFrames:'
+            'implementation_type/%s,PrivacySandboxAdsAPIsOverride' %
+            fenced_frame_implementation])
+
+  def _testCanSwitchToFencedFrame(self, fenced_frame_implementation):
+    self._initDriver(fenced_frame_implementation)
+    self._driver.Load(self.GetHttpsUrlForFile('/main.html'))
+    self._driver.SetTimeouts({'implicit': 2000})
+    fencedframe = self._driver.FindElement('tag name', 'fencedframe')
+    self._driver.SwitchToFrame(fencedframe)
+    button = self._driver.FindElement('tag name', 'button')
+    self.assertIsNotNone(button)
+
+  def _testAppendEmptyFencedFrame(self, fenced_frame_implementation):
+    self._initDriver(fenced_frame_implementation)
+    self._driver.Load(self.GetHttpsUrlForFile('/chromedriver/empty.html'))
+    self._driver.ExecuteScript(
+        'document.body.appendChild(document.createElement("fencedframe"));')
+    fencedframe = self._driver.FindElement('tag name', 'fencedframe')
+    self.assertIsNotNone(fencedframe)
+    self._driver.SwitchToFrame(fencedframe)
+
+  def _testFencedFrameInsideIframe(self, fenced_frame_implementation):
+    self._initDriver(fenced_frame_implementation)
+    self._driver.Load(self.GetHttpsUrlForFile('/nesting.html'))
+    self._driver.SwitchToFrameByIndex(0)
+    fencedframe = self._driver.FindElement('tag name', 'fencedframe')
+    self.assertIsNotNone(fencedframe)
+    self._driver.SwitchToFrame(fencedframe)
+
+  def testCanSwitchToFencedFrame_ShadowDom(self):
+    self._testCanSwitchToFencedFrame('shadow_dom')
+
+  def testCanSwitchToFencedFrame_MPArch(self):
+    self._testCanSwitchToFencedFrame('mparch')
+
+  def testAppendEmptyFencedFrame_ShadowDom(self):
+    self._testAppendEmptyFencedFrame('shadow_dom')
+
+  def testAppendEmptyFencedFrame_MPArch(self):
+    self._testAppendEmptyFencedFrame('mparch')
+
+  def testFencedFrameInsideIframe_ShadowDom(self):
+    self._testFencedFrameInsideIframe('shadow_dom')
+
+  def testFencedFrameInsideIframe_MPArch(self):
+    self._testFencedFrameInsideIframe('mparch')
 
 class ChromeDriverSiteIsolation(ChromeDriverBaseTestWithWebServer):
   """Tests for ChromeDriver with the new Site Isolation Chrome feature.
@@ -2414,11 +4167,19 @@ class ChromeDriverSiteIsolation(ChromeDriverBaseTestWithWebServer):
       self._driver.SetTimeouts({'implicit': 2000})
     self._driver.Load(self.GetHttpUrlForFile(
         '/chromedriver/cross_domain_iframe.html'))
+    frame = self._driver.FindElement('tag name', 'iframe')
+    self._driver.SwitchToFrame(frame)
+    self.assertTrue(self.WaitForCondition(
+        lambda: 'outer.html' in
+                self._driver.ExecuteScript('return window.location.href')))
+    self.assertTrue(self.WaitForCondition(
+        lambda: 'complete' ==
+                self._driver.ExecuteScript('return document.readyState')))
+    self._driver.SwitchToMainFrame()
     a_outer = self._driver.FindElement('tag name', 'a')
     a_outer.Click()
     frame_url = self._driver.ExecuteScript('return window.location.href')
     self.assertTrue(frame_url.endswith('#one'))
-    frame = self._driver.FindElement('tag name', 'iframe')
     self._driver.SwitchToFrame(frame)
     a_inner = self._driver.FindElement('tag name', 'a')
     a_inner.Click()
@@ -2438,7 +4199,7 @@ class ChromeDriverPageLoadTimeoutTest(ChromeDriverBaseTestWithWebServer):
       # Don't hang infinitely, 10 seconds are enough.
       self.send_response_event.wait(10)
       self.send_response_event.clear()
-      return {'Cache-Control': 'no-store'}, 'Hi!'
+      return {'Cache-Control': 'no-store'}, b'Hi!'
 
   def setUp(self):
     self._handler = ChromeDriverPageLoadTimeoutTest._RequestHandler()
@@ -2467,8 +4228,7 @@ class ChromeDriverPageLoadTimeoutTest(ChromeDriverBaseTestWithWebServer):
     timed_out = False
     try:
       action()
-    except chromedriver.ChromeDriverException as e:
-      self.assertNotEqual(-1, e.message.find('timeout'))
+    except chromedriver.Timeout as e:
       timed_out = True
     finally:
       self._handler.send_response_event.set()
@@ -2479,14 +4239,14 @@ class ChromeDriverPageLoadTimeoutTest(ChromeDriverBaseTestWithWebServer):
 
   def testPageLoadTimeout(self):
     self._CheckPageLoadTimeout(self._LoadHangingUrl)
-    self.assertEquals(self._initial_url, self._driver.GetCurrentUrl())
+    self.assertEqual(self._initial_url, self._driver.GetCurrentUrl())
 
   def testPageLoadTimeoutCrossDomain(self):
     # Cross-domain navigation is likely to be a cross-process one. In this case
     # DevToolsAgentHost behaves quite differently and does not send command
     # responses if the navigation hangs, so this case deserves a dedicated test.
     self._CheckPageLoadTimeout(lambda: self._LoadHangingUrl('foo.bar'))
-    self.assertEquals(self._initial_url, self._driver.GetCurrentUrl())
+    self.assertEqual(self._initial_url, self._driver.GetCurrentUrl())
 
   def testHistoryNavigationWithPageLoadTimeout(self):
     # Allow the page to load for the first time.
@@ -2496,7 +4256,7 @@ class ChromeDriverPageLoadTimeoutTest(ChromeDriverBaseTestWithWebServer):
 
     self._driver.GoBack()
     self._CheckPageLoadTimeout(self._driver.GoForward)
-    self.assertEquals(self._initial_url, self._driver.GetCurrentUrl())
+    self.assertEqual(self._initial_url, self._driver.GetCurrentUrl())
 
   def testRefreshWithPageLoadTimeout(self):
     # Allow the page to load for the first time.
@@ -2519,20 +4279,21 @@ class ChromeDriverAndroidTest(ChromeDriverBaseTest):
 
     try:
       omaha_list = json.loads(
-          urllib2.urlopen('http://omahaproxy.appspot.com/all.json').read())
+          urllib.request.urlopen('http://omahaproxy.appspot.com/all.json').read())
       for l in omaha_list:
         if l['os'] != 'android':
           continue
         for v in l['versions']:
           if (('stable' in v['channel'] and 'stable' in _ANDROID_PACKAGE_KEY) or
               ('beta' in v['channel'] and 'beta' in _ANDROID_PACKAGE_KEY)):
-            omaha = map(int, v['version'].split('.'))
-            device = map(int, self._driver.capabilities['version'].split('.'))
+            omaha = list(map(int, v['version'].split('.')))
+            device = list(map(int,
+              self._driver.capabilities['browserVersion'].split('.')))
             self.assertTrue(omaha <= device)
             return
       raise RuntimeError('Malformed omaha JSON')
-    except urllib2.URLError as e:
-      print 'Unable to fetch current version info from omahaproxy (%s)' % e
+    except urllib.error.URLError as e:
+      print('Unable to fetch current version info from omahaproxy (%s)' % e)
 
   def testDeviceManagement(self):
     self._drivers = [self.CreateDriver()
@@ -2546,19 +4307,20 @@ class ChromeDriverAndroidTest(ChromeDriverBaseTest):
     size = self._driver.GetWindowRect()
 
     script_size = self._driver.ExecuteScript(
-      "return [window.outerWidth * window.devicePixelRatio,"
-      "window.outerHeight * window.devicePixelRatio, 0, 0]")
-    self.assertEquals(size, script_size)
+        'return [window.outerWidth, window.outerHeight, 0, 0]')
+    self.assertEqual(size, script_size)
 
     script_inner = self._driver.ExecuteScript(
-      "return [window.innerWidth, window.innerHeight]")
-    self.assertLessEqual(script_inner[0], size[0])
-    self.assertLessEqual(script_inner[1], size[1])
-    # Sanity check: screen dimensions in the range 2-20000px
+        'return [window.innerWidth * visualViewport.scale, '
+        'window.innerHeight * visualViewport.scale]')
+    # Subtract inner size by 1 to compensate for rounding errors.
+    self.assertLessEqual(script_inner[0] - 1, size[0])
+    self.assertLessEqual(script_inner[1] - 1, size[1])
+    # Sanity check: screen dimensions in the range 20-20000px
     self.assertLessEqual(size[0], 20000)
     self.assertLessEqual(size[1], 20000)
-    self.assertGreaterEqual(size[0], 2)
-    self.assertGreaterEqual(size[1], 2)
+    self.assertGreaterEqual(size[0], 20)
+    self.assertGreaterEqual(size[1], 20)
 
 class ChromeDownloadDirTest(ChromeDriverBaseTest):
 
@@ -2572,13 +4334,13 @@ class ChromeDownloadDirTest(ChromeDriverBaseTest):
     return temp_dir
 
   def RespondWithCsvFile(self, request):
-    return {'Content-Type': 'text/csv'}, 'a,b,c\n1,2,3\n'
+    return {'Content-Type': 'text/csv'}, b'a,b,c\n1,2,3\n'
 
   def WaitForFileToDownload(self, path):
-    deadline = time.time() + 60
+    deadline = monotonic() + 60
     while True:
       time.sleep(0.1)
-      if os.path.isfile(path) or time.time() > deadline:
+      if os.path.isfile(path) or monotonic() > deadline:
         break
     self.assertTrue(os.path.isfile(path), "Failed to download file!")
 
@@ -2712,7 +4474,7 @@ class ChromeSwitchesCapabilityTest(ChromeDriverBaseTest):
     # selection.
     ports_generator = util.FindProbableFreePorts()
     for _ in range(3):
-      port = ports_generator.next()
+      port = next(ports_generator)
       port_flag = 'remote-debugging-port=%s' % port
       try:
         driver = self.CreateDriver(chrome_switches=[port_flag])
@@ -2734,9 +4496,9 @@ class ChromeDesiredCapabilityTest(ChromeDriverBaseTest):
     driver = self.CreateDriver()
     timeouts = driver.GetTimeouts()
     # Compare against defaults in W3C spec
-    self.assertEquals(timeouts['implicit'], 0)
-    self.assertEquals(timeouts['pageLoad'], 300000)
-    self.assertEquals(timeouts['script'], 30000)
+    self.assertEqual(timeouts['implicit'], 0)
+    self.assertEqual(timeouts['pageLoad'], 300000)
+    self.assertEqual(timeouts['script'], 30000)
 
   def testTimeouts(self):
     driver = self.CreateDriver(timeouts = {
@@ -2745,20 +4507,20 @@ class ChromeDesiredCapabilityTest(ChromeDriverBaseTest):
         'script':   789
     })
     timeouts = driver.GetTimeouts()
-    self.assertEquals(timeouts['implicit'], 123)
-    self.assertEquals(timeouts['pageLoad'], 456)
-    self.assertEquals(timeouts['script'], 789)
+    self.assertEqual(timeouts['implicit'], 123)
+    self.assertEqual(timeouts['pageLoad'], 456)
+    self.assertEqual(timeouts['script'], 789)
 
   # Run in Legacy mode
   def testUnexpectedAlertBehaviourLegacy(self):
     driver = self.CreateDriver(unexpected_alert_behaviour="accept",
                                send_w3c_capability=False,
                                send_w3c_request=False)
-    self.assertEquals("accept",
+    self.assertEqual("accept",
                       driver.capabilities['unexpectedAlertBehaviour'])
     driver.ExecuteScript('alert("HI");')
     self.WaitForCondition(driver.IsAlertOpen)
-    self.assertRaisesRegexp(chromedriver.UnexpectedAlertOpen,
+    self.assertRaisesRegex(chromedriver.UnexpectedAlertOpen,
                             'unexpected alert open: {Alert text : HI}',
                             driver.FindElement, 'tag name', 'div')
     self.assertFalse(driver.IsAlertOpen())
@@ -2766,22 +4528,22 @@ class ChromeDesiredCapabilityTest(ChromeDriverBaseTest):
   def testUnexpectedAlertBehaviourW3c(self):
     driver = self.CreateDriver(unexpected_alert_behaviour='accept',
                                send_w3c_capability=True, send_w3c_request=True)
-    self.assertEquals('accept',
+    self.assertEqual('accept',
                       driver.capabilities['unhandledPromptBehavior'])
     driver.ExecuteScript('alert("HI");')
     self.WaitForCondition(driver.IsAlertOpen)
     # With unhandledPromptBehavior=accept, calling GetTitle (and most other
     # endpoints) automatically dismisses the alert, so IsAlertOpen() becomes
     # False afterwards.
-    self.assertEquals(driver.GetTitle(), '')
+    self.assertEqual(driver.GetTitle(), '')
     self.assertFalse(driver.IsAlertOpen())
 
 
-class ChromeExtensionsCapabilityTest(ChromeDriverBaseTest):
+class ChromeExtensionsCapabilityTest(ChromeDriverBaseTestWithWebServer):
   """Tests that chromedriver properly processes chromeOptions.extensions."""
 
   def _PackExtension(self, ext_path):
-    return base64.b64encode(open(ext_path, 'rb').read())
+    return base64.b64encode(open(ext_path, 'rb').read()).decode('utf-8')
 
   def testExtensionsInstall(self):
     """Checks that chromedriver can take the extensions in crx format."""
@@ -2795,52 +4557,19 @@ class ChromeExtensionsCapabilityTest(ChromeDriverBaseTest):
     zip_1 = os.path.join(_TEST_DATA_DIR, 'ext_test_1.zip')
     self.CreateDriver(chrome_extensions=[self._PackExtension(zip_1)])
 
-  def testWaitsForExtensionToLoad(self):
-    did_load_event = threading.Event()
-    server = webserver.SyncWebServer()
-    def RunServer():
-      time.sleep(5)
-      server.RespondWithContent('<html>iframe</html>')
-      did_load_event.set()
-
-    thread = threading.Thread(target=RunServer)
-    thread.daemon = True
-    thread.start()
-    crx = os.path.join(_TEST_DATA_DIR, 'ext_slow_loader.crx')
-    driver = self.CreateDriver(
-        chrome_switches=['user-agent=' + server.GetUrl()],
-        chrome_extensions=[self._PackExtension(crx)])
-    self.assertTrue(did_load_event.is_set())
-
-  def testCanLaunchApp(self):
-    app_path = os.path.join(_TEST_DATA_DIR, 'test_app')
-    driver = self.CreateDriver(chrome_switches=['load-extension=%s' % app_path])
-    old_handles = driver.GetWindowHandles()
-    self.assertEqual(1, len(old_handles))
-    driver.LaunchApp('gegjcdcfeiojglhifpmibkadodekakpc')
-    new_window_handle = self.WaitForNewWindow(driver, old_handles)
-    driver.SwitchToWindow(new_window_handle)
-    body_element = driver.FindElement('tag name', 'body')
-    self.assertEqual('It works!', body_element.GetText())
-
   def testCanInspectBackgroundPage(self):
-    app_path = os.path.join(_TEST_DATA_DIR, 'test_app')
-    extension_path = os.path.join(_TEST_DATA_DIR, 'all_frames')
+    crx = os.path.join(_TEST_DATA_DIR, 'ext_bg_page.crx')
     driver = self.CreateDriver(
-        chrome_switches=['load-extension=%s' % app_path],
+        chrome_extensions=[self._PackExtension(crx)],
         experimental_options={'windowTypes': ['background_page']})
-    old_handles = driver.GetWindowHandles()
-    driver.LaunchApp('gegjcdcfeiojglhifpmibkadodekakpc')
-    new_window_handle = self.WaitForNewWindow(
-        driver, old_handles, check_closed_windows=False)
     handles = driver.GetWindowHandles()
     for handle in handles:
       driver.SwitchToWindow(handle)
       if driver.GetCurrentUrl() == 'chrome-extension://' \
-          'gegjcdcfeiojglhifpmibkadodekakpc/_generated_background_page.html':
+          'nibbphkelpaohebejnbojjalikodckih/_generated_background_page.html':
         self.assertEqual(42, driver.ExecuteScript('return magic;'))
         return
-    self.fail("couldn't find generated background page for test app")
+    self.fail("couldn't find generated background page for test extension")
 
   def testIFrameWithExtensionsSource(self):
     crx_path = os.path.join(_TEST_DATA_DIR, 'frames_extension.crx')
@@ -2869,14 +4598,6 @@ class ChromeExtensionsCapabilityTest(ChromeDriverBaseTest):
     driver.SwitchToFrame('iframe')
     self.assertEqual('two', driver.ExecuteScript("return window['iframe_var']"))
 
-  def testDontUseAutomationExtension(self):
-    driver = self.CreateDriver(
-        experimental_options={'useAutomationExtension': False})
-    driver.Load('chrome:version')
-    command_line = driver.FindElement('css selector', '#command_line').GetText()
-    self.assertNotIn('load-extension', command_line)
-
-
 class ChromeLogPathCapabilityTest(ChromeDriverBaseTest):
   """Tests that chromedriver properly processes chromeOptions.logPath."""
 
@@ -2894,40 +4615,12 @@ class ChromeLogPathCapabilityTest(ChromeDriverBaseTest):
     self.assertTrue(self.LOG_MESSAGE in open(tmp_log_path.name).read())
 
 
-class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
+class MobileEmulationCapabilityTest(ChromeDriverBaseTestWithWebServer):
   """Tests that ChromeDriver processes chromeOptions.mobileEmulation.
 
   Makes sure the device metrics are overridden in DevTools and user agent is
   overridden in Chrome.
   """
-
-  @staticmethod
-  def GlobalSetUp():
-    def respondWithUserAgentString(request):
-      return {}, """
-        <html>
-        <body>%s</body>
-        </html>""" % request.GetHeader('User-Agent')
-
-    def respondWithUserAgentStringUseDeviceWidth(request):
-      return {}, """
-        <html>
-        <head>
-        <meta name="viewport" content="width=device-width,minimum-scale=1.0">
-        </head>
-        <body>%s</body>
-        </html>""" % request.GetHeader('User-Agent')
-
-    MobileEmulationCapabilityTest._http_server = webserver.WebServer(
-        chrome_paths.GetTestData())
-    MobileEmulationCapabilityTest._http_server.SetCallbackForPath(
-        '/userAgent', respondWithUserAgentString)
-    MobileEmulationCapabilityTest._http_server.SetCallbackForPath(
-        '/userAgentUseDeviceWidth', respondWithUserAgentStringUseDeviceWidth)
-
-  @staticmethod
-  def GlobalTearDown():
-    MobileEmulationCapabilityTest._http_server.Shutdown()
 
   # Run in Legacy mode
   def testDeviceMetricsWithStandardWidth(self):
@@ -2974,7 +4667,7 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
     self.assertEqual(360, driver.ExecuteScript('return window.screen.width'))
     self.assertEqual(640, driver.ExecuteScript('return window.screen.height'))
     body_tag = driver.FindElement('tag name', 'body')
-    self.assertRegexpMatches(
+    self.assertRegex(
         body_tag.GetText(),
         '^' +
         re.escape('Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) '
@@ -2995,7 +4688,7 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
     text.SendKeys('0123456789+-*/ Hi')
     text.SendKeys(', there!')
     value = driver.ExecuteScript('return arguments[0].value;', text)
-    self.assertEquals('0123456789+-*/ Hi, there!', value)
+    self.assertEqual('0123456789+-*/ Hi, there!', value)
 
   def testClickElement(self):
     driver = self.CreateDriver(
@@ -3009,7 +4702,7 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
         '});'
         'return div;')
     div.Click()
-    self.assertEquals(1, len(driver.FindElements('tag name', 'br')))
+    self.assertEqual(1, len(driver.FindElements('tag name', 'br')))
 
   # Run in Legacy mode
   def testTapElement(self):
@@ -3025,37 +4718,7 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
         '});'
         'return div;')
     div.SingleTap()
-    self.assertEquals(1, len(driver.FindElements('tag name', 'br')))
-
-  def testDoesntWaitWhenPageLoadStrategyIsNone(self):
-    class HandleRequest(object):
-      def __init__(self):
-        self.sent_hello = threading.Event()
-
-      def slowPage(self, request):
-        self.sent_hello.wait(2)
-        return {}, """
-        <html>
-        <body>hello</body>
-        </html>"""
-
-    handler = HandleRequest()
-    self._http_server.SetCallbackForPath('/slow', handler.slowPage)
-
-    driver = self.CreateDriver(page_load_strategy='none')
-    self.assertEquals('none', driver.capabilities['pageLoadStrategy'])
-
-    driver.Load(self._http_server.GetUrl() + '/chromedriver/empty.html')
-    start = time.time()
-    driver.Load(self._http_server.GetUrl() + '/slow')
-    self.assertTrue(time.time() - start < 2)
-    handler.sent_hello.set()
-    self.WaitForCondition(lambda: 'hello' in driver.GetPageSource())
-    self.assertTrue('hello' in driver.GetPageSource())
-
-  def testUnsupportedPageLoadStrategyRaisesException(self):
-    self.assertRaises(chromedriver.InvalidArgument,
-                      self.CreateDriver, page_load_strategy="unsupported")
+    self.assertEqual(1, len(driver.FindElements('tag name', 'br')))
 
   def testNetworkConnectionDisabledByDefault(self):
     driver = self.CreateDriver()
@@ -3087,9 +4750,9 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
     # Test 4G connection.
     connection_type = 0x8
     returned_type = driver.SetNetworkConnection(connection_type)
-    self.assertEquals(connection_type, returned_type)
+    self.assertEqual(connection_type, returned_type)
     network = driver.GetNetworkConnection()
-    self.assertEquals(network, connection_type)
+    self.assertEqual(network, connection_type)
 
   def testEmulateNetworkConnectionMultipleBits(self):
     driver = self.CreateDriver(
@@ -3099,9 +4762,9 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
     # Tests that 4G takes precedence.
     connection_type = 0x38
     returned_type = driver.SetNetworkConnection(connection_type)
-    self.assertEquals(connection_type, returned_type)
+    self.assertEqual(connection_type, returned_type)
     network = driver.GetNetworkConnection()
-    self.assertEquals(network, connection_type)
+    self.assertEqual(network, connection_type)
 
   def testWifiAndAirplaneModeEmulation(self):
     driver = self.CreateDriver(
@@ -3111,16 +4774,16 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
     # Tests that Wifi takes precedence over Airplane Mode.
     connection_type = 0x3
     returned_type = driver.SetNetworkConnection(connection_type)
-    self.assertEquals(connection_type, returned_type)
+    self.assertEqual(connection_type, returned_type)
     network = driver.GetNetworkConnection()
-    self.assertEquals(network, connection_type)
+    self.assertEqual(network, connection_type)
 
   def testNetworkConnectionTypeIsAppliedToAllTabsImmediately(self):
     def respondWithString(request):
-      return {}, """
+      return {}, bytes("""
         <html>
         <body>%s</body>
-        </html>""" % "hello world!"
+        </html>""" % "hello world!", 'utf-8')
 
     self._http_server.SetCallbackForPath(
       '/helloworld', respondWithString)
@@ -3132,7 +4795,7 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
     # Set network to online
     connection_type = 0x10
     returned_type = driver.SetNetworkConnection(connection_type)
-    self.assertEquals(connection_type, returned_type)
+    self.assertEqual(connection_type, returned_type)
 
     # Open a window with two divs counting successful + unsuccessful
     # attempts to complete XML task
@@ -3146,14 +4809,14 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
     new_window_handle = self.WaitForNewWindow(driver, old_handles)
     self.assertNotEqual(None, new_window_handle)
     driver.SwitchToWindow(new_window_handle)
-    self.assertEquals(new_window_handle, driver.GetCurrentWindowHandle())
+    self.assertEqual(new_window_handle, driver.GetCurrentWindowHandle())
 
     # Set network to offline to determine whether the XML task continues to
     # run in the background, indicating that the conditions are only applied
     # to the current WebView
     connection_type = 0x1
     returned_type = driver.SetNetworkConnection(connection_type)
-    self.assertEquals(connection_type, returned_type)
+    self.assertEqual(connection_type, returned_type)
 
     driver.SwitchToWindow(window1_handle)
     connection_type = 0x1
@@ -3169,30 +4832,30 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
     # Test connection is offline.
     connection_type = 0x1;
     returned_type = driver.SetNetworkConnection(connection_type)
-    self.assertEquals(connection_type, returned_type)
+    self.assertEqual(connection_type, returned_type)
     network = driver.GetNetworkConnection()
-    self.assertEquals(network, connection_type)
+    self.assertEqual(network, connection_type)
 
     # Navigate to another window.
     driver.FindElement('css selector', '#link').Click()
     new_window_handle = self.WaitForNewWindow(driver, old_handles)
     self.assertNotEqual(None, new_window_handle)
     driver.SwitchToWindow(new_window_handle)
-    self.assertEquals(new_window_handle, driver.GetCurrentWindowHandle())
+    self.assertEqual(new_window_handle, driver.GetCurrentWindowHandle())
     self.assertRaises(
         chromedriver.NoSuchElement, driver.FindElement, 'css selector', '#link')
 
     # Set connection to 3G in second window.
     connection_type = 0x10;
     returned_type = driver.SetNetworkConnection(connection_type)
-    self.assertEquals(connection_type, returned_type)
+    self.assertEqual(connection_type, returned_type)
 
     driver.SwitchToWindow(window1_handle)
-    self.assertEquals(window1_handle, driver.GetCurrentWindowHandle())
+    self.assertEqual(window1_handle, driver.GetCurrentWindowHandle())
 
     # Test whether first window has old or new network conditions.
     network = driver.GetNetworkConnection()
-    self.assertEquals(network, connection_type)
+    self.assertEqual(network, connection_type)
 
   def testDefaultComplianceMode(self):
     driver = self.CreateDriver(send_w3c_capability=None,
@@ -3241,11 +4904,12 @@ class ChromeDriverLogTest(ChromeDriverBaseTest):
         _CHROMEDRIVER_BINARY, log_path=tmp_log_path)
     try:
       driver = chromedriver.ChromeDriver(
-          chromedriver_server.GetUrl(), chrome_binary=_CHROME_BINARY,
+          chromedriver_server.GetUrl(), chromedriver_server.GetPid(),
+          chrome_binary=_CHROME_BINARY,
           experimental_options={ self.UNEXPECTED_CHROMEOPTION_CAP : 1 })
       driver.Quit()
-    except chromedriver.ChromeDriverException, e:
-      self.assertTrue(self.LOG_MESSAGE in e.message)
+    except chromedriver.ChromeDriverException as e:
+      self.assertTrue(self.LOG_MESSAGE in str(e))
     finally:
       chromedriver_server.Kill()
     with open(tmp_log_path, 'r') as f:
@@ -3299,8 +4963,8 @@ class ChromeLoggingCapabilityTest(ChromeDriverBaseTest):
       if (cat == 'blink.console' and
           devtools_message['params']['name'] == 'foobar'):
         marked_timeline_events.append(devtools_message)
-    self.assertEquals(2, len(marked_timeline_events))
-    self.assertEquals({'Network', 'Page', 'Tracing'},
+    self.assertEqual(2, len(marked_timeline_events))
+    self.assertEqual({'Network', 'Page', 'Tracing'},
                       set(seen_log_domains.keys()))
 
   def testDevToolsEventsLogger(self):
@@ -3314,7 +4978,7 @@ class ChromeLoggingCapabilityTest(ChromeDriverBaseTest):
       devtools_message = json.loads(entry['message'])
       method = devtools_message['method']
       self.assertTrue('params' in devtools_message)
-      self.assertEquals(event, method)
+      self.assertEqual(event, method)
 
 class SessionHandlingTest(ChromeDriverBaseTest):
   """Tests for session operations."""
@@ -3344,13 +5008,14 @@ class RemoteBrowserTest(ChromeDriverBaseTest):
     # selection.
     ports_generator = util.FindProbableFreePorts()
     for _ in range(3):
-      port = ports_generator.next()
+      port = next(ports_generator)
       temp_dir = util.MakeTempDir()
-      print 'temp dir is ' + temp_dir
+      print('temp dir is ' + temp_dir)
       cmd = [_CHROME_BINARY,
              '--remote-debugging-port=%d' % port,
              '--user-data-dir=%s' % temp_dir,
-             '--use-mock-keychain']
+             '--use-mock-keychain',
+             '--password-store=basic']
       process = subprocess.Popen(cmd)
       try:
         driver = self.CreateDriver(debugger_address='localhost:%d' % port)
@@ -3367,13 +5032,58 @@ class RemoteBrowserTest(ChromeDriverBaseTest):
           for _ in range(20):
             if process.poll() is not None:
               break
-            print 'continuing to wait for Chrome to exit'
+            print('continuing to wait for Chrome to exit')
             time.sleep(.05)
           else:
             process.kill()
       break
     else:  # Else clause gets invoked if "break" never happens.
       raise  # This re-raises the most recent exception.
+
+  def testConnectToRemoteBrowserLiteralAddressHeadless(self):
+    debug_addrs = ['127.0.0.1', '::1']
+    debug_url_addrs = ['127.0.0.1', '[::1]']
+
+    for (debug_addr, debug_url_addr) in zip(debug_addrs, debug_url_addrs):
+      # Must use retries since there is an inherent race condition in port
+      # selection.
+      ports_generator = util.FindProbableFreePorts()
+      for _ in range(3):
+        port = next(ports_generator)
+        temp_dir = util.MakeTempDir()
+        print('temp dir is ' + temp_dir)
+        cmd = [_CHROME_BINARY,
+              '--headless',
+              '--remote-debugging-address=%s' % debug_addr,
+              '--remote-debugging-port=%d' % port,
+              '--user-data-dir=%s' % temp_dir,
+              '--use-mock-keychain',
+              '--password-store=basic']
+        process = subprocess.Popen(cmd)
+        try:
+          driver = self.CreateDriver(
+            debugger_address='%s:%d' % (debug_url_addr, port))
+          driver.ExecuteScript(
+            'console.info("%s")' % 'connecting at %d!' % port)
+          driver.Quit()
+        except:
+          continue
+        finally:
+          if process.poll() is None:
+            process.terminate()
+            # Wait for Chrome to exit here to prevent a race with Chrome to
+            # delete/modify the temporary user-data-dir.
+            # Maximum wait ~1 second.
+            for _ in range(20):
+              if process.poll() is not None:
+                break
+              print('continuing to wait for Chrome to exit')
+              time.sleep(.05)
+            else:
+              process.kill()
+        break
+      else:  # Else clause gets invoked if "break" never happens.
+        raise  # This re-raises the most recent exception.
 
 
 class LaunchDesktopTest(ChromeDriverBaseTest):
@@ -3406,19 +5116,20 @@ class LaunchDesktopTest(ChromeDriverBaseTest):
 
     file_descriptor, path = tempfile.mkstemp()
     try:
-      os.write(file_descriptor, '#!/bin/bash\nexit 0')
+      os.write(file_descriptor, b'#!/bin/bash\nexit 0')
       os.close(file_descriptor)
-      os.chmod(path, 0777)
+      os.chmod(path, 0o777)
       exception_raised = False
       try:
         driver = chromedriver.ChromeDriver(_CHROMEDRIVER_SERVER_URL,
+                                           _CHROMEDRIVER_SERVER_PID,
                                            chrome_binary=path,
                                            test_name=self.id())
       except Exception as e:
-        self.assertIn('Chrome failed to start', e.message)
-        self.assertIn('exited normally', e.message)
+        self.assertIn('Chrome failed to start', str(e))
+        self.assertIn('exited normally', str(e))
         self.assertIn('ChromeDriver is assuming that Chrome has crashed',
-                      e.message)
+                      str(e))
         exception_raised = True
       self.assertTrue(exception_raised)
       try:
@@ -3435,10 +5146,11 @@ class LaunchDesktopTest(ChromeDriverBaseTest):
     try:
       driver = chromedriver.ChromeDriver(
           _CHROMEDRIVER_SERVER_URL,
+          _CHROMEDRIVER_SERVER_PID,
           chrome_binary=os.path.join(temp_dir, 'this_file_should_not_exist'),
           test_name=self.id())
     except Exception as e:
-      self.assertIn('no chrome binary', e.message)
+      self.assertIn('no chrome binary', str(e))
       exception_raised = True
     finally:
       shutil.rmtree(temp_dir)
@@ -3464,7 +5176,7 @@ class PerfTest(ChromeDriverBaseTest):
     def PrintResult(result):
       mean = sum(result) / len(result)
       avg_dev = sum([abs(sample - mean) for sample in result]) / len(result)
-      print 'perf result', name, mean, avg_dev, result
+      print('perf result', name, mean, avg_dev, result)
       util.AddBuildStepText('%s: %.3f+-%.3f' % (
           name, mean, avg_dev))
 
@@ -3473,9 +5185,9 @@ class PerfTest(ChromeDriverBaseTest):
 
   def testSessionStartTime(self):
     def Run(url):
-      start = time.time()
+      start = monotonic()
       driver = self.CreateDriver(url)
-      end = time.time()
+      end = monotonic()
       driver.Quit()
       return end - start
     self._RunDriverPerfTest('session start', Run)
@@ -3483,63 +5195,43 @@ class PerfTest(ChromeDriverBaseTest):
   def testSessionStopTime(self):
     def Run(url):
       driver = self.CreateDriver(url)
-      start = time.time()
+      start = monotonic()
       driver.Quit()
-      end = time.time()
+      end = monotonic()
       return end - start
     self._RunDriverPerfTest('session stop', Run)
 
   def testColdExecuteScript(self):
     def Run(url):
       driver = self.CreateDriver(url)
-      start = time.time()
+      start = monotonic()
       driver.ExecuteScript('return 1')
-      end = time.time()
+      end = monotonic()
       driver.Quit()
       return end - start
     self._RunDriverPerfTest('cold exe js', Run)
 
 
-class HeadlessInvalidCertificateTest(ChromeDriverBaseTest):
+class HeadlessInvalidCertificateTest(ChromeDriverBaseTestWithWebServer):
   """End to end tests for ChromeDriver."""
 
   @staticmethod
-  def GlobalSetUp():
-    cert_path = os.path.join(chrome_paths.GetTestData(),
-                             'chromedriver/invalid_ssl_cert.pem')
-    HeadlessInvalidCertificateTest._https_server = webserver.WebServer(
-        chrome_paths.GetTestData(), cert_path)
-    if _ANDROID_PACKAGE_KEY:
-      HeadlessInvalidCertificateTest._device = device_utils.DeviceUtils\
-                                                           .HealthyDevices()[0]
-      https_host_port = HeadlessInvalidCertificateTest._https_server._server\
-                                                      .server_port
-      forwarder.Forwarder.Map([(https_host_port, https_host_port)],
-                              ChromeDriverTest._device)
-
-  @staticmethod
-  def GlobalTearDown():
-    if _ANDROID_PACKAGE_KEY:
-      forwarder.Forwarder.UnmapAllDevicePorts(
-          HeadlessInvalidCertificateTest._device)
-    HeadlessInvalidCertificateTest._https_server.Shutdown()
-
-  @staticmethod
   def GetHttpsUrlForFile(file_path):
-    return HeadlessInvalidCertificateTest._https_server.GetUrl() + file_path
+    return (
+      HeadlessInvalidCertificateTest._https_server.GetUrl() + file_path)
 
   def setUp(self):
     self._driver = self.CreateDriver(chrome_switches = ["--headless"],
                                      accept_insecure_certs = True)
 
   def testLoadsPage(self):
-    print "loading"
+    print("loading")
     self._driver.Load(self.GetHttpsUrlForFile('/chromedriver/page_test.html'))
     # Verify that page content loaded.
     self._driver.FindElement('css selector', '#link')
 
   def testNavigateNewWindow(self):
-    print "loading"
+    print("loading")
     self._driver.Load(self.GetHttpsUrlForFile('/chromedriver/page_test.html'))
     self._driver.ExecuteScript(
         'document.getElementById("link").href = "page_test.html";')
@@ -3549,7 +5241,7 @@ class HeadlessInvalidCertificateTest(ChromeDriverBaseTest):
     new_window_handle = self.WaitForNewWindow(self._driver, old_handles)
     self.assertNotEqual(None, new_window_handle)
     self._driver.SwitchToWindow(new_window_handle)
-    self.assertEquals(new_window_handle, self._driver.GetCurrentWindowHandle())
+    self.assertEqual(new_window_handle, self._driver.GetCurrentWindowHandle())
     # Verify that page content loaded in new window.
     self._driver.FindElement('css selector', '#link')
 
@@ -3569,13 +5261,187 @@ class HeadlessChromeDriverTest(ChromeDriverBaseTestWithWebServer):
 
     self.assertTrue(new_window['handle'] not in current_handles)
     self.assertTrue(new_window['handle'] in self._driver.GetWindowHandles())
-    self.assertEquals(text, 'PASS')
+    self.assertEqual(text, 'PASS')
 
   def testNewWindowDoesNotFocus(self):
     self._newWindowDoesNotFocus(window_type='window')
 
   def testNewTabDoesNotFocus(self):
     self._newWindowDoesNotFocus(window_type='tab')
+
+  def testWindowFullScreen(self):
+    old_rect_list = self._driver.GetWindowRect()
+    # Testing the resulting screensize doesn't work in headless, because there
+    # is no screen to give a size.
+    # We just want to ensure this command doesn't timeout or error.
+    self._driver.FullScreenWindow()
+    # Restore a known size so next tests won't fail
+    self._driver.SetWindowRect(*old_rect_list)
+
+  def testPrintHeadless(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    pdf = self._driver.PrintPDF({
+                                  'orientation': 'landscape',
+                                  'scale': 1.1,
+                                  'margin': {
+                                    'top': 1.1,
+                                    'bottom': 2.2,
+                                    'left': 3.3,
+                                    'right': 4.4
+                                  },
+                                  'background': True,
+                                  'shrinkToFit': False,
+                                  'pageRanges': [1],
+                                  'page': {
+                                    'width': 15.6,
+                                    'height': 20.6
+                                  }
+                                })
+    decoded_pdf = base64.b64decode(pdf)
+    self.assertTrue(decoded_pdf.startswith(b"%PDF"))
+    self.assertTrue(decoded_pdf.endswith(b"%%EOF"))
+
+  def testPrintInvalidArgumentHeadless(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self.assertRaises(chromedriver.InvalidArgument,
+                      self._driver.PrintPDF, {'pageRanges': ['x-y']})
+
+class BidiTest(ChromeDriverBaseTestWithWebServer):
+
+  def setUp(self):
+    self._driver = self.CreateDriver(web_socket_url = True)
+
+  def createWebSocketConnection(self, driver = None):
+    if driver is None:
+      driver = self._driver
+    conn = driver.CreateWebSocketConnection()
+    conn.SetTimeout(5 * 60) # 5 minutes
+    return conn
+
+  def testCreateContext(self):
+    conn = self.createWebSocketConnection()
+
+    old_handles = self._driver.GetWindowHandles()
+    self.assertEqual(1, len(old_handles))
+    self.assertNotEqual("BiDi Mapper", self._driver.GetTitle())
+
+    cmd_id = conn.SendCommand({
+      'method': 'browsingContext.create',
+      'params': {
+          'type': 'tab'
+      }
+    })
+    conn.WaitForResponse(cmd_id)
+    new_handles = self._driver.GetWindowHandles()
+    diff = set(new_handles) - set(old_handles)
+    self.assertEqual(1, len(diff))
+
+  def testGetBrowsingContextTree(self):
+    conn = self.createWebSocketConnection()
+
+    cmd_id = conn.SendCommand({
+      'method': 'browsingContext.getTree',
+      'params': {
+      }
+    })
+    resp = conn.WaitForResponse(cmd_id)
+    contexts = resp['result']['contexts']
+    self.assertEqual(1, len(contexts))
+
+  def testMapperIsNotDisplacedByNavigation(self):
+    self._http_server.SetDataForPath('/page.html',
+     bytes('<html><title>Regular Page</title></body></html>', 'utf-8'))
+
+    conn = self.createWebSocketConnection()
+    old_handles = self._driver.GetWindowHandles()
+
+    self._driver.Load(self._http_server.GetUrl() + '/page.html')
+    self.assertEqual("Regular Page", self._driver.GetTitle())
+
+    cmd_id = conn.SendCommand({
+      'method': 'browsingContext.create',
+      'params': {
+          'type': 'tab'
+      }
+    })
+    conn.WaitForResponse(cmd_id)
+    new_handles = self._driver.GetWindowHandles()
+    diff = set(new_handles) - set(old_handles)
+    self.assertEqual(1, len(diff))
+
+  def testBrowserQuitsWhenLastPageIsClosed(self):
+    conn = self.createWebSocketConnection()
+
+    handles = self._driver.GetWindowHandles()
+    self.assertEqual(1, len(handles))
+    self._driver.CloseWindow()
+
+    with self.assertRaises(chromedriver.WebSocketConnectionClosedException):
+      # BiDi messages cannot have negative "id".
+      # Wait indefinitely until time out.
+      conn.WaitForResponse(-1)
+
+  def testCloseOneOfManyPages(self):
+    conn = self.createWebSocketConnection()
+
+    cmd_id = conn.SendCommand({
+      'method': 'browsingContext.create',
+      'params': {
+          'type': 'tab'
+      }
+    })
+    conn.WaitForResponse(cmd_id)
+
+    handles = self._driver.GetWindowHandles()
+    self.assertEqual(2, len(handles))
+    self._driver.CloseWindow()
+
+    cmd_id = conn.SendCommand({
+      'method': 'browsingContext.getTree',
+      'params': {
+      }
+    })
+    resp = conn.WaitForResponse(cmd_id)
+    contexts = resp['result']['contexts']
+    self.assertEqual(1, len(contexts))
+
+  def testBrowserQuitsWhenLastBrowsingContextIsClosed(self):
+    conn = self.createWebSocketConnection()
+
+    cmd_id = conn.SendCommand({
+      'method': 'browsingContext.getTree',
+      'params': {
+      }
+    })
+    resp = conn.WaitForResponse(cmd_id)
+    contexts = resp['result']['contexts']
+
+    cmd_id = conn.SendCommand({
+      'method': 'browsingContext.close',
+      'params': {
+          'context': contexts[0]['context']
+      }
+    })
+    conn.WaitForResponse(cmd_id)
+
+    with self.assertRaises(chromedriver.WebSocketConnectionClosedException):
+      # BiDi messages cannot have negative "id".
+      # Wait indefinitely until time out.
+      conn.WaitForResponse(-1)
+
+
+  # TODO(nechaev): Test over tab switching by different means.
+
+class ClassiTest(ChromeDriverBaseTestWithWebServer):
+
+  def testAfterLastPage(self):
+    driver = self.CreateDriver(web_socket_url = False)
+
+    handles = driver.GetWindowHandles()
+    self.assertEqual(1, len(handles))
+    driver.CloseWindow()
+
+
 
 class SupportIPv4AndIPv6(ChromeDriverBaseTest):
   def testSupportIPv4AndIPv6(self):
@@ -3593,12 +5459,64 @@ class SupportIPv4AndIPv6(ChromeDriverBaseTest):
       self.CreateDriver('http://[::1]:' +
                                  str(chromedriver_server.GetPort()))
 
+class JavaScriptTests(ChromeDriverBaseTestWithWebServer):
+  def GetFileUrl(self, filename):
+    return 'file://' + self.js_root + filename
+
+  def setUp(self):
+    self._driver = self.CreateDriver()
+    self.js_root = os.path.dirname(os.path.realpath(__file__)) + '/../js/'
+    self._driver.SetWindowRect(640, 480, 0, 0)
+
+  def checkTestResult(self):
+    def getStatus():
+      return self._driver.ExecuteScript('return window.CDCJStestRunStatus')
+
+    self.WaitForCondition(getStatus)
+    self.assertEqual('PASS', getStatus())
+
+  def testAllJS(self):
+    self._driver.Load(self.GetFileUrl('call_function_test.html'))
+    self.checkTestResult()
+
+    self._driver.Load(self.GetFileUrl('dispatch_touch_event_test.html'))
+    self.checkTestResult()
+
+    self._driver.Load(self.GetFileUrl('execute_async_script_test.html'))
+    self.checkTestResult()
+
+    self._driver.Load(self.GetFileUrl('execute_script_test.html'))
+    self.checkTestResult()
+
+    self._driver.Load(self.GetFileUrl('get_element_location_test.html'))
+    self.checkTestResult()
+
+    self._driver.Load(self.GetFileUrl('get_element_region_test.html'))
+    self.checkTestResult()
+
+    self._driver.Load(self.GetFileUrl('is_option_element_toggleable_test.html'))
+    self.checkTestResult()
+
+    self._driver.Load(self.GetFileUrl('focus_test.html'))
+    self.checkTestResult()
+
+class VendorSpecificTest(ChromeDriverBaseTestWithWebServer):
+
+  def setUp(self):
+    global _VENDOR_ID
+    self._vendor_id = _VENDOR_ID
+    self._driver = self.CreateDriver()
+
+  def testGetSinks(self):
+    # Regression test for chromedriver:4176
+    # This command crashed ChromeDriver on Android
+    self._driver.GetCastSinks(self._vendor_id)
 
 # 'Z' in the beginning is to make test executed in the end of suite.
 class ZChromeStartRetryCountTest(unittest.TestCase):
 
   def testChromeStartRetryCount(self):
-    self.assertEquals(0, chromedriver.ChromeDriver.retry_count,
+    self.assertEqual(0, chromedriver.ChromeDriver.retry_count,
                       "Chrome was retried to start during suite execution "
                       "in following tests:\n" +
                       ', \n'.join(chromedriver.ChromeDriver.retried_tests))
@@ -3624,7 +5542,7 @@ if __name__ == '__main__':
   parser.add_option(
       '', '--android-package',
       help=('Android package key. Possible values: ' +
-            str(_ANDROID_NEGATIVE_FILTER.keys())))
+            str(list(_ANDROID_NEGATIVE_FILTER.keys()))))
 
   parser.add_option(
       '', '--isolated-script-test-output',
@@ -3632,6 +5550,9 @@ if __name__ == '__main__':
   parser.add_option(
       '', '--test-type',
       help='Select type of tests to run. Possible value: integration')
+  parser.add_option(
+      '', '--vendor',
+      help='Vendor id for vendor specific tests. Defaults to "goog"')
 
   options, args = parser.parse_args()
 
@@ -3650,8 +5571,14 @@ if __name__ == '__main__':
   if options.replayable and not options.log_path:
     parser.error('Need path specified when replayable log set to true.')
 
+  # When running in commit queue & waterfall, minidump will need to write to
+  # same directory as log, so use the same path
+  global _MINIDUMP_PATH
+  if options.log_path:
+    _MINIDUMP_PATH = os.path.dirname(options.log_path)
+
   global _CHROMEDRIVER_BINARY
-  _CHROMEDRIVER_BINARY = options.chromedriver
+  _CHROMEDRIVER_BINARY = util.GetAbsolutePathOfUserPath(options.chromedriver)
 
   if (options.android_package and
       options.android_package not in _ANDROID_NEGATIVE_FILTER):
@@ -3660,6 +5587,10 @@ if __name__ == '__main__':
   global chromedriver_server
   chromedriver_server = server.Server(_CHROMEDRIVER_BINARY, options.log_path,
                                       replayable=options.replayable)
+
+  global _CHROMEDRIVER_SERVER_PID
+  _CHROMEDRIVER_SERVER_PID = chromedriver_server.GetPid()
+
   global _CHROMEDRIVER_SERVER_URL
   _CHROMEDRIVER_SERVER_URL = chromedriver_server.GetUrl()
 
@@ -3668,13 +5599,40 @@ if __name__ == '__main__':
   if options.chrome:
     _CHROME_BINARY = util.GetAbsolutePathOfUserPath(options.chrome)
   else:
-    _CHROME_BINARY = None
+    # In some test environments (such as commit queue), it's not convenient to
+    # specify Chrome binary location on the command line. Try to use heuristics
+    # to locate the Chrome binary next to the ChromeDriver binary.
+    driver_path = os.path.dirname(_CHROMEDRIVER_BINARY)
+    chrome_path = None
+    platform = util.GetPlatformName()
+    if platform == 'linux':
+      chrome_path = os.path.join(driver_path, 'chrome')
+    elif platform == 'mac':
+      if os.path.exists(os.path.join(driver_path, 'Google Chrome.app')):
+        chrome_path = os.path.join(driver_path, 'Google Chrome.app',
+                                   'Contents', 'MacOS', 'Google Chrome')
+      else:
+        chrome_path = os.path.join(driver_path, 'Chromium.app',
+                                   'Contents', 'MacOS', 'Chromium')
+    elif platform == 'win':
+      chrome_path = os.path.join(driver_path, 'chrome.exe')
+
+    if chrome_path is not None and os.path.exists(chrome_path):
+      _CHROME_BINARY = chrome_path
+    else:
+      _CHROME_BINARY = None
 
   global _ANDROID_PACKAGE_KEY
   _ANDROID_PACKAGE_KEY = options.android_package
 
   if _ANDROID_PACKAGE_KEY:
     devil_chromium.Initialize()
+
+  global _VENDOR_ID
+  if options.vendor:
+    _VENDOR_ID = options.vendor
+  else:
+    _VENDOR_ID = 'goog'
 
   if options.filter == '':
     if _ANDROID_PACKAGE_KEY:
@@ -3692,22 +5650,36 @@ if __name__ == '__main__':
 
   all_tests_suite = unittest.defaultTestLoader.loadTestsFromModule(
       sys.modules[__name__])
-  tests = unittest_util.FilterTestSuite(all_tests_suite, options.filter)
-  # TODO(johnchen@chromium.org): Investigate feasibility of combining
-  # multiple GlobalSetup and GlobalTearDown, and reducing the number of HTTP
-  # servers used for the test.
-  ChromeDriverTest.GlobalSetUp()
-  ChromeDriverSecureContextTest.GlobalSetUp()
-  HeadlessInvalidCertificateTest.GlobalSetUp()
-  MobileEmulationCapabilityTest.GlobalSetUp()
-  result = unittest.TextTestRunner(stream=sys.stdout, verbosity=2).run(tests)
-  ChromeDriverTest.GlobalTearDown()
-  ChromeDriverSecureContextTest.GlobalTearDown()
-  HeadlessInvalidCertificateTest.GlobalTearDown()
-  MobileEmulationCapabilityTest.GlobalTearDown()
+  test_suite = unittest_util.FilterTestSuite(all_tests_suite, options.filter)
+  test_suites = [list(map(lambda t: t.id(),  test_suite))]
+
+  ChromeDriverBaseTestWithWebServer.GlobalSetUp()
+
+  runner = unittest.TextTestRunner(
+      stream=sys.stdout, descriptions=False, verbosity=2,
+      resultclass=unittest_util.AddSuccessTextTestResult)
+  result = runner.run(test_suite)
+  results = [result]
+
+  num_failed = len(result.failures) + len(result.errors)
+  # Limit fail tests to 10 to avoid real bug causing many tests to fail
+  # Only enable retry for automated bot test
+  if (num_failed > 0 and num_failed <= 10
+      and options.test_type == 'integration'):
+    retry_test_suite = unittest.TestSuite()
+    for f in result.failures:
+      retry_test_suite.addTest(f[0])
+    for e in result.errors:
+      retry_test_suite.addTest(e[0])
+    test_suites.append(list(map(lambda t: t.id(),  retry_test_suite)))
+    print('\nRetrying failed tests\n')
+    retry_result = runner.run(retry_test_suite)
+    results.append(retry_result)
+
+  ChromeDriverBaseTestWithWebServer.GlobalTearDown()
 
   if options.isolated_script_test_output:
-    util.WriteResultToJSONFile(tests, result,
+    util.WriteResultToJSONFile(test_suites, results,
                                options.isolated_script_test_output)
-
-  sys.exit(len(result.failures) + len(result.errors))
+  util.TryUploadingResultToResultSink(results)
+  sys.exit(len(results[-1].failures) + len(results[-1].errors))

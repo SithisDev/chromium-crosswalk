@@ -1,16 +1,21 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/signin/signin_email_confirmation_dialog.h"
 
+#include <utility>
 #include <vector>
 
+#include "base/check.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/user_metrics.h"
+#include "base/notreached.h"
+#include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/webui/signin/signin_email_confirmation_ui.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -18,6 +23,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_message_handler.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace {
 
@@ -43,6 +49,11 @@ class SigninEmailConfirmationDialog::DialogWebContentsObserver
                             SigninEmailConfirmationDialog* dialog)
       : content::WebContentsObserver(web_contents),
         signin_email_confirmation_dialog_(dialog) {}
+
+  DialogWebContentsObserver(const DialogWebContentsObserver&) = delete;
+  DialogWebContentsObserver& operator=(const DialogWebContentsObserver&) =
+      delete;
+
   ~DialogWebContentsObserver() override {}
 
  private:
@@ -52,13 +63,13 @@ class SigninEmailConfirmationDialog::DialogWebContentsObserver
     signin_email_confirmation_dialog_->ResetDialogObserver();
   }
 
-  void RenderProcessGone(base::TerminationStatus status) override {
+  void PrimaryMainFrameRenderProcessGone(
+      base::TerminationStatus status) override {
     signin_email_confirmation_dialog_->CloseDialog();
   }
 
-  SigninEmailConfirmationDialog* const signin_email_confirmation_dialog_;
-
-  DISALLOW_COPY_AND_ASSIGN(DialogWebContentsObserver);
+  const raw_ptr<SigninEmailConfirmationDialog>
+      signin_email_confirmation_dialog_;
 };
 
 SigninEmailConfirmationDialog::SigninEmailConfirmationDialog(
@@ -66,30 +77,29 @@ SigninEmailConfirmationDialog::SigninEmailConfirmationDialog(
     Profile* profile,
     const std::string& last_email,
     const std::string& new_email,
-    const Callback& callback)
+    Callback callback)
     : web_contents_(contents),
       profile_(profile),
       last_email_(last_email),
       new_email_(new_email),
-      callback_(callback) {
-  chrome::RecordDialogCreation(
-      chrome::DialogIdentifier::SIGN_IN_EMAIL_CONFIRMATION);
-}
+      callback_(std::move(callback)) {}
 
 SigninEmailConfirmationDialog::~SigninEmailConfirmationDialog() {}
 
 // static
-void SigninEmailConfirmationDialog::AskForConfirmation(
+SigninEmailConfirmationDialog*
+SigninEmailConfirmationDialog::AskForConfirmation(
     content::WebContents* contents,
     Profile* profile,
     const std::string& last_email,
     const std::string& email,
-    const Callback& callback) {
+    Callback callback) {
   base::RecordAction(base::UserMetricsAction("Signin_Show_ImportDataPrompt"));
   // ShowDialog() will take care of ownership.
   SigninEmailConfirmationDialog* dialog = new SigninEmailConfirmationDialog(
-      contents, profile, last_email, email, callback);
+      contents, profile, last_email, email, std::move(callback));
   dialog->ShowDialog();
+  return dialog;
 }
 
 void SigninEmailConfirmationDialog::ShowDialog() {
@@ -142,8 +152,8 @@ ui::ModalType SigninEmailConfirmationDialog::GetDialogModalType() const {
   return ui::MODAL_TYPE_WINDOW;
 }
 
-base::string16 SigninEmailConfirmationDialog::GetDialogTitle() const {
-  return base::string16();
+std::u16string SigninEmailConfirmationDialog::GetDialogTitle() const {
+  return std::u16string();
 }
 
 GURL SigninEmailConfirmationDialog::GetDialogContentURL() const {
@@ -165,30 +175,30 @@ void SigninEmailConfirmationDialog::GetDialogSize(gfx::Size* size) const {
 
 std::string SigninEmailConfirmationDialog::GetDialogArgs() const {
   std::string data;
-  base::DictionaryValue dialog_args;
-  dialog_args.SetString("lastEmail", last_email_);
-  dialog_args.SetString("newEmail", new_email_);
-  base::JSONWriter::Write(dialog_args, &data);
+  base::Value::Dict dialog_args;
+  dialog_args.Set("lastEmail", last_email_);
+  dialog_args.Set("newEmail", new_email_);
+  base::JSONWriter::Write(base::Value(std::move(dialog_args)), &data);
   return data;
 }
 
 void SigninEmailConfirmationDialog::OnDialogClosed(
     const std::string& json_retval) {
   Action action = CLOSE;
-  std::unique_ptr<base::DictionaryValue> ret_value(base::DictionaryValue::From(
-      base::JSONReader::ReadDeprecated(json_retval)));
-  if (ret_value) {
-    std::string action_string;
-    if (ret_value->GetString(kSigninEmailConfirmationActionKey,
-                             &action_string)) {
-      if (action_string == kSigninEmailConfirmationActionCancel) {
+  absl::optional<base::Value> ret_value = base::JSONReader::Read(json_retval);
+  if (ret_value && ret_value->is_dict()) {
+    const std::string* action_string =
+        ret_value->GetDict().FindString(kSigninEmailConfirmationActionKey);
+    if (action_string) {
+      if (*action_string == kSigninEmailConfirmationActionCancel) {
         action = CLOSE;
-      } else if (action_string == kSigninEmailConfirmationActionCreateNewUser) {
+      } else if (*action_string ==
+                 kSigninEmailConfirmationActionCreateNewUser) {
         action = CREATE_NEW_USER;
-      } else if (action_string == kSigninEmailConfirmationActionStartSync) {
+      } else if (*action_string == kSigninEmailConfirmationActionStartSync) {
         action = START_SYNC;
       } else {
-        NOTREACHED() << "Unexpected action value [" << action_string << "]";
+        NOTREACHED() << "Unexpected action value [" << *action_string << "]";
       }
     } else {
       NOTREACHED() << "No action in the dialog close return arguments";
@@ -199,10 +209,10 @@ void SigninEmailConfirmationDialog::OnDialogClosed(
     action = CLOSE;
   }
 
-  if (!callback_.is_null()) {
-    callback_.Run(action);
-    callback_.Reset();
-  }
+  NotifyModalDialogClosed();
+
+  if (callback_)
+    std::move(callback_).Run(action);
 }
 
 void SigninEmailConfirmationDialog::OnCloseContents(
@@ -213,4 +223,21 @@ void SigninEmailConfirmationDialog::OnCloseContents(
 
 bool SigninEmailConfirmationDialog::ShouldShowDialogTitle() const {
   return false;
+}
+
+void SigninEmailConfirmationDialog::CloseModalSignin() {
+  CloseDialog();
+}
+
+void SigninEmailConfirmationDialog::ResizeNativeView(int height) {
+  NOTIMPLEMENTED();
+}
+
+content::WebContents* SigninEmailConfirmationDialog::GetWebContents() {
+  return GetDialogWebContents();
+}
+
+void SigninEmailConfirmationDialog::SetWebContents(
+    content::WebContents* web_contents) {
+  NOTIMPLEMENTED();
 }

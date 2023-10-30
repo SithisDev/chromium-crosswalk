@@ -1,19 +1,22 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.keyboard_accessory.bar_component;
 
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
-import android.support.design.widget.TabLayout;
-import android.support.v7.widget.RecyclerView;
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.android.material.tabs.TabLayout;
+
+import org.chromium.base.Callback;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.Action;
 import org.chromium.chrome.browser.keyboard_accessory.tab_layout_component.KeyboardAccessoryTabLayoutCoordinator.TabLayoutCallbacks;
 import org.chromium.components.autofill.AutofillSuggestion;
 import org.chromium.ui.modelutil.ListModel;
 import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.modelutil.PropertyModel.ReadableBooleanPropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.ReadableObjectPropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.WritableBooleanPropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.WritableIntPropertyKey;
@@ -33,6 +36,8 @@ class KeyboardAccessoryProperties {
     static final ReadableObjectPropertyKey<ListModel<BarItem>> BAR_ITEMS =
             new ReadableObjectPropertyKey<>("bar_items");
     static final WritableBooleanPropertyKey VISIBLE = new WritableBooleanPropertyKey("visible");
+    static final WritableBooleanPropertyKey SKIP_CLOSING_ANIMATION =
+            new WritableBooleanPropertyKey("skip_closing_animation");
     static final WritableIntPropertyKey BOTTOM_OFFSET_PX = new WritableIntPropertyKey("offset");
     static final WritableObjectPropertyKey<String> SHEET_TITLE =
             new WritableObjectPropertyKey<>("sheet_title");
@@ -42,14 +47,24 @@ class KeyboardAccessoryProperties {
             new WritableObjectPropertyKey<>("tab_layout_item");
     static final WritableObjectPropertyKey<Runnable> SHOW_KEYBOARD_CALLBACK =
             new WritableObjectPropertyKey<>("keyboard_callback");
+    static final ReadableBooleanPropertyKey DISABLE_ANIMATIONS_FOR_TESTING =
+            new ReadableBooleanPropertyKey("skip_all_animations_for_testing");
+    static final WritableObjectPropertyKey<Callback<Integer>> OBFUSCATED_CHILD_AT_CALLBACK =
+            new WritableObjectPropertyKey<>("obfuscated_child_at_callback");
+    static final WritableBooleanPropertyKey SHOW_SWIPING_IPH =
+            new WritableBooleanPropertyKey("show_swiping_iph");
 
     static PropertyModel.Builder defaultModelBuilder() {
         return new PropertyModel
-                .Builder(BAR_ITEMS, VISIBLE, BOTTOM_OFFSET_PX, TAB_LAYOUT_ITEM,
-                        KEYBOARD_TOGGLE_VISIBLE, SHEET_TITLE, SHOW_KEYBOARD_CALLBACK)
+                .Builder(DISABLE_ANIMATIONS_FOR_TESTING, BAR_ITEMS, VISIBLE, SKIP_CLOSING_ANIMATION,
+                        BOTTOM_OFFSET_PX, TAB_LAYOUT_ITEM, KEYBOARD_TOGGLE_VISIBLE, SHEET_TITLE,
+                        SHOW_KEYBOARD_CALLBACK, OBFUSCATED_CHILD_AT_CALLBACK, SHOW_SWIPING_IPH)
                 .with(BAR_ITEMS, new ListModel<>())
                 .with(VISIBLE, false)
-                .with(KEYBOARD_TOGGLE_VISIBLE, false);
+                .with(SKIP_CLOSING_ANIMATION, false)
+                .with(KEYBOARD_TOGGLE_VISIBLE, false)
+                .with(DISABLE_ANIMATIONS_FOR_TESTING, false)
+                .with(SHOW_SWIPING_IPH, false);
     }
 
     /**

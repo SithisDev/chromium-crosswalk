@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,7 @@
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "url/gurl.h"
 
 using base::android::ConvertJavaStringToUTF16;
@@ -44,9 +45,8 @@ namespace android {
 RlzPingHandler::RlzPingHandler(const JavaRef<jobject>& jprofile) {
   Profile* profile = ProfileAndroid::FromProfileAndroid(jprofile);
   DCHECK(profile);
-  url_loader_factory_ =
-      content::BrowserContext::GetDefaultStoragePartition(profile)
-          ->GetURLLoaderFactoryForBrowserProcess();
+  url_loader_factory_ = profile->GetDefaultStoragePartition()
+                            ->GetURLLoaderFactoryForBrowserProcess();
 }
 
 RlzPingHandler::~RlzPingHandler() = default;
@@ -100,11 +100,11 @@ void RlzPingHandler::Ping(
             trigger:
             "Critical signals like first install, a promotion dialog being"
             "shown, a user selection for a promotion may trigger a ping"
+            data: "TODO(crbug.com/1231780): Add this field."
             destination: WEBSITE
           }
           policy {
             cookies_allowed: NO
-            cookies_store: "user"
             setting: "Not user controlled. But it uses a trusted web end point"
                      "that doesn't use user data"
             policy_exception_justification:
@@ -115,7 +115,7 @@ void RlzPingHandler::Ping(
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = request_url;
   resource_request->load_flags = net::LOAD_DISABLE_CACHE;
-  resource_request->allow_credentials = false;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   simple_url_loader_ = network::SimpleURLLoader::Create(
       std::move(resource_request), traffic_annotation);

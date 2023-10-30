@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,21 +9,21 @@
 #include "base/files/file_path.h"
 
 RemovableStorageWriter::RemovableStorageWriter(
-    std::unique_ptr<service_manager::ServiceContextRef> service_ref)
-    : service_ref_(std::move(service_ref)) {}
+    mojo::PendingReceiver<chrome::mojom::RemovableStorageWriter> receiver)
+    : receiver_(this, std::move(receiver)) {}
 
 RemovableStorageWriter::~RemovableStorageWriter() = default;
 
 void RemovableStorageWriter::Write(
     const base::FilePath& source,
     const base::FilePath& target,
-    chrome::mojom::RemovableStorageWriterClientPtr client) {
+    mojo::PendingRemote<chrome::mojom::RemovableStorageWriterClient> client) {
   writer_.Write(source, target, std::move(client));
 }
 
 void RemovableStorageWriter::Verify(
     const base::FilePath& source,
     const base::FilePath& target,
-    chrome::mojom::RemovableStorageWriterClientPtr client) {
+    mojo::PendingRemote<chrome::mojom::RemovableStorageWriterClient> client) {
   writer_.Verify(source, target, std::move(client));
 }

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,16 @@ namespace extensions {
 class Extension;
 
 namespace devtools_util {
+
+// Open a dev tools window for the service worker background for the given
+// extension.
+void InspectServiceWorkerBackground(const Extension* extension,
+                                    Profile* profile);
+
+// Open a dev tools window for an inactive service worker background for the
+// given extension.
+void InspectInactiveServiceWorkerBackground(const Extension* extension,
+                                            Profile* profile);
 
 // Open a dev tools window for the background page for the given extension,
 // starting the background page first if necessary.

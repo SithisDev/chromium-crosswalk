@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,56 +8,29 @@
 #include <vector>
 
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/resource_coordinator/tab_metrics_event.pb.h"
 #include "chrome/browser/resource_coordinator/tab_ranker/tab_features.h"
 #include "chrome/browser/resource_coordinator/tab_ranker/tab_features_test_helper.h"
 #include "chrome/browser/resource_coordinator/tab_ranker/window_features.h"
+#include "chrome/browser/tab_contents/form_interaction_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_activity_simulator.h"
+#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/site_engagement/content/site_engagement_service.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/page_importance_signals.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ui_base_types.h"
-
-// TODO(crbug.com/961073): Fix memory leaks in tests and re-enable on LSAN.
-#ifdef LEAK_SANITIZER
-#define MAYBE_GetNavigationEntryCount DISABLED_GetNavigationEntryCount
-#define MAYBE_GetAudibleState DISABLED_GetAudibleState
-#define MAYBE_CreateWindowFeaturesTest DISABLED_CreateWindowFeaturesTest
-#define MAYBE_CreateWindowFeaturesTestMoveTabToOtherWindow \
-  DISABLED_CreateWindowFeaturesTestMoveTabToOtherWindow
-#define MAYBE_CreateWindowFeaturesTestReplaceTab \
-  DISABLED_CreateWindowFeaturesTestReplaceTab
-#define MAYBE_GetHasFormEntry DISABLED_GetHasFormEntry
-#define MAYBE_GetPinState DISABLED_GetPinState
-#define MAYBE_GetSiteEngagementScore DISABLED_GetSiteEngagementScore
-#define MAYBE_GetHost DISABLED_GetHost
-#define MAYBE_GetTabFeatures DISABLED_GetTabFeatures
-#else
-#define MAYBE_GetNavigationEntryCount GetNavigationEntryCount
-#define MAYBE_GetAudibleState GetAudibleState
-#define MAYBE_CreateWindowFeaturesTest CreateWindowFeaturesTest
-#define MAYBE_CreateWindowFeaturesTestMoveTabToOtherWindow \
-  CreateWindowFeaturesTestMoveTabToOtherWindow
-#define MAYBE_CreateWindowFeaturesTestReplaceTab \
-  CreateWindowFeaturesTestReplaceTab
-#define MAYBE_GetHasFormEntry GetHasFormEntry
-#define MAYBE_GetPinState GetPinState
-#define MAYBE_GetSiteEngagementScore GetSiteEngagementScore
-#define MAYBE_GetHost GetHost
-#define MAYBE_GetTabFeatures GetTabFeatures
-#endif
 
 using content::WebContentsTester;
 using metrics::WindowMetricsEvent;
@@ -74,19 +47,25 @@ constexpr char kExampleDomain[] = "example.com";
 class FakeBrowserWindow : public TestBrowserWindow {
  public:
   FakeBrowserWindow() = default;
+
+  FakeBrowserWindow(const FakeBrowserWindow&) = delete;
+  FakeBrowserWindow& operator=(const FakeBrowserWindow&) = delete;
+
   ~FakeBrowserWindow() override = default;
 
   // Helper function to handle FakeBrowserWindow lifetime. Modeled after
   // CreateBrowserWithTestWindowForParams.
   static std::unique_ptr<Browser> CreateBrowserWithFakeWindowForParams(
-      Browser::CreateParams* params) {
+      const Browser::CreateParams& input) {
     // TestBrowserWindowOwner takes ownersip of the window and will destroy the
     // window (along with itself) automatically when the browser is closed.
     FakeBrowserWindow* window = new FakeBrowserWindow;
     new TestBrowserWindowOwner(window);
 
-    params->window = window;
-    auto browser = std::make_unique<Browser>(*params);
+    // Create a new params with window set.
+    Browser::CreateParams params = input;
+    params.window = window;
+    auto browser = std::unique_ptr<Browser>(Browser::Create(params));
     window->browser_ = browser.get();
     window->Activate();
     return browser;
@@ -129,11 +108,9 @@ class FakeBrowserWindow : public TestBrowserWindow {
   }
 
  private:
-  Browser* browser_ = nullptr;
+  raw_ptr<Browser> browser_ = nullptr;
   bool is_active_ = false;
   ui::WindowShowState show_state_ = ui::SHOW_STATE_NORMAL;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeBrowserWindow);
 };
 
 }  // namespace
@@ -144,24 +121,25 @@ class TabMetricsLoggerTest : public ChromeRenderViewHostTestHarness {
  protected:
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
-
-    params_ = new Browser::CreateParams(profile(), true);
-    browser_ = CreateBrowserWithTestWindowForParams(params_);
+    Browser::CreateParams params(profile(), true);
+    browser_ = FakeBrowserWindow::CreateBrowserWithFakeWindowForParams(params);
     tab_strip_model_ = browser_->tab_strip_model();
 
     // Add a foreground tab.
+    // This will not cause any leak, because we'll call
+    // tab_strip_model_->CloseAllTabs() in TearDown.
     web_contents_ = tab_activity_simulator_.AddWebContentsAndNavigate(
         tab_strip_model_, GURL(kChromiumUrl));
     tab_strip_model_->ActivateTabAt(0);
+    // This will not cause any leak because it's just a static_cast.
     web_contents_tester_ = WebContentsTester::For(web_contents_);
   }
 
   TabActivitySimulator tab_activity_simulator_;
-  Browser::CreateParams* params_;
   std::unique_ptr<Browser> browser_;
-  TabStripModel* tab_strip_model_;
-  content::WebContents* web_contents_;
-  content::WebContentsTester* web_contents_tester_;
+  raw_ptr<TabStripModel> tab_strip_model_;
+  raw_ptr<content::WebContents> web_contents_;
+  raw_ptr<content::WebContentsTester> web_contents_tester_;
   TabMetricsLogger::PageMetrics pg_metrics_;
 
   void TearDown() override {
@@ -183,31 +161,24 @@ class TabMetricsLoggerTest : public ChromeRenderViewHostTestHarness {
   }
 };
 
-// TODO(crbug.com/949288, crbug.com/950244): All tests are flaky on ChromeOS
-#if defined(OS_CHROMEOS)
-#define MAYBE_(test) DISABLED_##test
-#else
-#define MAYBE_(test) test
-#endif
-
 // Tests has_form_entry.
-TEST_F(TabMetricsLoggerTest, MAYBE_(MAYBE_GetHasFormEntry)) {
+TEST_F(TabMetricsLoggerTest, GetHasFormEntry) {
   EXPECT_FALSE(CurrentTabFeatures().has_form_entry);
-  content::PageImportanceSignals signal;
-  signal.had_form_interaction = true;
-  web_contents_tester_->SetPageImportanceSignals(signal);
+  FormInteractionTabHelper::CreateForWebContents(web_contents_);
+  FormInteractionTabHelper::FromWebContents(web_contents_)
+      ->OnHadFormInteractionChangedForTesting(true);
   EXPECT_TRUE(CurrentTabFeatures().has_form_entry);
 }
 
 // Tests is_pinned.
-TEST_F(TabMetricsLoggerTest, MAYBE_(MAYBE_GetPinState)) {
+TEST_F(TabMetricsLoggerTest, GetPinState) {
   EXPECT_FALSE(CurrentTabFeatures().is_pinned);
   tab_strip_model_->SetTabPinned(0, true);
   EXPECT_TRUE(CurrentTabFeatures().is_pinned);
 }
 
 // Tests navigation_entry_count.
-TEST_F(TabMetricsLoggerTest, MAYBE_(MAYBE_GetNavigationEntryCount)) {
+TEST_F(TabMetricsLoggerTest, GetNavigationEntryCount) {
   EXPECT_EQ(CurrentTabFeatures().navigation_entry_count, 1);
   tab_activity_simulator_.Navigate(web_contents_, GURL(kExampleUrl),
                                    pg_metrics_.page_transition);
@@ -218,37 +189,37 @@ TEST_F(TabMetricsLoggerTest, MAYBE_(MAYBE_GetNavigationEntryCount)) {
 }
 
 // Tests site_engagement_score.
-TEST_F(TabMetricsLoggerTest, MAYBE_(MAYBE_GetSiteEngagementScore)) {
+TEST_F(TabMetricsLoggerTest, GetSiteEngagementScore) {
   EXPECT_EQ(CurrentTabFeatures().site_engagement_score, 0);
-  SiteEngagementService::Get(profile())->ResetBaseScoreForURL(
+  site_engagement::SiteEngagementService::Get(profile())->ResetBaseScoreForURL(
       GURL(kChromiumUrl), 91);
   EXPECT_EQ(CurrentTabFeatures().site_engagement_score, 90);
 }
 
 // Tests was_recently_audible.
-TEST_F(TabMetricsLoggerTest, MAYBE_(MAYBE_GetAudibleState)) {
+TEST_F(TabMetricsLoggerTest, GetAudibleState) {
   EXPECT_FALSE(CurrentTabFeatures().was_recently_audible);
   web_contents_tester_->SetIsCurrentlyAudible(true);
   EXPECT_TRUE(CurrentTabFeatures().was_recently_audible);
 }
 
 // Tests host.
-TEST_F(TabMetricsLoggerTest, MAYBE_(MAYBE_GetHost)) {
+TEST_F(TabMetricsLoggerTest, GetHost) {
   EXPECT_EQ(CurrentTabFeatures().host, kChromiumDomain);
 }
 
 // Tests creating a flat TabFeatures structure for logging a tab and its
 // TabMetrics state.
-TEST_F(TabMetricsLoggerTest, MAYBE_(MAYBE_GetTabFeatures)) {
+TEST_F(TabMetricsLoggerTest, GetTabFeatures) {
   TabActivitySimulator tab_activity_simulator;
   Browser::CreateParams params(profile(), true);
   std::unique_ptr<Browser> browser =
-      CreateBrowserWithTestWindowForParams(&params);
+      FakeBrowserWindow::CreateBrowserWithFakeWindowForParams(params);
   TabStripModel* tab_strip_model = browser->tab_strip_model();
 
   // Add a foreground tab.
   tab_activity_simulator.AddWebContentsAndNavigate(tab_strip_model,
-                                                   GURL("about://blank"));
+                                                   GURL("about:blank"));
   tab_strip_model->ActivateTabAt(0);
 
   // Add a background tab to test.
@@ -287,7 +258,7 @@ TEST_F(TabMetricsLoggerTest, MAYBE_(MAYBE_GetTabFeatures)) {
   tab_activity_simulator.Navigate(bg_contents, GURL(kChromiumUrl),
                                   page_transition);
   tab_strip_model->SetTabPinned(1, true);
-  SiteEngagementService::Get(profile())->ResetBaseScoreForURL(
+  site_engagement::SiteEngagementService::Get(profile())->ResetBaseScoreForURL(
       GURL(kChromiumUrl), 91);
 
   {
@@ -325,6 +296,10 @@ TEST_F(TabMetricsLoggerTest, MAYBE_(MAYBE_GetTabFeatures)) {
 // Checks that ForegroundedOrClosed event is logged correctly.
 // TODO(charleszhao): add checks for TabMetrics event.
 class TabMetricsLoggerUKMTest : public ::testing::Test {
+ public:
+  TabMetricsLoggerUKMTest(const TabMetricsLoggerUKMTest&) = delete;
+  TabMetricsLoggerUKMTest& operator=(const TabMetricsLoggerUKMTest&) = delete;
+
  protected:
   TabMetricsLoggerUKMTest() = default;
 
@@ -354,13 +329,11 @@ class TabMetricsLoggerUKMTest : public ::testing::Test {
 
  private:
   // Sets up the task scheduling/task-runner environment for each test.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   // Sets itself as the global UkmRecorder on construction.
   ukm::TestAutoSetUkmRecorder test_ukm_recorder_;
   // The object being tested:
   TabMetricsLogger logger_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabMetricsLoggerUKMTest);
 };
 
 // Checks TabFeature is logged correctly with TabMetricsLogger::LogTabMetrics.
@@ -413,8 +386,6 @@ TEST_F(TabMetricsLoggerUKMTest, LogForegroundedOrClosedMetrics) {
   foc_metrics.is_foregrounded = false;
   foc_metrics.is_discarded = true;
   foc_metrics.time_from_backgrounded = 1234;
-  foc_metrics.mru_index = 4;
-  foc_metrics.total_tab_count = 7;
   foc_metrics.label_id = 5678;
 
   GetLogger()->LogForegroundedOrClosedMetrics(GetSourceId(), foc_metrics);
@@ -432,18 +403,16 @@ TEST_F(TabMetricsLoggerUKMTest, LogForegroundedOrClosedMetrics) {
                                 {"IsDiscarded", foc_metrics.is_discarded},
                                 {"IsForegrounded", foc_metrics.is_foregrounded},
                                 {"LabelId", foc_metrics.label_id},
-                                {"MRUIndex", foc_metrics.mru_index},
                                 {"TimeFromBackgrounded",
                                  foc_metrics.time_from_backgrounded},
-                                {"TotalTabCount", foc_metrics.total_tab_count},
                             });
 }
 
 // Tests CreateWindowFeatures of two browser windows.
-TEST_F(TabMetricsLoggerTest, MAYBE_CreateWindowFeaturesTest) {
+TEST_F(TabMetricsLoggerTest, CreateWindowFeaturesTest) {
   Browser::CreateParams params(profile(), true);
   std::unique_ptr<Browser> browser =
-      FakeBrowserWindow::CreateBrowserWithFakeWindowForParams(&params);
+      FakeBrowserWindow::CreateBrowserWithFakeWindowForParams(params);
 
   AddTab(browser.get());
   WindowFeatures expected_metrics{WindowMetricsEvent::TYPE_TABBED,
@@ -466,7 +435,7 @@ TEST_F(TabMetricsLoggerTest, MAYBE_CreateWindowFeaturesTest) {
   // Create a second browser.
   Browser::CreateParams params_2(Browser::TYPE_POPUP, profile(), true);
   std::unique_ptr<Browser> browser_2 =
-      FakeBrowserWindow::CreateBrowserWithFakeWindowForParams(&params_2);
+      FakeBrowserWindow::CreateBrowserWithFakeWindowForParams(params_2);
 
   AddTab(browser_2.get());
   WindowFeatures expected_metrics_2{WindowMetricsEvent::TYPE_POPUP,
@@ -492,11 +461,10 @@ TEST_F(TabMetricsLoggerTest, MAYBE_CreateWindowFeaturesTest) {
 }
 
 // Tests moving a tab between browser windows.
-TEST_F(TabMetricsLoggerTest,
-       MAYBE_CreateWindowFeaturesTestMoveTabToOtherWindow) {
+TEST_F(TabMetricsLoggerTest, CreateWindowFeaturesTestMoveTabToOtherWindow) {
   Browser::CreateParams params(profile(), true);
   std::unique_ptr<Browser> starting_browser =
-      FakeBrowserWindow::CreateBrowserWithFakeWindowForParams(&params);
+      FakeBrowserWindow::CreateBrowserWithFakeWindowForParams(params);
   AddTab(starting_browser.get());
   WindowFeatures starting_browser_metrics{WindowMetricsEvent::TYPE_TABBED,
                                           WindowMetricsEvent::SHOW_STATE_NORMAL,
@@ -513,7 +481,7 @@ TEST_F(TabMetricsLoggerTest,
 
   // Drag the tab out of its window.
   std::unique_ptr<content::WebContents> dragged_tab =
-      starting_browser->tab_strip_model()->DetachWebContentsAt(1);
+      starting_browser->tab_strip_model()->DetachWebContentsAtForInsertion(1);
   starting_browser_metrics.tab_count--;
   EXPECT_EQ(TabMetricsLogger::CreateWindowFeatures(starting_browser.get()),
             starting_browser_metrics);
@@ -525,10 +493,10 @@ TEST_F(TabMetricsLoggerTest,
 
   // Create a new Browser for the tab.
   std::unique_ptr<Browser> created_browser =
-      FakeBrowserWindow::CreateBrowserWithFakeWindowForParams(&params);
+      FakeBrowserWindow::CreateBrowserWithFakeWindowForParams(params);
   created_browser->window()->Activate();
   created_browser->tab_strip_model()->InsertWebContentsAt(
-      0, std::move(dragged_tab), TabStripModel::ADD_ACTIVE);
+      0, std::move(dragged_tab), AddTabTypes::ADD_ACTIVE);
 
   WindowFeatures created_browser_metrics{WindowMetricsEvent::TYPE_TABBED,
                                          WindowMetricsEvent::SHOW_STATE_NORMAL,
@@ -541,10 +509,10 @@ TEST_F(TabMetricsLoggerTest,
 }
 
 // Tests replacing a tab.
-TEST_F(TabMetricsLoggerTest, MAYBE_CreateWindowFeaturesTestReplaceTab) {
+TEST_F(TabMetricsLoggerTest, CreateWindowFeaturesTestReplaceTab) {
   Browser::CreateParams params(profile(), true);
   std::unique_ptr<Browser> browser =
-      FakeBrowserWindow::CreateBrowserWithFakeWindowForParams(&params);
+      FakeBrowserWindow::CreateBrowserWithFakeWindowForParams(params);
   AddTab(browser.get());
   WindowFeatures expected_metrics{WindowMetricsEvent::TYPE_TABBED,
                                   WindowMetricsEvent::SHOW_STATE_NORMAL, true,
@@ -559,7 +527,7 @@ TEST_F(TabMetricsLoggerTest, MAYBE_CreateWindowFeaturesTestReplaceTab) {
             expected_metrics);
 
   // Replace the tab.
-  content::WebContents::CreateParams web_contents_params(profile(), nullptr);
+  content::WebContents::CreateParams web_contents_params(profile());
   std::unique_ptr<content::WebContents> new_contents = base::WrapUnique(
       content::WebContentsTester::CreateTestWebContents(web_contents_params));
   std::unique_ptr<content::WebContents> old_contents =
@@ -569,7 +537,7 @@ TEST_F(TabMetricsLoggerTest, MAYBE_CreateWindowFeaturesTestReplaceTab) {
             expected_metrics);
 
   // Close the replaced tab. This should update TabCount.
-  browser->tab_strip_model()->CloseWebContentsAt(1, TabStripModel::CLOSE_NONE);
+  browser->tab_strip_model()->CloseWebContentsAt(1, TabCloseTypes::CLOSE_NONE);
   expected_metrics.tab_count--;
   EXPECT_EQ(TabMetricsLogger::CreateWindowFeatures(browser.get()),
             expected_metrics);

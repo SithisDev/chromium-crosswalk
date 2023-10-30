@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,39 +6,49 @@ package org.chromium.chrome.browser.offlinepages.indicator;
 
 import android.os.SystemClock;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.MediumTest;
 
+import androidx.test.filters.MediumTest;
+
+import org.hamcrest.Matchers;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ApplicationState;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.download.DownloadActivity;
+import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.app.download.home.DownloadActivity;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.net.connectivitydetector.ConnectivityDetector;
+import org.chromium.chrome.browser.net.connectivitydetector.ConnectivityDetectorDelegateStub;
 import org.chromium.chrome.browser.offlinepages.ClientId;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.snackbar.SnackbarManager;
-import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarManageable;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.UrlConstants;
-import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarManageable;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.ActivityUtils;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
+import org.chromium.chrome.test.batch.BlankCTATabInitialStateRule;
+import org.chromium.chrome.test.util.ActivityTestUtils;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.MenuUtils;
 import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.offlinepages.SavePageResult;
 import org.chromium.content_public.browser.LoadUrlParams;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.NetworkChangeNotifier;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -50,11 +60,16 @@ import java.util.concurrent.TimeUnit;
 /** Unit tests for offline indicator interacting with chrome activity. */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@Batch(Batch.PER_CLASS)
 // TODO(jianli): Add test for disabled feature.
 public class OfflineIndicatorControllerTest {
+    @ClassRule
+    public static ChromeTabbedActivityTestRule sActivityTestRule =
+            new ChromeTabbedActivityTestRule();
+
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
+    public BlankCTATabInitialStateRule mInitialStateRule =
+            new BlankCTATabInitialStateRule(sActivityTestRule, true);
 
     private static final String TEST_PAGE = "/chrome/test/data/android/test.html";
     private static final int TIMEOUT_MS = 5000;
@@ -62,36 +77,48 @@ public class OfflineIndicatorControllerTest {
             new ClientId(OfflinePageBridge.DOWNLOAD_NAMESPACE, "1234");
 
     private boolean mIsConnected = true;
+    private EmbeddedTestServer mTestServer;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeClass
+    public static void beforeClass() throws Exception {
         // ChromeActivityTestRule disables offline indicator feature. We want to enable it to do
         // our own testing.
         Features.getInstance().enable(ChromeFeatureList.OFFLINE_INDICATOR);
         OfflineIndicatorController.setTimeToWaitForStableOfflineForTesting(1);
-        // This test only cares about whether the network is disconnected or not. So there is no
-        // need to do http probes to validate the network in ConnectivityDetector.
-        ConnectivityDetector.setDelegateForTesting(new ConnectivityDetectorDelegateStub(
-                ConnectivityDetector.ConnectionState.NONE, true /*shouldSkipHttpProbes*/));
-        mActivityTestRule.startMainActivityOnBlankPage();
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             if (!NetworkChangeNotifier.isInitialized()) {
                 NetworkChangeNotifier.init();
             }
             NetworkChangeNotifier.forceConnectivityState(true);
+        });
+    }
+
+    @Before
+    public void setUp() throws Exception {
+        // This test only cares about whether the network is disconnected or not. So there is no
+        // need to do http probes to validate the network in ConnectivityDetector.
+        ConnectivityDetector.setDelegateForTesting(new ConnectivityDetectorDelegateStub(
+                ConnectivityDetector.ConnectionState.NONE, true /*shouldSkipHttpProbes*/));
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            OfflineIndicatorController.resetInstanceForTesting();
             OfflineIndicatorController.initialize();
             OfflineIndicatorController.getInstance()
                     .getConnectivityDetectorForTesting()
                     .setConnectionState(ConnectivityDetector.ConnectionState.VALIDATED);
         });
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
+    }
+
+    @After
+    public void tearDown() {
+        mTestServer.stopAndDestroyServer();
+        setNetworkConnectivity(true);
     }
 
     @Test
     @MediumTest
-    public void testShowOfflineIndicatorOnNTPWhenOffline() throws Exception {
-        EmbeddedTestServer testServer =
-                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
-        String testUrl = testServer.getURL(TEST_PAGE);
+    public void testShowOfflineIndicatorOnNTPWhenOffline() {
+        String testUrl = mTestServer.getURL(TEST_PAGE);
 
         // Load new tab page.
         loadPage(UrlConstants.NTP_URL);
@@ -100,15 +127,13 @@ public class OfflineIndicatorControllerTest {
         setNetworkConnectivity(false);
 
         // Offline indicator should be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), true);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), true);
     }
 
     @Test
     @MediumTest
-    public void testShowOfflineIndicatorOnRegularPageWhenOffline() throws Exception {
-        EmbeddedTestServer testServer =
-                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
-        String testUrl = testServer.getURL(TEST_PAGE);
+    public void testShowOfflineIndicatorOnRegularPageWhenOffline() {
+        String testUrl = mTestServer.getURL(TEST_PAGE);
 
         // Load a page.
         loadPage(testUrl);
@@ -117,15 +142,13 @@ public class OfflineIndicatorControllerTest {
         setNetworkConnectivity(false);
 
         // Offline indicator should be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), true);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), true);
     }
 
     @Test
     @MediumTest
-    public void testHideOfflineIndicatorWhenBackToOnline() throws Exception {
-        EmbeddedTestServer testServer =
-                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
-        String testUrl = testServer.getURL(TEST_PAGE);
+    public void testHideOfflineIndicatorWhenBackToOnline() {
+        String testUrl = mTestServer.getURL(TEST_PAGE);
 
         // Load a page.
         loadPage(testUrl);
@@ -134,21 +157,19 @@ public class OfflineIndicatorControllerTest {
         setNetworkConnectivity(false);
 
         // Offline indicator should be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), true);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), true);
 
         // Reconnect the network.
         setNetworkConnectivity(true);
 
         // Offline indicator should go away.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), false);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), false);
     }
 
     @Test
     @MediumTest
-    public void testDoNotShowSubsequentOfflineIndicatorWhenFlaky() throws Exception {
-        EmbeddedTestServer testServer =
-                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
-        String testUrl = testServer.getURL(TEST_PAGE);
+    public void testDoNotShowSubsequentOfflineIndicatorWhenFlaky() {
+        String testUrl = mTestServer.getURL(TEST_PAGE);
 
         // Load a page.
         loadPage(testUrl);
@@ -157,19 +178,19 @@ public class OfflineIndicatorControllerTest {
         setNetworkConnectivity(false);
 
         // Offline indicator should be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), true);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), true);
 
         // Reconnect the network.
         setNetworkConnectivity(true);
 
         // Offline indicator should go away.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), false);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), false);
 
         // Disconnect the network.
         setNetworkConnectivity(false);
 
         // Subsequent offline indicator should not be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), false);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), false);
 
         // Reconnect the network and keep it for some time before disconnecting it.
         setNetworkConnectivity(true);
@@ -177,18 +198,16 @@ public class OfflineIndicatorControllerTest {
         setNetworkConnectivity(false);
 
         // Subsequent offline indicator should be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), true);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), true);
     }
 
     @Test
     @MediumTest
-    public void testDoNotShowOfflineIndicatorOnErrorPageWhenOffline() throws Exception {
-        EmbeddedTestServer testServer =
-                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
-        String testUrl = testServer.getURL(TEST_PAGE);
+    public void testDoNotShowOfflineIndicatorOnErrorPageWhenOffline() {
+        String testUrl = mTestServer.getURL(TEST_PAGE);
 
         // Stop the server and also disconnect the network.
-        testServer.shutdownAndWaitUntilComplete();
+        mTestServer.shutdownAndWaitUntilComplete();
         setNetworkConnectivity(false);
 
         // Load an error page.
@@ -198,22 +217,20 @@ public class OfflineIndicatorControllerTest {
         setNetworkConnectivity(true);
 
         // Offline indicator should not be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), false);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), false);
 
         // Disconnect the network.
         setNetworkConnectivity(false);
 
         // Offline indicator should not be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), false);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), false);
     }
 
     @Test
     @MediumTest
     public void testDoNotShowOfflineIndicatorOnOfflinePageWhenOffline() throws Exception {
-        EmbeddedTestServer testServer =
-                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
-        String testUrl = testServer.getURL(TEST_PAGE);
-        Tab tab = mActivityTestRule.getActivity().getActivityTab();
+        String testUrl = mTestServer.getURL(TEST_PAGE);
+        Tab tab = sActivityTestRule.getActivity().getActivityTab();
 
         // Save an offline page.
         savePage(testUrl);
@@ -228,32 +245,31 @@ public class OfflineIndicatorControllerTest {
         setNetworkConnectivity(false);
 
         // Offline indicator should not be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), false);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), false);
     }
 
     @Test
     @MediumTest
-    public void testDoNotShowOfflineIndicatorOnDownloadsWhenOffline() throws Exception {
-        if (mActivityTestRule.getActivity().isTablet()) return;
+    public void testDoNotShowOfflineIndicatorOnDownloadsWhenOffline() {
+        if (sActivityTestRule.getActivity().isTablet()) return;
 
-        DownloadActivity downloadActivity = ActivityUtils.waitForActivity(
+        DownloadActivity downloadActivity = ActivityTestUtils.waitForActivity(
                 InstrumentationRegistry.getInstrumentation(), DownloadActivity.class,
                 new MenuUtils.MenuActivityTrigger(InstrumentationRegistry.getInstrumentation(),
-                        mActivityTestRule.getActivity(), R.id.downloads_menu_id));
+                        sActivityTestRule.getActivity(), R.id.downloads_menu_id));
 
         // Disconnect the network.
         setNetworkConnectivity(false);
 
         // Offline indicator should not be shown.
         checkOfflineIndicatorVisibility(downloadActivity, false);
+        downloadActivity.finish();
     }
 
     @Test
     @MediumTest
-    public void testDoNotShowOfflineIndicatorOnPageLoadingWhenOffline() throws Exception {
-        EmbeddedTestServer testServer =
-                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
-        String testUrl = testServer.getURL("/slow?1");
+    public void testDoNotShowOfflineIndicatorOnPageLoadingWhenOffline() {
+        String testUrl = mTestServer.getURL("/slow?3");
 
         // Load a page without waiting it to finish.
         loadPageWithoutWaiting(testUrl, null);
@@ -262,21 +278,19 @@ public class OfflineIndicatorControllerTest {
         setNetworkConnectivity(false);
 
         // Offline indicator should not be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), false);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), false);
 
         // Wait for the page to finish loading.
         waitForPageLoaded(testUrl);
 
         // Offline indicator should be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), true);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), true);
     }
 
     @Test
     @MediumTest
-    public void testReshowOfflineIndicatorWhenResumed() throws Exception {
-        EmbeddedTestServer testServer =
-                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
-        String testUrl = testServer.getURL(TEST_PAGE);
+    public void testReshowOfflineIndicatorWhenResumed() {
+        String testUrl = mTestServer.getURL(TEST_PAGE);
 
         // Load a page.
         loadPage(testUrl);
@@ -285,25 +299,24 @@ public class OfflineIndicatorControllerTest {
         setNetworkConnectivity(false);
 
         // Offline indicator should be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), true);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), true);
 
         // Hide offline indicator.
-        hideOfflineIndicator(mActivityTestRule.getActivity());
+        hideOfflineIndicator(sActivityTestRule.getActivity());
 
         // Simulate switching to other app and then coming back.
         setApplicationState(ApplicationState.HAS_STOPPED_ACTIVITIES);
         setApplicationState(ApplicationState.HAS_RUNNING_ACTIVITIES);
 
         // Offline indicator should be shown again.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), true);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), true);
     }
 
     @Test
     @MediumTest
-    public void testDoNotShowOfflineIndicatorWhenTemporarilyPaused() throws Exception {
-        EmbeddedTestServer testServer =
-                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
-        String testUrl = testServer.getURL(TEST_PAGE);
+    @DisabledTest(message = "https://crbug.com/1211514")
+    public void testDoNotShowOfflineIndicatorWhenTemporarilyPaused() {
+        String testUrl = mTestServer.getURL(TEST_PAGE);
 
         // Load a page.
         loadPage(testUrl);
@@ -312,10 +325,10 @@ public class OfflineIndicatorControllerTest {
         setNetworkConnectivity(false);
 
         // Offline indicator should be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), true);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), true);
 
         // Hide offline indicator.
-        hideOfflineIndicator(mActivityTestRule.getActivity());
+        hideOfflineIndicator(sActivityTestRule.getActivity());
 
         // The paused state can be set when the activity is temporarily covered by another
         // activity's Fragment. So switching to this state temporarily should not bring back
@@ -324,7 +337,7 @@ public class OfflineIndicatorControllerTest {
         setApplicationState(ApplicationState.HAS_RUNNING_ACTIVITIES);
 
         // Offline indicator should not be shown.
-        checkOfflineIndicatorVisibility(mActivityTestRule.getActivity(), false);
+        checkOfflineIndicatorVisibility(sActivityTestRule.getActivity(), false);
     }
 
     private void setNetworkConnectivity(boolean connected) {
@@ -345,11 +358,11 @@ public class OfflineIndicatorControllerTest {
         });
     }
 
-    private void loadPage(String pageUrl) throws Exception {
-        Tab tab = mActivityTestRule.getActivity().getActivityTab();
+    private void loadPage(String pageUrl) {
+        Tab tab = sActivityTestRule.getActivity().getActivityTab();
 
-        mActivityTestRule.loadUrl(pageUrl);
-        Assert.assertEquals(pageUrl, tab.getUrl());
+        sActivityTestRule.loadUrl(pageUrl);
+        Assert.assertEquals(pageUrl, ChromeTabUtils.getUrlStringOnUiThread(tab));
         if (mIsConnected) {
             Assert.assertFalse(isErrorPage(tab));
             Assert.assertFalse(isOfflinePage(tab));
@@ -358,8 +371,8 @@ public class OfflineIndicatorControllerTest {
         }
     }
 
-    private void loadPageWithoutWaiting(String pageUrl, String headers) throws Exception {
-        Tab tab = mActivityTestRule.getActivity().getActivityTab();
+    private void loadPageWithoutWaiting(String pageUrl, String headers) {
+        Tab tab = sActivityTestRule.getActivity().getActivityTab();
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             LoadUrlParams params = new LoadUrlParams(
@@ -371,21 +384,21 @@ public class OfflineIndicatorControllerTest {
         });
     }
 
-    private void waitForPageLoaded(String pageUrl) throws Exception {
-        Tab tab = mActivityTestRule.getActivity().getActivityTab();
+    private void waitForPageLoaded(String pageUrl) {
+        Tab tab = sActivityTestRule.getActivity().getActivityTab();
         ChromeTabUtils.waitForTabPageLoaded(tab, pageUrl);
         ChromeTabUtils.waitForInteractable(tab);
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 
     private void savePage(String url) throws InterruptedException {
-        mActivityTestRule.loadUrl(url);
+        sActivityTestRule.loadUrl(url);
 
         final Semaphore semaphore = new Semaphore(0);
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            Profile profile = Profile.getLastUsedProfile();
+            Profile profile = Profile.getLastUsedRegularProfile();
             OfflinePageBridge offlinePageBridge = OfflinePageBridge.getForProfile(profile);
-            offlinePageBridge.savePage(mActivityTestRule.getWebContents(), CLIENT_ID,
+            offlinePageBridge.savePage(sActivityTestRule.getWebContents(), CLIENT_ID,
                     new OfflinePageBridge.SavePageCallback() {
                         @Override
                         public void onSavePageDone(int savePageResult, String url, long offlineId) {
@@ -400,27 +413,21 @@ public class OfflineIndicatorControllerTest {
 
     private static void checkOfflineIndicatorVisibility(
             SnackbarManageable activity, boolean visible) {
-        CriteriaHelper.pollUiThread(
-                new Criteria(visible ? "Offline indicator not shown" : "Offline indicator shown") {
-                    @Override
-                    public boolean isSatisfied() {
-                        return visible == isShowingOfflineIndicator();
-                    }
-
-                    private boolean isShowingOfflineIndicator() {
-                        if (OfflineIndicatorController.isUsingTopSnackbar()) {
-                            TopSnackbarManager snackbarManager =
-                                    OfflineIndicatorController.getInstance()
-                                            .getTopSnackbarManagerForTesting();
-                            return snackbarManager.isShowing();
-                        } else {
-                            SnackbarManager snackbarManager = activity.getSnackbarManager();
-                            if (!snackbarManager.isShowing()) return false;
-                            return snackbarManager.getCurrentSnackbarForTesting().getController()
-                                    == OfflineIndicatorController.getInstance();
-                        }
-                    }
-                });
+        CriteriaHelper.pollUiThread(() -> {
+            if (OfflineIndicatorController.isUsingTopSnackbar()) {
+                TopSnackbarManager snackbarManager =
+                        OfflineIndicatorController.getInstance().getTopSnackbarManagerForTesting();
+                Criteria.checkThat(snackbarManager.isShowing(), Matchers.is(visible));
+            } else {
+                SnackbarManager snackbarManager = activity.getSnackbarManager();
+                Criteria.checkThat(snackbarManager.isShowing(), Matchers.is(visible));
+                if (visible) {
+                    Criteria.checkThat(
+                            snackbarManager.getCurrentSnackbarForTesting().getController(),
+                            Matchers.is(OfflineIndicatorController.getInstance()));
+                }
+            }
+        });
     }
 
     private static void hideOfflineIndicator(ChromeActivity activity) {

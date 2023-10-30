@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/stl_util.h"
 #include "base/test/test_reg_util_win.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -247,7 +246,7 @@ TEST(NtRegistryTestRedirection, DISABLED_Wow64RedirectionHKLM) {
 }
 
 TEST(NtRegistryTestMisc, SanitizeSubkeyPaths) {
-  std::wstring new_path = L"";
+  std::wstring new_path;
   EXPECT_TRUE(nt::SetTestingOverride(nt::HKCU, new_path));
   std::wstring sani_path = nt::GetTestingOverride(nt::HKCU);
   EXPECT_STREQ(L"", sani_path.c_str());
@@ -298,7 +297,7 @@ TEST(NtRegistryTestMisc, SanitizeSubkeyPaths) {
 class NtRegistryTest : public testing::Test {
  protected:
   void SetUp() override {
-    base::string16 temp;
+    std::wstring temp;
     ASSERT_NO_FATAL_FAILURE(
         override_manager_.OverrideRegistry(HKEY_CURRENT_USER, &temp));
     ASSERT_TRUE(nt::SetTestingOverride(nt::HKCU, temp));
@@ -308,7 +307,7 @@ class NtRegistryTest : public testing::Test {
   }
 
   void TearDown() override {
-    base::string16 temp;
+    std::wstring temp;
     ASSERT_TRUE(nt::SetTestingOverride(nt::HKCU, temp));
     ASSERT_TRUE(nt::SetTestingOverride(nt::HKLM, temp));
   }
@@ -352,7 +351,7 @@ TEST_F(NtRegistryTest, ApiSz) {
   const wchar_t* sz_val_name = L"SzTestValue";
   std::wstring sz_val = L"blah de blah de blahhhhh.";
   const wchar_t* sz_val_name2 = L"SzTestValueEmpty";
-  std::wstring sz_val2 = L"";
+  std::wstring sz_val2;
   const wchar_t* sz_val_name3 = L"SzTestValueMalformed";
   const wchar_t* sz_val_name4 = L"SzTestValueMalformed2";
   std::wstring sz_val3 = L"malformed";
@@ -445,7 +444,7 @@ TEST_F(NtRegistryTest, ApiMultiSz) {
   // Test 2 - Bad value
   // ------------------------------
   const wchar_t* multisz_val_name2 = L"SzmultiTestValueBad";
-  std::wstring multi_empty = L"";
+  std::wstring multi_empty;
 
   multisz_val_set.push_back(multi_empty);
   EXPECT_TRUE(
@@ -629,7 +628,7 @@ TEST_F(NtRegistryTest, ApiEnumeration) {
     ASSERT_TRUE(nt::QueryRegSubkey(key_handle, i, &subkey_name));
 
     bool found = false;
-    for (size_t index = 0; index < base::size(check_names); index++) {
+    for (size_t index = 0; index < std::size(check_names); index++) {
       if (0 == subkey_name.compare(check_names[index])) {
         found = true;
         break;

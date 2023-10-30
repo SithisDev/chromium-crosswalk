@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,15 +13,14 @@
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list_threadsafe.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/extensions/activity_log/activity_actions.h"
 #include "chrome/browser/extensions/activity_log/activity_log_policy.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/browser/script_executor.h"
 #include "extensions/common/dom_action_types.h"
@@ -38,7 +37,6 @@ class PrefRegistrySyncable;
 
 namespace extensions {
 class Extension;
-class ExtensionRegistry;
 class ExtensionSystem;
 
 // A utility for tracing interesting activity for each extension.
@@ -47,8 +45,7 @@ class ExtensionSystem;
 // each profile.
 //
 class ActivityLog : public BrowserContextKeyedAPI,
-                    public ExtensionRegistryObserver,
-                    public content::NotificationObserver {
+                    public ExtensionRegistryObserver {
  public:
   // Observers can listen for activity events. There is probably only one
   // observer: the activityLogPrivate API.
@@ -56,6 +53,9 @@ class ActivityLog : public BrowserContextKeyedAPI,
    public:
     virtual void OnExtensionActivity(scoped_refptr<Action> activity) = 0;
   };
+
+  ActivityLog(const ActivityLog&) = delete;
+  ActivityLog& operator=(const ActivityLog&) = delete;
 
   static BrowserContextKeyedAPIFactory<ActivityLog>* GetFactoryInstance();
 
@@ -99,7 +99,7 @@ class ActivityLog : public BrowserContextKeyedAPI,
           void(std::unique_ptr<std::vector<scoped_refptr<Action>>>)> callback);
 
   // ExtensionRegistryObserver.
-  // We keep track of whether the whitelisted extension is installed; if it is,
+  // We keep track of whether the allowlisted extension is installed; if it is,
   // we want to recompute whether to have logging enabled.
   void OnExtensionLoaded(content::BrowserContext* browser_context,
                          const Extension* extension) override;
@@ -174,11 +174,6 @@ class ActivityLog : public BrowserContextKeyedAPI,
   // whether or not a consumer is active. Otherwise, checks active_consumers_.
   void CheckActive(bool use_cached);
 
-  // content::NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
-
   // Called once the ExtensionSystem is ready.
   void OnExtensionSystemReady();
 
@@ -198,12 +193,12 @@ class ActivityLog : public BrowserContextKeyedAPI,
   // The database policy object takes care of recording & looking up data:
   // data summarization, compression, and logging. There should only be a
   // database_policy_ if the Watchdog app is installed or flag is set.
-  ActivityLogDatabasePolicy* database_policy_;
+  raw_ptr<ActivityLogDatabasePolicy> database_policy_;
   ActivityLogPolicy::PolicyType database_policy_type_;
 
-  Profile* profile_;
+  raw_ptr<Profile> profile_;
 
-  ExtensionSystem* extension_system_;
+  raw_ptr<ExtensionSystem> extension_system_;
 
   bool db_enabled_;  // Whether logging to disk is currently enabled.
   // testing_mode_ controls which policy is selected.
@@ -213,11 +208,11 @@ class ActivityLog : public BrowserContextKeyedAPI,
   // testing_mode_ also causes us to print to the console.
   bool testing_mode_;
 
-  // Used to track whether the whitelisted extension is installed. If it's
+  // Used to track whether the allowlisted extension is installed. If it's
   // added or removed, enabled_ may change.
-  ScopedObserver<extensions::ExtensionRegistry,
-                 extensions::ExtensionRegistryObserver>
-      extension_registry_observer_;
+  base::ScopedObservation<extensions::ExtensionRegistry,
+                          extensions::ExtensionRegistryObserver>
+      extension_registry_observation_{this};
 
   // The number of active consumers of the activity log.
   // TODO(kelvinjiang): eliminate this flag if possible and use has_listeners_
@@ -240,8 +235,6 @@ class ActivityLog : public BrowserContextKeyedAPI,
   // reasons.
   bool is_active_;
 
-  content::NotificationRegistrar registrar_;
-
   base::WeakPtrFactory<ActivityLog> weak_factory_{this};
 
   FRIEND_TEST_ALL_PREFIXES(ActivityLogApiTest, TriggerEvent);
@@ -250,7 +243,6 @@ class ActivityLog : public BrowserContextKeyedAPI,
   FRIEND_TEST_ALL_PREFIXES(ActivityLogEnabledTest, NoSwitch);
   FRIEND_TEST_ALL_PREFIXES(ActivityLogEnabledTest, PrefSwitch);
   FRIEND_TEST_ALL_PREFIXES(ActivityLogEnabledTest, WatchdogSwitch);
-  DISALLOW_COPY_AND_ASSIGN(ActivityLog);
 };
 
 template <>

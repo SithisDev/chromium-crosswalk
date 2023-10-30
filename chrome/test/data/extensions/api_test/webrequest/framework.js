@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,13 @@ var expectedEventData;
 var capturedEventData;
 var capturedUnexpectedData;
 var expectedEventOrder;
+var mparchEnabled;
 var tabId;
 var tabIdMap;
+var documentIdMap;
 var frameIdMap;
 var testWebSocketPort;
+var testWebTransportPort;
 var testServerPort;
 var testServer = "www.a.com";
 var defaultScheme = "http";
@@ -27,9 +30,10 @@ var listeners = {
   'onCompleted': [],
   'onErrorOccurred': []
 };
-// Requests initiated by an extension or user interaction with the browser is a
-// BROWSER_INITIATED action. If the request was instead initiated by a website
-// or code run in the context of a website then it's WEB_INITIATED.
+// Requests initiated by a user interaction with the browser is a
+// BROWSER_INITIATED action. If the request was instead initiated by the tabs
+// extension API, a website or code run in the context of a website then it's
+// WEB_INITIATED.
 const initiators = {
   BROWSER_INITIATED: 2,
   WEB_INITIATED: 3
@@ -42,7 +46,7 @@ var ignoreUnexpected = false;
 
 // This is a debugging aid to print all received events as well as the
 // information whether they were expected.
-var logAllRequests = false;
+var debug = false;
 
 // Runs the |tests| using the |tab| as a default tab.
 function runTestsForTab(tests, tab) {
@@ -52,6 +56,7 @@ function runTestsForTab(tests, tab) {
   chrome.test.getConfig(function(config) {
     testServerPort = config.testServer.port;
     testWebSocketPort = config.testWebSocketPort;
+    testWebTransportPort = config.testWebTransportPort;
     chrome.test.runTests(tests);
   });
 }
@@ -59,7 +64,21 @@ function runTestsForTab(tests, tab) {
 // Creates an "about:blank" tab and runs |tests| with this tab as default.
 function runTests(tests) {
   chrome.test.getConfig(function(config) {
+    if (config.customArg) {
+      let args = JSON.parse(config.customArg);
+      debug = args.debug;
+      mparchEnabled = args.mparch;
+      // Because the extension runs in split mode, only the incognito context
+      // should run the tests.
+      if (args.runInIncognito && !chrome.extension.inIncognitoContext)
+        return;
+    }
+
     var waitForAboutBlank = function(_, info, tab) {
+      if (debug) {
+        console.log("tabs.OnUpdated received in waitForAboutBlank: " +
+          JSON.stringify(info) + " " + JSON.stringify(tab));
+      }
       if (info.status == "complete" && tab.url == "about:blank") {
         chrome.tabs.onUpdated.removeListener(waitForAboutBlank);
         runTestsForTab(tests, tab);
@@ -118,12 +137,16 @@ function getServerDomain(navigationType, opt_host, opt_scheme) {
 function navigateAndWait(url, callback) {
   var done = chrome.test.listenForever(chrome.tabs.onUpdated,
       function (_, info, tab) {
+    if (debug) {
+      console.log("tabs.OnUpdated received in navigateAndWait: " +
+        JSON.stringify(info) + " " + JSON.stringify(tab));
+    }
     if (tab.id == tabId && info.status == "complete") {
       if (callback) callback(tab);
       done();
     }
   });
-  chrome.tabs.update(tabId, {url: url});
+  chrome.test.sendMessage(JSON.stringify({navigate: {tabId: tabId, url: url}}));
 }
 
 function deepCopy(obj) {
@@ -174,6 +197,7 @@ function expect(data, order, filter, extraInfoSpec) {
   }
   tabAndFrameUrls = {};  // Maps "{tabId}-{frameId}" to the URL of the frame.
   frameIdMap = {"-1": -1, "0": 0};
+  documentIdMap = [];
   removeListeners();
   resetDeclarativeRules();
   initListeners(filter || {urls: ["<all_urls>"]}, extraInfoSpec || []);
@@ -197,6 +221,18 @@ function expect(data, order, filter, extraInfoSpec) {
     if ('initiator' in expectedEventData[i].details &&
         expectedEventData[i].details.initiator == undefined) {
       delete expectedEventData[i].details.initiator;
+    }
+    if (expectedEventData[i].details.frameId >= 0) {
+      if (!('documentLifecycle' in expectedEventData[i].details)) {
+        expectedEventData[i].details.documentLifecycle = "active";
+      }
+      if (!('frameType' in expectedEventData[i].details)) {
+        expectedEventData[i].details.frameType = "outermost_frame";
+      }
+    }
+    if ('documentId' in expectedEventData[i].details &&
+        expectedEventData[i].details.documentId == undefined) {
+      delete expectedEventData[i].details.documentId;
     }
   }
 }
@@ -301,7 +337,8 @@ function captureEvent(name, details, callback) {
     chrome.test.assertTrue('tabId' in details &&
                             typeof details.tabId === 'number');
     var key = details.tabId + "-" + details.frameId;
-    if (details.type == "main_frame" || details.type == "sub_frame") {
+    if (details.type == 'main_frame' || details.type == 'sub_frame' ||
+        details.type == 'webtransport') {
       tabAndFrameUrls[key] = details.url;
     }
     details.frameUrl = tabAndFrameUrls[key] || "unknown frame URL";
@@ -317,6 +354,23 @@ function captureEvent(name, details, callback) {
   }
   details.frameId = frameIdMap[details.frameId];
   details.parentFrameId = frameIdMap[details.parentFrameId];
+
+  // Since the parentDocumentId & documentId is a unique random identifier it
+  // is not useful to tests. Normalize it so that test cases can assert
+  // against a fixed number.
+  if ('parentDocumentId' in details) {
+    if (documentIdMap[details.parentDocumentId] === undefined) {
+      documentIdMap[details.parentDocumentId] =
+          Object.keys(documentIdMap).length + 1;
+    }
+    details.parentDocumentId = documentIdMap[details.parentDocumentId];
+  }
+  if ('documentId' in details) {
+    if (documentIdMap[details.documentId] === undefined) {
+      documentIdMap[details.documentId] = Object.keys(documentIdMap).length + 1;
+    }
+    details.documentId = documentIdMap[details.documentId];
+  }
 
   // This assigns unique IDs to newly opened tabs. However, the new IDs are only
   // deterministic, if the order in which the tabs are opened is deterministic.
@@ -336,6 +390,15 @@ function captureEvent(name, details, callback) {
   if (details.responseHeaders) {
     details.responseHeadersExist = true;
     delete details.responseHeaders;
+  }
+
+  if (details?.requestBody?.raw) {
+    for (const rawItem of details.requestBody.raw) {
+      chrome.test.assertTrue(rawItem.bytes instanceof ArrayBuffer);
+      // Stub out the bytes with an empty array buffer, since the expectations
+      // don't hardcode real bytes.
+      rawItem.bytes = new ArrayBuffer;
+    }
   }
 
   // Check if the equivalent event is already captured, and issue a unique
@@ -371,8 +434,9 @@ function captureEvent(name, details, callback) {
   var retval;
   var retval_function;
   if (matchingExpectedEvent) {
-    if (logAllRequests) {
-      console.log("Expected: " + name + ": " + JSON.stringify(details));
+    if (debug) {
+      console.log("Expected event received: " + name + ": " +
+        JSON.stringify(details));
     }
     capturedEventData.push(
         {label: matchingExpectedEvent.label, event: name, details: details});
@@ -386,8 +450,9 @@ function captureEvent(name, details, callback) {
     retval = matchingExpectedEvent.retval;
     retval_function = matchingExpectedEvent.retval_function;
   } else {
-    if (logAllRequests) {
-      console.log('NOT Expected: ' + name + ': ' + JSON.stringify(details));
+    if (debug) {
+      console.log('NOT Expected event received: ' + name + ': ' +
+        JSON.stringify(details));
     }
     capturedUnexpectedData.push({event: name, details: details});
   }

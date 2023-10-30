@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,33 +6,30 @@
 
 #include <windows.h>
 
-#include <lm.h>
-
-#include <sddl.h>      // For ConvertSidToStringSid()
-#include <userenv.h>   // For GetUserProfileDirectory()
-#include <wincrypt.h>  // For CryptXXX()
-
 #include <atlconv.h>
-
+#include <lm.h>
 #include <malloc.h>
 #include <memory.h>
+#include <sddl.h>  // For ConvertSidToStringSid()
 #include <stdlib.h>
+#include <userenv.h>   // For GetUserProfileDirectory()
+#include <wincrypt.h>  // For CryptXXX()
 
 #include <iomanip>
 #include <memory>
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/macros.h"
 #include "base/scoped_native_library.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/win_util.h"
+#include "chrome/credential_provider/common/gcp_strings.h"
 #include "chrome/credential_provider/gaiacp/gcp_utils.h"
 #include "chrome/credential_provider/gaiacp/logging.h"
+#include "chrome/credential_provider/gaiacp/reg_utils.h"
 
 namespace credential_provider {
 
@@ -41,7 +38,7 @@ namespace {
 HRESULT GetDomainControllerServerForDomain(const wchar_t* domain,
                                            LPBYTE* server) {
   DCHECK(domain);
-  base::string16 local_domain = OSUserManager::GetLocalDomain();
+  std::wstring local_domain = OSUserManager::GetLocalDomain();
   // If the domain is the local domain, then there is no domain controller.
   if (wcsicmp(local_domain.c_str(), domain) == 0) {
     return S_OK;
@@ -78,14 +75,14 @@ bool OSUserManager::IsDeviceDomainJoined() {
 }
 
 // static
-base::string16 OSUserManager::GetLocalDomain() {
+std::wstring OSUserManager::GetLocalDomain() {
   // If the domain is the current computer, then there is no domain controller.
   wchar_t computer_name[MAX_COMPUTERNAME_LENGTH + 1];
-  DWORD length = base::size(computer_name);
+  DWORD length = std::size(computer_name);
   if (!::GetComputerNameW(computer_name, &length))
-    return base::string16();
+    return std::wstring();
 
-  return base::string16(computer_name, length);
+  return std::wstring(computer_name, length);
 }
 
 OSUserManager::~OSUserManager() {}
@@ -144,8 +141,7 @@ HRESULT OSUserManager::GenerateRandomPassword(wchar_t* password, int length) {
         return hr;
       }
 
-      wchar_t c =
-          kValidPasswordChars[r % (base::size(kValidPasswordChars) - 1)];
+      wchar_t c = kValidPasswordChars[r % (std::size(kValidPasswordChars) - 1)];
       *p++ = c;
       ++cur_length;
       --remaining_length;
@@ -204,7 +200,7 @@ HRESULT OSUserManager::GenerateRandomPassword(wchar_t* password, int length) {
 
 HRESULT OSUserManager::GetUserFullname(const wchar_t* domain,
                                        const wchar_t* username,
-                                       base::string16* fullname) {
+                                       std::wstring* fullname) {
   DCHECK(fullname);
   LPBYTE domain_server_buffer = nullptr;
   HRESULT hr =
@@ -240,7 +236,7 @@ HRESULT OSUserManager::AddUser(const wchar_t* username,
                                DWORD* error) {
   DCHECK(sid);
 
-  base::string16 local_users_group_name;
+  std::wstring local_users_group_name;
   // If adding to the local users group, make sure we can get the localized
   // name for the group before proceeding.
   if (add_to_users_group) {
@@ -288,7 +284,7 @@ HRESULT OSUserManager::AddUser(const wchar_t* username,
     wchar_t* sidstr = nullptr;
     if (::ConvertSidToStringSid(user_info->usri4_user_sid, &sidstr)) {
       *sid = SysAllocString(T2COLE(sidstr));
-      LOGFN(INFO) << "sid=" << sidstr;
+      LOGFN(VERBOSE) << "sid=" << sidstr;
       ::LocalFree(sidstr);
     } else {
       LOGFN(ERROR) << "Could not convert SID to string";
@@ -316,6 +312,22 @@ HRESULT OSUserManager::AddUser(const wchar_t* username,
   }
 
   return (nsts == NERR_Success ? S_OK : HRESULT_FROM_WIN32(nsts));
+}
+
+HRESULT OSUserManager::SetDefaultPasswordChangePolicies(
+    const wchar_t* domain,
+    const wchar_t* username) {
+  USER_INFO_1008 info1008;
+  DWORD error;
+  memset(&info1008, 0, sizeof(info1008));
+  info1008.usri1008_flags =
+      UF_PASSWD_CANT_CHANGE | UF_DONT_EXPIRE_PASSWD | UF_NORMAL_ACCOUNT;
+  NET_API_STATUS nsts = ::NetUserSetInfo(
+      domain, username, 1008, reinterpret_cast<LPBYTE>(&info1008), &error);
+  if (nsts != NERR_Success) {
+    LOGFN(ERROR) << "NetUserSetInfo(set password policies) nsts=" << nsts;
+  }
+  return HRESULT_FROM_WIN32(nsts);
 }
 
 HRESULT OSUserManager::ChangeUserPassword(const wchar_t* domain,
@@ -361,7 +373,7 @@ HRESULT OSUserManager::ChangeUserPassword(const wchar_t* domain,
     flags_changed = true;
   }
 
-  base::string16 password_domain = base::StringPrintf(L"%ls", domain);
+  std::wstring password_domain = base::StringPrintf(L"%ls", domain);
 
   NET_API_STATUS changepassword_nsts = ::NetUserChangePassword(
       password_domain.c_str(), username, old_password, new_password);
@@ -416,6 +428,37 @@ HRESULT OSUserManager::SetUserPassword(const wchar_t* domain,
   return HRESULT_FROM_WIN32(nsts);
 }
 
+HRESULT OSUserManager::SetUserFullname(const wchar_t* domain,
+                                       const wchar_t* username,
+                                       const wchar_t* full_name) {
+  LPBYTE domain_server_buffer = nullptr;
+  HRESULT hr =
+      GetDomainControllerServerForDomain(domain, &domain_server_buffer);
+  if (FAILED(hr))
+    return hr;
+
+  std::unique_ptr<wchar_t, void (*)(wchar_t*)> domain_to_query(
+      reinterpret_cast<wchar_t*>(domain_server_buffer), [](wchar_t* p) {
+        if (p)
+          ::NetApiBufferFree(p);
+      });
+
+  DWORD error = 0;
+  USER_INFO_1011 info1011;
+  NET_API_STATUS nsts;
+  memset(&info1011, 0, sizeof(info1011));
+  info1011.usri1011_full_name = const_cast<wchar_t*>(full_name);
+
+  nsts = ::NetUserSetInfo(domain_to_query.get(), username, 1011,
+                          reinterpret_cast<LPBYTE>(&info1011), &error);
+  if (nsts != NERR_Success) {
+    LOGFN(ERROR) << "Unable to change full name on the account for '"
+                 << username << "' nsts=" << nsts;
+  }
+
+  return HRESULT_FROM_WIN32(nsts);
+}
+
 HRESULT OSUserManager::IsWindowsPasswordValid(const wchar_t* domain,
                                               const wchar_t* username,
                                               const wchar_t* password) {
@@ -464,7 +507,7 @@ HRESULT OSUserManager::CreateLogonToken(const wchar_t* domain,
 
 HRESULT OSUserManager::GetUserSID(const wchar_t* domain,
                                   const wchar_t* username,
-                                  base::string16* sid_string) {
+                                  std::wstring* sid_string) {
   DCHECK(sid_string);
   sid_string->clear();
 
@@ -493,17 +536,30 @@ HRESULT OSUserManager::GetUserSID(const wchar_t* domain,
   DCHECK(sid);
 
   char sid_buffer[256];
-  DWORD sid_length = base::size(sid_buffer);
+  DWORD sid_length = std::size(sid_buffer);
   wchar_t user_domain_buffer[kWindowsDomainBufferLength];
-  DWORD domain_length = base::size(user_domain_buffer);
+  DWORD domain_length = std::size(user_domain_buffer);
   SID_NAME_USE use;
-  base::string16 username_with_domain =
-      base::string16(domain) + L"\\" + username;
+  std::wstring username_with_domain = std::wstring(domain) + L"\\" + username;
 
   if (!::LookupAccountName(nullptr, username_with_domain.c_str(), sid_buffer,
                            &sid_length, user_domain_buffer, &domain_length,
                            &use)) {
-    return HRESULT_FROM_WIN32(::GetLastError());
+    HRESULT hr = HRESULT_FROM_WIN32(::GetLastError());
+
+    LOGFN(VERBOSE) << "LookupAccountName failed with hr=" << putHR(hr);
+
+    wchar_t sid_buffer_temp[256];
+    if (FAILED(GetSidFromDomainAccountInfo(domain, username, sid_buffer_temp,
+                                           std::size(sid_buffer_temp)))) {
+      LOGFN(ERROR) << "GetSidFromDomainAccountInfo failed";
+
+      return hr;
+    }
+
+    ::ConvertStringSidToSid(sid_buffer_temp, sid);
+
+    return S_OK;
   }
 
   // Check that the domain of the user found with LookupAccountName matches what
@@ -535,7 +591,7 @@ HRESULT OSUserManager::FindUserBySID(const wchar_t* sid,
   HRESULT hr = S_OK;
   DWORD name_length = username ? username_size : 0;
   wchar_t local_domain_buffer[kWindowsDomainBufferLength];
-  DWORD domain_length = base::size(local_domain_buffer);
+  DWORD domain_length = std::size(local_domain_buffer);
   SID_NAME_USE use;
   if (!::LookupAccountSid(nullptr, psid, username, &name_length,
                           local_domain_buffer, &domain_length, &use)) {
@@ -554,24 +610,58 @@ HRESULT OSUserManager::FindUserBySID(const wchar_t* sid,
     wcscpy_s(domain, domain_size, local_domain_buffer);
   }
 
+  LOGFN(VERBOSE) << "username=" << std::wstring(username)
+                 << " domain=" << std::wstring(domain);
   ::LocalFree(psid);
   return hr;
 }
 
-bool OSUserManager::IsUserDomainJoined(const base::string16& sid) {
+HRESULT OSUserManager::FindUserBySidWithFallback(const wchar_t* sid,
+                                                 wchar_t* username,
+                                                 DWORD username_length,
+                                                 wchar_t* domain,
+                                                 DWORD domain_length) {
+  HRESULT hr = OSUserManager::Get()->FindUserBySID(
+      sid, username, username_length, domain, domain_length);
+
+  if (FAILED(hr)) {
+    // Although FindUserBySID is failed, we can still obtain the domain and
+    // username from the user properties. This is especially needed if an AD
+    // workstation can't reach domain controller to login an account which
+    // previously logged in on the same device.
+    if (SUCCEEDED(GetUserProperty(sid, base::UTF8ToWide(kKeyDomain), domain,
+                                  &domain_length)) &&
+        SUCCEEDED(GetUserProperty(sid, base::UTF8ToWide(kKeyUsername), username,
+                                  &username_length))) {
+      LOGFN(VERBOSE) << "Obtained domain: " << domain
+                     << " and user: " << username << " from registry!";
+      hr = S_OK;
+    } else {
+      hr = E_FAIL;
+    }
+  }
+  return hr;
+}
+
+bool OSUserManager::IsUserDomainJoined(const std::wstring& sid) {
+  LOGFN(VERBOSE) << "sid=" << sid;
+
   wchar_t username[kWindowsUsernameBufferLength];
   wchar_t domain[kWindowsDomainBufferLength];
 
-  HRESULT hr = FindUserBySID(sid.c_str(), username, base::size(username),
-                             domain, base::size(domain));
+  HRESULT hr = FindUserBySidWithFallback(
+      sid.c_str(), username, std::size(username), domain, std::size(domain));
 
   if (FAILED(hr)) {
     LOGFN(ERROR) << "IsUserDomainJoined sid=" << sid << " hr=" << putHR(hr);
     return hr;
   }
 
-  return !base::EqualsCaseInsensitiveASCII(
+  bool domain_joined = !base::EqualsCaseInsensitiveASCII(
       domain, OSUserManager::GetLocalDomain().c_str());
+  LOGFN(VERBOSE) << "sid=" << sid << " domain_joined=" << domain_joined;
+
+  return domain_joined;
 }
 
 HRESULT OSUserManager::RemoveUser(const wchar_t* username,
@@ -583,7 +673,7 @@ HRESULT OSUserManager::RemoveUser(const wchar_t* username,
   base::win::ScopedHandle token;
   wchar_t profiledir[MAX_PATH + 1];
 
-  base::string16 local_domain = OSUserManager::GetLocalDomain();
+  std::wstring local_domain = OSUserManager::GetLocalDomain();
 
   // Get the user's profile directory.  Try a batch logon first, and if that
   // fails then try an interactive logon.
@@ -595,7 +685,7 @@ HRESULT OSUserManager::RemoveUser(const wchar_t* username,
 
   if (SUCCEEDED(hr)) {
     // Get the gaia user's profile directory so that it can be deleted.
-    DWORD length = base::size(profiledir) - 1;
+    DWORD length = std::size(profiledir) - 1;
     if (!::GetUserProfileDirectory(token.Get(), profiledir, &length)) {
       hr = HRESULT_FROM_WIN32(::GetLastError());
       if (hr != HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND))
@@ -612,7 +702,7 @@ HRESULT OSUserManager::RemoveUser(const wchar_t* username,
     LOGFN(ERROR) << "NetUserDel nsts=" << nsts;
 
   // Force delete the user's profile directory.
-  if (*profiledir && !base::DeleteFile(base::FilePath(profiledir), true))
+  if (*profiledir && !base::DeletePathRecursively(base::FilePath(profiledir)))
     LOGFN(ERROR) << "base::DeleteFile";
 
   return S_OK;

@@ -1,19 +1,23 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_SEARCH_ENGINES_SEARCH_ENGINE_TAB_HELPER_H_
 #define CHROME_BROWSER_UI_SEARCH_ENGINES_SEARCH_ENGINE_TAB_HELPER_H_
 
-#include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
-#include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/common/open_search_description_document_handler.mojom.h"
+#include "components/favicon/core/favicon_driver.h"
 #include "components/favicon/core/favicon_driver_observer.h"
-#include "content/public/browser/web_contents_binding_set.h"
+#include "components/find_in_page/find_notification_details.h"
+#include "content/public/browser/render_frame_host_receiver_set.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
+
+namespace content {
+class NavigationEntry;
+}
 
 // Per-tab search engine manager. Handles dealing search engine processing
 // functionality.
@@ -23,14 +27,27 @@ class SearchEngineTabHelper
       public chrome::mojom::OpenSearchDescriptionDocumentHandler,
       public favicon::FaviconDriverObserver {
  public:
+  static void BindOpenSearchDescriptionDocumentHandler(
+      mojo::PendingAssociatedReceiver<
+          chrome::mojom::OpenSearchDescriptionDocumentHandler> receiver,
+      content::RenderFrameHost* rfh);
+
+  SearchEngineTabHelper(const SearchEngineTabHelper&) = delete;
+  SearchEngineTabHelper& operator=(const SearchEngineTabHelper&) = delete;
+
   ~SearchEngineTabHelper() override;
 
   // content::WebContentsObserver overrides.
   void DidFinishNavigation(content::NavigationHandle* handle) override;
   void WebContentsDestroyed() override;
 
- private:
+ protected:
   explicit SearchEngineTabHelper(content::WebContents* web_contents);
+  // Virtual for testing.
+  virtual std::u16string GenerateKeywordFromNavigationEntry(
+      content::NavigationEntry* entry);
+
+ private:
   friend class content::WebContentsUserData<SearchEngineTabHelper>;
 
   // chrome::mojom::OpenSearchDescriptionDocumentHandler overrides.
@@ -47,16 +64,15 @@ class SearchEngineTabHelper
   // If params has a searchable form, this tries to create a new keyword.
   void GenerateKeywordIfNecessary(content::NavigationHandle* handle);
 
-  content::WebContentsFrameBindingSet<
+  content::RenderFrameHostReceiverSet<
       chrome::mojom::OpenSearchDescriptionDocumentHandler>
-      osdd_handler_bindings_;
+      osdd_handler_receivers_;
 
-  ScopedObserver<favicon::FaviconDriver, favicon::FaviconDriverObserver>
-      favicon_driver_observer_{this};
+  base::ScopedObservation<favicon::FaviconDriver,
+                          favicon::FaviconDriverObserver>
+      favicon_driver_observation_{this};
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
-
-  DISALLOW_COPY_AND_ASSIGN(SearchEngineTabHelper);
 };
 
 #endif  // CHROME_BROWSER_UI_SEARCH_ENGINES_SEARCH_ENGINE_TAB_HELPER_H_

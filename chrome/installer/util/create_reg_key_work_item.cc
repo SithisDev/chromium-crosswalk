@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,6 @@
 #include "base/win/registry.h"
 #include "base/win/shlwapi.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
-#include "chrome/installer/util/install_util.h"
-#include "chrome/installer/util/logging_installer.h"
 
 using base::win::RegKey;
 
@@ -22,8 +20,8 @@ void UpOneDirectoryOrEmpty(std::wstring* dir) {
   base::FilePath directory = path.DirName();
   // If there is no separator, we will get back kCurrentDirectory.
   // In this case, clear dir.
-  if (directory == path || directory.value() ==
-      base::FilePath::kCurrentDirectory)
+  if (directory == path ||
+      directory.value() == base::FilePath::kCurrentDirectory)
     dir->clear();
   else
     *dir = directory.value();
@@ -31,8 +29,7 @@ void UpOneDirectoryOrEmpty(std::wstring* dir) {
 
 }  // namespace
 
-CreateRegKeyWorkItem::~CreateRegKeyWorkItem() {
-}
+CreateRegKeyWorkItem::~CreateRegKeyWorkItem() {}
 
 CreateRegKeyWorkItem::CreateRegKeyWorkItem(HKEY predefined_root,
                                            const std::wstring& path,
@@ -41,8 +38,7 @@ CreateRegKeyWorkItem::CreateRegKeyWorkItem(HKEY predefined_root,
       path_(path),
       wow64_access_(wow64_access),
       key_created_(false) {
-  DCHECK(wow64_access == 0 ||
-         wow64_access == KEY_WOW64_32KEY ||
+  DCHECK(wow64_access == 0 || wow64_access == KEY_WOW64_32KEY ||
          wow64_access == KEY_WOW64_64KEY);
 }
 
@@ -61,8 +57,7 @@ bool CreateRegKeyWorkItem::DoImpl() {
     DWORD disposition;
     key_path.assign(key_list_[i - 1]);
 
-    if (key.CreateWithDisposition(predefined_root_,
-                                  key_path.c_str(),
+    if (key.CreateWithDisposition(predefined_root_, key_path.c_str(),
                                   &disposition,
                                   KEY_READ | wow64_access_) == ERROR_SUCCESS) {
       if (disposition == REG_OPENED_EXISTING_KEY) {

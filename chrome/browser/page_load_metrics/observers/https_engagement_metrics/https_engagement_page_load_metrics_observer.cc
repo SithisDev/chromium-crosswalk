@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,27 +19,45 @@ HttpsEngagementPageLoadMetricsObserver::HttpsEngagementPageLoadMetricsObserver(
       HttpsEngagementServiceFactory::GetForBrowserContext(context);
 }
 
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+HttpsEngagementPageLoadMetricsObserver::OnFencedFramesStart(
+    content::NavigationHandle* navigation_handle,
+    const GURL& currently_committed_url) {
+  // This class is interested only in the primary page's end of life timing,
+  // and doesn't need to continue observing FencedFrame pages.
+  return STOP_OBSERVING;
+}
+
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+HttpsEngagementPageLoadMetricsObserver::OnPrerenderStart(
+    content::NavigationHandle* navigation_handle,
+    const GURL& currently_committed_url) {
+  // Once prerendered pages have been activated we will want to report this
+  // metric. Statistics are only be reported when foreground_time is nonzero so
+  // there are no additional checks needed.
+  return CONTINUE_OBSERVING;
+}
+
 void HttpsEngagementPageLoadMetricsObserver::OnComplete(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (!extra_info.did_commit || !extra_info.url.is_valid()) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (!GetDelegate().DidCommit() || !GetDelegate().GetUrl().is_valid()) {
     return;
   }
 
   // Don't record anything if the user never saw it.
   base::TimeDelta foreground_time =
-      GetDelegate()->GetVisibilityTracker().GetForegroundDuration();
+      GetDelegate().GetVisibilityTracker().GetForegroundDuration();
   if (foreground_time.is_zero())
     return;
 
-  if (extra_info.url.SchemeIs(url::kHttpsScheme)) {
+  if (GetDelegate().GetUrl().SchemeIs(url::kHttpsScheme)) {
     if (engagement_service_) {
       engagement_service_->RecordTimeOnPage(foreground_time,
                                             HttpsEngagementService::HTTPS);
     }
     UMA_HISTOGRAM_LONG_TIMES_100(internal::kHttpsEngagementHistogram,
                                  foreground_time);
-  } else if (extra_info.url.SchemeIs(url::kHttpScheme)) {
+  } else if (GetDelegate().GetUrl().SchemeIs(url::kHttpScheme)) {
     if (engagement_service_) {
       engagement_service_->RecordTimeOnPage(foreground_time,
                                             HttpsEngagementService::HTTP);

@@ -1,17 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_TAB_MODAL_CONFIRM_DIALOG_DELEGATE_H_
 #define CHROME_BROWSER_UI_TAB_MODAL_CONFIRM_DIALOG_DELEGATE_H_
 
+#include <string>
+
 #include "base/callback.h"
-#include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "base/memory/raw_ptr.h"
+#include "content/public/browser/web_contents_observer.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/window_open_disposition.h"
 
 namespace content {
@@ -25,19 +24,27 @@ class Image;
 class TabModalConfirmDialogCloseDelegate {
  public:
   TabModalConfirmDialogCloseDelegate() {}
+
+  TabModalConfirmDialogCloseDelegate(
+      const TabModalConfirmDialogCloseDelegate&) = delete;
+  TabModalConfirmDialogCloseDelegate& operator=(
+      const TabModalConfirmDialogCloseDelegate&) = delete;
+
   virtual ~TabModalConfirmDialogCloseDelegate() {}
 
   virtual void CloseDialog() = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TabModalConfirmDialogCloseDelegate);
 };
 
 // This class acts as the delegate for a simple tab-modal dialog confirming
 // whether the user wants to execute a certain action.
-class TabModalConfirmDialogDelegate : public content::NotificationObserver {
+class TabModalConfirmDialogDelegate : public content::WebContentsObserver {
  public:
   explicit TabModalConfirmDialogDelegate(content::WebContents* web_contents);
+
+  TabModalConfirmDialogDelegate(const TabModalConfirmDialogDelegate&) = delete;
+  TabModalConfirmDialogDelegate& operator=(
+      const TabModalConfirmDialogDelegate&) = delete;
+
   ~TabModalConfirmDialogDelegate() override;
 
   void set_close_delegate(TabModalConfirmDialogCloseDelegate* close_delegate) {
@@ -72,8 +79,8 @@ class TabModalConfirmDialogDelegate : public content::NotificationObserver {
   void LinkClicked(WindowOpenDisposition disposition);
 
   // The title of the dialog. Note that the title is not shown on all platforms.
-  virtual base::string16 GetTitle() = 0;
-  virtual base::string16 GetDialogMessage() = 0;
+  virtual std::u16string GetTitle() = 0;
+  virtual std::u16string GetDialogMessage() = 0;
 
   // Icon to show for the dialog. If this method is not overridden, a default
   // icon (like the application icon) is shown.
@@ -81,12 +88,13 @@ class TabModalConfirmDialogDelegate : public content::NotificationObserver {
 
   // Title for the accept and the cancel buttons.
   // The default implementation uses IDS_OK and IDS_CANCEL.
-  virtual base::string16 GetAcceptButtonTitle();
-  virtual base::string16 GetCancelButtonTitle();
+  virtual int GetDialogButtons() const;
+  virtual std::u16string GetAcceptButtonTitle();
+  virtual std::u16string GetCancelButtonTitle();
 
   // Returns the text of the link to be displayed, if any. Otherwise returns
   // an empty string.
-  virtual base::string16 GetLinkText() const;
+  virtual std::u16string GetLinkText() const;
 
   // GTK stock icon names for the accept and cancel buttons, respectively.
   // The icons are only used on GTK. If these methods are not overriden,
@@ -95,23 +103,18 @@ class TabModalConfirmDialogDelegate : public content::NotificationObserver {
   virtual const char* GetCancelButtonIcon();
 
   // Allow the delegate to customize which button is default, and which is
-  // initially focused. If returning base::nullopt, the dialog uses default
+  // initially focused. If returning absl::nullopt, the dialog uses default
   // behavior.
-  virtual base::Optional<int> GetDefaultDialogButton();
-  virtual base::Optional<int> GetInitiallyFocusedButton();
+  virtual absl::optional<int> GetDefaultDialogButton();
+  virtual absl::optional<int> GetInitiallyFocusedButton();
+
+  // content::WebContentObserver:
+  void DidStartLoading() override;
 
  protected:
   TabModalConfirmDialogCloseDelegate* close_delegate() {
     return close_delegate_;
   }
-
-  // content::NotificationObserver implementation.
-  // Watch for a new load or a closed tab and dismiss the dialog if they occur.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
-
-  content::NotificationRegistrar registrar_;
 
  private:
   // It is guaranteed that exactly one of OnAccepted(), OnCanceled() or
@@ -134,13 +137,11 @@ class TabModalConfirmDialogDelegate : public content::NotificationObserver {
   // Close the dialog.
   void CloseDialog();
 
-  TabModalConfirmDialogCloseDelegate* close_delegate_;
+  raw_ptr<TabModalConfirmDialogCloseDelegate> close_delegate_;
 
   // True iff we are in the process of closing, to avoid running callbacks
   // multiple times.
   bool closing_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabModalConfirmDialogDelegate);
 };
 
 #endif  // CHROME_BROWSER_UI_TAB_MODAL_CONFIRM_DIALOG_DELEGATE_H_

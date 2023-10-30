@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "content/public/common/content_switches.h"
-#include "services/service_manager/embedder/switches.h"
 #include "third_party/re2/src/re2/re2.h"
 
 namespace metrics {
@@ -25,11 +24,17 @@ void SkipLine(re2::StringPiece* contents) {
   RE2::Consume(contents, *kSkipLine);
 }
 
-const LazyRE2 kChromeExePathMatcher = {R"(/opt/google/chrome/chrome\s*)"};
+// Matches both Ash-Chrome and Lacros binaries.
+const LazyRE2 kChromeExePathMatcher = {
+    R"((/opt/google/chrome/chrome|\S*lacros\S*/chrome))"};
 
+// Matches Lacros binaries.
+const LazyRE2 kLacrosExePathMatcher = {R"((\S*lacros\S*/chrome))"};
 }  // namespace
 
-std::map<uint32_t, Process> ProcessTypeCollector::ChromeProcessTypes() {
+std::map<uint32_t, Process> ProcessTypeCollector::ChromeProcessTypes(
+    std::vector<uint32_t>& lacros_pids,
+    std::string& lacros_path) {
   std::string output;
   if (!base::GetAppOutput(std::vector<std::string>({"ps", "-ewwo", "pid,cmd"}),
                           &output)) {
@@ -38,7 +43,7 @@ std::map<uint32_t, Process> ProcessTypeCollector::ChromeProcessTypes() {
     return std::map<uint32_t, Process>();
   }
 
-  return ParseProcessTypes(output);
+  return ParseProcessTypes(output, lacros_pids, lacros_path);
 }
 
 std::map<uint32_t, Thread> ProcessTypeCollector::ChromeThreadTypes() {
@@ -55,7 +60,9 @@ std::map<uint32_t, Thread> ProcessTypeCollector::ChromeThreadTypes() {
 }
 
 std::map<uint32_t, Process> ProcessTypeCollector::ParseProcessTypes(
-    re2::StringPiece contents) {
+    re2::StringPiece contents,
+    std::vector<uint32_t>& lacros_pids,
+    std::string& lacros_path) {
   static const LazyRE2 kLineMatcher = {
       R"(\s*(\d+))"    // PID
       R"(\s+(.+)\n?)"  // COMMAND LINE
@@ -86,8 +93,18 @@ std::map<uint32_t, Process> ProcessTypeCollector::ParseProcessTypes(
       continue;
     }
 
-    if (!RE2::Consume(&cmd_line, *kChromeExePathMatcher)) {
+    re2::StringPiece cmd;
+    if (!RE2::Consume(&cmd_line, *kChromeExePathMatcher, &cmd)) {
       continue;
+    }
+
+    // Use a second match to record any Lacros PID.
+    re2::StringPiece lacros_cmd;
+    if (RE2::Consume(&cmd, *kLacrosExePathMatcher, &lacros_cmd)) {
+      lacros_pids.emplace_back(pid);
+      if (lacros_path.empty()) {
+        lacros_path = lacros_cmd;
+      }
     }
 
     std::string type;
@@ -102,12 +119,10 @@ std::map<uint32_t, Process> ProcessTypeCollector::ParseProcessTypes(
       process = Process::GPU_PROCESS;
     } else if (type == switches::kUtilityProcess) {
       process = Process::UTILITY_PROCESS;
-    } else if (type == service_manager::switches::kZygoteProcess) {
+    } else if (type == switches::kZygoteProcess) {
       process = Process::ZYGOTE_PROCESS;
     } else if (type == switches::kPpapiPluginProcess) {
       process = Process::PPAPI_PLUGIN_PROCESS;
-    } else if (type == switches::kPpapiBrokerProcess) {
-      process = Process::PPAPI_BROKER_PROCESS;
     }
 
     process_types.emplace(pid, process);
@@ -131,8 +146,7 @@ std::map<uint32_t, Thread> ProcessTypeCollector::ParseThreadTypes(
   static const LazyRE2 kLineMatcher = {
       R"(\s*(\d+))"    // PID
       R"(\s+(\d+))"    // TID
-      R"(\s+(\S+))"    // CMD
-      R"(\s+(.+)\n?)"  // COMMAND LINE
+      R"(\s+(.+)\n?)"  // COMM and CMD, either of which may contain spaces
   };
 
   // Skip header.
@@ -142,15 +156,14 @@ std::map<uint32_t, Thread> ProcessTypeCollector::ParseThreadTypes(
   bool is_truncated = false;
   while (!contents.empty()) {
     uint32_t pid = 0, tid = 0;
-    std::string cmd;
-    re2::StringPiece cmd_line;
-    if (!RE2::Consume(&contents, *kLineMatcher, &pid, &tid, &cmd, &cmd_line)) {
+    re2::StringPiece comm_cmd;
+    if (!RE2::Consume(&contents, *kLineMatcher, &pid, &tid, &comm_cmd)) {
       SkipLine(&contents);
       is_truncated = true;
       continue;
     }
 
-    if (!RE2::Consume(&cmd_line, *kChromeExePathMatcher)) {
+    if (!RE2::PartialMatch(comm_cmd, *kChromeExePathMatcher)) {
       continue;
     }
 
@@ -162,20 +175,30 @@ std::map<uint32_t, Thread> ProcessTypeCollector::ParseThreadTypes(
     Thread thread = Thread::OTHER_THREAD;
     if (pid == tid) {
       thread = Thread::MAIN_THREAD;
-    } else if (cmd == "Chrome_IOThread" ||
-               base::StartsWith(cmd, "Chrome_ChildIOT",
-                                base::CompareCase::SENSITIVE)) {
+    } else if (comm_cmd.starts_with("Chrome_IOThread") ||
+               comm_cmd.starts_with("Chrome_ChildIOT")) {
       thread = Thread::IO_THREAD;
-    } else if (cmd == "Compositor" ||
-               base::StartsWith(cmd, "VizCompositorTh",
-                                base::CompareCase::SENSITIVE)) {
-      thread = Thread::COMPOSITOR_THREAD;
-    } else if (base::StartsWith(cmd, "TaskScheduler",
-                                base::CompareCase::SENSITIVE)) {
-      thread = Thread::SCHEDULER_WORKER_THREAD;
-    } else if (base::StartsWith(cmd, "CompositorTileW",
-                                base::CompareCase::SENSITIVE)) {
+    } else if (comm_cmd.starts_with("CompositorTileW")) {
       thread = Thread::COMPOSITOR_TILE_WORKER_THREAD;
+    } else if (comm_cmd.starts_with("Compositor") ||
+               comm_cmd.starts_with("VizCompositorTh")) {
+      thread = Thread::COMPOSITOR_THREAD;
+    } else if (comm_cmd.starts_with("ThreadPool")) {
+      thread = Thread::THREAD_POOL_THREAD;
+    } else if (comm_cmd.starts_with("DrmThread")) {
+      thread = Thread::DRM_THREAD;
+    } else if (comm_cmd.starts_with("GpuMemory")) {
+      thread = Thread::GPU_MEMORY_THREAD;
+    } else if (comm_cmd.starts_with("MemoryInfra")) {
+      thread = Thread::MEMORY_INFRA_THREAD;
+    } else if (comm_cmd.starts_with("Media")) {
+      thread = Thread::MEDIA_THREAD;
+    } else if (comm_cmd.starts_with("DedicatedWorker")) {
+      thread = Thread::DEDICATED_WORKER_THREAD;
+    } else if (comm_cmd.starts_with("ServiceWorker")) {
+      thread = Thread::SERVICE_WORKER_THREAD;
+    } else if (comm_cmd.starts_with("WebRTC")) {
+      thread = Thread::WEBRTC_THREAD;
     }
 
     thread_types.emplace(tid, thread);

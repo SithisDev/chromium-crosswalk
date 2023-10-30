@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -96,36 +96,6 @@
             "optional": true,
             "type": "array",
             "items": {"type": "string"}
-          }
-        }
-      },
-      {
-        "id": "ChromeUIOverrides",
-        "type": "object",
-        "description": "Chrome user interface features which can be overriden by an extension.",
-        "properties": {
-          "bookmarks_ui": {
-            "type": "object",
-            "description": "Settings to permit bookmarks user interface customization by extensions.",
-            "optional": true,
-            "properties": {
-              "remove_button": {
-                "type": "boolean",
-                "description": "If <code>true</code>, the built-in bookmark button will be removed from the user interface.",
-                "optional": true
-              },
-              "remove_bookmark_shortcut": {
-                "type": "boolean",
-                "description": "If <code>true</code>, the built-in \"Bookmark this page...\" shortcut key is removed and the extension is permitted to override the shortcut by binding it in the commands section of the manifest.",
-                "optional": true
-              },
-              "remove_bookmark_open_pages_shortcut": {
-                "type": "boolean",
-                "nodoc": true,
-                "description": "[Private] If <code>true</code>, the built-in \"Bookmark open pages...\" shortcut key and corresponding menu item is removed.",
-                "optional": true
-              }
-            }
           }
         }
       },

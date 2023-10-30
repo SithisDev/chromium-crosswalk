@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,22 @@ import static org.chromium.ui.base.LocalizationUtils.isLayoutRtl;
 
 import android.content.Context;
 import android.graphics.Rect;
-import android.support.design.widget.TabLayout;
-import android.support.v4.view.ViewCompat;
-import android.support.v7.widget.LinearLayoutManager;
-import android.support.v7.widget.RecyclerView;
 import android.util.AttributeSet;
 import android.view.View;
+import android.view.ViewPropertyAnimator;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.animation.AccelerateInterpolator;
 import android.widget.LinearLayout;
 
-import org.chromium.chrome.browser.ChromeFeatureList;
+import androidx.annotation.CallSuper;
+import androidx.core.view.ViewCompat;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.google.android.material.tabs.TabLayout;
+
+import org.chromium.base.TraceEvent;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.keyboard_accessory.R;
 
 /**
@@ -25,8 +31,14 @@ import org.chromium.chrome.browser.keyboard_accessory.R;
  * suggestions and manual entry points assisting the user in filling forms.
  */
 class KeyboardAccessoryView extends LinearLayout {
+    protected static final int FADE_ANIMATION_DURATION_MS = 150; // Total duration of show/hide.
+    protected static final int HIDING_ANIMATION_DELAY_MS = 50; // Shortens animation duration.
+
     protected RecyclerView mBarItemsView;
     protected TabLayout mTabLayout;
+    private ViewPropertyAnimator mRunningAnimation;
+    private boolean mShouldSkipClosingAnimation;
+    private boolean mDisableAnimations;
 
     protected static class HorizontalDividerItemDecoration extends RecyclerView.ItemDecoration {
         private final int mHorizontalMargin;
@@ -60,6 +72,7 @@ class KeyboardAccessoryView extends LinearLayout {
 
     @Override
     protected void onFinishInflate() {
+        TraceEvent.begin("KeyboardAccessoryView#onFinishInflate");
         super.onFinishInflate();
         sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED);
 
@@ -79,6 +92,7 @@ class KeyboardAccessoryView extends LinearLayout {
         setOnClickListener(view -> {});
         setClickable(false); // Disables the "Double-tap to activate" Talkback reading.
         setSoundEffectsEnabled(false);
+        TraceEvent.end("KeyboardAccessoryView#onFinishInflate");
     }
 
     TabLayout getTabLayout() {
@@ -89,12 +103,14 @@ class KeyboardAccessoryView extends LinearLayout {
     }
 
     void setVisible(boolean visible) {
+        TraceEvent.begin("KeyboardAccessoryView#setVisible");
         if (!visible || getVisibility() != VISIBLE) mBarItemsView.scrollToPosition(0);
         if (visible) {
             show();
         } else {
             hide();
         }
+        TraceEvent.end("KeyboardAccessoryView#setVisible");
     }
 
     void setBottomOffset(int bottomOffset) {
@@ -104,17 +120,68 @@ class KeyboardAccessoryView extends LinearLayout {
     }
 
     void setBarItemsAdapter(RecyclerView.Adapter adapter) {
+        // Make sure the view updates the fallback icon padding whenever new items arrive.
+        adapter.registerAdapterDataObserver(new RecyclerView.AdapterDataObserver() {
+            @Override
+            public void onItemRangeChanged(int positionStart, int itemCount) {
+                super.onItemRangeChanged(positionStart, itemCount);
+                mBarItemsView.scrollToPosition(0);
+                mBarItemsView.invalidateItemDecorations();
+                onItemsChanged();
+            }
+        });
         mBarItemsView.setAdapter(adapter);
     }
 
+    /** Template method. Override to be notified if the bar items change. */
+    @CallSuper
+    protected void onItemsChanged() {}
+
     private void show() {
+        TraceEvent.begin("KeyboardAccessoryView#show");
         bringToFront(); // Needs to overlay every component and the bottom sheet - like a keyboard.
-        setVisibility(View.VISIBLE);
+        if (mRunningAnimation != null) mRunningAnimation.cancel();
+        if (areAnimationsDisabled()) {
+            mRunningAnimation = null;
+            setVisibility(View.VISIBLE);
+            return;
+        }
+        if (getVisibility() != View.VISIBLE) setAlpha(0f);
+        mRunningAnimation = animate()
+                                    .alpha(1f)
+                                    .setDuration(FADE_ANIMATION_DURATION_MS)
+                                    .setInterpolator(new AccelerateInterpolator())
+                                    .withStartAction(() -> setVisibility(View.VISIBLE));
         announceForAccessibility(getContentDescription());
+        TraceEvent.end("KeyboardAccessoryView#show");
     }
 
     private void hide() {
-        setVisibility(View.GONE);
+        if (mRunningAnimation != null) mRunningAnimation.cancel();
+        if (mShouldSkipClosingAnimation || areAnimationsDisabled()) {
+            mRunningAnimation = null;
+            setVisibility(View.GONE);
+            return;
+        }
+        mRunningAnimation =
+                animate()
+                        .alpha(0.0f)
+                        .setInterpolator(new AccelerateInterpolator())
+                        .setStartDelay(HIDING_ANIMATION_DELAY_MS)
+                        .setDuration(FADE_ANIMATION_DURATION_MS - HIDING_ANIMATION_DELAY_MS)
+                        .withEndAction(() -> setVisibility(View.GONE));
+    }
+
+    void setSkipClosingAnimation(boolean shouldSkipClosingAnimation) {
+        mShouldSkipClosingAnimation = shouldSkipClosingAnimation;
+    }
+
+    void disableAnimationsForTesting() {
+        mDisableAnimations = true;
+    }
+
+    boolean areAnimationsDisabled() {
+        return mDisableAnimations;
     }
 
     private void initializeHorizontalRecyclerView(RecyclerView recyclerView) {

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,12 @@
 
 #include <vector>
 
+#include "ash/components/arc/mojom/app.mojom-forward.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
-#include "components/arc/common/app.mojom.h"
 
 class PrefService;
 class Profile;
@@ -25,6 +24,10 @@ namespace arc {
 class ArcPaiStarter : public ArcAppListPrefs::Observer {
  public:
   explicit ArcPaiStarter(Profile* profile);
+
+  ArcPaiStarter(const ArcPaiStarter&) = delete;
+  ArcPaiStarter& operator=(const ArcPaiStarter&) = delete;
+
   ~ArcPaiStarter() override;
 
   // Creates PAI starter in case it has not been executed for the requested
@@ -90,9 +93,7 @@ class ArcPaiStarter : public ArcAppListPrefs::Observer {
   // Used to report PAI flow time uma.
   base::Time request_start_time_;
   // Keep last.
-  base::WeakPtrFactory<ArcPaiStarter> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ArcPaiStarter);
+  base::WeakPtrFactory<ArcPaiStarter> weak_ptr_factory_{this};
 };
 
 }  // namespace arc

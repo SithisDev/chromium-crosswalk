@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/ui/platform_keys_certificate_selector_chromeos.h"
 #include "chrome/browser/ui/views/certificate_selector.h"
@@ -29,14 +28,19 @@ class PlatformKeysCertificateSelector : public chrome::CertificateSelector {
   // |callback| must not be null.
   PlatformKeysCertificateSelector(const net::CertificateList& certificates,
                                   const std::string& extension_name,
-                                  const CertificateSelectedCallback& callback,
+                                  CertificateSelectedCallback callback,
                                   content::WebContents* web_contents);
+
+  PlatformKeysCertificateSelector(const PlatformKeysCertificateSelector&) =
+      delete;
+  PlatformKeysCertificateSelector& operator=(
+      const PlatformKeysCertificateSelector&) = delete;
+
   ~PlatformKeysCertificateSelector() override;
 
   void Init();
 
   // chrome::CertificateSelector:
-  bool Cancel() override;
   void AcceptCertificate(
       std::unique_ptr<net::ClientCertIdentity> identity) override;
 
@@ -45,8 +49,6 @@ class PlatformKeysCertificateSelector : public chrome::CertificateSelector {
 
   // Will be reset to null after it was run.
   CertificateSelectedCallback callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(PlatformKeysCertificateSelector);
 };
 
 }  // namespace chromeos

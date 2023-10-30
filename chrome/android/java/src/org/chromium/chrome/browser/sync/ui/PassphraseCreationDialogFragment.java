@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,6 @@ package org.chromium.chrome.browser.sync.ui;
 import android.app.Activity;
 import android.app.Dialog;
 import android.os.Bundle;
-import android.support.v4.app.DialogFragment;
-import android.support.v7.app.AlertDialog;
 import android.text.SpannableString;
 import android.text.method.LinkMovementMethod;
 import android.text.style.ClickableSpan;
@@ -20,8 +18,11 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.TextView.OnEditorActionListener;
 
+import androidx.appcompat.app.AlertDialog;
+import androidx.fragment.app.DialogFragment;
+
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.help.HelpAndFeedback;
+import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherImpl;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.ui.text.SpanApplier;
 import org.chromium.ui.text.SpanApplier.SpanInfo;
@@ -30,7 +31,9 @@ import org.chromium.ui.text.SpanApplier.SpanInfo;
  * Dialog to ask the user to enter a new custom passphrase.
  */
 public class PassphraseCreationDialogFragment extends DialogFragment {
-    public interface Listener { void onPassphraseCreated(String passphrase); }
+    public interface Listener {
+        void onPassphraseCreated(String passphrase);
+    }
 
     private EditText mEnterPassphrase;
     private EditText mConfirmPassphrase;
@@ -59,7 +62,7 @@ public class PassphraseCreationDialogFragment extends DialogFragment {
         instructionsView.setText(getInstructionsText());
 
         AlertDialog dialog =
-                new AlertDialog.Builder(getActivity(), R.style.Theme_Chromium_AlertDialog)
+                new AlertDialog.Builder(getActivity(), R.style.ThemeOverlay_BrowserUI_AlertDialog)
                         .setView(view)
                         .setTitle(R.string.sync_passphrase_type_custom_dialog_title)
                         .setPositiveButton(R.string.save, null)
@@ -71,14 +74,13 @@ public class PassphraseCreationDialogFragment extends DialogFragment {
 
     private SpannableString getInstructionsText() {
         final Activity activity = getActivity();
-        return SpanApplier.applySpans(
-                activity.getString(R.string.sync_custom_passphrase),
+        return SpanApplier.applySpans(activity.getString(R.string.sync_custom_passphrase),
                 new SpanInfo("<learnmore>", "</learnmore>", new ClickableSpan() {
                     @Override
                     public void onClick(View view) {
-                        HelpAndFeedback.getInstance(activity).show(activity,
+                        HelpAndFeedbackLauncherImpl.getInstance().show(activity,
                                 activity.getString(R.string.help_context_change_sync_passphrase),
-                                Profile.getLastUsedProfile(), null);
+                                Profile.getLastUsedRegularProfile(), null);
                     }
                 }));
     }

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/manifest_handlers/incognito_info.h"
-#include "extensions/common/view_type.h"
+#include "extensions/common/mojom/view_type.mojom.h"
 
 namespace extensions {
 
@@ -28,16 +28,14 @@ std::unique_ptr<ExtensionViewHost> CreateViewHostForExtension(
     const GURL& url,
     Profile* profile,
     Browser* browser,
-    ViewType view_type) {
+    mojom::ViewType view_type) {
   DCHECK(profile);
   // A NULL browser may only be given for dialogs.
-  DCHECK(browser || view_type == VIEW_TYPE_EXTENSION_DIALOG);
+  DCHECK(browser || view_type == mojom::ViewType::kExtensionDialog);
   scoped_refptr<content::SiteInstance> site_instance =
       ProcessManager::Get(profile)->GetSiteInstanceForURL(url);
-  auto host = std::make_unique<ExtensionViewHost>(
-      extension, site_instance.get(), url, view_type);
-  host->CreateView(browser);
-  return host;
+  return std::make_unique<ExtensionViewHost>(extension, site_instance.get(),
+                                             url, view_type, browser);
 }
 
 // Creates a view host for an extension in an incognito window. Returns NULL
@@ -47,7 +45,7 @@ std::unique_ptr<ExtensionViewHost> CreateViewHostForIncognito(
     const GURL& url,
     Profile* profile,
     Browser* browser,
-    ViewType view_type) {
+    mojom::ViewType view_type) {
   DCHECK(extension);
   DCHECK(profile->IsOffTheRecord());
 
@@ -66,7 +64,7 @@ std::unique_ptr<ExtensionViewHost> CreateViewHostForIncognito(
   NOTREACHED() <<
       "We shouldn't be trying to create an incognito extension view unless "
       "it has been enabled for incognito.";
-  return NULL;
+  return nullptr;
 }
 
 // Returns the extension associated with |url| in |profile|. Returns NULL if
@@ -74,7 +72,7 @@ std::unique_ptr<ExtensionViewHost> CreateViewHostForIncognito(
 const Extension* GetExtensionForUrl(Profile* profile, const GURL& url) {
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile);
   if (!registry)
-    return NULL;
+    return nullptr;
   std::string extension_id = url.host();
   return registry->enabled_extensions().GetByID(extension_id);
 }
@@ -84,14 +82,14 @@ std::unique_ptr<ExtensionViewHost> CreateViewHost(
     const GURL& url,
     Profile* profile,
     Browser* browser,
-    extensions::ViewType view_type) {
+    extensions::mojom::ViewType view_type) {
   DCHECK(profile);
   // A NULL browser may only be given for dialogs.
-  DCHECK(browser || view_type == VIEW_TYPE_EXTENSION_DIALOG);
+  DCHECK(browser || view_type == mojom::ViewType::kExtensionDialog);
 
   const Extension* extension = GetExtensionForUrl(profile, url);
   if (!extension)
-    return NULL;
+    return nullptr;
   if (profile->IsOffTheRecord()) {
     return CreateViewHostForIncognito(
         extension, url, profile, browser, view_type);
@@ -107,8 +105,8 @@ std::unique_ptr<ExtensionViewHost> ExtensionViewHostFactory::CreatePopupHost(
     const GURL& url,
     Browser* browser) {
   DCHECK(browser);
-  return CreateViewHost(
-      url, browser->profile(), browser, VIEW_TYPE_EXTENSION_POPUP);
+  return CreateViewHost(url, browser->profile(), browser,
+                        mojom::ViewType::kExtensionPopup);
 }
 
 // static
@@ -116,7 +114,8 @@ std::unique_ptr<ExtensionViewHost> ExtensionViewHostFactory::CreateDialogHost(
     const GURL& url,
     Profile* profile) {
   DCHECK(profile);
-  return CreateViewHost(url, profile, NULL, VIEW_TYPE_EXTENSION_DIALOG);
+  return CreateViewHost(url, profile, nullptr,
+                        mojom::ViewType::kExtensionDialog);
 }
 
 }  // namespace extensions

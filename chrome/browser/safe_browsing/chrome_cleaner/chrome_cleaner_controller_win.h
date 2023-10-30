@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,30 +9,14 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/observer_list_types.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_scanner_results_win.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/sw_reporter_invocation_win.h"
+#include "components/prefs/pref_registry_simple.h"
 
 class Profile;
 
-namespace extensions {
-class ExtensionService;
-}
-
 namespace safe_browsing {
-
-// These values are used to send UMA information and are replicated in the
-// histograms.xml file, so the order MUST NOT CHANGE.
-enum CleanupStartedHistogramValue {
-  CLEANUP_STARTED_FROM_PROMPT_DIALOG = 0,
-  CLEANUP_STARTED_FROM_PROMPT_IN_SETTINGS = 1,
-
-  CLEANUP_STARTED_MAX,
-};
-
-// Records a SoftwareReporter.CleanupStarted histogram.
-void RecordCleanupStartedHistogram(CleanupStartedHistogramValue value);
 
 // Interface for the Chrome Cleaner controller class that keeps track of the
 // execution of the Chrome Cleaner and the various states through which the
@@ -97,7 +81,7 @@ class ChromeCleanerController {
     kDismissed,
   };
 
-  class Observer {
+  class Observer : public base::CheckedObserver {
    public:
     virtual void OnIdle(IdleReason idle_reason) {}
     virtual void OnReporterRunning() {}
@@ -110,13 +94,13 @@ class ChromeCleanerController {
         const ChromeCleanerScannerResults& scanner_results) {}
     virtual void OnRebootRequired() {}
     virtual void OnRebootFailed() {}
-
-   protected:
-    virtual ~Observer() = default;
   };
 
   // Returns the global controller object.
   static ChromeCleanerController* GetInstance();
+
+  ChromeCleanerController(const ChromeCleanerController&) = delete;
+  ChromeCleanerController& operator=(const ChromeCleanerController&) = delete;
 
   virtual State state() const = 0;
   virtual IdleReason idle_reason() const = 0;
@@ -135,6 +119,7 @@ class ChromeCleanerController {
   // by calling the corresponding |On*()| function.
   virtual void AddObserver(Observer* observer) = 0;
   virtual void RemoveObserver(Observer* observer) = 0;
+  virtual bool HasObserver(Observer* observer) = 0;
 
   // Invoked by the reporter runner, notifies the controller that a reporter
   // sequence started. If there is no pending cleaner action (currently on the
@@ -162,8 +147,9 @@ class ChromeCleanerController {
   // unless the user has manually requested a reporter run, in which case the
   // |SwReporterInvocationType::kUserInitiatedWithLogsAllowed| or
   // |SwReporterInvocationType::kUserInitiatedWithLogsDisallowed| types will be
-  // passed.
+  // passed. |prompt_seed| is the seed specified in the component manifest.
   virtual void OnSwReporterReady(
+      const std::string& prompt_seed,
       SwReporterInvocationSequence&& invocations) = 0;
 
   // Downloads the Chrome Cleaner binary, executes it and waits for the Cleaner
@@ -194,7 +180,6 @@ class ChromeCleanerController {
   // "Cleanup" button multiple times.
   virtual void ReplyWithUserResponse(
       Profile* profile,
-      extensions::ExtensionService* extension_service,
       UserResponse user_response) = 0;
 
   // If the controller is in the kRebootRequired state, initiates a reboot of
@@ -214,13 +199,16 @@ class ChromeCleanerController {
   // Returns true if cleaner reporting is managed by enterprise policy.
   virtual bool IsReportingManagedByPolicy(Profile* profile) = 0;
 
+  // Returns the prompt seed specified in the component manifest.
+  virtual std::string GetIncomingPromptSeed() = 0;
+
  protected:
   ChromeCleanerController();
   virtual ~ChromeCleanerController();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ChromeCleanerController);
 };
+
+// Registers the reporter scan completion time preference.
+void RegisterChromeCleanerScanCompletionTimePref(PrefRegistrySimple* registry);
 
 //  These are used for debug output in tests.
 std::ostream& operator<<(std::ostream& out,

@@ -1,8 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/task_manager/test_task_manager.h"
+
+#include "base/timer/mock_timer.h"
 
 namespace task_manager {
 
@@ -78,16 +80,12 @@ bool TestTaskManager::IsTaskOnBackgroundedProcess(TaskId task_id) const {
   return false;
 }
 
-const base::string16& TestTaskManager::GetTitle(TaskId task_id) const {
+const std::u16string& TestTaskManager::GetTitle(TaskId task_id) const {
   return title_;
 }
 
-const std::string& TestTaskManager::GetTaskNameForRappor(TaskId task_id) const {
-  return rappor_sample_;
-}
-
-base::string16 TestTaskManager::GetProfileName(TaskId task_id) const {
-  return base::string16();
+std::u16string TestTaskManager::GetProfileName(TaskId task_id) const {
+  return std::u16string();
 }
 
 const gfx::ImageSkia& TestTaskManager::GetIcon(TaskId task_id) const {
@@ -154,7 +152,7 @@ bool TestTaskManager::GetV8Memory(TaskId task_id,
 
 bool TestTaskManager::GetWebCacheStats(
     TaskId task_id,
-    blink::WebCache::ResourceTypeStats* stats) const {
+    blink::WebCacheResourceTypeStats* stats) const {
   return false;
 }
 

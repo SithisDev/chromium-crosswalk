@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,8 +28,9 @@ import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.infobar.IPHInfoBarSupport.IPHBubbleDelegate;
 import org.chromium.chrome.browser.infobar.IPHInfoBarSupport.PopupState;
-import org.chromium.chrome.browser.infobar.InfoBarContainerLayout.Item;
-import org.chromium.chrome.browser.widget.textbubble.TextBubble;
+import org.chromium.components.browser_ui.widget.textbubble.TextBubble;
+import org.chromium.components.infobars.InfoBar;
+import org.chromium.components.infobars.InfoBarUiItem;
 
 /** Tests {@link IPHInfoBarSupport}. */
 @RunWith(BaseRobolectricTestRunner.class)
@@ -38,7 +39,7 @@ public class IPHInfoBarSupportTest {
     @Mock
     private IPHBubbleDelegate mDelegate;
     @Mock
-    private Item mItem;
+    private InfoBarUiItem mItem;
     @Mock
     private View mView;
 

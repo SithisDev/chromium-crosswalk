@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,19 +9,13 @@ import org.junit.rules.TestRule;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
-import org.chromium.base.library_loader.LibraryProcessType;
-import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.task.PostTask;
-import org.chromium.chrome.browser.ChromeApplication;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.chrome.browser.init.BrowserParts;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.init.EmptyBrowserParts;
-import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.content_public.browser.BrowserStartupController;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -47,10 +41,6 @@ public class ReducedModeNativeTestRule implements TestRule {
         return new Statement() {
             @Override
             public void evaluate() throws Throwable {
-                Features.getInstance().enable(ChromeFeatureList.NETWORK_SERVICE);
-                // Unfortunately, Features has already formed the command line at this point. This
-                // forces another redo after we added new flags.
-                Features.ensureCommandLineIsUpToDate();
                 if (mAutoLoadNative) {
                     loadNative();
                 }
@@ -67,39 +57,28 @@ public class ReducedModeNativeTestRule implements TestRule {
             }
 
             @Override
-            public boolean startServiceManagerOnly() {
+            public boolean startMinimalBrowser() {
                 return true;
             }
         };
         PostTask.postTask(UiThreadTaskTraits.DEFAULT, () -> {
-            try {
-                ChromeBrowserInitializer.getInstance().handlePreNativeStartup(parts);
-                ChromeBrowserInitializer.getInstance().handlePostNativeStartup(true, parts);
-            } catch (ProcessInitException e) {
-                ChromeApplication.reportStartupErrorAndExit(e);
-            }
+            ChromeBrowserInitializer.getInstance().handlePreNativeStartupAndLoadLibraries(parts);
+            ChromeBrowserInitializer.getInstance().handlePostNativeStartup(true, parts);
         });
         waitForNativeLoaded();
     }
 
     private void waitForNativeLoaded() {
         CriteriaHelper.pollUiThread(
-                new Criteria("Failed while waiting for starting Service Manager.") {
-                    @Override
-                    public boolean isSatisfied() {
-                        return mNativeLoaded.get();
-                    }
-                });
+                mNativeLoaded::get, "Failed while waiting for starting minimal browser.");
     }
 
-    public void assertOnlyServiceManagerStarted() {
+    public void assertMinimalBrowserStarted() {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             Assert.assertTrue("Native has not been started.",
-                    BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
-                            .isNativeStarted());
-            Assert.assertFalse("The full browser is started instead of ServiceManager only.",
-                    BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
-                            .isFullBrowserStarted());
+                    BrowserStartupController.getInstance().isNativeStarted());
+            Assert.assertFalse("The full browser is started instead of minimal browser.",
+                    BrowserStartupController.getInstance().isFullBrowserStarted());
         });
     }
 }

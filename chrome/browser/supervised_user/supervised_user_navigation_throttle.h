@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,11 @@
 
 #include <memory>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/supervised_user/supervised_user_error_page/supervised_user_error_page.h"
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
 #include "chrome/browser/supervised_user/supervised_users.h"
-#include "components/supervised_user_error_page/supervised_user_error_page.h"
 #include "content/public/browser/navigation_throttle.h"
 
 class SupervisedUserNavigationThrottle : public content::NavigationThrottle {
@@ -23,6 +22,11 @@ class SupervisedUserNavigationThrottle : public content::NavigationThrottle {
   // throttling is required.
   static std::unique_ptr<SupervisedUserNavigationThrottle>
   MaybeCreateThrottleFor(content::NavigationHandle* navigation_handle);
+
+  SupervisedUserNavigationThrottle(const SupervisedUserNavigationThrottle&) =
+      delete;
+  SupervisedUserNavigationThrottle& operator=(
+      const SupervisedUserNavigationThrottle&) = delete;
 
   ~SupervisedUserNavigationThrottle() override;
 
@@ -52,16 +56,16 @@ class SupervisedUserNavigationThrottle : public content::NavigationThrottle {
                    supervised_user_error_page::FilteringBehaviorReason reason,
                    bool uncertain);
 
-  void OnInterstitialResult(CallbackActions continue_request);
+  void OnInterstitialResult(CallbackActions continue_request,
+                            bool already_requested_permission,
+                            bool is_main_frame);
 
-  const SupervisedUserURLFilter* url_filter_;
+  raw_ptr<const SupervisedUserURLFilter> url_filter_;
   bool deferred_;
   supervised_user_error_page::FilteringBehaviorReason reason_;
   SupervisedUserURLFilter::FilteringBehavior behavior_;
   base::WeakPtrFactory<SupervisedUserNavigationThrottle> weak_ptr_factory_{
       this};
-
-  DISALLOW_COPY_AND_ASSIGN(SupervisedUserNavigationThrottle);
 };
 
 #endif  // CHROME_BROWSER_SUPERVISED_USER_SUPERVISED_USER_NAVIGATION_THROTTLE_H_

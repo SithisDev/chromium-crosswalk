@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,16 @@ var assertFalse = chrome.test.assertFalse;
 var assertTrue = chrome.test.assertTrue;
 
 var rootNode = null;
+
+function createTabAndWaitUntilLoaded(url, callback) {
+  chrome.tabs.create({"url": url}, function(tab) {
+    chrome.tabs.onUpdated.addListener(function(tabId, changeInfo) {
+      if (tabId == tab.id && changeInfo.status == 'complete') {
+        callback(tab);
+      }
+    });
+  });
+}
 
 function setUpAndRunTests(allTests) {
   chrome.test.getConfig(function(config) {
@@ -24,9 +34,8 @@ function setUpAndRunTests(allTests) {
         chrome.test.runTests(allTests);
       });
     }
-    chrome.tabs.create({ 'url': url }, function() {
+    createTabAndWaitUntilLoaded(url, function(unused_tab) {
       chrome.automation.getTree(gotTree);
     });
   });
 }
-

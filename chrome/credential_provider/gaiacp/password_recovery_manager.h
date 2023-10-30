@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "base/win/windows_types.h"
 #include "url/gurl.h"
@@ -18,25 +17,30 @@ namespace credential_provider {
 // a given user and to retrieve this encrypted password.
 class PasswordRecoveryManager {
  public:
-  // Default timeout when trying to make requests to the EMM escrow service.
-  static const base::TimeDelta kDefaultEscrowServiceRequestTimeout;
+  // Default timeout when trying to make requests to the EMM escrow service to
+  // retrieve encryption key.
+  static const base::TimeDelta kDefaultEscrowServiceEncryptionKeyRequestTimeout;
+
+  // Default timeout when trying to make requests to the EMM escrow service to
+  // retrieve decryption key.
+  static const base::TimeDelta kDefaultEscrowServiceDecryptionKeyRequestTimeout;
 
   static PasswordRecoveryManager* Get();
 
   // Clear the password recovery information stored in the LSA for user with SID
   // |sid|.
-  HRESULT ClearUserRecoveryPassword(const base::string16& sid);
+  HRESULT ClearUserRecoveryPassword(const std::wstring& sid);
 
   // Attempts to recover the password for user with SID |sid| using the EMM
   // escrow service.
-  HRESULT RecoverWindowsPasswordIfPossible(const base::string16& sid,
+  HRESULT RecoverWindowsPasswordIfPossible(const std::wstring& sid,
                                            const std::string& access_token,
-                                           base::string16* recovered_password);
+                                           std::wstring* recovered_password);
   // Attempts to store encryped passwod information for user with SID |sid| in
   // the LSA.
-  HRESULT StoreWindowsPasswordIfNeeded(const base::string16& sid,
+  HRESULT StoreWindowsPasswordIfNeeded(const std::wstring& sid,
                                        const std::string& access_token,
-                                       const base::string16& password);
+                                       const std::wstring& password);
 
   // Calculates the full url of various escrow service requests based on
   // the registry setting for the escrow server url.
@@ -47,11 +51,14 @@ class PasswordRecoveryManager {
   // Returns the storage used for the instance pointer.
   static PasswordRecoveryManager** GetInstanceStorage();
 
-  explicit PasswordRecoveryManager(base::TimeDelta request_timeout);
+  explicit PasswordRecoveryManager(
+      base::TimeDelta encryption_key_request_timeout,
+      base::TimeDelta decryption_key_request_timeout);
   virtual ~PasswordRecoveryManager();
 
   void SetRequestTimeoutForTesting(base::TimeDelta request_timeout) {
-    request_timeout_ = request_timeout;
+    encryption_key_request_timeout_ = request_timeout;
+    decryption_key_request_timeout_ = request_timeout;
   }
   std::string MakeGenerateKeyPairResponseForTesting(
       const std::string& public_key,
@@ -60,8 +67,8 @@ class PasswordRecoveryManager {
       const std::string& private_key);
 
  private:
-
-  base::TimeDelta request_timeout_;
+  base::TimeDelta encryption_key_request_timeout_;
+  base::TimeDelta decryption_key_request_timeout_;
 };
 
 }  // namespace credential_provider

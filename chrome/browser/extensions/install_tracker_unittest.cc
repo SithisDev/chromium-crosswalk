@@ -1,13 +1,17 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/install_tracker.h"
 
+#include <memory>
+
 #include "base/files/file_path.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/extensions/active_install_data.h"
+#include "chrome/browser/extensions/scoped_active_install.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
@@ -30,7 +34,7 @@ const char kExtensionId3[] = "ladmcjmmmmgonboiadnaindoekpbljde";
 
 scoped_refptr<const Extension> CreateDummyExtension(const std::string& id) {
   return extensions::ExtensionBuilder("Dummy name")
-      .SetLocation(extensions::Manifest::INTERNAL)
+      .SetLocation(extensions::mojom::ManifestLocation::kInternal)
       .SetID(id)
       .Build();
 }
@@ -40,8 +44,8 @@ scoped_refptr<const Extension> CreateDummyExtension(const std::string& id) {
 class InstallTrackerTest : public testing::Test {
  public:
   InstallTrackerTest() {
-    profile_.reset(new TestingProfile());
-    tracker_.reset(new InstallTracker(profile_.get(), NULL));
+    profile_ = std::make_unique<TestingProfile>();
+    tracker_ = base::WrapUnique(new InstallTracker(profile_.get(), nullptr));
   }
 
   ~InstallTrackerTest() override {}
@@ -56,7 +60,7 @@ class InstallTrackerTest : public testing::Test {
     EXPECT_EQ(original.percent_downloaded, retrieved.percent_downloaded);
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
   std::unique_ptr<InstallTracker> tracker_;
 };
@@ -81,8 +85,8 @@ TEST_F(InstallTrackerTest, AddAndRemoveActiveInstalls) {
   ASSERT_FALSE(retrieved_data3);
   VerifyInstallData(install_data1, *retrieved_data1);
   VerifyInstallData(install_data2, *retrieved_data2);
-  retrieved_data1 = NULL;
-  retrieved_data2 = NULL;
+  retrieved_data1 = nullptr;
+  retrieved_data2 = nullptr;
 
   tracker_->RemoveActiveInstall(kExtensionId1);
   EXPECT_FALSE(tracker_->GetActiveInstall(kExtensionId1));
@@ -103,14 +107,14 @@ TEST_F(InstallTrackerTest, ScopedActiveInstallDeregister) {
       tracker_->GetActiveInstall(kExtensionId1);
   ASSERT_TRUE(retrieved_data);
   VerifyInstallData(install_data, *retrieved_data);
-  retrieved_data = NULL;
+  retrieved_data = nullptr;
 
   scoped_active_install.reset();
   EXPECT_FALSE(tracker_->GetActiveInstall(kExtensionId1));
 
   // Verify the constructor that doesn't register the install.
-  scoped_active_install.reset(
-      new ScopedActiveInstall(tracker(), kExtensionId1));
+  scoped_active_install =
+      std::make_unique<ScopedActiveInstall>(tracker(), kExtensionId1);
   EXPECT_FALSE(tracker_->GetActiveInstall(kExtensionId1));
 
   tracker_->AddActiveInstall(install_data);
@@ -131,7 +135,7 @@ TEST_F(InstallTrackerTest, ScopedActiveInstallCancelled) {
       tracker_->GetActiveInstall(kExtensionId1);
   ASSERT_TRUE(retrieved_data);
   VerifyInstallData(install_data, *retrieved_data);
-  retrieved_data = NULL;
+  retrieved_data = nullptr;
 
   scoped_active_install->CancelDeregister();
   scoped_active_install.reset();
@@ -171,7 +175,7 @@ TEST_F(InstallTrackerTest, ExtensionInstallFailure) {
   ASSERT_TRUE(retrieved_data);
   EXPECT_EQ(0, retrieved_data->percent_downloaded);
   EXPECT_EQ(install_params.extension_id, retrieved_data->extension_id);
-  retrieved_data = NULL;
+  retrieved_data = nullptr;
 
   tracker_->OnInstallFailure(kExtensionId1);
   EXPECT_FALSE(tracker_->GetActiveInstall(kExtensionId1));
@@ -188,7 +192,7 @@ TEST_F(InstallTrackerTest, ExtensionInstalledEvent) {
   ASSERT_TRUE(retrieved_data);
   EXPECT_EQ(0, retrieved_data->percent_downloaded);
   EXPECT_EQ(install_params.extension_id, retrieved_data->extension_id);
-  retrieved_data = NULL;
+  retrieved_data = nullptr;
 
   // Simulate an extension install.
   scoped_refptr<const Extension> extension =

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/strings/string_util.h"
-#include "base/task/post_task.h"
 #include "chrome/browser/extensions/api/developer_private/developer_private_api.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
@@ -19,7 +18,7 @@
 namespace {
 
 bool g_skip_picker_for_test = false;
-base::FilePath* g_path_to_be_picked_for_test = NULL;
+base::FilePath* g_path_to_be_picked_for_test = nullptr;
 
 }  // namespace
 
@@ -31,20 +30,20 @@ EntryPicker::EntryPicker(EntryPickerClient* client,
                          content::WebContents* web_contents,
                          ui::SelectFileDialog::Type picker_type,
                          const base::FilePath& last_directory,
-                         const base::string16& select_title,
+                         const std::u16string& select_title,
                          const ui::SelectFileDialog::FileTypeInfo& info,
                          int file_type_index)
     : client_(client) {
   if (g_skip_picker_for_test) {
     if (g_path_to_be_picked_for_test) {
-      base::PostTaskWithTraits(
-          FROM_HERE, {content::BrowserThread::UI},
+      content::GetUIThreadTaskRunner({})->PostTask(
+          FROM_HERE,
           base::BindOnce(&EntryPicker::FileSelected, base::Unretained(this),
                          *g_path_to_be_picked_for_test, 1,
                          static_cast<void*>(nullptr)));
     } else {
-      base::PostTaskWithTraits(
-          FROM_HERE, {content::BrowserThread::UI},
+      content::GetUIThreadTaskRunner({})->PostTask(
+          FROM_HERE,
           base::BindOnce(&EntryPicker::FileSelectionCanceled,
                          base::Unretained(this), static_cast<void*>(nullptr)));
     }
@@ -99,7 +98,7 @@ void EntryPicker::SkipPickerAndAlwaysSelectPathForTest(
 // static
 void EntryPicker::SkipPickerAndAlwaysCancelForTest() {
   g_skip_picker_for_test = true;
-  g_path_to_be_picked_for_test = NULL;
+  g_path_to_be_picked_for_test = nullptr;
 }
 
 // static

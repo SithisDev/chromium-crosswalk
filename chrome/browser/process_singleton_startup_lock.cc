@@ -1,11 +1,11 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/process_singleton_startup_lock.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 
 ProcessSingletonStartupLock::ProcessSingletonStartupLock(
     const ProcessSingleton::NotificationCallback& original_callback)
@@ -18,8 +18,9 @@ ProcessSingletonStartupLock::~ProcessSingletonStartupLock() {
 
 ProcessSingleton::NotificationCallback
 ProcessSingletonStartupLock::AsNotificationCallback() {
-  return base::Bind(&ProcessSingletonStartupLock::NotificationCallbackImpl,
-                    base::Unretained(this));
+  return base::BindRepeating(
+      &ProcessSingletonStartupLock::NotificationCallbackImpl,
+      base::Unretained(this));
 }
 
 void ProcessSingletonStartupLock::Unlock() {

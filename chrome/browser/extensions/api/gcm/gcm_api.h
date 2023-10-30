@@ -1,10 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_GCM_GCM_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_GCM_GCM_API_H_
 
+#include "base/memory/raw_ptr.h"
 #include "chrome/common/extensions/api/gcm.h"
 #include "components/gcm_driver/gcm_client.h"
 #include "extensions/browser/extension_function.h"
@@ -17,7 +18,7 @@ class Profile;
 
 namespace extensions {
 
-class GcmApiFunction : public UIThreadExtensionFunction {
+class GcmApiFunction : public ExtensionFunction {
  public:
   GcmApiFunction() {}
 
@@ -42,7 +43,7 @@ class GcmRegisterFunction : public GcmApiFunction {
  protected:
   ~GcmRegisterFunction() override;
 
-  // UIThreadExtensionFunction:
+  // ExtensionFunction:
   ResponseAction Run() final;
 
  private:
@@ -59,7 +60,7 @@ class GcmUnregisterFunction : public GcmApiFunction {
  protected:
   ~GcmUnregisterFunction() override;
 
-  // UIThreadExtensionFunction:
+  // ExtensionFunction:
   ResponseAction Run() final;
 
  private:
@@ -75,7 +76,7 @@ class GcmSendFunction : public GcmApiFunction {
  protected:
   ~GcmSendFunction() override;
 
-  // UIThreadExtensionFunction:
+  // ExtensionFunction:
   ResponseAction Run() final;
 
  private:
@@ -102,7 +103,7 @@ class GcmJsEventRouter {
  private:
   // The application we route the event to is running in context of the
   // |profile_| and the latter outlives the event router.
-  Profile* profile_;
+  raw_ptr<Profile> profile_;
 };
 
 }  // namespace extensions

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 
 namespace base {
 class FilePath;
-class ListValue;
 }
 
 struct Session;
@@ -22,11 +21,10 @@ class WebView;
 std::string GenerateId();
 
 // Send a sequence of key strokes to the active Element in window.
-Status SendKeysOnWindow(
-    WebView* web_view,
-    const base::ListValue* key_list,
-    bool release_modifiers,
-    int* sticky_modifiers);
+Status SendKeysOnWindow(WebView* web_view,
+                        const base::Value::List* key_list,
+                        bool release_modifiers,
+                        int* sticky_modifiers);
 
 // Decodes the given base64-encoded string, after removing any newlines,
 // which are required in some base64 standards. Returns true on success.
@@ -46,6 +44,8 @@ Status UnzipSoleFile(const base::FilePath& unzip_dir,
 // If an error is encountered, will mark |session| for deletion and return.
 Status NotifyCommandListenersBeforeCommand(Session* session,
                                            const std::string& command_name);
+
+double ConvertCentimeterToInch(double centimeter);
 
 // Functions to get an optional value of the given type from a dictionary.
 // Each function has three different outcomes:
@@ -81,6 +81,14 @@ bool GetOptionalString(const base::DictionaryValue* dict,
                        base::StringPiece path,
                        std::string* out_value,
                        bool* has_value = nullptr);
+bool GetOptionalDictionary(const base::DictionaryValue* dict,
+                           base::StringPiece path,
+                           const base::DictionaryValue** out_value,
+                           bool* has_value = nullptr);
+bool GetOptionalList(const base::DictionaryValue* dict,
+                     base::StringPiece path,
+                     const base::Value::List** out_value,
+                     bool* has_value = nullptr);
 // Handles "safe integer" mentioned in W3C spec,
 // https://www.w3.org/TR/webdriver/#dfn-maximum-safe-integer.
 bool GetOptionalSafeInt(const base::DictionaryValue* dict,

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 
 #include "chrome/app/chrome_crash_reporter_client_win.h"
 #include "chrome/chrome_elf/hook_util/hook_util.h"
-#include "components/crash/content/app/crashpad.h"
+#include "components/crash/core/app/crashpad.h"
 #include "components/crash/core/common/crash_keys.h"
 #include "third_party/crashpad/crashpad/client/crashpad_client.h"
 
@@ -64,10 +64,13 @@ namespace elf_crash {
 // NOTE: This function will be called from DllMain during DLL_PROCESS_ATTACH
 // (while we have the loader lock), so do not misbehave.
 bool InitializeCrashReporting() {
-#ifdef _DEBUG
+  if (g_crash_helper_enabled)
+    return true;
+
+#if defined(_DEBUG) || defined(DCHECK_ALWAYS_ON)
   assert(g_crash_reports == nullptr);
   assert(g_set_unhandled_exception_filter == nullptr);
-#endif  // _DEBUG
+#endif  // defined(_DEBUG) || defined(DCHECK_ALWAYS_ON)
 
   // No global objects with destructors, so using global pointers.
   // DllMain on detach will clean these up.
@@ -83,11 +86,11 @@ bool InitializeCrashReporting() {
 // NOTE: This function will be called from DllMain during DLL_PROCESS_DETACH
 // (while we have the loader lock), so do not misbehave.
 void ShutdownCrashReporting() {
-  if (g_crash_reports != nullptr) {
+  if (g_crash_reports) {
     g_crash_reports->clear();
     delete g_crash_reports;
   }
-  if (g_set_unhandled_exception_filter != nullptr) {
+  if (g_set_unhandled_exception_filter) {
     delete g_set_unhandled_exception_filter;
   }
 }
@@ -95,16 +98,19 @@ void ShutdownCrashReporting() {
 // Please refer to the comment on g_set_unhandled_exception_filter for more
 // information about why we intercept the SetUnhandledExceptionFilter API.
 void DisableSetUnhandledExceptionFilter() {
-  if (!g_crash_helper_enabled)
-    return;
+#if defined(_DEBUG) || defined(DCHECK_ALWAYS_ON)
+  // Should never patch SetUnhandledExceptionFilter before crashpad has called
+  // it.
+  assert(g_crash_helper_enabled);
+#endif  // defined(_DEBUG) || defined(DCHECK_ALWAYS_ON)
   if (g_set_unhandled_exception_filter->Hook(
           ::GetModuleHandle(nullptr), "kernel32.dll",
           "SetUnhandledExceptionFilter",
           reinterpret_cast<void*>(SetUnhandledExceptionFilterPatch)) !=
       NO_ERROR) {
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(DCHECK_ALWAYS_ON)
     assert(false);
-#endif  // _DEBUG
+#endif  // defined(_DEBUG) || defined(DCHECK_ALWAYS_ON)
   }
 }
 

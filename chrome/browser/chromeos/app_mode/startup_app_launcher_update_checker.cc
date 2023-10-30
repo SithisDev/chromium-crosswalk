@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/updater/extension_downloader.h"
 
-namespace chromeos {
+namespace ash {
 
 StartupAppLauncherUpdateChecker::StartupAppLauncherUpdateChecker(
     Profile* profile)
@@ -57,12 +58,9 @@ void StartupAppLauncherUpdateChecker::Observe(
     const content::NotificationDetails& details) {
   DCHECK_EQ(extensions::NOTIFICATION_EXTENSION_UPDATE_FOUND, type);
 
-  using UpdateDetails = const std::pair<std::string, base::Version>;
-  const std::string& id = content::Details<UpdateDetails>(details)->first;
-  const base::Version& version =
-      content::Details<UpdateDetails>(details)->second;
-  SYSLOG(INFO) << "Found extension update id=" << id
-               << " version=" << version.GetString();
+  const content::Details<extensions::UpdateDetails> update_details(details);
+  SYSLOG(INFO) << "Found extension update id=" << update_details->id
+               << " version=" << update_details->version.GetString();
   update_found_ = true;
 }
 
@@ -74,4 +72,4 @@ void StartupAppLauncherUpdateChecker::OnExtensionUpdaterDone() {
   std::move(callback_).Run(update_found_);
 }
 
-}  // namespace chromeos
+}  // namespace ash

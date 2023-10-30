@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,12 @@
 #include "base/callback_forward.h"
 #include "base/containers/flat_set.h"
 #include "base/lazy_instance.h"
-#include "base/macros.h"
 #include "base/observer_list.h"
+#include "build/build_config.h"
+
+#if BUILDFLAG(IS_ANDROID)
+#error This file should only be included on desktop.
+#endif
 
 class Browser;
 class Profile;
@@ -29,9 +33,12 @@ class BrowserList {
  public:
   using BrowserSet = base::flat_set<Browser*>;
   using BrowserVector = std::vector<Browser*>;
-  using CloseCallback = base::Callback<void(const base::FilePath&)>;
+  using CloseCallback = base::RepeatingCallback<void(const base::FilePath&)>;
   using const_iterator = BrowserVector::const_iterator;
   using const_reverse_iterator = BrowserVector::const_reverse_iterator;
+
+  BrowserList(const BrowserList&) = delete;
+  BrowserList& operator=(const BrowserList&) = delete;
 
   // Returns the last active browser for this list.
   Browser* GetLastActive() const;
@@ -44,15 +51,14 @@ class BrowserList {
 
   Browser* get(size_t index) const { return browsers_[index]; }
 
-  // Returns iterated access to list of open browsers ordered by when
-  // they were last active. The underlying data structure is a vector
-  // and we push_back on recent access so a reverse iterator gives the
-  // latest accessed browser first.
-  const_reverse_iterator begin_last_active() const {
-    return last_active_browsers_.rbegin();
+  // Returns iterated access to list of open browsers ordered by activation. The
+  // underlying data structure is a vector and we push_back on recent access so
+  // a reverse iterator gives the latest accessed browser first.
+  const_reverse_iterator begin_browsers_ordered_by_activation() const {
+    return browsers_ordered_by_activation_.rbegin();
   }
-  const_reverse_iterator end_last_active() const {
-    return last_active_browsers_.rend();
+  const_reverse_iterator end_browsers_ordered_by_activation() const {
+    return browsers_ordered_by_activation_.rend();
   }
 
   // Returns the set of browsers that are currently in the closing state.
@@ -67,6 +73,10 @@ class BrowserList {
   // so notify and THEN delete the object.
   static void AddBrowser(Browser* browser);
   static void RemoveBrowser(Browser* browser);
+
+  // Appends active browser windows to |browsers_ordered_by_activation_|.
+  // Prepends inactive browser windows to |browsers_ordered_by_activation_|.
+  static void AddBrowserToActiveList(Browser* browser);
 
   // Adds and removes |observer| from the observer list for all desktops.
   // Observers are responsible for making sure the notifying browser is relevant
@@ -116,18 +126,27 @@ class BrowserList {
       const CloseCallback& on_close_aborted,
       bool skip_beforeunload);
 
-  // Returns true if at least one incognito session is active across all
+  // Returns true if at least one off-the-record browser is active across all
   // desktops.
-  static bool IsIncognitoSessionActive();
+  static bool IsOffTheRecordBrowserActive();
 
-  // Returns the number of active incognito sessions for |profile| across all
-  // desktops. Note that this function does not count devtools windows opened
-  // for incognito windows.
-  static int GetIncognitoSessionsActiveForProfile(Profile* profile);
+  // Returns the number of active off-the-record browsers for |profile| across
+  // all desktops. Note that this function does not count devtools windows
+  // opened for off-the-record windows.
+  static int GetOffTheRecordBrowsersActiveForProfile(Profile* profile);
 
-  // Returns true if the incognito session for |profile| is in use in any window
-  // across all desktops. This function considers devtools windows as well.
-  static bool IsIncognitoSessionInUse(Profile* profile);
+  // Returns the number of active incognito browsers except devtools windows
+  // across all desktops.
+  static size_t GetIncognitoBrowserCount();
+
+  // Returns the number of active guest browsers except devtools windows
+  // across all desktops.
+  static size_t GetGuestBrowserCount();
+
+  // Returns true if the off-the-record browser for |profile| is in use in any
+  // window across all desktops. This function considers devtools windows as
+  // well.
+  static bool IsOffTheRecordBrowserInUse(Profile* profile);
 
  private:
   BrowserList();
@@ -166,9 +185,11 @@ class BrowserList {
 
   // A vector of the browsers in this list, in the order they were added.
   BrowserVector browsers_;
-  // A vector of the browsers in this list that have been activated, in the
-  // reverse order in which they were last activated.
-  BrowserVector last_active_browsers_;
+  // A vector of the browsers in this list, in reverse order of activation. I.e.
+  // the most recently used browser will be at the end. Inactive browser
+  // windows, (e.g., created by session restore) are inserted at the front of
+  // the list.
+  BrowserVector browsers_ordered_by_activation_;
   // A vector of the browsers that are currently in the closing state.
   BrowserSet currently_closing_browsers_;
 
@@ -178,8 +199,6 @@ class BrowserList {
       base::ObserverList<BrowserListObserver>::Unchecked>::Leaky observers_;
 
   static BrowserList* instance_;
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserList);
 };
 
 #endif  // CHROME_BROWSER_UI_BROWSER_LIST_H_

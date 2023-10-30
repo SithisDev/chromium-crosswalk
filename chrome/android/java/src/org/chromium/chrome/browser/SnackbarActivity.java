@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.WindowManager;
 
-import org.chromium.chrome.browser.snackbar.SnackbarManager;
-import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarManageable;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarManageable;
 
 /**
  * Base Activity class that is used for lighter-weight standalone Activities that rely on the native
@@ -30,7 +30,7 @@ public abstract class SnackbarActivity extends SynchronousInitializationActivity
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O) {
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
         }
-        mSnackbarManager = new SnackbarManager(this, null);
+        mSnackbarManager = new SnackbarManager(this, findViewById(android.R.id.content), null);
     }
 
     @Override

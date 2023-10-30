@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,18 +6,16 @@
 #define CHROME_BROWSER_UI_ASH_ACCESSIBILITY_FAKE_ACCESSIBILITY_CONTROLLER_H_
 
 #include "ash/public/cpp/accessibility_controller.h"
-#include "base/macros.h"
 
 // Fake implementation of ash's mojo AccessibilityController interface.
-//
-// This fake registers itself to ServiceManager on construction and deregisters
-// on destruction.
-//
-// Note: A ServiceManagerConnection must be initialized before constructing this
-// object. Consider using content::TestServiceManagerContext on your tests.
 class FakeAccessibilityController : ash::AccessibilityController {
  public:
   FakeAccessibilityController();
+
+  FakeAccessibilityController(const FakeAccessibilityController&) = delete;
+  FakeAccessibilityController& operator=(const FakeAccessibilityController&) =
+      delete;
+
   ~FakeAccessibilityController() override;
 
   bool was_client_set() const { return was_client_set_; }
@@ -34,22 +32,51 @@ class FakeAccessibilityController : ash::AccessibilityController {
   void SetSelectToSpeakState(ash::SelectToSpeakState state) override;
   void SetSelectToSpeakEventHandlerDelegate(
       ash::SelectToSpeakEventHandlerDelegate* delegate) override;
-  void SetSwitchAccessEventHandlerDelegate(
-      ash::SwitchAccessEventHandlerDelegate* delegate) override;
-  void SetSwitchAccessKeysToCapture(
-      const std::vector<int>& keys_to_capture) override;
+  void ShowSelectToSpeakPanel(const gfx::Rect& anchor,
+                              bool is_paused,
+                              double speed) override;
+  void HideSelectToSpeakPanel() override;
+  void OnSelectToSpeakPanelAction(ash::SelectToSpeakPanelAction action,
+                                  double value) override;
+  void HideSwitchAccessBackButton() override;
+  void HideSwitchAccessMenu() override;
+  void ShowSwitchAccessBackButton(const gfx::Rect& anchor) override;
+  void ShowSwitchAccessMenu(const gfx::Rect& anchor,
+                            std::vector<std::string> actions) override;
+  void StartPointScan() override;
+  void StopPointScan() override;
   void SetDictationActive(bool is_active) override;
+  void SetPointScanSpeedDipsPerSecond(
+      int point_scan_speed_dips_per_second) override;
   void ToggleDictationFromSource(ash::DictationToggleSource source) override;
-  void OnAutoclickScrollableBoundsFound(gfx::Rect& bounds_in_screen) override;
-  void ForwardKeyEventsToSwitchAccess(bool should_forward) override;
-  base::string16 GetBatteryDescription() const override;
+  void ShowDictationLanguageUpgradedNudge(
+      const std::string& dictation_locale,
+      const std::string& application_locale) override;
+  void HandleAutoclickScrollableBoundsFound(
+      gfx::Rect& bounds_in_screen) override;
+  std::u16string GetBatteryDescription() const override;
   void SetVirtualKeyboardVisible(bool is_visible) override;
+  void PerformAcceleratorAction(
+      ash::AcceleratorAction accelerator_action) override;
   void NotifyAccessibilityStatusChanged() override;
+  bool IsAccessibilityFeatureVisibleInTrayMenu(
+      const std::string& path) override;
+  void DisableSwitchAccessDisableConfirmationDialogTesting() override;
+  void UpdateDictationButtonOnSpeechRecognitionDownloadChanged(
+      int download_progress) override;
+  void ShowSpeechRecognitionDownloadNotificationForDictation(
+      bool succeeded,
+      const std::u16string& display_language) override;
+  void UpdateDictationBubble(
+      bool visible,
+      ash::DictationBubbleIconType icon,
+      const absl::optional<std::u16string>& text,
+      const absl::optional<std::vector<ash::DictationBubbleHintType>>& hints)
+      override;
+  void SilenceSpokenFeedback() override;
 
  private:
   bool was_client_set_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeAccessibilityController);
 };
 
 #endif  // CHROME_BROWSER_UI_ASH_ACCESSIBILITY_FAKE_ACCESSIBILITY_CONTROLLER_H_

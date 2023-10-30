@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 
 @implementation ElementAppleScript
 
-@synthesize uniqueID = uniqueID_;
-@synthesize container = container_;
-@synthesize containerProperty = containerProperty_;
+@synthesize uniqueID = _uniqueID;
+@synthesize container = _container;
+@synthesize containerProperty = _containerProperty;
 
 // calling objectSpecifier asks an object to return an object specifier
 // record referring to itself.  You must call setContainer:property: before
@@ -28,9 +28,9 @@
 }
 
 - (void)dealloc {
-  [uniqueID_ release];
-  [container_ release];
-  [containerProperty_ release];
+  [_uniqueID release];
+  [_container release];
+  [_containerProperty release];
   [super dealloc];
 }
 

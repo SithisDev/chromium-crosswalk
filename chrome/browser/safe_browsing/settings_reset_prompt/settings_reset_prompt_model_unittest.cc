@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,10 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profile_resetter/profile_resetter_test_base.h"
@@ -51,13 +53,10 @@ const char kStartupUrl1[] = "http://start1.com";
 const char kStartupUrl2[] = "http://start2.com";
 const char kStartupUrl3[] = "http://start3.com";
 
-bool ListValueContainsUrl(const base::ListValue* list, const GURL& url) {
-  if (!list)
-    return false;
-
-  for (size_t i = 0; i < list->GetSize(); ++i) {
-    std::string url_text;
-    if (list->GetString(i, &url_text) && url == url_text)
+bool ListValueContainsUrl(const base::Value::List& list, const GURL& url) {
+  for (const base::Value& i : list) {
+    const std::string* url_text = i.GetIfString();
+    if (url_text && url == *url_text)
       return true;
   }
   return false;
@@ -83,16 +82,15 @@ class SettingsResetPromptModelTest
     init_params.pref_file.clear();
     InitializeExtensionService(init_params);
 
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
     // In production code, the settings reset prompt profile preferences are
     // registered on Windows only. We explicitly register the prefs on
     // non-Windows systems so that we can continue testing the model on more
     // than just Windows.
     SettingsResetPromptPrefsManager::RegisterProfilePrefs(
         testing_pref_service()->registry());
-#endif  // !defined(OS_WIN)
+#endif  // !BUILDFLAG(IS_WIN)
 
-    profile_->CreateWebDataService();
     TemplateURLServiceFactory::GetInstance()->SetTestingFactory(
         profile(), base::BindRepeating(&CreateTemplateURLServiceForTesting));
 
@@ -120,8 +118,8 @@ class SettingsResetPromptModelTest
     ASSERT_TRUE(template_url_service);
 
     TemplateURLData data;
-    data.SetShortName(base::ASCIIToUTF16("TestEngine"));
-    data.SetKeyword(base::ASCIIToUTF16("TestEngine"));
+    data.SetShortName(u"TestEngine");
+    data.SetKeyword(u"TestEngine");
     data.SetURL(default_search);
     TemplateURL* template_url =
         template_url_service->Add(std::make_unique<TemplateURL>(data));
@@ -173,7 +171,7 @@ class SettingsResetPromptModelTest
                                  std::move(profile_resetter));
   }
 
-  PrefService* prefs_;
+  raw_ptr<PrefService> prefs_;
   SessionStartupPref startup_pref_;
   int reset_callbacks_ = 0;
 };
@@ -294,6 +292,15 @@ TEST_F(SettingsResetPromptModelTest, StartupUrls) {
     EXPECT_THAT(model->startup_urls(),
                 UnorderedElementsAre(GURL(kStartupUrl1), GURL(kStartupUrl2)));
   }
+
+  // Should return the list of startup URLs if startup type is set to
+  // |SessionStartupPref::LAST_AND_URLS|.
+  SetStartupType(SessionStartupPref::LAST_AND_URLS);
+  {
+    ModelPointer model = CreateModel();
+    EXPECT_THAT(model->startup_urls(),
+                UnorderedElementsAre(GURL(kStartupUrl1), GURL(kStartupUrl2)));
+  }
 }
 
 TEST_F(SettingsResetPromptModelTest, StartupUrlsToReset) {
@@ -324,6 +331,15 @@ TEST_F(SettingsResetPromptModelTest, StartupUrlsToReset) {
                 ElementsAre(GURL(kStartupUrl2)));
   }
 
+  {
+    ModelPointer model = CreateModel({kStartupUrl1, kStartupUrl2});
+    EXPECT_THAT(model->startup_urls_to_reset(),
+                UnorderedElementsAre(GURL(kStartupUrl1), GURL(kStartupUrl2)));
+  }
+
+  // Should return the URLs that have a match in the config when startup type is
+  // set to |SessionStartupPref::LAST_AND_URLS|.
+  SetStartupType(SessionStartupPref::LAST_AND_URLS);
   {
     ModelPointer model = CreateModel({kStartupUrl1, kStartupUrl2});
     EXPECT_THAT(model->startup_urls_to_reset(),
@@ -411,8 +427,8 @@ TEST_P(ResetStatesTest, PerformReset) {
 
   ModelPointer model = CreateModel(reset_urls, std::move(profile_resetter));
   model->PerformReset(std::make_unique<BrandcodedDefaultSettings>(),
-                      base::Bind(&SettingsResetPromptModelTest::OnResetDone,
-                                 base::Unretained(this)));
+                      base::BindOnce(&SettingsResetPromptModelTest::OnResetDone,
+                                     base::Unretained(this)));
   EXPECT_EQ(reset_callbacks_, 1);
 }
 

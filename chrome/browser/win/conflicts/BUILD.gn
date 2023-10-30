@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,9 +11,7 @@ assert(is_win)
 #       to the //chrome/browser target (chrome/browser/BUILD.gn).
 
 proto_library("module_list_proto") {
-  sources = [
-    "proto/module_list.proto",
-  ]
+  sources = [ "proto/module_list.proto" ]
 }
 
 source_set("module_info") {
@@ -29,17 +27,14 @@ source_set("module_info") {
     "//content/public/common",
   ]
 
-  deps = [
-    "//base:i18n",
-    "//chrome/common/safe_browsing:binary_feature_extractor",
-  ]
+  deps = [ "//base:i18n" ]
+
+  libs = [ "crypt32.lib" ]
 }
 
 loadable_module("conflicts_dll") {
   testonly = true
-  sources = [
-    "test/conflicts_dll.cc",
-  ]
+  sources = [ "test/conflicts_dll.cc" ]
 }
 
 source_set("unit_tests") {
@@ -58,6 +53,7 @@ source_set("unit_tests") {
   deps = [
     ":conflicts_dll",
     ":module_info",
+    "//base",
     "//chrome/browser",
     "//chrome/services/util_win:lib",
     "//chrome/test:test_support",
@@ -70,8 +66,8 @@ source_set("unit_tests") {
     sources += [
       "incompatible_applications_updater_unittest.cc",
       "installed_applications_unittest.cc",
-      "module_blacklist_cache_updater_unittest.cc",
-      "module_blacklist_cache_util_unittest.cc",
+      "module_blocklist_cache_updater_unittest.cc",
+      "module_blocklist_cache_util_unittest.cc",
       "module_list_filter_unittest.cc",
       "module_load_attempt_log_listener_unittest.cc",
       "registry_key_watcher_unittest.cc",
@@ -99,8 +95,10 @@ if (is_chrome_branded) {
       ":conflicts_dll",
       ":module_list_proto",
       "//chrome/browser",
+      "//chrome/browser:browser_process",
       "//chrome/chrome_elf:third_party_shared_defines",
       "//chrome/test:test_support_ui",
+      "//content/test:test_support",
       "//testing/gtest",
     ]
   }

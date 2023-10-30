@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,18 +9,28 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/containers/flat_set.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
 namespace user_manager {
 class User;
 }
 
 namespace policy {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+namespace internal {
+class ProxiedPoliciesPropagatedWatcher;
+}
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 class CloudPolicyStore;
 class ConfigurationPolicyProvider;
+class PolicyMigrator;
 class PolicyService;
+class PolicyServiceImpl;
 class SchemaRegistry;
 class ChromeBrowserPolicyConnector;
 
@@ -31,6 +41,8 @@ class ChromeBrowserPolicyConnector;
 class ProfilePolicyConnector final {
  public:
   ProfilePolicyConnector();
+  ProfilePolicyConnector(const ProfilePolicyConnector&) = delete;
+  ProfilePolicyConnector& operator=(const ProfilePolicyConnector&) = delete;
   ~ProfilePolicyConnector();
 
   // |user| is only used in Chrome OS builds and should be set to nullptr
@@ -57,11 +69,20 @@ class ProfilePolicyConnector final {
   // must call this method only when the policies system is fully initialized.
   bool IsManaged() const;
 
-
   // Returns true if the |policy_key| user policy is currently set via the
   // |configuration_policy_provider_| and isn't being overridden by a
   // higher-level provider.
   bool IsProfilePolicy(const char* policy_key) const;
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Triggers the time out handling of waiting for the proxied primary user
+  // policies to propagate. May be only called form tests.
+  void TriggerProxiedPoliciesWaitTimeoutForTesting();
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+  // Returns affiliation IDs contained in the PolicyData corresponding to the
+  // profile.
+  base::flat_set<std::string> user_affiliation_ids() const;
 
  private:
   // Returns the policy store which is actually used.
@@ -73,7 +94,39 @@ class ProfilePolicyConnector final {
   const ConfigurationPolicyProvider* DeterminePolicyProviderForPolicy(
       const char* policy_key) const;
 
-#if defined(OS_CHROMEOS)
+  void AppendPolicyProviderWithSchemaTracking(
+      ConfigurationPolicyProvider* policy_provider,
+      SchemaRegistry* schema_registry);
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // On Chrome OS, primary Profile user policies are forwarded to the
+  // device-global PolicyService[1] using a ProxyPolicyProvider.
+  // When that is done, signaling that |policy_service_| is initialized should
+  // be delayed until the policies provided by |user_policy_delegate| have
+  // propagated to the device-wide PolicyService[1]. This is done so that code
+  // that runs early on Profile initialization can rely on the device-wide
+  // PolicyService[1] and local state Preferences[2] respecting the proxied
+  // primary user policies.
+  //
+  // This function starts watching for the propagation to happen by creating a
+  // |ProxiedPoliciesPropagatedWatcher| and creates a PolicyService that
+  // only signals that it is initilalized when the
+  // |proxied_policies_propagated_watcher_| has fired.
+  //
+  // [1] i.e. g_browser_process->policy_service()
+  // [2] i.e. g_browser_process->local_state()
+  std::unique_ptr<PolicyService> CreatePolicyServiceWithInitializationThrottled(
+      const std::vector<ConfigurationPolicyProvider*>& policy_providers,
+      std::vector<std::unique_ptr<PolicyMigrator>> migrators,
+      ConfigurationPolicyProvider* user_policy_delegate);
+
+  // Called when primary user policies that are proxied to the device-wide
+  // PolicyService have propagated.
+  // |policy_service| is passed here because UnthrottleInitialization is
+  // implemented on PolicyServiceImpl, but the |policy_service_| class member is
+  // a PolicyService for testability.
+  void OnProxiedPoliciesPropagated(PolicyServiceImpl* policy_service);
+
   // Some of the user policy configuration affects browser global state, and
   // can only come from one Profile. |is_primary_user_| is true if this
   // connector belongs to the first signed-in Profile, and in that case that
@@ -82,12 +135,28 @@ class ProfilePolicyConnector final {
   bool is_primary_user_ = false;
 
   std::unique_ptr<ConfigurationPolicyProvider> special_user_policy_provider_;
-#endif  // defined(OS_CHROMEOS)
 
-  std::unique_ptr<ConfigurationPolicyProvider>
-      wrapped_platform_policy_provider_;
-  const ConfigurationPolicyProvider* configuration_policy_provider_ = nullptr;
-  const CloudPolicyStore* policy_store_ = nullptr;
+  // If the user associated with the Profile for this ProfilePolicyConnector is
+  // the primary user, the user policies will be proxied into the device-wide
+  // PolicyService. This object allows calling a callback when that is finished
+  // so it is possible to delay signaling that |policy_service_| is initialized
+  // until the policies have been reflected in the device-wide PolicyService.
+  std::unique_ptr<internal::ProxiedPoliciesPropagatedWatcher>
+      proxied_policies_propagated_watcher_;
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+  // Wrap policy provider with SchemaRegistryTrackingPolicyProvider to track
+  // extensions' policy schema update.
+  std::vector<std::unique_ptr<ConfigurationPolicyProvider>>
+      wrapped_policy_providers_;
+
+  raw_ptr<const ConfigurationPolicyProvider> configuration_policy_provider_ =
+      nullptr;
+  raw_ptr<const CloudPolicyStore> policy_store_ = nullptr;
+
+#if BUILDFLAG(IS_CHROMEOS)
+  std::unique_ptr<ConfigurationPolicyProvider> restricted_mgs_policy_provider;
+#endif
 
   // |policy_providers_| contains a list of the policy providers available for
   // the PolicyService of this connector, in decreasing order of priority.
@@ -102,7 +171,15 @@ class ProfilePolicyConnector final {
   std::unique_ptr<PolicyService> policy_service_;
   std::unique_ptr<bool> is_managed_override_;
 
-  DISALLOW_COPY_AND_ASSIGN(ProfilePolicyConnector);
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  // Returns |true| when this is the main profile.
+  bool IsMainProfile() const;
+
+  // The |browser_policy_connector_| is owned by the |BrowserProcess| whereas
+  // the |ProfilePolicyConnector| is owned by the Profile - which gets deleted
+  // first - so the lifetime of the pointer is guaranteed.
+  raw_ptr<ChromeBrowserPolicyConnector> browser_policy_connector_ = nullptr;
+#endif
 };
 
 }  // namespace policy

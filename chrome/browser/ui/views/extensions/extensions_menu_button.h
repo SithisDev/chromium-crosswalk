@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,66 +7,60 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
+#include "chrome/browser/ui/views/extensions/extension_context_menu_controller.h"
 #include "chrome/browser/ui/views/hover_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_action_view_delegate_views.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
 
 namespace views {
 class Button;
-class MenuButton;
-class MenuModelAdapter;
-class MenuRunner;
 }  // namespace views
 
+// ExtensionsMenuButton is the single extension action button within a row in
+// the extensions menu. This includes the extension icon and name and triggers
+// the extension action.
 class ExtensionsMenuButton : public HoverButton,
-                             public views::ButtonListener,
                              public ToolbarActionViewDelegateViews {
  public:
+  METADATA_HEADER(ExtensionsMenuButton);
   ExtensionsMenuButton(Browser* browser,
-                       std::unique_ptr<ToolbarActionViewController> controller);
+                       ToolbarActionViewController* controller);
+  ExtensionsMenuButton(const ExtensionsMenuButton&) = delete;
+  ExtensionsMenuButton& operator=(const ExtensionsMenuButton&) = delete;
   ~ExtensionsMenuButton() override;
 
-  static const char kClassName[];
+  // HoverButton:
+  void AddedToWidget() override;
+  void OnThemeChanged() override;
+
+  const std::u16string& label_text_for_testing() const {
+    return label()->GetText();
+  }
 
  private:
-  // views::ButtonListener:
-  const char* GetClassName() const override;
-  void ButtonPressed(Button* sender, const ui::Event& event) override;
-
   // ToolbarActionViewDelegateViews:
   views::View* GetAsView() override;
   views::FocusManager* GetFocusManagerForAccelerator() override;
   views::Button* GetReferenceButtonForPopup() override;
   content::WebContents* GetCurrentWebContents() const override;
   void UpdateState() override;
-  bool IsMenuRunning() const override;
+  void ShowContextMenuAsFallback() override;
 
-  void RunExtensionContextMenu(ui::MenuSourceType source_type);
+  void ButtonPressed();
 
-  // Callback for MenuModelAdapter.
-  void OnMenuClosed();
+  const raw_ptr<Browser> browser_;
 
-  // Configures the secondary (right-hand-side) view of this HoverButton.
-  void ConfigureSecondaryView();
-
-  Browser* const browser_;
-  const std::unique_ptr<ToolbarActionViewController> controller_;
-
-  // TODO(pbos): There's complicated configuration code in place since menus
-  // can't be triggered from ImageButtons. When MenuRunner::RunMenuAt accepts
-  // views::Buttons, turn this into a views::ImageButton and use
-  // image_button_factory.h methods to configure it.
-  views::MenuButton* context_menu_button_ = nullptr;
-
-  // Responsible for converting the context menu model into |menu_|.
-  std::unique_ptr<views::MenuModelAdapter> menu_adapter_;
-
-  // Responsible for running the menu.
-  std::unique_ptr<views::MenuRunner> menu_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionsMenuButton);
+  // Responsible for executing the extension's actions.
+  const raw_ptr<ToolbarActionViewController> controller_;
 };
+
+BEGIN_VIEW_BUILDER(/* no export */, ExtensionsMenuButton, HoverButton)
+END_VIEW_BUILDER
+
+DEFINE_VIEW_BUILDER(/* no export */, ExtensionsMenuButton)
 
 #endif  // CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSIONS_MENU_BUTTON_H_

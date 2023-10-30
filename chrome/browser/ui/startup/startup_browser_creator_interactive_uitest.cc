@@ -1,7 +1,8 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <vector>
 
 #include "base/command_line.h"
@@ -9,6 +10,7 @@
 #include "base/run_loop.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
@@ -22,6 +24,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -34,7 +37,7 @@ using StartupBrowserCreatorTest = InProcessBrowserTest;
 // Chrome OS doesn't support multiprofile.
 // And BrowserWindow::IsActive() always returns false in tests on MAC.
 // And this test is useless without that functionality.
-#if !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
+#if !BUILDFLAG(IS_CHROMEOS_ASH) && !BUILDFLAG(IS_MAC)
 IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, LastUsedProfileActivated) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   ProfileManager* profile_manager = g_browser_process->profile_manager();
@@ -76,13 +79,14 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, LastUsedProfileActivated) {
   last_opened_profiles.push_back(profile_2);
   last_opened_profiles.push_back(profile_3);
   last_opened_profiles.push_back(profile_4);
-  browser_creator.Start(dummy, profile_manager->user_data_dir(), profile_2,
+  browser_creator.Start(dummy, profile_manager->user_data_dir(),
+                        {profile_2, StartupProfileMode::kBrowserWindow},
                         last_opened_profiles);
 
   while (!browser_creator.ActivatedProfile())
     base::RunLoop().RunUntilIdle();
 
-  Browser* new_browser = NULL;
+  Browser* new_browser = nullptr;
 
   // The last used profile (the profile_2 in this case) must be active.
   ASSERT_EQ(1u, chrome::GetBrowserCount(profile_2));
@@ -106,18 +110,22 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, LastUsedProfileActivated) {
   ASSERT_TRUE(new_browser);
   EXPECT_FALSE(new_browser->window()->IsActive());
 }
-#endif  // !OS_MACOSX && !OS_CHROMEOS
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH) && !BUILDFLAG(IS_MAC)
 
 #if defined(USE_AURA)
 class StartupPagePrefSetterMainExtraParts : public ChromeBrowserMainExtraParts {
  public:
   explicit StartupPagePrefSetterMainExtraParts(const std::vector<GURL>& urls)
       : urls_(urls) {}
+  StartupPagePrefSetterMainExtraParts(
+      const StartupPagePrefSetterMainExtraParts&) = delete;
+  StartupPagePrefSetterMainExtraParts& operator=(
+      const StartupPagePrefSetterMainExtraParts&) = delete;
 
   // ChromeBrowserMainExtraParts:
   void PreBrowserStart() override {
     Profile* profile =
-        g_browser_process->profile_manager()->GetActiveUserProfile();
+        g_browser_process->profile_manager()->GetLastUsedProfile();
 
     SessionStartupPref pref_urls(SessionStartupPref::URLS);
     pref_urls.urls = std::move(urls_);
@@ -126,7 +134,6 @@ class StartupPagePrefSetterMainExtraParts : public ChromeBrowserMainExtraParts {
 
  private:
   std::vector<GURL> urls_;
-  DISALLOW_COPY_AND_ASSIGN(StartupPagePrefSetterMainExtraParts);
 };
 
 class StartupPageTest : public InProcessBrowserTest {
@@ -135,6 +142,8 @@ class StartupPageTest : public InProcessBrowserTest {
     // Don't open about:blank since we want to test startup urls.
     set_open_about_blank_on_browser_launch(false);
   }
+  StartupPageTest(const StartupPageTest&) = delete;
+  StartupPageTest& operator=(const StartupPageTest&) = delete;
   ~StartupPageTest() override = default;
 
   // InProcessBrowserTest:
@@ -147,11 +156,8 @@ class StartupPageTest : public InProcessBrowserTest {
     ChromeBrowserMainParts* chrome_browser_main_parts =
         static_cast<ChromeBrowserMainParts*>(browser_main_parts);
     chrome_browser_main_parts->AddParts(
-        new StartupPagePrefSetterMainExtraParts(urls));
+        std::make_unique<StartupPagePrefSetterMainExtraParts>(urls));
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(StartupPageTest);
 };
 
 IN_PROC_BROWSER_TEST_F(StartupPageTest, StartupPageFocus) {

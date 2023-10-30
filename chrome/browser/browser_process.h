@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,29 +16,38 @@
 #include <string>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/shell_integration.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/common/buildflags.h"
 #include "media/media_buildflags.h"
 
 class BackgroundModeManager;
+class BrowserProcessPlatformPart;
+class BuildState;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
 class GpuModeManager;
+class HidPolicyAllowedDevices;
 class IconManager;
-class IntranetRedirectDetector;
 class MediaFileSystemRegistry;
 class NotificationPlatformBridge;
 class NotificationUIManager;
 class PrefService;
 class ProfileManager;
+class SerialPolicyAllowedPorts;
+class StartupData;
 class StatusTray;
 class SystemNetworkContextManager;
-class WatchDogThread;
 class WebRtcLogUploader;
-class StartupData;
+
+#if !BUILDFLAG(IS_ANDROID)
+class IntranetRedirectDetector;
+#endif
+
+namespace breadcrumbs {
+class BreadcrumbPersistentStorageManager;
+}
 
 namespace network {
 class NetworkQualityTracker;
@@ -59,7 +68,6 @@ class VariationsService;
 
 namespace component_updater {
 class ComponentUpdateService;
-class SupervisedUserWhitelistInstaller;
 }
 
 namespace extensions {
@@ -82,17 +90,9 @@ namespace network_time {
 class NetworkTimeTracker;
 }
 
-namespace optimization_guide {
-class OptimizationGuideService;
-}
-
 namespace policy {
 class ChromeBrowserPolicyConnector;
 class PolicyService;
-}
-
-namespace prefs {
-class InProcessPrefServiceFactory;
 }
 
 namespace printing {
@@ -101,17 +101,9 @@ class PrintJobManager;
 class PrintPreviewDialogController;
 }
 
-namespace rappor {
-class RapporServiceImpl;
-}
-
 namespace resource_coordinator {
 class ResourceCoordinatorParts;
 class TabManager;
-}
-
-namespace safe_browsing {
-class ClientSideDetectionService;
 }
 
 // NOT THREAD SAFE, call only from the main thread.
@@ -119,6 +111,10 @@ class ClientSideDetectionService;
 class BrowserProcess {
  public:
   BrowserProcess();
+
+  BrowserProcess(const BrowserProcess&) = delete;
+  BrowserProcess& operator=(const BrowserProcess&) = delete;
+
   virtual ~BrowserProcess();
 
   // Invoked when the user is logging out/shutting down. When logging off we may
@@ -138,7 +134,6 @@ class BrowserProcess {
 
   // Services: any of these getters may return NULL
   virtual metrics::MetricsService* metrics_service() = 0;
-  virtual rappor::RapporServiceImpl* rappor_service() = 0;
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
   virtual scoped_refptr<network::SharedURLLoaderFactory>
@@ -166,9 +161,6 @@ class BrowserProcess {
   // network quality change events.
   virtual network::NetworkQualityTracker* network_quality_tracker() = 0;
 
-  // Returns the thread that is used for health check of all browser threads.
-  virtual WatchDogThread* watchdog_thread() = 0;
-
   // Starts and manages the policy system.
   virtual policy::ChromeBrowserPolicyConnector* browser_policy_connector() = 0;
 
@@ -192,7 +184,9 @@ class BrowserProcess {
   virtual printing::BackgroundPrintingManager*
       background_printing_manager() = 0;
 
+#if !BUILDFLAG(IS_ANDROID)
   virtual IntranetRedirectDetector* intranet_redirect_detector() = 0;
+#endif
 
   // Returns the locale used by the application. It is the IETF language tag,
   // defined in BCP 47. The region subtag is not included when it adds no
@@ -206,8 +200,10 @@ class BrowserProcess {
 
   // Returns the object that manages background applications.
   virtual BackgroundModeManager* background_mode_manager() = 0;
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
   virtual void set_background_mode_manager_for_test(
       std::unique_ptr<BackgroundModeManager> manager) = 0;
+#endif
 
   // Returns the StatusTray, which provides an API for displaying status icons
   // in the system status tray. Returns NULL if status icons are not supported
@@ -217,26 +213,18 @@ class BrowserProcess {
   // Returns the SafeBrowsing service.
   virtual safe_browsing::SafeBrowsingService* safe_browsing_service() = 0;
 
-  // Returns an object which handles communication with the SafeBrowsing
-  // client-side detection servers.
-  virtual safe_browsing::ClientSideDetectionService*
-      safe_browsing_detection_service() = 0;
-
   // Returns the service providing versioned storage for rules used by the Safe
   // Browsing subresource filter.
   virtual subresource_filter::RulesetService*
   subresource_filter_ruleset_service() = 0;
 
-  // Returns the service used to provide hints for what optimizations can be
-  // performed on slow page loads.
-  virtual optimization_guide::OptimizationGuideService*
-  optimization_guide_service() = 0;
-
   // Returns the StartupData which owns any pre-created objects in //chrome
   // before the full browser starts.
   virtual StartupData* startup_data() = 0;
 
-#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
+// complete.
+#if BUILDFLAG(IS_WIN) || (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS))
   // This will start a timer that, if Chrome is in persistent mode, will check
   // whether an update is available, and if that's the case, restart the
   // browser. Note that restart code will strip some of the command line keys
@@ -249,18 +237,16 @@ class BrowserProcess {
 
   virtual component_updater::ComponentUpdateService* component_updater() = 0;
 
-#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
-  virtual component_updater::SupervisedUserWhitelistInstaller*
-  supervised_user_whitelist_installer() = 0;
-#endif
-
   virtual MediaFileSystemRegistry* media_file_system_registry() = 0;
 
   virtual WebRtcLogUploader* webrtc_log_uploader() = 0;
 
   virtual network_time::NetworkTimeTracker* network_time_tracker() = 0;
 
+#if !BUILDFLAG(IS_ANDROID)
+  // Avoid using this. Prefer using GCMProfileServiceFactory.
   virtual gcm::GCMDriver* gcm_driver() = 0;
+#endif
 
   // Returns the tab manager. On non-supported platforms, this returns null.
   // TODO(sebmarchand): Update callers to
@@ -270,16 +256,22 @@ class BrowserProcess {
   virtual resource_coordinator::ResourceCoordinatorParts*
   resource_coordinator_parts() = 0;
 
-  // Returns the default web client state of Chrome (i.e., was it the user's
-  // default browser) at the time a previous check was made sometime between
-  // process startup and now.
-  virtual shell_integration::DefaultWebClientState
-  CachedDefaultWebClientState() = 0;
+#if !BUILDFLAG(IS_ANDROID)
+  // Returns the object which keeps track of serial port permissions configured
+  // through the policy engine.
+  virtual SerialPolicyAllowedPorts* serial_policy_allowed_ports() = 0;
 
-  virtual prefs::InProcessPrefServiceFactory* pref_service_factory() const = 0;
+  // Returns the object which keeps track of Human Interface Device (HID)
+  // permissions configured through the policy engine.
+  virtual HidPolicyAllowedDevices* hid_policy_allowed_devices() = 0;
+#endif
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(BrowserProcess);
+  virtual BuildState* GetBuildState() = 0;
+
+  // Returns the BreadcrumbPersistentStorageManager writing breadcrumbs to disk,
+  // or nullptr if breadcrumbs logging is disabled.
+  virtual breadcrumbs::BreadcrumbPersistentStorageManager*
+  GetBreadcrumbPersistentStorageManager() = 0;
 };
 
 extern BrowserProcess* g_browser_process;

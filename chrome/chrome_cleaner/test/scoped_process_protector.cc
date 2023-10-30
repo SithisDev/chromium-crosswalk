@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,11 @@
 
 #include <aclapi.h>
 
+#include <string>
+
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/strings/string16.h"
+#include "base/logging.h"
 
 namespace chrome_cleaner {
 
@@ -86,10 +88,10 @@ void ScopedProcessProtector::DenyAllAccess() {
 
 void ScopedProcessProtector::DenyAccess(ACCESS_MASK access_to_deny) {
   // The name of the predefined EVERYONE group.
-  static constexpr base::char16 kEveryoneGroup[] = STRING16_LITERAL("EVERYONE");
+  static constexpr wchar_t kEveryoneGroup[] = L"EVERYONE";
 
   // The Trustee parameter requires a non-const string.
-  base::string16 trustee_name(kEveryoneGroup);
+  std::wstring trustee_name(kEveryoneGroup);
 
   EXPLICIT_ACCESS access = {};
   access.grfAccessPermissions = access_to_deny;

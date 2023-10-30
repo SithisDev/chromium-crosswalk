@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,10 @@
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
 #include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/strings/string_piece.h"
 #include "build/build_config.h"
 #include "chrome/common/importer/imported_bookmark_entry.h"
 #include "chrome/utility/importer/importer.h"
@@ -29,12 +29,15 @@ namespace sql {
 class Database;
 }
 
-// Importer for Mozilla Firefox 3 and later.
+// Importer for Mozilla Firefox.
 // Firefox stores its persistent information in a system called places.
 // http://wiki.mozilla.org/Places
 class FirefoxImporter : public Importer {
  public:
   FirefoxImporter();
+
+  FirefoxImporter(const FirefoxImporter&) = delete;
+  FirefoxImporter& operator=(const FirefoxImporter&) = delete;
 
   // Importer:
   void StartImport(const importer::SourceProfile& source_profile,
@@ -58,16 +61,14 @@ class FirefoxImporter : public Importer {
 
   FRIEND_TEST_ALL_PREFIXES(FirefoxImporterTest, ImportBookmarksV25);
   void ImportBookmarks();
+#if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_FUCHSIA)
   void ImportPasswords();
+#endif
   void ImportHistory();
-  void ImportSearchEngines();
   // Import the user's home page, unless it is set to default home page as
   // defined in browserconfig.properties.
   void ImportHomepage();
   void ImportAutofillFormData();
-  void GetSearchEnginesXMLData(std::vector<std::string>* search_engine_data);
-  void GetSearchEnginesXMLDataFromJSON(
-      std::vector<std::string>* search_engine_data);
 
   // The struct stores the information about a bookmark item.
   struct BookmarkItem;
@@ -106,15 +107,19 @@ class FirefoxImporter : public Importer {
   void LoadFavicons(const std::vector<ImportedBookmarkEntry>& bookmarks,
                     favicon_base::FaviconUsageDataList* favicons);
 
+  // Copies |source_path_|/|base_file_name| to a temporary directory and returns
+  // the copy's path. Using the copy is safer, ensures we don't modify Firefox's
+  // profile. |base_file_name| must be ASCII. Returns empty path on I/O failure.
+  base::FilePath GetCopiedSourcePath(base::StringPiece base_file_name);
+
   base::FilePath source_path_;
   base::FilePath app_path_;
+  base::ScopedTempDir source_path_copy_;
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
   // Stored because we can only access it from the UI thread.
   std::string locale_;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(FirefoxImporter);
 };
 
 #endif  // CHROME_UTILITY_IMPORTER_FIREFOX_IMPORTER_H_

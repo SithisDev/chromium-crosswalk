@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,15 +11,11 @@
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "chrome/services/removable_storage_writer/public/mojom/removable_storage_writer.mojom.h"
-
-namespace service_manager {
-class Connector;
-}
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace extensions {
 namespace image_writer {
@@ -29,17 +25,18 @@ namespace image_writer {
 class ImageWriterUtilityClient
     : public base::RefCountedThreadSafe<ImageWriterUtilityClient> {
  public:
-  typedef base::Callback<void()> CancelCallback;
-  typedef base::Callback<void()> SuccessCallback;
-  typedef base::Callback<void(int64_t)> ProgressCallback;
-  typedef base::Callback<void(const std::string&)> ErrorCallback;
+  using CancelCallback = base::OnceClosure;
+  using SuccessCallback = base::OnceClosure;
+  using ProgressCallback = base::RepeatingCallback<void(int64_t)>;
+  using ErrorCallback = base::OnceCallback<void(const std::string&)>;
   using ImageWriterUtilityClientFactory =
-      base::Callback<scoped_refptr<ImageWriterUtilityClient>()>;
+      base::RepeatingCallback<scoped_refptr<ImageWriterUtilityClient>()>;
 
-  // |connector| should be a fresh connector not yet bound to any thread.
+  ImageWriterUtilityClient(const ImageWriterUtilityClient&) = delete;
+  ImageWriterUtilityClient& operator=(const ImageWriterUtilityClient&) = delete;
+
   static scoped_refptr<ImageWriterUtilityClient> Create(
-      const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-      std::unique_ptr<service_manager::Connector> connector);
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner);
 
   static void SetFactoryForTesting(ImageWriterUtilityClientFactory* factory);
 
@@ -49,9 +46,9 @@ class ImageWriterUtilityClient
   // |error_callback|: Called with an error message on failure.
   // |source|: The path to the source file to read data from.
   // |target|: The path to the target device to write the image file to.
-  virtual void Write(const ProgressCallback& progress_callback,
-                     const SuccessCallback& success_callback,
-                     const ErrorCallback& error_callback,
+  virtual void Write(ProgressCallback progress_callback,
+                     SuccessCallback success_callback,
+                     ErrorCallback error_callback,
                      const base::FilePath& source,
                      const base::FilePath& target);
 
@@ -61,16 +58,16 @@ class ImageWriterUtilityClient
   // |error_callback|: Called with an error message on failure.
   // |source|: The path to the source file to read data from.
   // |target|: The path to the target device file to verify.
-  virtual void Verify(const ProgressCallback& progress_callback,
-                      const SuccessCallback& success_callback,
-                      const ErrorCallback& error_callback,
+  virtual void Verify(ProgressCallback progress_callback,
+                      SuccessCallback success_callback,
+                      ErrorCallback error_callback,
                       const base::FilePath& source,
                       const base::FilePath& target);
 
   // Cancels any pending write or verify operation.
   // |cancel_callback|: Called when the cancel has actually occurred.
   // TODO(crbug.com/703514): Consider removing this API.
-  virtual void Cancel(const CancelCallback& cancel_callback);
+  virtual void Cancel(CancelCallback cancel_callback);
 
   // Shuts down the utility process that may have been created.
   virtual void Shutdown();
@@ -79,9 +76,8 @@ class ImageWriterUtilityClient
   friend class base::RefCountedThreadSafe<ImageWriterUtilityClient>;
   friend class ImageWriterUtilityClientTest;
 
-  ImageWriterUtilityClient(
-      const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-      std::unique_ptr<service_manager::Connector> connector);
+  explicit ImageWriterUtilityClient(
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner);
   virtual ~ImageWriterUtilityClient();
 
  private:
@@ -102,16 +98,12 @@ class ImageWriterUtilityClient
 
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
-  std::unique_ptr<service_manager::Connector> connector_;
-
-  chrome::mojom::RemovableStorageWriterPtr removable_storage_writer_;
+  mojo::Remote<chrome::mojom::RemovableStorageWriter> removable_storage_writer_;
 
   std::unique_ptr<RemovableStorageWriterClientImpl>
       removable_storage_writer_client_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(ImageWriterUtilityClient);
 };
 
 }  // namespace image_writer

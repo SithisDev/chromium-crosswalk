@@ -1,17 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/installer/util/delete_after_reboot_helper.h"
 
 #include <windows.h>
+
 #include <shlobj.h>
 #include <stddef.h>
 
 #include <memory>
 
 #include "base/files/file_util.h"
-#include "base/stl_util.h"
+#include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/win/registry.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -42,13 +43,13 @@ class DeleteAfterRebootHelperTest : public testing::Test {
   }
   void TearDown() override {
     // Delete the temporary directory if it's still there.
-    base::DeleteFile(temp_dir_, true);
+    base::DeletePathRecursively(temp_dir_);
 
     // Try and restore the pending moves value, if we have one.
     if (IsUserAnAdmin() && original_pending_moves_.size() > 1) {
-      base::win::RegKey session_manager_key(
-          HKEY_LOCAL_MACHINE, kSessionManagerKey,
-          KEY_CREATE_SUB_KEY | KEY_SET_VALUE);
+      base::win::RegKey session_manager_key(HKEY_LOCAL_MACHINE,
+                                            kSessionManagerKey,
+                                            KEY_CREATE_SUB_KEY | KEY_SET_VALUE);
       if (!session_manager_key.Handle()) {
         // Couldn't open / create the key.
         DLOG(ERROR) << "Failed to open session manager key for writing.";
@@ -65,7 +66,7 @@ class DeleteAfterRebootHelperTest : public testing::Test {
   // Compares two buffers of size len. Returns true if they are equal,
   // false otherwise. Standard warnings about making sure the buffers
   // are at least len chars long apply.
-  template<class Type>
+  template <class Type>
   bool CompareBuffers(Type* buf1, Type* buf2, int len) {
     Type* comp1 = buf1;
     Type* comp2 = buf2;
@@ -86,7 +87,7 @@ class DeleteAfterRebootHelperTest : public testing::Test {
     size_t length = 0;
     std::vector<PendingMove>::const_iterator iter(string_list.begin());
     for (; iter != string_list.end(); ++iter) {
-      length += iter->first.size() + 1;  // +1 for the null char.
+      length += iter->first.size() + 1;   // +1 for the null char.
       length += iter->second.size() + 1;  // +1 for the null char.
     }
     length++;  // for the additional null char.
@@ -110,17 +111,16 @@ TEST_F(DeleteAfterRebootHelperTest, TestStringListToMultiSZConversions) {
     DWORD length;
     size_t count;
   } tests[] = {
-    { L"basic", L"foo\0bar\0fee\0bee\0boo\0bong\0\0", 26 * sizeof(wchar_t), 3 },
-    { L"empty", L"\0\0", 2 * sizeof(wchar_t), 1 },
-    { L"deletes", L"foo\0\0bar\0\0bizz\0\0", 16 * sizeof(wchar_t), 3 },
+      {L"basic", L"foo\0bar\0fee\0bee\0boo\0bong\0\0", 26 * sizeof(wchar_t), 3},
+      {L"empty", L"\0\0", 2 * sizeof(wchar_t), 1},
+      {L"deletes", L"foo\0\0bar\0\0bizz\0\0", 16 * sizeof(wchar_t), 3},
   };
 
-  for (size_t i = 0; i < base::size(tests); i++) {
+  for (size_t i = 0; i < std::size(tests); i++) {
     std::vector<PendingMove> string_list;
     EXPECT_TRUE(SUCCEEDED(
         MultiSZBytesToStringArray(reinterpret_cast<const char*>(tests[i].str),
-                                  tests[i].length,
-                                  &string_list)))
+                                  tests[i].length, &string_list)))
         << tests[i].test_name;
     EXPECT_EQ(tests[i].count, string_list.size()) << tests[i].test_name;
     std::vector<char> buffer;
@@ -136,16 +136,14 @@ TEST_F(DeleteAfterRebootHelperTest, TestStringListToMultiSZConversions) {
       {L"malformed", reinterpret_cast<const wchar_t*>("oddnumb\0\0"), 9, 1},
   };
 
-  for (size_t i = 0; i < base::size(failures); i++) {
+  for (size_t i = 0; i < std::size(failures); i++) {
     std::vector<PendingMove> string_list;
     EXPECT_FALSE(SUCCEEDED(MultiSZBytesToStringArray(
-        reinterpret_cast<const char*>(failures[i].str),
-        failures[i].length,
+        reinterpret_cast<const char*>(failures[i].str), failures[i].length,
         &string_list)))
         << failures[i].test_name;
   }
 }
-
 
 TEST_F(DeleteAfterRebootHelperTest, TestFileDeleteScheduleAndUnschedule) {
   if (!IsUserAnAdmin()) {
@@ -173,9 +171,9 @@ TEST_F(DeleteAfterRebootHelperTest, TestFileDeleteScheduleAndUnschedule) {
   }
 
   // Check that each of the deletes we expect are there in order.
-  base::FilePath expected_paths[] =
-      { temp_file_, temp_subdir_file_, temp_subdir_, temp_dir_ };
-  for (size_t i = 0; i < base::size(expected_paths); ++i) {
+  base::FilePath expected_paths[] = {temp_file_, temp_subdir_file_,
+                                     temp_subdir_, temp_dir_};
+  for (size_t i = 0; i < std::size(expected_paths); ++i) {
     EXPECT_FALSE(iter == pending_moves.end());
     if (iter != pending_moves.end()) {
       base::FilePath short_path_name(GetShortPathName(expected_paths[i]));
@@ -227,9 +225,9 @@ TEST_F(DeleteAfterRebootHelperTest, TestFileDeleteSchedulingWithActualDeletes) {
   }
 
   // Check that each of the deletes we expect are there in order.
-  base::FilePath expected_paths[] =
-      { temp_file_, temp_subdir_file_, temp_subdir_, temp_dir_ };
-  for (size_t i = 0; i < base::size(expected_paths); ++i) {
+  base::FilePath expected_paths[] = {temp_file_, temp_subdir_file_,
+                                     temp_subdir_, temp_dir_};
+  for (size_t i = 0; i < std::size(expected_paths); ++i) {
     EXPECT_FALSE(iter == pending_moves.end());
     if (iter != pending_moves.end()) {
       base::FilePath short_path_name(GetShortPathName(expected_paths[i]));
@@ -240,7 +238,7 @@ TEST_F(DeleteAfterRebootHelperTest, TestFileDeleteSchedulingWithActualDeletes) {
   }
 
   // Delete the temporary directory.
-  base::DeleteFile(temp_dir_, true);
+  base::DeletePathRecursively(temp_dir_);
 
   // Test that we can remove the pending deletes.
   EXPECT_TRUE(RemoveFromMovesPendingReboot(temp_dir_));
@@ -255,4 +253,3 @@ TEST_F(DeleteAfterRebootHelperTest, TestFileDeleteSchedulingWithActualDeletes) {
     EXPECT_FALSE(MatchPendingDeletePath(short_temp_file, move_path));
   }
 }
-

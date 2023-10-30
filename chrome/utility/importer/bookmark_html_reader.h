@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/strings/string16.h"
 #include "chrome/common/importer/importer_data_types.h"
 #include "components/favicon_base/favicon_usage_data.h"
 
@@ -44,8 +43,8 @@ namespace bookmark_html_reader {
 // |favicons| is a pointer to a vector, which is filled with the favicons of
 // imported bookmarks. It may be NULL, in which case favicons are not imported.
 void ImportBookmarksFile(
-    const base::Callback<bool(void)>& cancellation_callback,
-    const base::Callback<bool(const GURL&)>& valid_url_callback,
+    base::RepeatingCallback<bool(void)> cancellation_callback,
+    base::RepeatingCallback<bool(const GURL&)> valid_url_callback,
     const base::FilePath& file_path,
     std::vector<ImportedBookmarkEntry>* bookmarks,
     std::vector<importer::SearchEngineInfo>* search_engines,
@@ -74,7 +73,7 @@ bool ParseCharsetFromLine(const std::string& line,
                           std::string* charset);
 bool ParseFolderNameFromLine(const std::string& line,
                              const std::string& charset,
-                             base::string16* folder_name,
+                             std::u16string* folder_name,
                              bool* is_toolbar_folder,
                              base::Time* add_date);
 // See above, this will also put the data: URL of the favicon into |*favicon|
@@ -82,12 +81,12 @@ bool ParseFolderNameFromLine(const std::string& line,
 // the contents of the actual POST (with %s for the search term).
 bool ParseBookmarkFromLine(const std::string& line,
                            const std::string& charset,
-                           base::string16* title,
+                           std::u16string* title,
                            GURL* url,
                            GURL* favicon,
-                           base::string16* shortcut,
+                           std::u16string* shortcut,
                            base::Time* add_date,
-                           base::string16* post_data);
+                           std::u16string* post_data);
 // Save bookmarks imported from browsers with Firefox 2 compatible bookmark
 // systems such as Epiphany. This bookmark format is the same as that of the
 // basic Firefox 2 bookmark, but it misses additional properties and uses
@@ -98,7 +97,7 @@ bool ParseBookmarkFromLine(const std::string& line,
 //   </dl>
 bool ParseMinimumBookmarkFromLine(const std::string& line,
                                   const std::string& charset,
-                                  base::string16* title,
+                                  std::u16string* title,
                                   GURL* url);
 
 }  // namespace internal

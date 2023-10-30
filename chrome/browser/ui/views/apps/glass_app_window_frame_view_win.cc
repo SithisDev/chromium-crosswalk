@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/win/windows_version.h"
 #include "extensions/browser/app_window/native_app_window.h"
 #include "ui/base/hit_test.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/win/hwnd_metrics.h"
 #include "ui/display/win/screen_win.h"
 #include "ui/views/widget/widget.h"
@@ -20,9 +21,6 @@ namespace {
 const int kResizeAreaCornerSize = 16;
 
 }  // namespace
-
-const char GlassAppWindowFrameViewWin::kViewClassName[] =
-    "ui/views/apps/GlassAppWindowFrameViewWin";
 
 GlassAppWindowFrameViewWin::GlassAppWindowFrameViewWin(views::Widget* widget)
     : widget_(widget) {}
@@ -40,7 +38,7 @@ gfx::Insets GlassAppWindowFrameViewWin::GetGlassInsets() const {
           ? display::win::ScreenWin::GetSystemMetricsInDIP(SM_CXSIZEFRAME)
           : 0;
 
-  return gfx::Insets(caption_height, frame_size, frame_size, frame_size);
+  return gfx::Insets::TLBR(caption_height, frame_size, frame_size, frame_size);
 }
 
 gfx::Insets GlassAppWindowFrameViewWin::GetClientAreaInsets(
@@ -55,10 +53,11 @@ gfx::Insets GlassAppWindowFrameViewWin::GetClientAreaInsets(
     //   * we get weird black bars at the top when maximized in multiple monitor
     //     configurations.
     int border_thickness = 1;
-    insets.Set(0, 0, border_thickness, border_thickness);
+    insets = gfx::Insets::TLBR(0, 0, border_thickness, border_thickness);
   } else {
     const int frame_thickness = ui::GetFrameThickness(monitor);
-    insets.Set(0, frame_thickness, frame_thickness, frame_thickness);
+    insets =
+        gfx::Insets::TLBR(0, frame_thickness, frame_thickness, frame_thickness);
   }
   return insets;
 }
@@ -108,13 +107,9 @@ int GlassAppWindowFrameViewWin::NonClientHitTest(const gfx::Point& point) {
   // fullscreen, as it can't be resized in those states.
   int resize_border =
       display::win::ScreenWin::GetSystemMetricsInDIP(SM_CXSIZEFRAME);
-  int frame_component =
-      GetHTComponentForFrame(point,
-                             resize_border,
-                             resize_border,
-                             kResizeAreaCornerSize - resize_border,
-                             kResizeAreaCornerSize - resize_border,
-                             can_ever_resize);
+  int frame_component = GetHTComponentForFrame(
+      point, gfx::Insets(resize_border), kResizeAreaCornerSize - resize_border,
+      kResizeAreaCornerSize - resize_border, can_ever_resize);
   if (frame_component != HTNOWHERE)
     return frame_component;
 
@@ -139,10 +134,6 @@ gfx::Size GlassAppWindowFrameViewWin::CalculatePreferredSize() const {
       .size();
 }
 
-const char* GlassAppWindowFrameViewWin::GetClassName() const {
-  return kViewClassName;
-}
-
 gfx::Size GlassAppWindowFrameViewWin::GetMinimumSize() const {
   gfx::Size min_size = widget_->client_view()->GetMinimumSize();
 
@@ -164,3 +155,6 @@ gfx::Size GlassAppWindowFrameViewWin::GetMaximumSize() const {
 
   return max_size;
 }
+
+BEGIN_METADATA(GlassAppWindowFrameViewWin, views::NonClientFrameView)
+END_METADATA

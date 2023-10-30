@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "chrome/browser/vr/ui_interface.h"
 #include "chrome/browser/vr/ui_scene_constants.h"
 #include "chrome/browser/vr/ui_test_input.h"
+#include "device/vr/public/mojom/vr_service.mojom.h"
 #include "ui/gfx/geometry/quaternion.h"
 
 namespace {
@@ -75,7 +76,7 @@ void InputDelegateForTesting::QueueControllerActionForTesting(
 
   switch (controller_input.action) {
     case VrControllerTestAction::kHover:
-      FALLTHROUGH;
+      [[fallthrough]];
     case VrControllerTestAction::kClickUp:
       controller_model.touchpad_button_state =
           ControllerModel::ButtonState::kUp;
@@ -165,7 +166,7 @@ InputDelegateForTesting::GetInputSourceState() {
   state->source_id = 1;
   state->description->target_ray_mode =
       device::mojom::XRTargetRayMode::POINTING;
-  state->description->emulated_position = true;
+  state->emulated_position = true;
 
   return state;
 }

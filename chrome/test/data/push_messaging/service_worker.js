@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@ self.addEventListener('install', () => skipWaiting());
 //     - Display a Web Notification without using event.waitUntil().
 // "shownotification-with-showtrigger"
 //     - Display a Web Notification with a showTrigger.
-this.onpush = function(event) {
+self.addEventListener('push', function(event) {
   if (event.data === null) {
     sendMessageToClients('push', '[NULL]');
     return;
@@ -53,7 +53,16 @@ this.onpush = function(event) {
   }, function(ex) {
     sendMessageToClients('push', String(ex));
   }));
-};
+});
+
+self.addEventListener('pushsubscriptionchange', function(event) {
+  const newEndpoint =
+      event.newSubscription ? event.newSubscription.endpoint : 'null';
+  const oldEndpoint =
+      event.oldSubscription ? event.oldSubscription.endpoint : 'null';
+  const data = {oldEndpoint, newEndpoint};
+  sendMessageToClients('pushsubscriptionchange', data);
+});
 
 self.addEventListener('message', function handler (event) {
   let pushSubscriptionOptions = {

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,11 @@
 'use strict';
 
 /** @const */
-var BROWSER_SUPPORTS_TLS_CHANNEL_ID = true;
-
-/** @const */
 var HTTP_ORIGINS_ALLOWED = false;
 
 /** @const */
 var LOG_SAVER_EXTENSION_ID = 'fjajfjhkeibgmiggdfehjplbhmfkialk';
+var LOG_SAVER_EXTENSION_ORIGIN = 'chrome-extension://' + LOG_SAVER_EXTENSION_ID;
 
 var FACTORY_REGISTRY = (function() {
   var windowTimer = new WindowTimer();
@@ -67,11 +65,16 @@ function defaultResponseCallback(request, sendResponse, response) {
  * @param {*} response The response to return.
  */
 function sendResponseToActiveTabOnly(request, sender, sendResponse, response) {
+  let foregroundAlreadyTested =
+      ('foregroundChecked' in response) && response.foregroundChecked;
+  delete response.foregroundChecked;
+
   // For WebAuthn-proxied requests on Windows, dismissing the native Windows
   // UI after a timeout races with the error being returned here. Hence, skip
   // the focus check for all timeouts.
-  if (response.responseData &&
-      response.responseData.errorCode == ErrorCodes.TIMEOUT) {
+  if ((response.responseData &&
+       response.responseData.errorCode === ErrorCodes.TIMEOUT) ||
+      foregroundAlreadyTested) {
     defaultResponseCallback(request, sendResponse, response);
     return;
   }
@@ -108,7 +111,7 @@ function messageHandler(request, sender, sendResponse) {
 }
 
 /**
- * Listen to individual messages sent from (whitelisted) webpages via
+ * Listen to individual messages sent from (allowlisted) extensions/apps via
  * chrome.runtime.sendMessage
  * @param {*} request The received request
  * @param {!MessageSender} sender The message sender
@@ -116,7 +119,7 @@ function messageHandler(request, sender, sendResponse) {
  * @return {boolean}
  */
 function messageHandlerExternal(request, sender, sendResponse) {
-  if (sender.id && sender.id === LOG_SAVER_EXTENSION_ID) {
+  if (sender.origin && sender.origin === LOG_SAVER_EXTENSION_ORIGIN) {
     return handleLogSaverMessage(request);
   }
 

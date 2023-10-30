@@ -1,32 +1,38 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//third_party/closure_compiler/compile_js.gni")
+import("//chrome/browser/resources/tools/build_webui.gni")
 
-js_type_check("closure_compile") {
-  deps = [
-    ":descriptor_panel",
-    ":device_page",
-    ":usb_internals",
+build_webui("build") {
+  grd_prefix = "usb_internals"
+
+  static_files = [
+    "usb_internals.css",
+    "usb_internals.html",
   ]
-}
 
-js_library("usb_internals") {
-  deps = [
-    ":device_page",
-    "//chrome/browser/ui/webui/usb_internals:mojo_bindings_js_library_for_compile",
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js:util",
-    "//ui/webui/resources/js/cr/ui:tabs",
+  web_component_files = [ "app.ts" ]
+  non_web_component_files = [
+    "descriptor_panel.ts",
+    "devices_page.ts",
   ]
-}
 
-js_library("devices_page") {
-  deps = [
-    ":descriptor_panel",
+  mojo_files_deps = [
+    "//chrome/browser/ui/webui/usb_internals:mojo_bindings_webui_js",
+    "//services/device/public/mojom:usb_test_js",
+    "//services/device/public/mojom:usb_webui_js",
   ]
-}
+  mojo_files = [
+    "$root_gen_dir/mojom-webui/chrome/browser/ui/webui/usb_internals/usb_internals.mojom-webui.js",
+    "$root_gen_dir/mojom-webui/services/device/public/mojom/usb_device.mojom-webui.js",
+    "$root_gen_dir/mojom-webui/services/device/public/mojom/usb_manager.mojom-webui.js",
+    "$root_gen_dir/mojom-webui/services/device/public/mojom/usb_manager_test.mojom-webui.js",
+  ]
 
-js_library("descriptor_panel") {
+  ts_deps = [
+    "//ui/webui/resources:library",
+    "//ui/webui/resources/mojo:library",
+  ]
+  html_to_wrapper_template = "native"
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/logging.h"
-#include "base/macros.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -22,6 +20,7 @@
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/window_features/window_features.mojom.h"
 #include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
 
@@ -40,10 +39,11 @@ class TestWebContentsDelegate : public WebDialogWebContentsDelegate {
       : WebDialogWebContentsDelegate(
             context,
             std::make_unique<ChromeWebContentsHandler>()) {}
-  ~TestWebContentsDelegate() override = default;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestWebContentsDelegate);
+  TestWebContentsDelegate(const TestWebContentsDelegate&) = delete;
+  TestWebContentsDelegate& operator=(const TestWebContentsDelegate&) = delete;
+
+  ~TestWebContentsDelegate() override = default;
 };
 
 class WebDialogWebContentsDelegateTest : public BrowserWithTestWindowTest {
@@ -66,7 +66,7 @@ class WebDialogWebContentsDelegateTest : public BrowserWithTestWindowTest {
 TEST_F(WebDialogWebContentsDelegateTest, DoNothingMethodsTest) {
   // None of the following calls should do anything.
   history::HistoryAddPageArgs should_add_args(
-      GURL(), base::Time::Now(), 0, 0, GURL(), history::RedirectList(),
+      GURL(), base::Time::Now(), nullptr, 0, GURL(), history::RedirectList(),
       ui::PAGE_TRANSITION_TYPED, false, history::SOURCE_SYNCED, false, true);
   test_web_contents_delegate_->NavigationStateChanged(
       nullptr, content::InvalidateTypes(0));
@@ -93,8 +93,9 @@ TEST_F(WebDialogWebContentsDelegateTest, AddNewContentsForegroundTabTest) {
   std::unique_ptr<WebContents> contents =
       WebContentsTester::CreateTestWebContents(profile(), nullptr);
   test_web_contents_delegate_->AddNewContents(
-      nullptr, std::move(contents), WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      gfx::Rect(), false, nullptr);
+      nullptr, std::move(contents), GURL(),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB, blink::mojom::WindowFeatures(),
+      false, nullptr);
   // This should create a new foreground tab in the existing browser.
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
   EXPECT_EQ(1U, chrome::GetTotalBrowserCount());
@@ -105,13 +106,14 @@ TEST_F(WebDialogWebContentsDelegateTest, DetachTest) {
   test_web_contents_delegate_->Detach();
   EXPECT_EQ(nullptr, test_web_contents_delegate_->browser_context());
   // Now, none of the following calls should do anything.
+  GURL url(url::kAboutBlankURL);
   test_web_contents_delegate_->OpenURLFromTab(
-      nullptr, OpenURLParams(GURL(url::kAboutBlankURL), Referrer(),
-                             WindowOpenDisposition::NEW_FOREGROUND_TAB,
-                             ui::PAGE_TRANSITION_LINK, false));
+      nullptr,
+      OpenURLParams(url, Referrer(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                    ui::PAGE_TRANSITION_LINK, false));
   test_web_contents_delegate_->AddNewContents(
-      nullptr, nullptr, WindowOpenDisposition::NEW_FOREGROUND_TAB, gfx::Rect(),
-      false, nullptr);
+      nullptr, nullptr, url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      blink::mojom::WindowFeatures(), false, nullptr);
   EXPECT_EQ(0, browser()->tab_strip_model()->count());
   EXPECT_EQ(1U, chrome::GetTotalBrowserCount());
 }

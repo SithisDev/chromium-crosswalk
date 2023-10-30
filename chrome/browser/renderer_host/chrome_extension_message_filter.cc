@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,28 +7,27 @@
 #include <stdint.h>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
+#include "base/containers/adapters.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
+#include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/activity_log/activity_action_constants.h"
 #include "chrome/browser/extensions/activity_log/activity_actions.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/activity_log_private/activity_log_private_api.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/common/extensions/chrome_extension_messages.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/browser_task_traits.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/l10n_file_util.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_set.h"
-#include "extensions/common/file_util.h"
 #include "extensions/common/manifest_handlers/default_locale_handler.h"
 #include "extensions/common/manifest_handlers/shared_module_info.h"
 #include "extensions/common/message_bundle.h"
@@ -38,7 +37,7 @@ using content::BrowserThread;
 namespace {
 
 const uint32_t kExtensionFilteredMessageClasses[] = {
-    ChromeExtensionMsgStart, ExtensionMsgStart,
+    ExtensionMsgStart,
 };
 
 // Logs an action to the extension activity log for the specified profile.
@@ -56,20 +55,13 @@ void AddActionToExtensionActivityLog(Profile* profile,
 
 }  // namespace
 
-ChromeExtensionMessageFilter::ChromeExtensionMessageFilter(
-    int render_process_id,
-    Profile* profile)
+ChromeExtensionMessageFilter::ChromeExtensionMessageFilter(Profile* profile)
     : BrowserMessageFilter(kExtensionFilteredMessageClasses,
-                           base::size(kExtensionFilteredMessageClasses)),
-      render_process_id_(render_process_id),
+                           std::size(kExtensionFilteredMessageClasses)),
       profile_(profile),
-      activity_log_(extensions::ActivityLog::GetInstance(profile)),
-      extension_info_map_(
-          extensions::ExtensionSystem::Get(profile)->info_map()) {
+      activity_log_(extensions::ActivityLog::GetInstance(profile)) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  notification_registrar_.Add(this,
-                              chrome::NOTIFICATION_PROFILE_DESTROYED,
-                              content::Source<Profile>(profile));
+  observed_profile_.Observe(profile);
 }
 
 ChromeExtensionMessageFilter::~ChromeExtensionMessageFilter() {
@@ -97,6 +89,7 @@ bool ChromeExtensionMessageFilter::OnMessageReceived(
 void ChromeExtensionMessageFilter::OverrideThreadForMessage(
     const IPC::Message& message, BrowserThread::ID* thread) {
   switch (message.type()) {
+    case ExtensionHostMsg_GetMessageBundle::ID:
     case ExtensionHostMsg_AddAPIActionToActivityLog::ID:
     case ExtensionHostMsg_AddDOMActionToActivityLog::ID:
     case ExtensionHostMsg_AddEventToActivityLog::ID:
@@ -111,16 +104,21 @@ void ChromeExtensionMessageFilter::OnDestruct() const {
   if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     delete this;
   } else {
-    BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE, this);
+    content::GetUIThreadTaskRunner({})->DeleteSoon(FROM_HERE, this);
   }
 }
 
 void ChromeExtensionMessageFilter::OnGetExtMessageBundle(
     const std::string& extension_id, IPC::Message* reply_msg) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  // The profile may have been destroyed during the hop from the background
+  // thread to the UI thread.
+  if (!profile_)
+    return;
 
   const extensions::ExtensionSet& extension_set =
-      extension_info_map_->extensions();
+      extensions::ExtensionRegistry::Get(profile_)->enabled_extensions();
   const extensions::Extension* extension = extension_set.GetByID(extension_id);
 
   if (!extension) {  // The extension has gone.
@@ -135,8 +133,8 @@ void ChromeExtensionMessageFilter::OnGetExtMessageBundle(
   if (default_locale.empty()) {
     // A little optimization: send the answer here to avoid an extra thread hop.
     std::unique_ptr<extensions::MessageBundle::SubstitutionMap> dictionary_map(
-        extensions::file_util::LoadNonLocalizedMessageBundleSubstitutionMap(
-            extension_id));
+        extensions::l10n_file_util::
+            LoadNonLocalizedMessageBundleSubstitutionMap(extension_id));
     ExtensionHostMsg_GetMessageBundle::WriteReplyParams(reply_msg,
                                                         *dictionary_map);
     Send(reply_msg);
@@ -150,32 +148,37 @@ void ChromeExtensionMessageFilter::OnGetExtMessageBundle(
   // Iterate through the imports in reverse.  This will allow later imported
   // modules to override earlier imported modules, as the list order is
   // maintained from the definition in manifest.json of the imports.
-  for (auto it = imports.rbegin(); it != imports.rend(); ++it) {
+  for (const extensions::SharedModuleInfo::ImportInfo& import :
+       base::Reversed(imports)) {
     const extensions::Extension* imported_extension =
-        extension_set.GetByID(it->extension_id);
+        extension_set.GetByID(import.extension_id);
     if (!imported_extension) {
-      NOTREACHED() << "Missing shared module " << it->extension_id;
+      NOTREACHED() << "Missing shared module " << import.extension_id;
       continue;
     }
     paths_to_load.push_back(imported_extension->path());
   }
 
   // This blocks tab loading. Priority is inherited from the calling context.
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
-      base::BindOnce(&ChromeExtensionMessageFilter::OnGetExtMessageBundleAsync,
-                     this, paths_to_load, extension_id, default_locale,
-                     reply_msg));
+      base::BindOnce(
+          &ChromeExtensionMessageFilter::OnGetExtMessageBundleAsync, this,
+          paths_to_load, extension_id, default_locale,
+          extension_l10n_util::GetGzippedMessagesPermissionForExtension(
+              extension),
+          reply_msg));
 }
 
 void ChromeExtensionMessageFilter::OnGetExtMessageBundleAsync(
     const std::vector<base::FilePath>& extension_paths,
     const std::string& main_extension_id,
     const std::string& default_locale,
+    extension_l10n_util::GzippedMessagesPermission gzip_permission,
     IPC::Message* reply_msg) {
   std::unique_ptr<extensions::MessageBundle::SubstitutionMap> dictionary_map(
-      extensions::file_util::LoadMessageBundleSubstitutionMapFromPaths(
-          extension_paths, main_extension_id, default_locale));
+      extensions::l10n_file_util::LoadMessageBundleSubstitutionMapFromPaths(
+          extension_paths, main_extension_id, default_locale, gzip_permission));
 
   ExtensionHostMsg_GetMessageBundle::WriteReplyParams(reply_msg,
                                                       *dictionary_map);
@@ -191,10 +194,10 @@ void ChromeExtensionMessageFilter::OnAddAPIActionToExtensionActivityLog(
   scoped_refptr<extensions::Action> action = new extensions::Action(
       extension_id, base::Time::Now(), extensions::Action::ACTION_API_CALL,
       params.api_call);
-  action->set_args(base::WrapUnique(params.arguments.DeepCopy()));
+  action->set_args(params.arguments.Clone());
   if (!params.extra.empty()) {
-    action->mutable_other()->SetString(
-        activity_log_constants::kActionExtra, params.extra);
+    action->mutable_other().Set(activity_log_constants::kActionExtra,
+                                params.extra);
   }
   AddActionToExtensionActivityLog(profile_, activity_log_, action);
 }
@@ -208,11 +211,12 @@ void ChromeExtensionMessageFilter::OnAddDOMActionToExtensionActivityLog(
   scoped_refptr<extensions::Action> action = new extensions::Action(
       extension_id, base::Time::Now(), extensions::Action::ACTION_DOM_ACCESS,
       params.api_call);
-  action->set_args(base::WrapUnique(params.arguments.DeepCopy()));
+  if (params.arguments.is_list())
+    action->set_args(params.arguments.GetList().Clone());
   action->set_page_url(params.url);
   action->set_page_title(base::UTF16ToUTF8(params.url_title));
-  action->mutable_other()->SetInteger(activity_log_constants::kActionDomVerb,
-                                      params.call_type);
+  action->mutable_other().Set(activity_log_constants::kActionDomVerb,
+                              params.call_type);
   AddActionToExtensionActivityLog(profile_, activity_log_, action);
 }
 
@@ -225,20 +229,19 @@ void ChromeExtensionMessageFilter::OnAddEventToExtensionActivityLog(
   scoped_refptr<extensions::Action> action = new extensions::Action(
       extension_id, base::Time::Now(), extensions::Action::ACTION_API_EVENT,
       params.api_call);
-  action->set_args(base::WrapUnique(params.arguments.DeepCopy()));
+  action->set_args(params.arguments.Clone());
   if (!params.extra.empty()) {
-    action->mutable_other()->SetString(activity_log_constants::kActionExtra,
-                                       params.extra);
+    action->mutable_other().Set(activity_log_constants::kActionExtra,
+                                params.extra);
   }
   AddActionToExtensionActivityLog(profile_, activity_log_, action);
 }
 
-void ChromeExtensionMessageFilter::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_PROFILE_DESTROYED, type);
-  profile_ = NULL;
+void ChromeExtensionMessageFilter::OnProfileWillBeDestroyed(Profile* profile) {
+  DCHECK_EQ(profile_, profile);
+  DCHECK(observed_profile_.IsObservingSource(profile_.get()));
+  observed_profile_.Reset();
+  profile_ = nullptr;
   activity_log_ = nullptr;
 }
 

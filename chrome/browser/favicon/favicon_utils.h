@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_FAVICON_FAVICON_UTILS_H_
 
 #include "components/favicon/content/content_favicon_driver.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 namespace content {
 class WebContents;
@@ -25,9 +26,9 @@ namespace favicon {
 void CreateContentFaviconDriverForWebContents(
     content::WebContents* web_contents);
 
-// Returns whether the favicon should be displayed. If this returns false, no
-// space is provided for the favicon, and the favicon is never displayed.
-bool ShouldDisplayFavicon(content::WebContents* web_contents);
+// Generates a monogram in a colored circle. The color is based on the hash
+// of the url and the monogram is the first letter of the URL domain.
+SkBitmap GenerateMonogramFavicon(GURL url, int icon_size, int circle_size);
 
 // Retrieves the favicon from given WebContents. If contents contain a
 // network error, desaturate the favicon.
@@ -36,6 +37,22 @@ gfx::Image TabFaviconFromWebContents(content::WebContents* contents);
 // Returns the image to use when no favicon is available, taking dark mode
 // into account if necessary.
 gfx::Image GetDefaultFavicon();
+
+// Saves the favicon for the last committed navigation entry to the favicon
+// database.
+void SaveFaviconEvenIfInIncognito(content::WebContents* contents);
+
+// Return true if the favicon for |entry| should be themified, based on both
+// its visible and actual URL.
+bool ShouldThemifyFaviconForEntry(content::NavigationEntry* entry);
+
+// Recolor favicon with |alternate_color| if contrast ratio is low between
+// source color and background |active_background| or
+// |inactive_background|.
+gfx::ImageSkia ThemeFavicon(const gfx::ImageSkia& source,
+                            SkColor alternate_color,
+                            SkColor active_background,
+                            SkColor inactive_background);
 
 }  // namespace favicon
 

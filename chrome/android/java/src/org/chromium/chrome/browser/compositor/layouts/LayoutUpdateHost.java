@@ -1,11 +1,11 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.compositor.layouts;
 
-import org.chromium.chrome.browser.compositor.animation.CompositorAnimationHandler;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
+import org.chromium.chrome.browser.layouts.animation.CompositorAnimationHandler;
 import org.chromium.chrome.browser.tab.Tab;
 
 /**
@@ -19,6 +19,15 @@ public interface LayoutUpdateHost {
      * {@link LayoutRenderHost#requestRender()}).
      */
     void requestUpdate();
+
+    /**
+     * Requests a next update to refresh the transforms and changing properties. The update occurs
+     * once a frame. This is requesting a new frame to be updated and rendered (no need to call
+     * {@link LayoutRenderHost#requestRender()}).
+     * @param onUpdateEffective Callback that will be called when there is a buffer swap for the
+     *                          updated frame.
+     */
+    default void requestUpdate(Runnable onUpdateEffective) {}
 
     /**
      * Tells its host {@link android.view.View} that the hide will be an animation away.
@@ -62,16 +71,14 @@ public interface LayoutUpdateHost {
      * @param id               The id of the reference tab in the
      *                         {@link org.chromium.chrome.browser.tabmodel.TabModel}.
      * @param incognito        Whether the new tab is incognito.
-     * @param showCloseButton  True to show and activate a close button on the border.
-     * @param isTitleNeeded    Whether a title will be shown.
      * @param maxContentWidth  The maximum layout width this tab can be.  Negative numbers will use
      *                         the original content width.
      * @param maxContentHeight The maximum layout height this tab can be.  Negative numbers will use
      *                         the original content height.
      * @return                 The created or recycled {@link LayoutTab}.
      */
-    LayoutTab createLayoutTab(int id, boolean incognito, boolean showCloseButton,
-            boolean isTitleNeeded, float maxContentWidth, float maxContentHeight);
+    LayoutTab createLayoutTab(
+            int id, boolean incognito, float maxContentWidth, float maxContentHeight);
 
     /**
      * Notifies the host that the {@link LayoutTab} is no longer needed by the layout.

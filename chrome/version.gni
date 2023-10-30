@@ -1,155 +1,155 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/chrome_build.gni")
+# This exposes the Chrome version as GN variables for use in build files.
+# This also generates the various version codes used for builds of chrome for
+# android.
+#
+# PREFER NOT TO USE THESE. The GYP build uses this kind of thing extensively.
+# However, it is far better to write an action (or use
+# //build/util/process_version.gni) to generate a file at build-time with the
+# information you need. This allows better dependency checking and GN will
+# run faster.
+#
+# These values should only be used if you REALLY need to depend on them at
+# build-time, for example, in the computation of output file names.
 
-# Runs the version processing script over the given template file to produce
-# an output file. This is used for generating various forms of files that
-# incorporate the product name and version.
-#
-# Unlike GYP, this will actually compile the resulting file, so you don't need
-# to add it separately to the sources, just depend on the target.
-#
-# This template automatically includes VERSION, LASTCHANGE, and BRANDING. It
-# automatically uses the template file .
-# GYP parameterizes this template file but all current invocations use this
-# same one. If in the future we need to set it, this should be added as an
-# optional argument.
-#
-# In GYP this is a rule that runs once per ".ver" file. In GN this just
-# processes one file per invocation of the template so you may have to have
-# multiple targets.
-#
-# Parameters:
-#   sources (optional):
-#     List of file names to read. When converting a GYP target, this should
-#     list the 'source' (see above) as well as any extra_variable_files.
-#
-#   output:
-#     File name of file to write. In GYP this is unspecified and it will
-#     make up a file name for you based on the input name, and tack on
-#     "_version.rc" to the end. But in GN you need to specify the full name.
-#
-#   template_file (optional):
-#     Template file to use (not a list). Most Windows uses for generating
-#     resources will want to specify the chrome_version_rc_template defined
-#     below.
-#
-#   extra_args (optional):
-#     Extra arguments to pass to version.py. Any "-f <filename>" args should
-#     use sources instead.
-#
-#   process_only (optional, defaults to false)
-#     Set to generate only one action that processes the version file and
-#     doesn't attempt to link the result into a source set. This is for if
-#     you are processing the version as data only.
-#
-#   visibility (optional)
-#
-# Example:
-#   process_version("myversion") {
-#     sources = [ "myfile.h.in" ]
-#     output = "$target_gen_dir/myfile.h"
-#     extra_args = ["-e", "FOO=42"]
-#     extra_files = [ "foo/BRANDING" ]
-#   }
-template("process_version") {
-  assert(defined(invoker.output), "Output must be defined for $target_name")
+# Give version.py a pattern that will expand to a GN scope consisting of
+# all values we need at once.
+_version_dictionary_template = "full = \"@MAJOR@.@MINOR@.@BUILD@.@PATCH@\" " +
+                               "major = \"@MAJOR@\" minor = \"@MINOR@\" " +
+                               "build = \"@BUILD@\" patch = \"@PATCH@\" "
 
+# The file containing the Chrome version number.
+chrome_version_file = "//chrome/VERSION"
 
-  process_only = defined(invoker.process_only) && invoker.process_only
+_script_arguments = []
 
-  if (process_only) {
-    action_name = target_name
-  } else {
-    action_name = target_name + "_action"
-    source_set_name = target_name
+if (is_mac) {
+  _version_dictionary_template += "patch_hi = @PATCH_HI@ patch_lo = @PATCH_LO@ "
+
+  _script_arguments += [
+    "-e",
+    "PATCH_HI=int(PATCH)//256",
+    "-e",
+    "PATCH_LO=int(PATCH)%256",
+  ]
+} else if (target_os == "android") {
+  import("//build/config/android/config.gni")
+
+  _version_dictionary_template +=
+      "chrome_version_code = " + "\"@CHROME_VERSION_CODE@\" " +
+      "chrome_modern_version_code = \"@CHROME_MODERN_VERSION_CODE@\" " +
+      "monochrome_version_code = \"@MONOCHROME_VERSION_CODE@\" " +
+      "trichrome_version_code = \"@TRICHROME_VERSION_CODE@\" " +
+      "webview_stable_version_code = \"@WEBVIEW_STABLE_VERSION_CODE@\" " +
+      "webview_beta_version_code = \"@WEBVIEW_BETA_VERSION_CODE@\" " +
+      "webview_dev_version_code = \"@WEBVIEW_DEV_VERSION_CODE@\" "
+
+  if (target_cpu == "arm64" || target_cpu == "x64") {
+    _version_dictionary_template += "monochrome_32_version_code = \"@MONOCHROME_32_VERSION_CODE@\" " + "monochrome_32_64_version_code = \"@MONOCHROME_32_64_VERSION_CODE@\" " + "monochrome_64_32_version_code = \"@MONOCHROME_64_32_VERSION_CODE@\" " + "monochrome_64_version_code = \"@MONOCHROME_64_VERSION_CODE@\" " + "trichrome_32_version_code = \"@TRICHROME_32_VERSION_CODE@\" " + "trichrome_32_64_version_code = \"@TRICHROME_32_64_VERSION_CODE@\" " + "trichrome_64_32_version_code = \"@TRICHROME_64_32_VERSION_CODE@\" " + "trichrome_64_version_code = \"@TRICHROME_64_VERSION_CODE@\" " + "webview_32_stable_version_code = \"@WEBVIEW_32_STABLE_VERSION_CODE@\" " + "webview_32_beta_version_code = \"@WEBVIEW_32_BETA_VERSION_CODE@\" " + "webview_32_dev_version_code = \"@WEBVIEW_32_DEV_VERSION_CODE@\" " + "webview_64_stable_version_code = \"@WEBVIEW_64_STABLE_VERSION_CODE@\" " + "webview_64_beta_version_code = \"@WEBVIEW_64_BETA_VERSION_CODE@\" " + "webview_64_dev_version_code = \"@WEBVIEW_64_DEV_VERSION_CODE@\" "
   }
 
-  action(action_name) {
-    script = "//build/util/version.py"
+  _script_arguments += [
+    "-a",
+    target_cpu,
+  ]
 
-    lastchange_path = "//build/util/LASTCHANGE"
-    version_path = "//chrome/VERSION"
-    if (is_chrome_branded) {
-      branding_path = "//chrome/app/theme/google_chrome/BRANDING"
-    } else {
-      branding_path = "//chrome/app/theme/chromium/BRANDING"
-    }
-
-    inputs = [
-      version_path,
-      lastchange_path,
-      branding_path,
-    ]
-    if (defined(invoker.inputs)) {
-      inputs += invoker.inputs
-    }
-    if (defined(invoker.template_file)) {
-      inputs += [ invoker.template_file ]
-    }
-
-    outputs = [
-      invoker.output,
-    ]
-
-    args = []
-
-    if (is_official_build) {
-      args += [ "--official" ]
-    }
-
-    if (defined(invoker.sources)) {
-      inputs += invoker.sources
-      foreach(i, invoker.sources) {
-        args += [
-          "-f",
-          rebase_path(i, root_build_dir),
-        ]
-      }
-    }
-
-    args += [
-      "-f",
-      rebase_path(version_path, root_build_dir),
-      "-f",
-      rebase_path(branding_path, root_build_dir),
-      "-f",
-      rebase_path(lastchange_path, root_build_dir),
-    ]
-    if (defined(invoker.extra_args)) {
-      args += invoker.extra_args
-    }
-    args += [
-      "-o",
-      rebase_path(invoker.output, root_build_dir),
-    ]
-    if (defined(invoker.template_file)) {
-      args += [ rebase_path(invoker.template_file, root_build_dir) ]
-    }
-
-    forward_variables_from(invoker, [ "deps" ])
-
-    if (process_only) {
-      # When processing only, visibility gets applied to this target.
-      forward_variables_from(invoker, [ "visibility" ])
-    } else {
-      # When linking the result, only the source set can depend on the action.
-      visibility = [ ":$source_set_name" ]
-    }
-  }
-
-  if (!process_only) {
-    source_set(source_set_name) {
-      forward_variables_from(invoker, [ "visibility" ])
-      sources = get_target_outputs(":$action_name")
-      public_deps = [
-        ":$action_name",
-      ]
-    }
+  if (defined(final_android_sdk) && !final_android_sdk) {
+    _script_arguments += [ "--next" ]
   }
 }
 
-chrome_version_rc_template = "//chrome/app/chrome_version.rc.version"
+_script_arguments += [
+  "-f",
+  rebase_path(chrome_version_file, root_build_dir),
+  "-t",
+  _version_dictionary_template,
+  "--os",
+  target_os,
+]
 
+_result = exec_script("//build/util/version.py",
+                      _script_arguments,
+                      "scope",
+                      [
+                        chrome_version_file,
+                        "//build/util/android_chrome_version.py",
+                      ])
+
+# Full version. For example "45.0.12321.0"
+chrome_version_full = _result.full
+
+# The constituent parts of the full version.
+chrome_version_major = _result.major
+chrome_version_minor = _result.minor
+chrome_version_build = _result.build
+chrome_version_patch = _result.patch
+
+if (is_mac) {
+  chrome_version_patch_hi = _result.patch_hi
+  chrome_version_patch_lo = _result.patch_lo
+
+  chrome_dylib_version = "$chrome_version_build.$chrome_version_patch_hi" +
+                         ".$chrome_version_patch_lo"
+} else if (target_os == "android") {
+  forward_variables_from(_result,
+                         [
+                           "chrome_modern_version_code",
+                           "chrome_version_code",
+                           "monochrome_version_code",
+                           "monochrome_32_version_code",
+                           "monochrome_32_64_version_code",
+                           "monochrome_64_32_version_code",
+                           "monochrome_64_version_code",
+                           "trichrome_version_code",
+                           "trichrome_32_version_code",
+                           "trichrome_32_64_version_code",
+                           "trichrome_64_32_version_code",
+                           "trichrome_64_version_code",
+                           "webview_beta_version_code",
+                           "webview_dev_version_code",
+                           "webview_stable_version_code",
+                           "webview_32_beta_version_code",
+                           "webview_32_dev_version_code",
+                           "webview_32_stable_version_code",
+                           "webview_64_beta_version_code",
+                           "webview_64_dev_version_code",
+                           "webview_64_stable_version_code",
+                         ])
+
+  chrome_version_name = chrome_version_full
+
+  lines_to_write = [
+    "VersionName: $chrome_version_name",
+    "Chrome: $chrome_version_code",
+    "ChromeModern: $chrome_modern_version_code",
+    "Monochrome: $monochrome_version_code",
+    "TrichromeChrome: $trichrome_version_code",
+    "AndroidWebviewStable: $webview_stable_version_code",
+    "AndroidWebviewBeta: $webview_beta_version_code",
+    "AndroidWebviewDev: $webview_dev_version_code",
+  ]
+
+  if (target_cpu == "arm64" || target_cpu == "x64") {
+    lines_to_write += [
+      "Monochrome32: $monochrome_32_version_code",
+      "Monochrome3264: $monochrome_32_64_version_code",
+      "Monochrome6432: $monochrome_64_32_version_code",
+      "Monochrome64: $monochrome_64_version_code",
+      "TrichromeChrome32: $trichrome_32_version_code",
+      "TrichromeChrome3264: $trichrome_32_64_version_code",
+      "TrichromeChrome6432: $trichrome_64_32_version_code",
+      "TrichromeChrome64: $trichrome_64_version_code",
+      "AndroidWebview32Stable: $webview_32_stable_version_code",
+      "AndroidWebview32Beta: $webview_32_beta_version_code",
+      "AndroidWebview32Dev: $webview_32_dev_version_code",
+      "AndroidWebview64Stable: $webview_64_stable_version_code",
+      "AndroidWebview64Beta: $webview_64_beta_version_code",
+      "AndroidWebview64Dev: $webview_64_dev_version_code",
+    ]
+  }
+
+  write_file("$root_out_dir/android_chrome_versions.txt", lines_to_write)
+}

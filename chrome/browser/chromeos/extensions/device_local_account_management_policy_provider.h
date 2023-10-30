@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,7 @@
 
 #include <string>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "chrome/browser/chromeos/policy/device_local_account.h"
+#include "chrome/browser/ash/policy/core/device_local_account.h"
 #include "extensions/browser/management_policy.h"
 
 namespace chromeos {
@@ -22,20 +20,21 @@ class DeviceLocalAccountManagementPolicyProvider
  public:
   explicit DeviceLocalAccountManagementPolicyProvider(
       policy::DeviceLocalAccount::Type account_type);
-  ~DeviceLocalAccountManagementPolicyProvider() override;
 
-  // Used to check whether an extension is explicitly whitelisted.
-  static bool IsWhitelisted(const std::string& extension_id);
+  DeviceLocalAccountManagementPolicyProvider(
+      const DeviceLocalAccountManagementPolicyProvider&) = delete;
+  DeviceLocalAccountManagementPolicyProvider& operator=(
+      const DeviceLocalAccountManagementPolicyProvider&) = delete;
+
+  ~DeviceLocalAccountManagementPolicyProvider() override;
 
   // extensions::ManagementPolicy::Provider:
   std::string GetDebugPolicyProviderName() const override;
   bool UserMayLoad(const extensions::Extension* extension,
-                   base::string16* error) const override;
+                   std::u16string* error) const override;
 
  private:
   const policy::DeviceLocalAccount::Type account_type_;
-
-  DISALLOW_COPY_AND_ASSIGN(DeviceLocalAccountManagementPolicyProvider);
 };
 
 }  // namespace chromeos

@@ -1,10 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_ANDROID_EXPLORE_SITES_RECORD_SITE_CLICK_TASK_H_
 #define CHROME_BROWSER_ANDROID_EXPLORE_SITES_RECORD_SITE_CLICK_TASK_H_
 
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/android/explore_sites/explore_sites_store.h"
 #include "components/offline_pages/task/task.h"
 
@@ -29,14 +30,14 @@ class RecordSiteClickTask : public Task {
 
   void FinishedExecuting(bool result);
 
-  ExploreSitesStore* store_;  // outlives this class.
+  raw_ptr<ExploreSitesStore> store_;  // outlives this class.
   std::string url_;
   int category_type_;
 
   bool complete_ = false;
   bool result_ = false;
 
-  base::WeakPtrFactory<RecordSiteClickTask> weak_ptr_factory_;
+  base::WeakPtrFactory<RecordSiteClickTask> weak_ptr_factory_{this};
 };
 
 }  // namespace explore_sites

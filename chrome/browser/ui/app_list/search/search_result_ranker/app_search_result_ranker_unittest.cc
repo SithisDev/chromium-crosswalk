@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/ui/app_list/search/search_result_ranker/app_launch_predictor.h"
 #include "chrome/browser/ui/app_list/search/search_result_ranker/app_launch_predictor.pb.h"
 #include "chrome/browser/ui/app_list/search/search_result_ranker/app_launch_predictor_test_util.h"
@@ -39,11 +39,11 @@ class AppSearchResultRankerFlagTest : public testing::Test {
   }
 
   // Waits for all tasks in to finish.
-  void Wait() { scoped_task_environment_.RunUntilIdle(); }
+  void Wait() { task_environment_.RunUntilIdle(); }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_{
-      base::test::ScopedTaskEnvironment::MainThreadType::DEFAULT,
-      base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::QUEUED};
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::MainThreadType::DEFAULT,
+      base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED};
   base::ScopedTempDir temp_dir_;
   base::test::ScopedFeatureList scoped_feature_list_;
 };
@@ -121,9 +121,7 @@ class AppSearchResultRankerSerializationTest
 TEST_F(AppSearchResultRankerSerializationTest, LoadFromDiskSucceed) {
   // Prepare file to be loaded.
   const std::string proto_str = proto_.SerializeAsString();
-  EXPECT_NE(
-      base::WriteFile(predictor_filename_, proto_str.c_str(), proto_str.size()),
-      -1);
+  EXPECT_TRUE(base::WriteFile(predictor_filename_, proto_str));
   // Construct ranker.
   AppSearchResultRanker ranker(temp_dir_.GetPath(), kNotAnEphemeralUser);
 
@@ -159,9 +157,7 @@ TEST_F(AppSearchResultRankerSerializationTest,
        LoadFromDiskFailWithInvalidProto) {
   const std::string wrong_proto = "abc";
   // Prepare file to be loaded.
-  EXPECT_NE(base::WriteFile(predictor_filename_, wrong_proto.c_str(),
-                            wrong_proto.size()),
-            -1);
+  EXPECT_TRUE(base::WriteFile(predictor_filename_, wrong_proto));
 
   // Construct ranker.
   AppSearchResultRanker ranker(temp_dir_.GetPath(), kNotAnEphemeralUser);

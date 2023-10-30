@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,18 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/stl_util.h"
-#include "base/task/post_task.h"
+#include "base/callback_helpers.h"
+#include "base/logging.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/time/time.h"
 #include "chrome/browser/extensions/api/braille_display_private/brlapi_connection.h"
@@ -32,21 +34,13 @@ namespace {
 
 // Delay between detecting a directory update and trying to connect
 // to the brlapi.
-constexpr base::TimeDelta kConnectionDelay =
-    base::TimeDelta::FromMilliseconds(500);
+constexpr base::TimeDelta kConnectionDelay = base::Milliseconds(500);
 
 // How long to periodically retry connecting after a brltty restart.
 // Some displays are slow to connect.
-constexpr base::TimeDelta kConnectRetryTimeout =
-    base::TimeDelta::FromSeconds(20);
+constexpr base::TimeDelta kConnectRetryTimeout = base::Seconds(20);
 
 }  // namespace
-
-BrailleController::BrailleController() {
-}
-
-BrailleController::~BrailleController() {
-}
 
 // static
 BrailleController* BrailleController::GetInstance() {
@@ -60,32 +54,26 @@ BrailleControllerImpl* BrailleControllerImpl::GetInstance() {
       base::LeakySingletonTraits<BrailleControllerImpl>>::get();
 }
 
-BrailleControllerImpl::BrailleControllerImpl()
-    : started_connecting_(false),
-      connect_scheduled_(false) {
-  create_brlapi_connection_function_ = base::Bind(
-      &BrailleControllerImpl::CreateBrlapiConnection,
-      base::Unretained(this));
+BrailleControllerImpl::BrailleControllerImpl() {
+  create_brlapi_connection_function_ = base::BindOnce(
+      &BrailleControllerImpl::CreateBrlapiConnection, base::Unretained(this));
 }
 
-BrailleControllerImpl::~BrailleControllerImpl() {
-}
+BrailleControllerImpl::~BrailleControllerImpl() = default;
 
 void BrailleControllerImpl::TryLoadLibBrlApi() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (libbrlapi_loader_.loaded())
+  if (skip_libbrlapi_so_load_ || libbrlapi_loader_.loaded())
     return;
-  // These versions of libbrlapi work the same for the functions we
-  // are using.  (0.6.0 adds brlapi_writeWText).
-  static const char* const kSupportedVersions[] = {
-    "libbrlapi.so.0.5",
-    "libbrlapi.so.0.6"
-  };
-  for (size_t i = 0; i < base::size(kSupportedVersions); ++i) {
-    if (libbrlapi_loader_.Load(kSupportedVersions[i]))
-      return;
+
+  // This api version needs to match the one contained in
+  // third_party/libbrlapi/brlapi.h.
+  static const char* const kSupportedVersion = "libbrlapi.so.0.8";
+
+  if (!libbrlapi_loader_.Load(kSupportedVersion)) {
+    LOG(WARNING) << "Couldn't load libbrlapi(" << kSupportedVersion << ": "
+                 << strerror(errno);
   }
-  LOG(WARNING) << "Couldn't load libbrlapi: " << strerror(errno);
 }
 
 std::unique_ptr<DisplayState> BrailleControllerImpl::GetDisplayState() {
@@ -100,8 +88,12 @@ std::unique_ptr<DisplayState> BrailleControllerImpl::GetDisplayState() {
     } else if (rows * columns > 0) {
       // rows * columns == 0 means no display present.
       display_state->available = true;
-      display_state->text_column_count.reset(new int(columns));
-      display_state->text_row_count.reset(new int(rows));
+      display_state->text_column_count = columns;
+      display_state->text_row_count = rows;
+
+      unsigned int cell_size = 0;
+      connection_->GetCellSize(&cell_size);
+      display_state->cell_size = cell_size;
     }
   }
   return display_state;
@@ -134,10 +126,9 @@ void BrailleControllerImpl::WriteDots(const std::vector<uint8_t>& cells,
 
 void BrailleControllerImpl::AddObserver(BrailleObserver* observer) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (!base::PostTaskWithTraits(
-          FROM_HERE, {BrowserThread::IO},
-          base::BindOnce(&BrailleControllerImpl::StartConnecting,
-                         base::Unretained(this)))) {
+  if (!content::GetIOThreadTaskRunner({})->PostTask(
+          FROM_HERE, base::BindOnce(&BrailleControllerImpl::StartConnecting,
+                                    base::Unretained(this)))) {
     NOTREACHED();
   }
   observers_.AddObserver(observer);
@@ -149,13 +140,12 @@ void BrailleControllerImpl::RemoveObserver(BrailleObserver* observer) {
 }
 
 void BrailleControllerImpl::SetCreateBrlapiConnectionForTesting(
-    const CreateBrlapiConnectionFunction& function) {
+    CreateBrlapiConnectionFunction function) {
   if (function.is_null()) {
-    create_brlapi_connection_function_ = base::Bind(
-        &BrailleControllerImpl::CreateBrlapiConnection,
-        base::Unretained(this));
+    create_brlapi_connection_function_ = base::BindOnce(
+        &BrailleControllerImpl::CreateBrlapiConnection, base::Unretained(this));
   } else {
-    create_brlapi_connection_function_ = function;
+    create_brlapi_connection_function_ = std::move(function);
   }
 }
 
@@ -169,12 +159,12 @@ void BrailleControllerImpl::StartConnecting() {
     return;
   started_connecting_ = true;
   TryLoadLibBrlApi();
-  if (!libbrlapi_loader_.loaded()) {
+  if (!libbrlapi_loader_.loaded() && !skip_libbrlapi_so_load_) {
     return;
   }
 
   if (!sequenced_task_runner_) {
-    sequenced_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+    sequenced_task_runner_ = base::ThreadPool::CreateSequencedTaskRunner(
         {base::MayBlock(), base::TaskPriority::USER_VISIBLE});
   }
 
@@ -197,9 +187,10 @@ void BrailleControllerImpl::StartWatchingSocketDirOnTaskThread() {
                                                 base::BlockingType::MAY_BLOCK);
   base::FilePath brlapi_dir(BRLAPI_SOCKETPATH);
   if (!file_path_watcher_.Watch(
-          brlapi_dir, false,
-          base::Bind(&BrailleControllerImpl::OnSocketDirChangedOnTaskThread,
-                     base::Unretained(this)))) {
+          brlapi_dir, base::FilePathWatcher::Type::kNonRecursive,
+          base::BindRepeating(
+              &BrailleControllerImpl::OnSocketDirChangedOnTaskThread,
+              base::Unretained(this)))) {
     LOG(WARNING) << "Couldn't watch brlapi directory " << BRLAPI_SOCKETPATH;
   }
 }
@@ -213,8 +204,8 @@ void BrailleControllerImpl::OnSocketDirChangedOnTaskThread(
     LOG(ERROR) << "Error watching brlapi directory: " << path.value();
     return;
   }
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&BrailleControllerImpl::OnSocketDirChangedOnIOThread,
                      base::Unretained(this)));
 }
@@ -231,15 +222,19 @@ void BrailleControllerImpl::OnSocketDirChangedOnIOThread() {
 
 void BrailleControllerImpl::TryToConnect() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(libbrlapi_loader_.loaded());
+  DCHECK(skip_libbrlapi_so_load_ || libbrlapi_loader_.loaded());
   connect_scheduled_ = false;
-  if (!connection_.get())
-    connection_ = create_brlapi_connection_function_.Run();
-  if (connection_.get() && !connection_->Connected()) {
+  if (!connection_.get()) {
+    DCHECK(!create_brlapi_connection_function_.is_null());
+    connection_ = std::move(create_brlapi_connection_function_).Run();
+  }
+
+  DCHECK(connection_);
+  if (!connection_->Connected()) {
     VLOG(1) << "Trying to connect to brlapi";
-    BrlapiConnection::ConnectResult result = connection_->Connect(base::Bind(
-        &BrailleControllerImpl::DispatchKeys,
-        base::Unretained(this)));
+    BrlapiConnection::ConnectResult result =
+        connection_->Connect(base::BindRepeating(
+            &BrailleControllerImpl::DispatchKeys, base::Unretained(this)));
     switch (result) {
       case BrlapiConnection::CONNECT_SUCCESS:
         DispatchOnDisplayStateChanged(GetDisplayState());
@@ -272,8 +267,8 @@ void BrailleControllerImpl::ScheduleTryToConnect() {
   }
   VLOG(1) << "Scheduling connection retry to brlapi";
   connect_scheduled_ = true;
-  base::PostDelayedTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostDelayedTask(
+      FROM_HERE,
       base::BindOnce(&BrailleControllerImpl::TryToConnect,
                      base::Unretained(this)),
       kConnectionDelay);
@@ -284,13 +279,12 @@ void BrailleControllerImpl::Disconnect() {
   if (!connection_ || !connection_->Connected())
     return;
   connection_->Disconnect();
-  DispatchOnDisplayStateChanged(
-      std::unique_ptr<DisplayState>(new DisplayState()));
+  DispatchOnDisplayStateChanged(std::make_unique<DisplayState>());
 }
 
 std::unique_ptr<BrlapiConnection>
 BrailleControllerImpl::CreateBrlapiConnection() {
-  DCHECK(libbrlapi_loader_.loaded());
+  DCHECK(skip_libbrlapi_so_load_ || libbrlapi_loader_.loaded());
   return BrlapiConnection::Create(&libbrlapi_loader_);
 }
 
@@ -318,13 +312,12 @@ void BrailleControllerImpl::DispatchKeys() {
 
 void BrailleControllerImpl::DispatchKeyEvent(std::unique_ptr<KeyEvent> event) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
-        base::BindOnce(&BrailleControllerImpl::DispatchKeyEvent,
-                       base::Unretained(this), base::Passed(&event)));
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&BrailleControllerImpl::DispatchKeyEvent,
+                                  base::Unretained(this), std::move(event)));
     return;
   }
-  VLOG(1) << "Dispatching key event: " << *event->ToValue();
+  VLOG(1) << "Dispatching key event: " << event->ToValue();
   for (auto& observer : observers_)
     observer.OnBrailleKeyEvent(*event);
 }
@@ -332,11 +325,11 @@ void BrailleControllerImpl::DispatchKeyEvent(std::unique_ptr<KeyEvent> event) {
 void BrailleControllerImpl::DispatchOnDisplayStateChanged(
     std::unique_ptr<DisplayState> new_state) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    if (!base::PostTaskWithTraits(
-            FROM_HERE, {BrowserThread::UI},
+    if (!content::GetUIThreadTaskRunner({})->PostTask(
+            FROM_HERE,
             base::BindOnce(
                 &BrailleControllerImpl::DispatchOnDisplayStateChanged,
-                base::Unretained(this), base::Passed(&new_state)))) {
+                base::Unretained(this), std::move(new_state)))) {
       NOTREACHED();
     }
     return;

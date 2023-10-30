@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #include "base/files/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/path_service.h"
+#include "base/process/launch.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_restrictions.h"
@@ -20,6 +21,7 @@
 #include "chrome/common/renderer_configuration.mojom.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "media/base/media_switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -27,18 +29,8 @@
 namespace {
 
 base::FilePath GetPythonPath() {
-#if defined(OS_WIN)
-  // Windows bots do not have python installed and available on the PATH.
-  // Please see infra/doc/users/python.md
-  base::FilePath bot_path =
-      base::FilePath(FILE_PATH_LITERAL("c:/infra-system/bin/python.exe"));
-
-  if (base::PathExists(bot_path))
-    return bot_path;
-  return base::FilePath(FILE_PATH_LITERAL("python.exe"));
-#else
-  return base::FilePath(FILE_PATH_LITERAL("python"));
-#endif
+  // Every environment should have python3.
+  return base::FilePath(FILE_PATH_LITERAL("python3"));
 }
 
 const base::FilePath kTestDataPath = base::FilePath(
@@ -46,9 +38,9 @@ const base::FilePath kTestDataPath = base::FilePath(
 
 const char kMediaEngagementTestDataPath[] = "chrome/test/data/media/engagement";
 
-const base::string16 kAllowedTitle = base::ASCIIToUTF16("Allowed");
+const std::u16string kAllowedTitle = u"Allowed";
 
-const base::string16 kDeniedTitle = base::ASCIIToUTF16("Denied");
+const std::u16string kDeniedTitle = u"Denied";
 
 const base::FilePath kEmptyDataPath = kTestDataPath.AppendASCII("empty.pb");
 
@@ -68,6 +60,13 @@ class MediaEngagementAutoplayBrowserTest
     http_server_.ServeFilesFromSourceDirectory(kMediaEngagementTestDataPath);
     http_server_origin2_.ServeFilesFromSourceDirectory(
         kMediaEngagementTestDataPath);
+
+    // Enable or disable MEI based on the test parameter.
+    if (GetParam()) {
+      scoped_feature_list_.InitWithFeatures(kFeatures, {});
+    } else {
+      scoped_feature_list_.InitWithFeatures({}, kFeatures);
+    }
   }
 
   ~MediaEngagementAutoplayBrowserTest() override = default;
@@ -81,13 +80,6 @@ class MediaEngagementAutoplayBrowserTest
   void SetUp() override {
     ASSERT_TRUE(http_server_.Start());
     ASSERT_TRUE(http_server_origin2_.Start());
-
-    // Enable or disable MEI based on the test parameter.
-    if (GetParam()) {
-      scoped_feature_list_.InitWithFeatures(kFeatures, {});
-    } else {
-      scoped_feature_list_.InitWithFeatures({}, kFeatures);
-    }
 
     InProcessBrowserTest::SetUp();
 
@@ -157,24 +149,30 @@ class MediaEngagementAutoplayBrowserTest
 
     // Write JSON file with the server origin in it.
     base::ListValue list;
-    list.AppendString(origin.Serialize());
+    list.Append(origin.Serialize());
     std::string json_data;
     base::JSONWriter::Write(list, &json_data);
-    EXPECT_TRUE(
-        base::WriteFile(input_path, json_data.c_str(), json_data.size()));
+    EXPECT_TRUE(base::WriteFile(input_path, json_data));
 
-    // Get the path to the "generator" binary in the module path.
-    base::FilePath module_dir;
-    EXPECT_TRUE(base::PathService::Get(base::DIR_MODULE, &module_dir));
+    // Get the source root. The make_dafsa.py script is in here.
+    base::FilePath src_root;
+    EXPECT_TRUE(
+        base::PathService::Get(base::DIR_SRC_TEST_DATA_ROOT, &src_root));
+
+    // Get the generated root. The protobuf-generated files are in here.
+    base::FilePath gen_root;
+    EXPECT_TRUE(
+        base::PathService::Get(base::DIR_GEN_TEST_DATA_ROOT, &gen_root));
 
     // Launch the generator and wait for it to finish.
     base::CommandLine cmd(GetPythonPath());
-    cmd.AppendArgPath(module_dir.Append(
+    cmd.AppendArgPath(src_root.Append(
         FILE_PATH_LITERAL("tools/media_engagement_preload/make_dafsa.py")));
+    cmd.AppendArgPath(gen_root);
     cmd.AppendArgPath(input_path);
     cmd.AppendArgPath(output_path);
     base::Process process = base::LaunchProcess(cmd, base::LaunchOptions());
-    EXPECT_TRUE(process.WaitForExit(0));
+    EXPECT_TRUE(process.WaitForExit(nullptr));
 
     // Load the preloaded list.
     EXPECT_TRUE(
@@ -192,7 +190,7 @@ class MediaEngagementAutoplayBrowserTest
   }
 
  private:
-  base::string16 WaitAndGetTitle() {
+  std::u16string WaitAndGetTitle() {
     content::TitleWatcher title_watcher(GetWebContents(), kAllowedTitle);
     title_watcher.AlsoWaitForTitle(kDeniedTitle);
     return title_watcher.WaitAndGetTitle();
@@ -297,8 +295,14 @@ IN_PROC_BROWSER_TEST_P(MediaEngagementAutoplayBrowserTest,
   ExpectAutoplayAllowedIfEnabled();
 }
 
+// Disabled due to being flaky. crbug.com/1212507
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_UsePreloadedData_Allowed DISABLED_UsePreloadedData_Allowed
+#else
+#define MAYBE_UsePreloadedData_Allowed UsePreloadedData_Allowed
+#endif
 IN_PROC_BROWSER_TEST_P(MediaEngagementAutoplayBrowserTest,
-                       UsePreloadedData_Allowed) {
+                       MAYBE_UsePreloadedData_Allowed) {
   // Autoplay should be blocked by default if we have a bad score.
   SetScores(PrimaryOrigin(), 0, 0);
   LoadTestPage("engagement_autoplay_test.html");
@@ -367,16 +371,28 @@ IN_PROC_BROWSER_TEST_P(MediaEngagementAutoplayBrowserTest, TopFrameNavigation) {
   ExpectAutoplayAllowedIfEnabled();
 }
 
-IN_PROC_BROWSER_TEST_P(MediaEngagementAutoplayBrowserTest,
-                       BypassAutoplayHighEngagement_HTTPSOnly) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(media::kMediaEngagementHTTPSOnly);
+class MediaEngagementAutoplayBrowserTestHttpsOnly
+    : public MediaEngagementAutoplayBrowserTest {
+ public:
+  MediaEngagementAutoplayBrowserTestHttpsOnly() {
+    feature_list_.InitAndEnableFeature(media::kMediaEngagementHTTPSOnly);
+  }
 
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_P(MediaEngagementAutoplayBrowserTestHttpsOnly,
+                       BypassAutoplayHighEngagement) {
   SetScores(PrimaryOrigin(), 20, 20);
   LoadTestPage("engagement_autoplay_test.html");
   ExpectAutoplayDenied();
 }
 
-INSTANTIATE_TEST_SUITE_P(/* no prefix */,
+INSTANTIATE_TEST_SUITE_P(All,
                          MediaEngagementAutoplayBrowserTest,
+                         testing::Bool());
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         MediaEngagementAutoplayBrowserTestHttpsOnly,
                          testing::Bool());

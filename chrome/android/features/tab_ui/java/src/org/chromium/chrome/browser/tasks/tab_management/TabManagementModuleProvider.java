@@ -1,12 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.tasks.tab_management;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.metrics.UmaSessionStats;
 /**
  * Provider class for TabManagementModule.
@@ -44,5 +44,12 @@ public class TabManagementModuleProvider {
             }
         }
         return TabManagementModule.getImpl();
+    }
+
+    /**
+     * Returns whether TabManagementModule is supported by checking if the module is installed.
+     */
+    public static boolean isTabManagementModuleSupported() {
+        return getDelegate() != null;
     }
 }

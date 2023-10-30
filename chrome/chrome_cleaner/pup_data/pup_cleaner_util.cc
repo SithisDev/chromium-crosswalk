@@ -1,12 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/chrome_cleaner/pup_data/pup_cleaner_util.h"
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
 #include "chrome/chrome_cleaner/os/file_remover.h"
 #include "chrome/chrome_cleaner/os/layered_service_provider_wrapper.h"
 #include "chrome/chrome_cleaner/pup_data/pup_data.h"
@@ -25,7 +24,6 @@ bool CollectRemovablePupFiles(const std::vector<UwSId>& pup_ids,
                                            base::DoNothing());
 
   for (const auto& pup_id : pup_ids) {
-    size_t added_pup_files_size = 0;
     const auto* pup = PUPData::GetPUP(pup_id);
 
     for (const auto& file_path : pup->expanded_disk_footprints.file_paths()) {
@@ -33,7 +31,6 @@ bool CollectRemovablePupFiles(const std::vector<UwSId>& pup_ids,
       if (file_remover.CanRemove(file_path) ==
           FileRemoverAPI::DeletionValidationStatus::ALLOWED) {
         pup_files->Insert(file_path);
-        ++added_pup_files_size;
       }
     }
   }

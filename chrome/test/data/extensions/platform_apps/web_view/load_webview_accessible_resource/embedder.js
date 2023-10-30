@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,13 @@ window.runTest = function(testName) {
     testBlobInWebviewAccessibleResource();
   } else if (testName == 'testLoadWebviewInaccessibleResource') {
     testLoadWebviewInaccessibleResource();
+  } else if (testName == 'testLoadAccessibleSubresourceInAppWebviewFrame') {
+    testLoadAccessibleSubresourceInAppWebviewFrame();
+  } else if (
+      testName == 'testInaccessibleResourceDoesNotLoadInAppWebviewFrame') {
+    testInaccessibleResourceDoesNotLoadInAppWebviewFrame();
+  } else if (testName == 'testNavigateGuestToWebviewAccessibleResource') {
+    testNavigateGuestToWebviewAccessibleResource();
   } else {
     window.console.log('Incorrect testName: ' + testName);
     chrome.test.sendMessage('TEST_FAILED');
@@ -36,6 +43,67 @@ function testLoadWebviewAccessibleResource() {
   });
 
   webview.src = embedder.guestURL;
+};
+
+function testNavigateGuestToWebviewAccessibleResource() {
+  var webview = document.querySelector('webview');
+
+  webview.addEventListener('loadstop', function() {
+    webview.executeScript(
+        {code: 'document.body.innerText'}, function(result) {
+          // If the test html loads successfully, it will have a body
+          // containing the text "Foo" (and the test passes in this case).
+          if (result == "Foo")
+            chrome.test.sendMessage('TEST_PASSED');
+          else
+            chrome.test.sendMessage('TEST_FAILED');
+        });
+  });
+
+  webview.src = chrome.runtime.getURL('assets/foo.html');
+};
+
+function testInaccessibleResourceDoesNotLoadInAppWebviewFrame() {
+  var webview = document.querySelector('webview');
+
+  webview.addEventListener('loadstop', function() {
+    var script = `
+      fetch('inaccessible.txt')
+        .then(response => {
+          chrome.test.sendMessage('TEST_FAILED');
+        })
+        .catch(() => {
+          chrome.test.sendMessage('TEST_PASSED');
+        });
+    `;
+    webview.executeScript({code: script});
+  });
+
+  webview.src = chrome.runtime.getURL('assets/foo.html');
+};
+
+function testLoadAccessibleSubresourceInAppWebviewFrame() {
+  var webview = document.querySelector('webview');
+
+  webview.addEventListener('loadstop', function() {
+    var script = `
+      fetch('accessible.txt')
+        .then(response => response.text())
+        .then(data => {
+          if (data == 'Hello World\\n')
+            chrome.test.sendMessage('TEST_PASSED');
+          else 
+            throw new Error("Unexpected data: " + data);
+        })
+        .catch((error) => {
+          console.warn(error);
+          chrome.test.sendMessage('TEST_FAILED');
+        });
+    `;
+    webview.executeScript({code: script});
+  });
+
+  webview.src = chrome.runtime.getURL('assets/foo.html');
 };
 
 function testReloadWebviewAccessibleResource() {
@@ -99,7 +167,6 @@ function testLoadWebviewInaccessibleResource() {
     webview.executeScript({code: 'location="' + inaccessibleURL + '";'});
     didNavigate = true;
   });
-
   // The inaccessible URL should be blocked, and the webview should stay at
   // foo.html.
   webview.addEventListener('loadabort', function(e) {
@@ -124,10 +191,12 @@ function testLoadWebviewInaccessibleResource() {
 
 onload = function() {
   chrome.test.getConfig(function(config) {
-    embedder.guestURL =
-        'http://localhost:' + config.testServer.port +
-        '/extensions/platform_apps/web_view/load_webview_accessible_resource/' +
-        'guest.html';
+    if (config.testServer) {
+      embedder.guestURL =
+          'http://localhost:' + config.testServer.port +
+          '/extensions/platform_apps/web_view/' +
+          'load_webview_accessible_resource/guest.html';
+    }
     chrome.test.sendMessage('Launched');
   });
 };

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,10 @@
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_STATS_H_
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+#include "chrome/browser/download/download_commands.h"
+#include "chrome/browser/download/download_prompt_status.h"
+#include "chrome/browser/profiles/profile.h"
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_path_reservation_tracker.h"
 
@@ -67,6 +71,9 @@ enum ChromeDownloadOpenMethod {
   // the preferred method was to open the download using the browser.
   DOWNLOAD_OPEN_METHOD_USER_PLATFORM,
 
+  // The download was opened using a rename handler.
+  DOWNLOAD_OPEN_METHOD_RENAME_HANDLER,
+
   DOWNLOAD_OPEN_METHOD_LAST_ENTRY
 };
 
@@ -88,6 +95,26 @@ enum class DownloadPathGenerationEvent {
   COUNT
 };
 
+// Records reasons that will result in the download being canceled with
+// DOWNLOAD_INTERRUPT_REASON_USER_CANCELED.
+// Used in UMA, do not remove, change or reuse existing entries.
+// Update histograms.xml and enums.xml when adding entries.
+enum class DownloadCancelReason {
+  // Existed download path after download target determination.
+  kExistingDownloadPath = 0,
+  // Canceled due to download target determiner confirmation result.
+  kTargetConfirmationResult = 1,
+  // Canceled due to no valid virtual path.
+  kNoValidPath = 2,
+  // Canceled due to no mixed content.
+  kMixedContent = 3,
+  // Canceled due to failed path reservacation.
+  kFailedPathReservation = 4,
+  // Canceled due to empty local path.
+  kEmptyLocalPath = 5,
+  kMaxValue = kEmptyLocalPath
+};
+
 // Increment one of the above counts.
 void RecordDownloadCount(ChromeDownloadCountTypes type);
 
@@ -96,14 +123,18 @@ void RecordDownloadSource(ChromeDownloadSource source);
 
 // Record that a download warning was shown.
 void RecordDangerousDownloadWarningShown(
-    download::DownloadDangerType danger_type);
+    download::DownloadDangerType danger_type,
+    const base::FilePath& file_path,
+    bool is_https,
+    bool has_user_gesture);
 
 // Record that the user opened the confirmation dialog for a dangerous download.
 void RecordOpenedDangerousConfirmDialog(
     download::DownloadDangerType danger_type);
 
-// Record how a download was opened.
-void RecordDownloadOpenMethod(ChromeDownloadOpenMethod open_method);
+// Record that a download was opened.
+void RecordDownloadOpen(ChromeDownloadOpenMethod open_method,
+                        const std::string& mime_type_string);
 
 // Record if the database is available to provide the next download id before
 // starting all downloads.
@@ -117,86 +148,86 @@ void RecordDownloadPathGeneration(DownloadPathGenerationEvent event,
 void RecordDownloadPathValidation(download::PathValidationResult result,
                                   bool is_transient);
 
-// Records drags of completed downloads from the shelf. Used in UMA, do not
-// remove, change or reuse existing entries. Update histograms.xml and
-// enums.xml when adding entries.
-enum class DownloadShelfDragEvent {
-  // A download was dragged. All platforms.
-  STARTED,
-  // The download was dropped somewhere that isn't a drag target. Currently
-  // only recorded on Mac.
-  CANCELED,
-  // The download was dropped somewhere useful (a folder, an application,
-  // etc.). Currently only recorded on Mac.
-  DROPPED,
+// Record download cancel reason.
+void RecordDownloadCancelReason(DownloadCancelReason reason);
+
+// Records information related to dragging completed downloads from the
+// shelf/bubble. Used in UMA. Do not remove, change or reuse existing entries.
+// Update histograms.xml and enums.xml when adding entries.
+enum class DownloadDragInfo {
+  // A download starting to be dragged. It is possible the drag-and-drop will
+  // not complete depending on the user's actions.
+  DRAG_STARTED,
+  // As a point of reference for dragged downloads, this represents when a
+  // download completes on the shelf/bubble. This omits downloads that are
+  // immediately removed from the shelf/bubble when they complete.
+  DOWNLOAD_COMPLETE,
 
   COUNT
 };
 
-void RecordDownloadShelfDragEvent(DownloadShelfDragEvent drag_event);
+// Records either when a drag event is initiated by the user or, as a point of
+// reference, when a download completes on the shelf/bubble.
+void RecordDownloadShelfDragInfo(DownloadDragInfo drag_info);
+void RecordDownloadBubbleDragInfo(DownloadDragInfo drag_info);
 
-#if defined(OS_ANDROID)
-// Tracks media parser events. Each media parser hubs IPC channels for local
-// media analysis tasks. Used in UMA, do not remove, change or reuse existing
-// entries.
-enum class MediaParserEvent {
-  // Started to initialize the media parser.
-  kInitialize = 0,
-  // The mime type is not supported by the media parser.
-  kUnsupportedMimeType = 1,
-  // Failed to read the local media file.
-  kReadFileError = 2,
-  // Utility process connection error.
-  kUtilityConnectionError = 3,
-  // GPU process connection error.
-  kGpuConnectionError = 4,
-  // Failed to parse metadata.
-  kMetadataFailed = 5,
-  // Failed to retrieve video thumbnail.
-  kVideoThumbnailFailed = 6,
-  // Failed to parse media file, aggregation of all failure reasons.
-  kFailure = 7,
-  // Media file successfully parsed.
-  kSuccess = 8,
-  // Time out and failed.
-  kTimeout = 9,
-  kCount
+void RecordDownloadStartPerProfileType(Profile* profile);
+
+#if BUILDFLAG(IS_ANDROID)
+// Records whether the download dialog is shown to the user.
+void RecordDownloadPromptStatus(DownloadPromptStatus status);
+#endif  // BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_CHROMEOS)
+// Records that a notification for a download was suppressed.
+void RecordDownloadNotificationSuppressed();
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+enum class DownloadShelfContextMenuAction {
+  // Drop down button for download shelf context menu is visible
+  kDropDownShown = 0,
+  // Drop down button was pressed
+  kDropDownPressed = 1,
+  kShowInFolderEnabled = 2,
+  kShowInFolderClicked = 3,
+  kOpenWhenCompleteEnabled = 4,
+  kOpenWhenCompleteClicked = 5,
+  kAlwaysOpenTypeEnabled = 6,
+  kAlwaysOpenTypeClicked = 7,
+  kPlatformOpenEnabled = 8,
+  kPlatformOpenClicked = 9,
+  kCancelEnabled = 10,
+  kCancelClicked = 11,
+  kPauseEnabled = 12,
+  kPauseClicked = 13,
+  kResumeEnabled = 14,
+  kResumeClicked = 15,
+  kDiscardEnabled = 16,
+  kDiscardClicked = 17,
+  kKeepEnabled = 18,
+  kKeepClicked = 19,
+  kLearnMoreScanningEnabled = 20,
+  kLearnMoreScanningClicked = 21,
+  kLearnMoreInterruptedEnabled = 22,
+  kLearnMoreInterruptedClicked = 23,
+  kLearnMoreMixedContentEnabled = 24,
+  kLearnMoreMixedContentClicked = 25,
+  kCopyToClipboardEnabled = 26,
+  kCopyToClipboardClicked = 27,
+  // kAnnotateEnabled = 28,
+  // kAnnotateClicked = 29,
+  kDeepScanEnabled = 30,
+  kDeepScanClicked = 31,
+  kBypassDeepScanningEnabled = 32,
+  kBypassDeepScanningClicked = 33,
+  // kReviewEnabled = 34,
+  // kReviewClicked = 35,
+  kNotReached = 36,  // Should not be possible to hit
+  kMaxValue = kNotReached
 };
 
-// Tracks local media metadata requests. Used in UMA, do not remove, change or
-// reuse existing entries.
-enum class MediaMetadataEvent {
-  // Started to retrieve metadata.
-  kMetadataStart = 0,
-  // Failed to retrieve metadata.
-  kMetadataFailed = 1,
-  // Completed to retrieve metadata.
-  kMetadataComplete = 2,
-  kCount
-};
-
-// Tracks video thumbnail requests. Used in UMA, do not remove, change or
-// reuse existing entries.
-enum class VideoThumbnailEvent {
-  kVideoThumbnailStart = 0,
-  // Failed to extract video frame.
-  kVideoFrameExtractionFailed = 1,
-  // Failed to decode video frame.
-  kVideoDecodeFailed = 2,
-  // Completed to retrieve video thumbnail.
-  kVideoThumbnailComplete = 3,
-  kCount
-};
-
-// Records download media parser event.
-void RecordMediaParserEvent(MediaParserEvent event);
-
-// Records media metadata parsing events.
-void RecordMediaMetadataEvent(MediaMetadataEvent event);
-
-// Records video thumbnail retrieval events.
-void RecordVideoThumbnailEvent(VideoThumbnailEvent event);
-
-#endif
+DownloadShelfContextMenuAction DownloadCommandToShelfAction(
+    DownloadCommands::Command download_command,
+    bool clicked);
 
 #endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_STATS_H_

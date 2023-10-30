@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,9 @@ var pass = chrome.test.callbackPass;
 
 var callbackCompleted;
 var EXPECTED_EVENTS = [
-  { "available": true, "textColumnCount": 11, "textRowCount": 1 },
-  { "available": false },
-  { "available": true, "textColumnCount": 22, "textRowCount": 1 },
+  {'available': true, 'textColumnCount': 11, 'textRowCount': 1, cellSize: 6},
+  {'available': false},
+  {'available': true, 'textColumnCount': 22, 'textRowCount': 1, cellSize: 6},
 ];
 
 var eventNumber = 0;

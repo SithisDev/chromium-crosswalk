@@ -1,10 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/download/download_completion_blocker.h"
 
-#include "base/logging.h"
 
 DownloadCompletionBlocker::DownloadCompletionBlocker()
   : is_complete_(false) {
@@ -21,7 +20,7 @@ void DownloadCompletionBlocker::CompleteDownload() {
 
   if (callback_.is_null())
     return;
-  callback_.Run();
+  std::move(callback_).Run();
   // |callback_| may delete |this|, so do not rely on |this| after running
   // |callback_|!
 }

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,6 @@
 
 #include <string>
 #include <vector>
-
-#include "base/macros.h"
 
 namespace ukm {
 namespace builders {
@@ -28,10 +26,10 @@ enum class DecisionFailureReason : int32_t {
   INVALID = -1,
   // The browser was opted out of the intervention via enterprise policy.
   LIFECYCLES_ENTERPRISE_POLICY_OPT_OUT,
-  // The origin opted itself out of the intervention via feature policy.
-  LIFECYCLES_FEATURE_POLICY_OPT_OUT,
-  // The origin was opted out of the intervention in the global blacklist.
-  GLOBAL_BLACKLIST,
+  // A frame on the page opted itself out of the intervention via origin trial.
+  ORIGIN_TRIAL_OPT_OUT,
+  // The origin was opted out of the intervention in the global disallowlist.
+  GLOBAL_DISALLOWLIST,
   // The local heuristic opted the origin out of the intervention due to its use
   // of audio while in the background.
   HEURISTIC_AUDIO,
@@ -41,9 +39,6 @@ enum class DecisionFailureReason : int32_t {
   // The local heuristic is temporarily opting the origin out of the
   // intervention due to a lack of sufficient observation time.
   HEURISTIC_INSUFFICIENT_OBSERVATION,
-  // The local heuristic opted the origin out of the intervention due to its use
-  // of notifications while in the background.
-  HEURISTIC_NOTIFICATIONS,
   // The local heuristic opted the origin out of the intervention due to its use
   // of title updates while in the background.
   HEURISTIC_TITLE,
@@ -77,6 +72,20 @@ enum class DecisionFailureReason : int32_t {
   // This tab is sharing its BrowsingInstance with another tab, and so could
   // want to communicate with it.
   LIVE_STATE_SHARING_BROWSING_INSTANCE,
+  // The tab is opted out of the intervention as it's currently connected to a
+  // bluetooth device.
+  LIVE_STATE_USING_BLUETOOTH,
+  // The tab is opted out of the intervention as it's currently holding at least
+  // one WebLock.
+  LIVE_STATE_USING_WEBLOCK,
+  // The tab is opted out of the intervention as it's currently holding at least
+  // one IndexedDB lock.
+  LIVE_STATE_USING_INDEXEDDB_LOCK,
+  // The tab is opted out of the intervention as it has the permission to use
+  // notifications.
+  LIVE_STATE_HAS_NOTIFICATIONS_PERMISSION,
+  // The tab is a standalone desktop PWA window.
+  LIVE_WEB_APP,
   // This must remain last.
   MAX,
 };
@@ -87,11 +96,10 @@ enum class DecisionFailureReason : int32_t {
 enum class DecisionSuccessReason : int32_t {
   // An invalid failure reason. This must remain first.
   INVALID = -1,
-  // The origin opted itself into the intervention via lifecycles feature
-  // policy.
-  LIFECYCLES_FEATURE_POLICY_OPT_IN,
-  // The origin was opted into the intervention via the global whitelist.
-  GLOBAL_WHITELIST,
+  // A frame on the page opted itself in the intervention via origin trial.
+  ORIGIN_TRIAL_OPT_IN,
+  // The origin was opted into the intervention via the global allowlist.
+  GLOBAL_ALLOWLIST,
   // The origin has been observed to be safe for the intervention using local
   // database observations.
   HEURISTIC_OBSERVED_TO_BE_SAFE,
@@ -166,6 +174,10 @@ class DecisionDetails {
   };
 
   DecisionDetails();
+
+  DecisionDetails(const DecisionDetails&) = delete;
+  DecisionDetails& operator=(const DecisionDetails&) = delete;
+
   ~DecisionDetails();
 
   // Allow move assignment.
@@ -215,8 +227,6 @@ class DecisionDetails {
   // reasons after this toggle isn't very informative.
   bool toggled_;
   std::vector<Reason> reasons_;
-
-  DISALLOW_COPY_AND_ASSIGN(DecisionDetails);
 };
 
 }  // namespace resource_coordinator

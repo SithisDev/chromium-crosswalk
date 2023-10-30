@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,56 +6,57 @@ package org.chromium.chrome.browser;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.ActivityManager.RecentTaskInfo;
 import android.app.Notification;
 import android.app.SearchManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
-import android.os.StrictMode;
-import android.support.annotation.IntDef;
-import android.support.customtabs.CustomTabsIntent;
-import android.support.customtabs.CustomTabsSessionToken;
-import android.support.customtabs.TrustedWebUtils;
+import android.os.SystemClock;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.browser.customtabs.CustomTabsIntent;
+import androidx.browser.customtabs.CustomTabsSessionToken;
+import androidx.browser.customtabs.TrustedWebUtils;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.IntentUtils;
+import org.chromium.base.Log;
+import org.chromium.base.PackageManagerUtils;
 import org.chromium.base.StrictModeContext;
-import org.chromium.base.library_loader.LibraryProcessType;
-import org.chromium.base.metrics.CachedMetrics;
+import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.app.video_tutorials.VideoTutorialShareHelper;
 import org.chromium.chrome.browser.browserservices.SessionDataHolder;
-import org.chromium.chrome.browser.browserservices.trustedwebactivityui.splashscreen.TwaSplashController;
+import org.chromium.chrome.browser.browserservices.ui.splashscreen.trustedwebactivity.TwaSplashController;
 import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
 import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
-import org.chromium.chrome.browser.customtabs.PaymentHandlerActivity;
-import org.chromium.chrome.browser.customtabs.SeparateTaskCustomTabActivity;
 import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
-import org.chromium.chrome.browser.incognito.IncognitoDisclosureActivity;
-import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
-import org.chromium.chrome.browser.metrics.MediaNotificationUma;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.notifications.NotificationPlatformBridge;
 import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
-import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.searchwidget.SearchActivity;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.chrome.browser.util.IntentUtils;
-import org.chromium.chrome.browser.util.UrlConstants;
+import org.chromium.chrome.browser.translate.TranslateIntentHandler;
+import org.chromium.chrome.browser.util.AndroidTaskUtils;
 import org.chromium.chrome.browser.vr.VrModuleProvider;
-import org.chromium.chrome.browser.webapps.ActivityAssigner;
 import org.chromium.chrome.browser.webapps.WebappLauncherActivity;
-import org.chromium.content_public.browser.BrowserStartupController;
+import org.chromium.components.browser_ui.media.MediaNotificationUma;
+import org.chromium.components.embedder_support.util.UrlConstants;
+import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.widget.Toast;
-import org.chromium.webapk.lib.client.WebApkValidator;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
-import java.util.UUID;
+import java.util.Set;
 
 /**
  * Dispatches incoming intents to the appropriate activity based on the current configuration and
@@ -70,22 +71,8 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
 
     private static final String TAG = "ActivitiyDispatcher";
 
-    private static final String NO_TOUCH_ACTIVITY_NAME =
-            "org.chromium.chrome.browser.touchless.NoTouchActivity";
-
-    /**
-     * Timeout in ms for reading PartnerBrowserCustomizations provider. We do not trust third party
-     * provider by default.
-     */
-    private static final int PARTNER_BROWSER_CUSTOMIZATIONS_TIMEOUT_MS = 10000;
-
-    private static final CachedMetrics.SparseHistogramSample sIntentFlagsHistogram =
-            new CachedMetrics.SparseHistogramSample("Launch.IntentFlags");
-
     private final Activity mActivity;
-    private final Intent mIntent;
-    private final boolean mIsCustomTabIntent;
-    private final boolean mIsVrIntent;
+    private Intent mIntent;
 
     @IntDef({Action.CONTINUE, Action.FINISH_ACTIVITY, Action.FINISH_ACTIVITY_REMOVE_TASK})
     @Retention(RetentionPolicy.SOURCE)
@@ -128,9 +115,12 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
      */
     public static @Action int dispatchToCustomTabActivity(Activity currentActivity, Intent intent) {
         LaunchIntentDispatcher dispatcher = new LaunchIntentDispatcher(currentActivity, intent);
-        if (!dispatcher.mIsCustomTabIntent) return Action.CONTINUE;
-        dispatcher.launchCustomTabActivity();
-        return Action.FINISH_ACTIVITY;
+        if (!isCustomTabIntent(dispatcher.mIntent)) return Action.CONTINUE;
+        if (dispatcher.launchCustomTabActivity(new IntentHandler(currentActivity, dispatcher))) {
+            return Action.FINISH_ACTIVITY;
+        } else {
+            return Action.CONTINUE;
+        }
     }
 
     private LaunchIntentDispatcher(Activity activity, Intent intent) {
@@ -144,9 +134,6 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
         }
 
         recordIntentMetrics();
-
-        mIsVrIntent = VrModuleProvider.getIntentDelegate().isVrIntent(mIntent);
-        mIsCustomTabIntent = isCustomTabIntent(mIntent);
     }
 
     /**
@@ -158,19 +145,25 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
         // Read partner browser customizations information asynchronously.
         // We want to initialize early because when there are no tabs to restore, we should possibly
         // show homepage, which might require reading PartnerBrowserCustomizations provider.
-        PartnerBrowserCustomizations.initializeAsync(
-                mActivity.getApplicationContext(), PARTNER_BROWSER_CUSTOMIZATIONS_TIMEOUT_MS);
+        PartnerBrowserCustomizations.getInstance().initializeAsync(
+                mActivity.getApplicationContext());
 
-        int tabId = IntentUtils.safeGetIntExtra(
-                mIntent, IntentHandler.TabOpenType.BRING_TAB_TO_FRONT_STRING, Tab.INVALID_TAB_ID);
+        boolean isCustomTabIntent = isCustomTabIntent(mIntent);
+
+        int tabId = IntentHandler.getBringTabToFrontId(mIntent);
         boolean incognito =
                 mIntent.getBooleanExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB, false);
 
         // Check if a web search Intent is being handled.
-        IntentHandler intentHandler = new IntentHandler(this, mActivity.getPackageName());
+        IntentHandler intentHandler = new IntentHandler(mActivity, this);
         String url = IntentHandler.getUrlFromIntent(mIntent);
         if (url == null && tabId == Tab.INVALID_TAB_ID && !incognito
                 && intentHandler.handleWebSearchIntent(mIntent)) {
+            return Action.FINISH_ACTIVITY;
+        }
+
+        // Check if the URL is a video tutorial and needs to be handled in a video player.
+        if (VideoTutorialShareHelper.handleVideoTutorialURL(url)) {
             return Action.FINISH_ACTIVITY;
         }
 
@@ -190,25 +183,6 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
             return Action.FINISH_ACTIVITY;
         }
 
-        // Check if we should launch an Instant App to handle the intent.
-        if (InstantAppsHandler.getInstance().handleIncomingIntent(
-                    mActivity, mIntent, mIsCustomTabIntent, false)) {
-            return Action.FINISH_ACTIVITY;
-        }
-
-        // Check if we should launch a WebApk to handle the intent.
-        // For NoTouchMode, prefer to launch PWAs instead of the browser on view intents.
-        if (!mIsCustomTabIntent && FeatureUtilities.isNoTouchModeEnabled() && url != null
-                && Intent.ACTION_VIEW.equals(mIntent.getAction())) {
-            String packageName = WebApkValidator.queryFirstWebApkPackage(
-                    ContextUtils.getApplicationContext(), url);
-            if (packageName != null) {
-                mActivity.startActivity(WebApkValidator.createWebApkIntentForUrlAndOptionalPackage(
-                        url, packageName));
-                return Action.FINISH_ACTIVITY;
-            }
-        }
-
         // Check if we should push the user through First Run.
         if (FirstRunFlowSequencer.launch(mActivity, mIntent, false /* requiresBroadcast */,
                     false /* preferLightweightFre */)) {
@@ -216,8 +190,8 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
         }
 
         // Check if we should launch a Custom Tab.
-        if (mIsCustomTabIntent) {
-            launchCustomTabActivity();
+        if (isCustomTabIntent) {
+            launchCustomTabActivity(intentHandler);
             return Action.FINISH_ACTIVITY;
         }
 
@@ -230,12 +204,10 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
         searchIntent.putExtra(SearchManager.QUERY, query);
 
         try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
-            int resolvers =
-                    ContextUtils.getApplicationContext()
-                            .getPackageManager()
-                            .queryIntentActivities(searchIntent, PackageManager.GET_RESOLVED_FILTER)
-                            .size();
-            if (resolvers == 0) {
+            if (PackageManagerUtils.canResolveActivity(
+                        searchIntent, PackageManager.GET_RESOLVED_FILTER)) {
+                mActivity.startActivity(searchIntent);
+            } else {
                 // Phone doesn't have a WEB_SEARCH action handler, open Search Activity with
                 // the given query.
                 Intent searchActivityIntent = new Intent(Intent.ACTION_MAIN);
@@ -243,17 +215,26 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
                         ContextUtils.getApplicationContext(), SearchActivity.class);
                 searchActivityIntent.putExtra(SearchManager.QUERY, query);
                 mActivity.startActivity(searchActivityIntent);
-            } else {
-                mActivity.startActivity(searchIntent);
             }
         }
     }
 
     @Override
-    public void processUrlViewIntent(String url, String referer, String headers,
-            @IntentHandler.TabOpenType int tabOpenType, String externalAppId,
-            int tabIdToBringToFront, boolean hasUserGesture, Intent intent) {
+    public void processTranslateTabIntent(
+            @Nullable String targetLanguageCode, @Nullable String expectedUrl) {
         assert false;
+    }
+
+    @Override
+    public void processUrlViewIntent(LoadUrlParams loadUrlParams, int tabOpenType,
+            String externalAppId, int tabIdToBringToFront, Intent intent) {
+        assert false;
+    }
+
+    @Override
+    public long getIntentHandlingTimeMs() {
+        assert false;
+        return 0;
     }
 
     /** When started with an intent, maybe pre-resolve the domain. */
@@ -267,15 +248,26 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
     }
 
     /**
+     * Adds a token to TRANSLATE_TAB intents that we know were sent from a first party app.
+     *
+     * TRANSLATE_TAB requires a signature permission. We know that permission has been enforced (and
+     * thus comes from a first party application) if it was routed via the TranslateDispatcher
+     * activity-alias. In this case, add a token so IntentHandler knows the intent is from a first
+     * party app.
+     */
+    private static void maybeAuthenticateFirstPartyTranslateIntent(Intent intent) {
+        if (intent != null && TranslateIntentHandler.ACTION_TRANSLATE_TAB.equals(intent.getAction())
+                && TranslateIntentHandler.COMPONENT_TRANSLATE_DISPATCHER.equals(
+                        intent.getComponent().getClassName())) {
+            IntentUtils.addTrustedIntentExtras(intent);
+        }
+    }
+
+    /**
      * @return Whether the intent is for launching a Custom Tab.
      */
     public static boolean isCustomTabIntent(Intent intent) {
         if (intent == null) return false;
-        // CCT is disabled in noTouch mode except for some Chrome-internal exceptions.
-        if (FeatureUtilities.isNoTouchModeEnabled()
-                && !IntentHandler.wasIntentSenderChrome(intent)) {
-            return false;
-        }
         if (CustomTabsIntent.shouldAlwaysUseBrowserUI(intent)
                 || !intent.hasExtra(CustomTabsIntent.EXTRA_SESSION)) {
             return false;
@@ -295,6 +287,11 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
         newIntent.setData(uri);
         newIntent.setClassName(context, CustomTabActivity.class.getName());
 
+        // Since configureIntentForResizableCustomTab() might change the componenet/class
+        // associated with the passed intent, it needs to be called after #setClassName(context,
+        // CustomTabActivity.class.getName());
+        CustomTabIntentDataProvider.configureIntentForResizableCustomTab(context, newIntent);
+
         if (clearTopIntentsForCustomTabsEnabled(intent)) {
             // Ensure the new intent is routed into the instance of CustomTabActivity in this task.
             // If the existing CustomTabActivity can't handle the intent, it will re-launch
@@ -312,19 +309,16 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
             }
         }
 
-        // Use a custom tab with a unique theme for payment handlers.
-        if (intent.getIntExtra(CustomTabIntentDataProvider.EXTRA_UI_TYPE,
-                    CustomTabIntentDataProvider.CustomTabsUiType.DEFAULT)
-                == CustomTabIntentDataProvider.CustomTabsUiType.PAYMENT_REQUEST) {
-            newIntent.setClassName(context, PaymentHandlerActivity.class.getName());
-        }
-
         // If |uri| is a content:// URI, we want to propagate the URI permissions. This can't be
         // achieved by simply adding the FLAG_GRANT_READ_URI_PERMISSION to the Intent, since the
         // data URI on the Intent isn't |uri|, it just has |uri| as a query parameter.
         if (uri != null && UrlConstants.CONTENT_SCHEME.equals(uri.getScheme())) {
-            context.grantUriPermission(
-                    context.getPackageName(), uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            try {
+                context.grantUriPermission(
+                        context.getPackageName(), uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException e) {
+                Log.w(TAG, "Unable to grant Uri permission. ", e);
+            }
         }
 
         if (CommandLine.getInstance().hasSwitch(ChromeSwitches.OPEN_CUSTOM_TABS_IN_NEW_TASK)) {
@@ -344,90 +338,65 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
             // Android will try to find and reuse an existing CCT activity in the background. Use
             // this flag to always start a new one instead.
             newIntent.addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
-
-            // Provide the general feeling of supporting multi tasks in Android version that did not
-            // fully support them. Reuse the least recently used SeparateTaskCustomTabActivity
-            // instance.
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-                String uuid = UUID.randomUUID().toString();
-                int activityIndex = ActivityAssigner
-                                            .instance(ActivityAssigner.ActivityAssignerNamespace
-                                                              .SEPARATE_TASK_CCT_NAMESPACE)
-                                            .assign(uuid);
-                String className = SeparateTaskCustomTabActivity.class.getName() + activityIndex;
-                newIntent.setClassName(context, className);
-
-                String url = IntentHandler.getUrlFromIntent(newIntent);
-                assert url != null;
-                newIntent.setData(new Uri.Builder()
-                                          .scheme(UrlConstants.CUSTOM_TAB_SCHEME)
-                                          .authority(uuid)
-                                          .query(url)
-                                          .build());
-            } else {
-                // Force a new document to ensure the proper task/stack creation.
-                newIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
-            }
-        }
-
-        // If the previous caller was not Chrome, but added EXTRA_IS_OPENED_BY_CHROME or
-        // EXTRA_IS_OPENED_BY_WEBAPK for malicious purpose, remove it. The new intent will be sent
-        // by Chrome, but was not sent by Chrome initially.
-        if (!IntentHandler.wasIntentSenderChrome(intent)) {
-            IntentUtils.safeRemoveExtra(
-                    newIntent, CustomTabIntentDataProvider.EXTRA_IS_OPENED_BY_CHROME);
-            IntentUtils.safeRemoveExtra(
-                    newIntent, CustomTabIntentDataProvider.EXTRA_IS_OPENED_BY_WEBAPK);
+            // Force a new document to ensure the proper task/stack creation.
+            newIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
         }
 
         return newIntent;
     }
 
     private static SessionDataHolder getSessionDataHolder() {
-        return ChromeApplication.getComponent().resolveSessionDataHolder();
+        return ChromeApplicationImpl.getComponent().resolveSessionDataHolder();
     }
 
     /**
      * Handles launching a {@link CustomTabActivity}, which will sit on top of a client's activity
-     * in the same task.
+     * in the same task. Returns whether an Activity was launched (or brought to the foreground).
      */
-    private void launchCustomTabActivity() {
+    private boolean launchCustomTabActivity(IntentHandler intentHandler) {
         CustomTabsConnection.getInstance().onHandledIntent(
                 CustomTabsSessionToken.getSessionTokenFromIntent(mIntent), mIntent);
+
+        boolean startedActivity = false;
+        boolean isCustomTab = true;
+        if (intentHandler.shouldIgnoreIntent(mIntent, startedActivity, isCustomTab)) {
+            return false;
+        }
+
         if (!clearTopIntentsForCustomTabsEnabled(mIntent)) {
             // The old way of delivering intents relies on calling the activity directly via a
             // static reference. It doesn't allow using CLEAR_TOP, and also doesn't work when an
             // intent brings the task to foreground. The condition above is a temporary safety net.
             boolean handled = getSessionDataHolder().handleIntent(mIntent);
-            if (handled) return;
+            if (handled) return true;
         }
         maybePrefetchDnsInBackground();
 
+        // Strip EXTRA_CALLING_ACTIVITY_PACKAGE if present on the original intent so that it
+        // cannot be spoofed by CCT client apps.
+        IntentUtils.safeRemoveExtra(mIntent, IntentHandler.EXTRA_CALLING_ACTIVITY_PACKAGE);
+
         // Create and fire a launch intent.
         Intent launchIntent = createCustomTabActivityIntent(mActivity, mIntent);
-
-        boolean hasOffTheRecordProfile =
-                BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
-                        .isFullBrowserStarted()
-                && Profile.getLastUsedProfile().hasOffTheRecordProfile();
-
-        boolean shouldShowIncognitoDisclosure =
-                CustomTabIntentDataProvider.isValidExternalIncognitoIntent(launchIntent)
-                && hasOffTheRecordProfile;
-
-        if (shouldShowIncognitoDisclosure) {
-            IncognitoDisclosureActivity.launch(mActivity, launchIntent);
-            return;
+        Uri extraReferrer = mActivity.getReferrer();
+        if (extraReferrer != null) {
+            launchIntent.putExtra(IntentHandler.EXTRA_ACTIVITY_REFERRER, extraReferrer.toString());
+        }
+        ComponentName callingActivity = mActivity.getCallingActivity();
+        if (callingActivity != null) {
+            launchIntent.putExtra(
+                    IntentHandler.EXTRA_CALLING_ACTIVITY_PACKAGE, callingActivity.getPackageName());
         }
 
         // Allow disk writes during startActivity() to avoid strict mode violations on some
         // Samsung devices, see https://crbug.com/796548.
         try (StrictModeContext ignored = StrictModeContext.allowDiskWrites()) {
             if (TwaSplashController.handleIntent(mActivity, launchIntent)) {
-                return;
+                return true;
             }
 
             mActivity.startActivity(launchIntent, null);
+            return true;
         }
     }
 
@@ -435,12 +404,14 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
      * Handles launching a {@link ChromeTabbedActivity}.
      */
     @SuppressLint("InlinedApi")
+    @SuppressWarnings("checkstyle:SystemExitCheck") // Allowed due to https://crbug.com/847921#c17.
     private @Action int dispatchToTabbedActivity() {
-        if (mIsVrIntent) {
+        boolean isVrIntent = VrModuleProvider.getIntentDelegate().isVrIntent(mIntent);
+        if (isVrIntent) {
             for (Activity activity : ApplicationStatus.getRunningActivities()) {
                 if (activity instanceof ChromeTabbedActivity) {
                     if (VrModuleProvider.getDelegate().willChangeDensityInVr(
-                                (ChromeActivity) activity)) {
+                                ((ChromeActivity) activity).getWindowAndroid())) {
                         // In the rare case that entering VR will trigger a density change (and
                         // hence an Activity recreation), just return to Daydream home and kill the
                         // process, as there's no good way to recreate without showing 2D UI
@@ -454,25 +425,44 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
 
         maybePrefetchDnsInBackground();
 
+        maybeAuthenticateFirstPartyTranslateIntent(mIntent);
+
         Intent newIntent = new Intent(mIntent);
-        String targetActivityClassName = null;
-        if (FeatureUtilities.isNoTouchModeEnabled()) {
-            // When in No Touch Mode we don't support tabs, and replace the TabbedActivity with the
-            // NoTouchActivity.
-            // We can't depend on NoTouchActivity directly as it's not always compiled in, so
-            // refer to it by string.
-            targetActivityClassName = NO_TOUCH_ACTIVITY_NAME;
-        } else {
-            targetActivityClassName = MultiWindowUtils.getInstance()
-                                              .getTabbedActivityForIntent(newIntent, mActivity)
-                                              .getName();
+
+        if (Intent.ACTION_VIEW.equals(newIntent.getAction())
+                && !IntentHandler.wasIntentSenderChrome(newIntent)) {
+            long time = SystemClock.elapsedRealtime();
+            if (!chromeTabbedTaskExists()) {
+                newIntent.putExtra(IntentHandler.EXTRA_STARTED_TABBED_CHROME_TASK, true);
+            }
+            RecordHistogram.recordTimesHistogram("Startup.Android.ChromeTabbedTaskExistsTime",
+                    SystemClock.elapsedRealtime() - time);
         }
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP_MR1) {
+            Uri extraReferrer = mActivity.getReferrer();
+            if (extraReferrer != null) {
+                newIntent.putExtra(IntentHandler.EXTRA_ACTIVITY_REFERRER, extraReferrer.toString());
+            }
+        }
+
+        String targetActivityClassName = MultiWindowUtils.getInstance()
+                                                 .getTabbedActivityForIntent(newIntent, mActivity)
+                                                 .getName();
         newIntent.setClassName(
                 mActivity.getApplicationContext().getPackageName(), targetActivityClassName);
-        newIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            newIntent.addFlags(Intent.FLAG_ACTIVITY_RETAIN_IN_RECENTS);
+        newIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_RETAIN_IN_RECENTS);
+
+        if ((mIntent.getFlags() & Intent.FLAG_ACTIVITY_MULTIPLE_TASK) != 0) {
+            newIntent.setFlags(newIntent.getFlags() | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+            if (Intent.ACTION_VIEW.equals(mIntent.getAction())) {
+                RecordHistogram.recordBooleanHistogram(
+                        "Startup.Android.NewInstance.LaunchedFromDraggedLinkViewIntent",
+                        mIntent.getBooleanExtra(IntentHandler.EXTRA_SOURCE_DRAG_DROP, false));
+            }
         }
+
         Uri uri = newIntent.getData();
         boolean isContentScheme = false;
         if (uri != null && UrlConstants.CONTENT_SCHEME.equals(uri.getScheme())) {
@@ -489,9 +479,8 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
         }
 
         // This system call is often modified by OEMs and not actionable. http://crbug.com/619646.
-        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
         try {
-            Bundle options = mIsVrIntent
+            Bundle options = isVrIntent
                     ? VrModuleProvider.getIntentDelegate().getVrIntentOptions(mActivity)
                     : null;
             mActivity.startActivity(newIntent, options);
@@ -504,11 +493,27 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
             } else {
                 throw ex;
             }
-        } finally {
-            StrictMode.setThreadPolicy(oldPolicy);
         }
 
         return Action.FINISH_ACTIVITY;
+    }
+
+    private boolean chromeTabbedTaskExists() {
+        // Fast check for a running Chrome instance.
+        for (Activity activity : ApplicationStatus.getRunningActivities()) {
+            if (activity instanceof ChromeTabbedActivity) return true;
+        }
+        // Slightly slower check for an existing task (One IPC, usually ~2ms).
+        try {
+            Set<RecentTaskInfo> recentTaskInfos =
+                    AndroidTaskUtils.getRecentTaskInfosMatchingComponentNames(
+                            mActivity, ChromeTabbedActivity.TABBED_MODE_COMPONENT_NAMES);
+            return !recentTaskInfos.isEmpty();
+        } catch (SecurityException ex) {
+            // If we can't query task status, assume a Chrome task exists so this doesn't
+            // mistakenly lead to a Chrome task being removed.
+            return true;
+        }
     }
 
     /**
@@ -518,12 +523,9 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
         @IntentHandler.ExternalAppId
         int source = IntentHandler.determineExternalIntentSource(mIntent);
         if (mIntent.getPackage() == null && source != IntentHandler.ExternalAppId.CHROME) {
-            int flagsOfInterest = Intent.FLAG_ACTIVITY_NEW_TASK;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                flagsOfInterest |= Intent.FLAG_ACTIVITY_NEW_DOCUMENT;
-            }
+            int flagsOfInterest = Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT;
             int maskedFlags = mIntent.getFlags() & flagsOfInterest;
-            sIntentFlagsHistogram.record(maskedFlags);
+            RecordHistogram.recordSparseHistogram("Launch.IntentFlags", maskedFlags);
         }
         MediaNotificationUma.recordClickSource(mIntent);
     }

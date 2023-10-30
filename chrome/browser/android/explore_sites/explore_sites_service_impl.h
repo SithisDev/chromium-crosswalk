@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "chrome/browser/android/explore_sites/explore_sites_fetcher.h"
 #include "chrome/browser/android/explore_sites/explore_sites_service.h"
 #include "chrome/browser/android/explore_sites/explore_sites_store.h"
@@ -37,26 +36,26 @@ class ExploreSitesServiceImpl : public ExploreSitesService,
       std::unique_ptr<ExploreSitesStore> store,
       std::unique_ptr<URLLoaderFactoryGetter> url_loader_factory_getter,
       std::unique_ptr<HistoryStatisticsReporter> history_statistics_reporter);
+
+  ExploreSitesServiceImpl(const ExploreSitesServiceImpl&) = delete;
+  ExploreSitesServiceImpl& operator=(const ExploreSitesServiceImpl&) = delete;
+
   ~ExploreSitesServiceImpl() override;
 
   static bool IsExploreSitesEnabled();
 
   // ExploreSitesService implementation.
   void GetCatalog(CatalogCallback callback) override;
-  void GetCategoryImage(int category_id,
-                        int pixel_size,
-                        BitmapCallback callback) override;
   void GetSummaryImage(int pixel_size, BitmapCallback callback) override;
   void GetSiteImage(int site_id, BitmapCallback callback) override;
   void UpdateCatalogFromNetwork(bool is_immediate_fetch,
                                 const std::string& accept_languages,
                                 BooleanCallback callback) override;
   void RecordClick(const std::string& url, int category_type) override;
-  void BlacklistSite(const std::string& url) override;
+  void BlockSite(const std::string& url) override;
   void ClearActivities(base::Time begin,
                        base::Time end,
                        base::OnceClosure callback) override;
-  void IncrementNtpShownCount(int category_id) override;
   void ClearCachedCatalogsForDebugging() override;
   void OverrideCountryCodeForDebugging(
       const std::string& country_code) override;
@@ -104,9 +103,7 @@ class ExploreSitesServiceImpl : public ExploreSitesService,
   std::unique_ptr<ExploreSitesFetcher> explore_sites_fetcher_;
   std::unique_ptr<HistoryStatisticsReporter> history_statistics_reporter_;
   std::vector<BooleanCallback> update_catalog_callbacks_;
-  base::WeakPtrFactory<ExploreSitesServiceImpl> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExploreSitesServiceImpl);
+  base::WeakPtrFactory<ExploreSitesServiceImpl> weak_ptr_factory_{this};
 };
 
 }  // namespace explore_sites

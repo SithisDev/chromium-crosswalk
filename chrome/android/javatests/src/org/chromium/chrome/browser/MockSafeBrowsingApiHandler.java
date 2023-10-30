@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,9 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import org.chromium.base.annotations.UsedByReflection;
 import org.chromium.base.task.PostTask;
+import org.chromium.build.annotations.UsedByReflection;
 import org.chromium.components.safe_browsing.SafeBrowsingApiHandler;
-import org.chromium.components.safe_browsing.SafeBrowsingApiHandler.Observer;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 
 import java.util.HashMap;
@@ -36,17 +35,7 @@ public class MockSafeBrowsingApiHandler implements SafeBrowsingApiHandler {
     private HashMap<String, String> mResponseMap;
 
     @Override
-    public String getSafetyNetId() {
-        return "";
-    }
-
-    @Override
     public boolean init(Observer observer) {
-        return init(observer, false);
-    }
-
-    @Override
-    public boolean init(Observer observer, boolean enableLocalBlacklists) {
         mObserver = observer;
         mResponseMap = new HashMap<String, String>(sResponseMap);
         return true;
@@ -60,6 +49,11 @@ public class MockSafeBrowsingApiHandler implements SafeBrowsingApiHandler {
                 (Runnable) () -> mObserver.onUrlCheckDone(
                         callbackId, SafeBrowsingResult.SUCCESS, metadata, DEFAULT_CHECK_DELTA_US));
         // clang-format on
+    }
+
+    @Override
+    public boolean startAllowlistLookup(final String uri, int threatType) {
+        return false;
     }
 
     private String getMetadata(String uri, int[] threatsOfInterest) {

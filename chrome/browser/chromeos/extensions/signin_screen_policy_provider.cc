@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -43,7 +42,7 @@ std::string SigninScreenPolicyProvider::GetDebugPolicyProviderName() const {
 
 bool SigninScreenPolicyProvider::UserMayLoad(
     const extensions::Extension* extension,
-    base::string16* error) const {
+    std::u16string* error) const {
   if (g_bypass_checks_for_testing)
     return true;
   const extensions::Feature* feature =

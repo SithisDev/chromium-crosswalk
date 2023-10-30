@@ -1,16 +1,28 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Bookmark Manager API test for Chrome.
+import {simulateChromeExtensionAPITest} from './test_util.js';
 
 test('bookmarkManagerPrivate', async () => {
   const bookmarkManager = chrome.bookmarkManagerPrivate;
   const {pass, fail, runTests} = simulateChromeExtensionAPITest();
 
-  let fooNode, fooNode2, barNode, gooNode, count, emptyFolder, emptyFolder2;
-  let folder, nodeA, nodeB;
-  let childFolder, grandChildFolder, childNodeA, childNodeB;
+  let fooNode;
+  let fooNode2;
+  let barNode;
+  let gooNode;
+  let count;
+  let emptyFolder;
+  let emptyFolder2;
+  let folder;
+  let nodeA;
+  let nodeB;
+  let childFolder;
+  let grandChildFolder;
+  let childNodeA;
+  let childNodeB;
 
   function doCopy() {
     bookmarkManager.copy.apply(null, arguments);
@@ -56,11 +68,11 @@ test('bookmarkManagerPrivate', async () => {
       childFolder = {parentId: folder.id, title: 'Child Folder'};
       childNodeA = {
         title: 'childNodeA',
-        url: 'http://www.example.com/childNodeA'
+        url: 'http://www.example.com/childNodeA',
       };
       childNodeB = {
         title: 'childNodeB',
-        url: 'http://www.example.com/childNodeB'
+        url: 'http://www.example.com/childNodeB',
       };
       grandChildFolder = {title: 'grandChildFolder'};
       chrome.bookmarks.create(
@@ -84,7 +96,7 @@ test('bookmarkManagerPrivate', async () => {
 
     function getSubtree() {
       bookmarkManager.getSubtree(childFolder.id, false, pass(function(result) {
-                                   let children = result[0].children;
+                                   const children = result[0].children;
                                    assertEquals(3, children.length);
                                    assertEquals(childNodeA.id, children[0].id);
                                    assertEquals(childNodeB.id, children[1].id);
@@ -95,7 +107,7 @@ test('bookmarkManagerPrivate', async () => {
 
     function getSubtreeFoldersOnly() {
       bookmarkManager.getSubtree(childFolder.id, true, pass(function(result) {
-                                   let children = result[0].children;
+                                   const children = result[0].children;
                                    assertEquals(1, children.length);
                                    assertEquals(
                                        grandChildFolder.id, children[0].id);
@@ -109,7 +121,7 @@ test('bookmarkManagerPrivate', async () => {
       fooNode = {
         parentId: '1',
         title: 'Foo',
-        url: 'http://www.example.com/foo'
+        url: 'http://www.example.com/foo',
       };
 
       emptyFolder = {parentId: '1', title: 'Empty Folder'};
@@ -131,7 +143,7 @@ test('bookmarkManagerPrivate', async () => {
       barNode = {
         parentId: '1',
         title: 'Bar',
-        url: 'http://www.example.com/bar'
+        url: 'http://www.example.com/bar',
       };
 
       chrome.bookmarks.create(barNode, pass(function(result) {
@@ -143,7 +155,7 @@ test('bookmarkManagerPrivate', async () => {
       gooNode = {
         parentId: '1',
         title: 'Goo',
-        url: 'http://www.example.com/goo'
+        url: 'http://www.example.com/goo',
       };
 
       chrome.bookmarks.create(gooNode, pass(function(result) {
@@ -156,6 +168,12 @@ test('bookmarkManagerPrivate', async () => {
     function clipboard2() {
       // Copy the fooNode.
       doCopy([fooNode.id]);
+
+      // Ensure canPaste is now true.
+      bookmarkManager.canPaste('1', pass(function(result) {
+                                 assertTrue(
+                                     result, 'Should be able to paste now');
+                               }));
 
       // Paste it.
       doPaste('1');
@@ -183,6 +201,12 @@ test('bookmarkManagerPrivate', async () => {
                                      count -= 2;
                                      assertEquals(count, result.length);
                                    }));
+
+      // Ensure canPaste is still true.
+      bookmarkManager.canPaste('1', pass(function(result) {
+                                 assertTrue(
+                                     result, 'Should be able to paste now');
+                               }));
     },
 
     function clipboard4() {
@@ -196,15 +220,16 @@ test('bookmarkManagerPrivate', async () => {
             assertEquals(count, result.length);
 
             // Look for barNode's index.
-            for (let barIndex = 0; barIndex < result.length; barIndex++) {
-              if (result[barIndex].id == barNode.id) {
+            let barIndex;
+            for (barIndex = 0; barIndex < result.length; barIndex++) {
+              if (result[barIndex].id === barNode.id) {
                 break;
               }
             }
             assertTrue(barIndex + 2 < result.length);
 
-            let last = result[barIndex + 1];
-            let last2 = result[barIndex + 2];
+            const last = result[barIndex + 1];
+            const last2 = result[barIndex + 2];
             assertEquals(fooNode.title, last.title);
             assertEquals(fooNode.url, last.url);
             assertEquals(fooNode.parentId, last.parentId);
@@ -222,6 +247,12 @@ test('bookmarkManagerPrivate', async () => {
       // Copy it.
       doCopy([emptyFolder.id]);
 
+      // Ensure canPaste is now true.
+      bookmarkManager.canPaste('1', pass(function(result) {
+                                 assertTrue(
+                                     result, 'Should be able to paste now');
+                               }));
+
       // Paste it at the end of a multiple selection.
       doPaste('1', [barNode.id, fooNode2.id]);
 
@@ -232,8 +263,9 @@ test('bookmarkManagerPrivate', async () => {
             assertEquals(count, result.length);
 
             // Look for fooNode2's index.
-            for (let foo2Index = 0; foo2Index < result.length; foo2Index++) {
-              if (result[foo2Index].id == fooNode2.id) {
+            let foo2Index;
+            for (foo2Index = 0; foo2Index < result.length; foo2Index++) {
+              if (result[foo2Index].id === fooNode2.id) {
                 break;
               }
             }
@@ -260,6 +292,14 @@ test('bookmarkManagerPrivate', async () => {
 
             // Pasting to a managed folder is not allowed.
             assertTrue(result[1].url === undefined);
+
+            bookmarkManager.canPaste(
+                result[1].id, pass(function(result) {
+                  assertFalse(
+                      result,
+                      'Should not be able to paste to managed folders.');
+                }));
+
             bookmarkManager.paste(result[1].id, fail(error));
           }));
     },

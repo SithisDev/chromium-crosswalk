@@ -1,10 +1,10 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/chromedriver/chrome/ui_events.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
@@ -23,25 +23,32 @@ MouseEvent::MouseEvent(MouseEventType type,
       modifiers(modifiers),
       buttons(buttons),
       click_count(click_count),
-      origin(kViewPort),
-      element_id(std::string()),
+      force(0.0),
+      tangentialPressure(0.0),
+      tiltX(0),
+      tiltY(0),
+      twist(0),
       pointer_type(kMouse) {}
 
 MouseEvent::MouseEvent(const MouseEvent& other) = default;
 
 MouseEvent::~MouseEvent() {}
 
+TouchEvent::TouchEvent() : TouchEvent(kPause, 0, 0) {}
+
 TouchEvent::TouchEvent(TouchEventType type, int x, int y)
     : type(type),
       x(x),
       y(y),
-      origin(kViewPort),
       radiusX(1.0),
       radiusY(1.0),
       rotationAngle(0.0),
       force(1.0),
+      tangentialPressure(0.0),
+      tiltX(0),
+      tiltY(0),
+      twist(0),
       id(0),
-      element_id(std::string()),
       dispatch(true) {}
 
 TouchEvent::TouchEvent(const TouchEvent& other) = default;
@@ -132,7 +139,7 @@ KeyEvent KeyEventBuilder::Build() {
   return key_event_;
 }
 
-void KeyEventBuilder::Generate(std::list<KeyEvent>* key_events) {
+void KeyEventBuilder::Generate(std::vector<KeyEvent>* key_events) {
   key_events->push_back(SetType(kRawKeyDownEventType)->Build());
   if (key_event_.modified_text.length() || key_event_.unmodified_text.length())
     key_events->push_back(SetType(kCharEventType)->Build());
@@ -141,17 +148,17 @@ void KeyEventBuilder::Generate(std::list<KeyEvent>* key_events) {
 
 void KeyEventBuilder::UpdateKeyString() {
   ui::DomCode dom_code = ui::UsLayoutKeyboardCodeToDomCode(key_event_.key_code);
-  int flags = ui::EventFlags::EF_NONE;
+  int flags = ui::EF_NONE;
   if (key_event_.modifiers & kAltKeyModifierMask)
-    flags |= ui::EventFlags::EF_ALT_DOWN;
+    flags |= ui::EF_ALT_DOWN;
   if (key_event_.modifiers & kControlKeyModifierMask)
-    flags |= ui::EventFlags::EF_CONTROL_DOWN;
+    flags |= ui::EF_CONTROL_DOWN;
   if (key_event_.modifiers & kMetaKeyModifierMask)
-    flags |= ui::EventFlags::EF_COMMAND_DOWN;
+    flags |= ui::EF_COMMAND_DOWN;
   if (key_event_.modifiers & kShiftKeyModifierMask)
-    flags |= ui::EventFlags::EF_SHIFT_DOWN;
+    flags |= ui::EF_SHIFT_DOWN;
   if (key_event_.modifiers & kNumLockKeyModifierMask)
-    flags |= ui::EventFlags::EF_NUM_LOCK_ON;
+    flags |= ui::EF_NUM_LOCK_ON;
   ui::DomKey dom_key;
   ui::KeyboardCode ignored;
   if (ui::DomCodeToUsLayoutDomKey(dom_code, flags, &dom_key, &ignored))

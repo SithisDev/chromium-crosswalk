@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -14,8 +14,8 @@ bool IsExtensionDownload(const download::DownloadItem& download_item) {
   return false;
 }
 
-bool OffStoreInstallAllowedByPrefs(Profile* profile,
-                                   const download::DownloadItem& item) {
+bool IsTrustedExtensionDownload(Profile* profile,
+                                const download::DownloadItem& item) {
   // Extensions are not supported on Android, return the safe default.
   return false;
 }

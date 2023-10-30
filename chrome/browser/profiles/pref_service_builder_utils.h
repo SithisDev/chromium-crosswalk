@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,10 @@
 #include <string>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
-#include "services/preferences/public/mojom/tracked_preference_validation_delegate.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/preferences/public/mojom/tracked_preference_validation_delegate.mojom-forward.h"
 
 class PrefStore;
 class SimpleFactoryKey;
@@ -52,7 +52,7 @@ std::unique_ptr<sync_preferences::PrefServiceSyncable> CreatePrefService(
     PrefStore* extension_pref_store,
     policy::PolicyService* policy_service,
     policy::ChromeBrowserPolicyConnector* browser_policy_connector,
-    prefs::mojom::TrackedPreferenceValidationDelegatePtr
+    mojo::PendingRemote<prefs::mojom::TrackedPreferenceValidationDelegate>
         pref_validation_delegate,
     scoped_refptr<base::SequencedTaskRunner> io_task_runner,
     SimpleFactoryKey* key,

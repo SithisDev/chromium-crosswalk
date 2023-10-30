@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -17,7 +16,7 @@
 #include "chrome/chrome_cleaner/constants/quarantine_constants.h"
 #include "chrome/chrome_cleaner/os/disk_util.h"
 #include "chrome/chrome_cleaner/os/file_path_sanitization.h"
-#include "mojo/public/cpp/system/platform_handle.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace chrome_cleaner {
 
@@ -41,10 +40,10 @@ constexpr uint32_t kMinimizedWriteAccess =
 // the default file stream "::$DATA" so it won't break the filename in the
 // following uses. For other file streams, we don't archive and ignore them.
 bool GetSanitizedFileName(const base::FilePath& path,
-                          base::string16* output_sanitized_filename) {
+                          std::wstring* output_sanitized_filename) {
   DCHECK(output_sanitized_filename);
 
-  base::string16 sanitized_filename = path.BaseName().AsUTF16Unsafe();
+  std::wstring sanitized_filename = path.BaseName().value();
   if (base::EndsWith(sanitized_filename, kDefaultFileStreamSuffix,
                      base::CompareCase::INSENSITIVE_ASCII)) {
     // Remove the default file stream suffix.
@@ -54,22 +53,22 @@ bool GetSanitizedFileName(const base::FilePath& path,
   }
   // If there is any ":" in |sanitized_filename|, it either points to a
   // non-default file stream or is abnormal. Don't archive in this case.
-  if (sanitized_filename.find(L":") != base::string16::npos)
+  if (sanitized_filename.find(L":") != std::wstring::npos)
     return false;
 
   *output_sanitized_filename = sanitized_filename;
   return true;
 }
 
-void RunArchiver(mojom::ZipArchiverPtr* zip_archiver_ptr,
-                 mojo::ScopedHandle mojo_src_handle,
-                 mojo::ScopedHandle mojo_zip_handle,
+void RunArchiver(mojo::Remote<mojom::ZipArchiver>* zip_archiver,
+                 mojo::PlatformHandle mojo_src_handle,
+                 mojo::PlatformHandle mojo_zip_handle,
                  const std::string& filename,
                  const std::string& password,
                  mojom::ZipArchiver::ArchiveCallback callback) {
-  DCHECK(zip_archiver_ptr);
+  DCHECK(zip_archiver);
 
-  (*zip_archiver_ptr)
+  (*zip_archiver)
       ->Archive(std::move(mojo_src_handle), std::move(mojo_zip_handle),
                 filename, password, std::move(callback));
 }
@@ -80,7 +79,7 @@ void OnArchiveDone(const base::FilePath& zip_file_path,
   if (result_code != ZipArchiverResultCode::kSuccess) {
     // The zip file handle has been closed by mojo. Delete the incomplete zip
     // file directly.
-    if (!base::DeleteFile(zip_file_path, /*recursive=*/false))
+    if (!base::DeleteFile(zip_file_path))
       LOG(ERROR) << "Failed to delete the incomplete zip file.";
   }
   // Call |result_callback| for SandboxedZipArchiver::Archive.
@@ -92,18 +91,18 @@ void OnArchiveDone(const base::FilePath& zip_file_path,
 namespace internal {
 
 // Zip file name format: "|filename|_|file_hash|.zip"
-base::string16 ConstructZipArchiveFileName(const base::string16& filename,
-                                           const std::string& file_hash,
-                                           size_t max_filename_length) {
-  const base::string16 normalized_hash =
-      base::UTF8ToUTF16(base::ToUpperASCII(file_hash));
+std::wstring ConstructZipArchiveFileName(const std::wstring& filename,
+                                         const std::string& file_hash,
+                                         size_t max_filename_length) {
+  const std::wstring normalized_hash =
+      base::UTF8ToWide(base::ToUpperASCII(file_hash));
 
   // Length of the ".zip" suffix and the "_" infix.
   constexpr size_t kAffixSize = 5;
 
   // If the constructed filename is too long for the destination volume, use a
   // prefix of the filename.
-  base::string16 normalized_filename;
+  std::wstring normalized_filename;
   if (filename.size() + normalized_hash.size() + kAffixSize >
       max_filename_length) {
     size_t trimmed_length =
@@ -113,7 +112,7 @@ base::string16 ConstructZipArchiveFileName(const base::string16& filename,
     normalized_filename = filename;
   }
 
-  base::string16 result =
+  std::wstring result =
       base::StrCat({normalized_filename, L"_", normalized_hash, L".zip"});
   DCHECK(result.size() <= max_filename_length);
   DCHECK(result.size() ==
@@ -125,15 +124,15 @@ base::string16 ConstructZipArchiveFileName(const base::string16& filename,
 
 SandboxedZipArchiver::SandboxedZipArchiver(
     scoped_refptr<MojoTaskRunner> mojo_task_runner,
-    UniqueZipArchiverPtr zip_archiver_ptr,
+    RemoteZipArchiverPtr zip_archiver,
     const base::FilePath& dst_archive_folder,
     const std::string& zip_password)
     : mojo_task_runner_(mojo_task_runner),
-      zip_archiver_ptr_(std::move(zip_archiver_ptr)),
+      zip_archiver_(std::move(zip_archiver)),
       dst_archive_folder_(dst_archive_folder),
       zip_password_(zip_password) {
-  // Make sure the |zip_archiver_ptr| is bound with the |mojo_task_runner|.
-  DCHECK(zip_archiver_ptr_.get_deleter().task_runner_ == mojo_task_runner);
+  // Make sure the |zip_archiver| is bound with the |mojo_task_runner|.
+  DCHECK(zip_archiver_.get_deleter().task_runner_ == mojo_task_runner);
 
   int max_component_length =
       base::GetMaximumPathComponentLength(dst_archive_folder_);
@@ -157,7 +156,7 @@ void SandboxedZipArchiver::Archive(const base::FilePath& src_file_path,
   // eliminate TOCTTOU, use |FILE_FLAG_BACKUP_SEMANTICS| to open a directory
   // then check.
   base::File src_file(::CreateFile(
-      src_file_path.AsUTF16Unsafe().c_str(), kMinimizedReadAccess,
+      src_file_path.value().c_str(), kMinimizedReadAccess,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
       OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
       nullptr));
@@ -190,7 +189,7 @@ void SandboxedZipArchiver::Archive(const base::FilePath& src_file_path,
     return;
   }
 
-  base::string16 sanitized_src_filename;
+  std::wstring sanitized_src_filename;
   if (!GetSanitizedFileName(src_file_path, &sanitized_src_filename)) {
     std::move(result_callback).Run(ZipArchiverResultCode::kIgnoredSourceFile);
     return;
@@ -209,15 +208,15 @@ void SandboxedZipArchiver::Archive(const base::FilePath& src_file_path,
     return;
   }
 
-  const base::string16 zip_filename = internal::ConstructZipArchiveFileName(
+  const std::wstring zip_filename = internal::ConstructZipArchiveFileName(
       sanitized_src_filename, src_file_hash, dst_max_component_length_);
   base::FilePath zip_file_path = dst_archive_folder_.Append(zip_filename);
 
   // If the full path is longer than MAX_PATH, prepending "\\?\" allows to
   // extend the path limit (see CreateFile documentation).
   if (zip_file_path.value().size() >= MAX_PATH) {
-    base::string16 long_file_path =
-        base::string16(L"\\\\?\\") + zip_file_path.value();
+    std::wstring long_file_path =
+        std::wstring(L"\\\\?\\") + zip_file_path.value();
     zip_file_path = base::FilePath(long_file_path);
   }
 
@@ -228,7 +227,7 @@ void SandboxedZipArchiver::Archive(const base::FilePath& src_file_path,
   }
 
   // Create and open the zip file with minimized rights for writing.
-  base::File zip_file(::CreateFile(zip_file_path.AsUTF16Unsafe().c_str(),
+  base::File zip_file(::CreateFile(zip_file_path.value().c_str(),
                                    kMinimizedWriteAccess, 0, nullptr,
                                    CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
   if (!zip_file.IsValid()) {
@@ -239,18 +238,20 @@ void SandboxedZipArchiver::Archive(const base::FilePath& src_file_path,
     return;
   }
 
-  const std::string filename_in_zip = base::UTF16ToUTF8(sanitized_src_filename);
+  const std::string filename_in_zip = base::WideToUTF8(sanitized_src_filename);
   // Do archive.
-  // Unretained pointer of |zip_archiver_ptr_| is safe because its deleter
-  // is run on the same task runner. If |zip_archiver_ptr_| is destructed later,
-  // the deleter will be scheduled after this task.
+  // Unretained pointer of |zip_archiver_| is safe because its deleter is run on
+  // the same task runner. If |zip_archiver_| is destructed later, the deleter
+  // will be scheduled after this task.
   auto done_callback =
       base::BindOnce(OnArchiveDone, zip_file_path, std::move(result_callback));
   mojo_task_runner_->PostTask(
       FROM_HERE,
-      base::BindOnce(RunArchiver, base::Unretained(zip_archiver_ptr_.get()),
-                     mojo::WrapPlatformFile(src_file.TakePlatformFile()),
-                     mojo::WrapPlatformFile(zip_file.TakePlatformFile()),
+      base::BindOnce(RunArchiver, base::Unretained(zip_archiver_.get()),
+                     mojo::PlatformHandle(
+                         base::ScopedPlatformFile(src_file.TakePlatformFile())),
+                     mojo::PlatformHandle(
+                         base::ScopedPlatformFile(zip_file.TakePlatformFile())),
                      filename_in_zip, zip_password_, std::move(done_callback)));
 }
 
@@ -295,8 +296,8 @@ ResultCode SpawnZipArchiverSandbox(
       SpawnSandbox(&setup_hooks, SandboxType::kZipArchiver);
   if (result_code == RESULT_CODE_SUCCESS) {
     *sandboxed_zip_archiver = std::make_unique<SandboxedZipArchiver>(
-        mojo_task_runner, setup_hooks.TakeZipArchiverPtr(), dst_archive_folder,
-        zip_password);
+        mojo_task_runner, setup_hooks.TakeZipArchiverRemote(),
+        dst_archive_folder, zip_password);
   }
 
   return result_code;

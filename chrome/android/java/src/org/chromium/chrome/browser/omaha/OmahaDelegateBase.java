@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@ package org.chromium.chrome.browser.omaha;
 
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
+import android.os.PowerManager;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.chrome.browser.AppHooks;
 
@@ -46,9 +46,10 @@ public abstract class OmahaDelegateBase extends OmahaDelegate {
 
     @Override
     boolean isChromeBeingUsed() {
-        boolean isChromeVisible = ApplicationStatus.hasVisibleActivities();
-        boolean isScreenOn = ApiCompatibilityUtils.isInteractive(getContext());
-        return isChromeVisible && isScreenOn;
+        if (!ApplicationStatus.hasVisibleActivities()) return false;
+
+        PowerManager powerManager = (PowerManager) mContext.getSystemService(Context.POWER_SERVICE);
+        return powerManager.isInteractive();
     }
 
     @Override

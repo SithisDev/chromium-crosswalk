@@ -1,11 +1,12 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/media_router/cast_modes_with_media_sources.h"
 
-#include "chrome/common/media_router/media_sink.h"
-#include "chrome/common/media_router/media_source.h"
+#include "components/media_router/common/media_sink.h"
+#include "components/media_router/common/media_source.h"
+#include "components/media_router/common/test/test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -24,8 +25,7 @@ TEST(MediaRouterCastModesWithMediaSourcesTest, AddAndRemoveSources) {
   const CastModeSet castModeSetPresentationAndTab(
       {MediaCastMode::PRESENTATION, MediaCastMode::TAB_MIRROR});
 
-  CastModesWithMediaSources sources(
-      MediaSink("sinkId", "name", SinkIconType::GENERIC));
+  CastModesWithMediaSources sources(CreateDialSink("sinkId", "name"));
   EXPECT_TRUE(sources.IsEmpty());
   EXPECT_EQ(sources.GetCastModes(), castModeSetEmpty);
 

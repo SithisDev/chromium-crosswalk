@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,28 +8,22 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/lazy_instance.h"
-#include "base/stl_util.h"
+#include "base/observer_list.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/error_console/error_console_factory.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "components/crx_file/id_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
 #include "extensions/browser/extension_prefs.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/features/feature_channel.h"
+#include "extensions/common/logging_constants.h"
 
 namespace extensions {
 
@@ -62,14 +56,13 @@ ErrorConsole::ErrorConsole(Profile* profile)
     : enabled_(false),
       default_mask_(kDefaultMask),
       profile_(profile),
-      prefs_(nullptr),
-      registry_observer_(this) {
+      prefs_(nullptr) {
   pref_registrar_.Init(profile_->GetPrefs());
   pref_registrar_.Add(prefs::kExtensionsUIDeveloperMode,
-                      base::Bind(&ErrorConsole::OnPrefChanged,
-                                 base::Unretained(this)));
+                      base::BindRepeating(&ErrorConsole::OnPrefChanged,
+                                          base::Unretained(this)));
 
-  registry_observer_.Add(ExtensionRegistry::Get(profile_));
+  registry_observation_.Observe(ExtensionRegistry::Get(profile_));
 
   CheckEnabled();
 }
@@ -200,10 +193,10 @@ void ErrorConsole::Enable() {
   // also create an ExtensionPrefs object.
   prefs_ = ExtensionPrefs::Get(profile_);
 
-  notification_registrar_.Add(
-      this,
-      chrome::NOTIFICATION_PROFILE_DESTROYED,
-      content::NotificationService::AllBrowserContextsAndSources());
+  profile_observations_.AddObservation(profile_.get());
+  if (profile_->HasPrimaryOTRProfile())
+    profile_observations_.AddObservation(
+        profile_->GetPrimaryOTRProfile(/*create_if_needed=*/true));
 
   const ExtensionSet& extensions =
       ExtensionRegistry::Get(profile_)->enabled_extensions();
@@ -215,7 +208,7 @@ void ErrorConsole::Enable() {
 }
 
 void ErrorConsole::Disable() {
-  notification_registrar_.RemoveAll();
+  profile_observations_.RemoveAllObservations();
   errors_.RemoveAllErrors();
   enabled_ = false;
 }
@@ -266,14 +259,15 @@ void ErrorConsole::AddManifestErrorsForExtension(const Extension* extension) {
   }
 }
 
-void ErrorConsole::Observe(int type,
-                           const content::NotificationSource& source,
-                           const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_PROFILE_DESTROYED, type);
-  Profile* profile = content::Source<Profile>(source).ptr();
+void ErrorConsole::OnOffTheRecordProfileCreated(Profile* off_the_record) {
+  profile_observations_.AddObservation(off_the_record);
+}
+
+void ErrorConsole::OnProfileWillBeDestroyed(Profile* profile) {
+  profile_observations_.RemoveObservation(profile);
   // If incognito profile which we are associated with is destroyed, also
   // destroy all incognito errors.
-  if (profile->IsOffTheRecord() && profile_->IsSameProfile(profile))
+  if (profile->IsOffTheRecord() && profile_->IsSameOrParent(profile))
     errors_.RemoveErrors(ErrorMap::Filter::IncognitoErrors(), nullptr);
 }
 
@@ -287,7 +281,7 @@ int ErrorConsole::GetMaskForExtension(const std::string& extension_id) const {
   const Extension* extension =
       ExtensionRegistry::Get(profile_)->GetExtensionById(
           extension_id, ExtensionRegistry::EVERYTHING);
-  if (extension && extension->location() == Manifest::UNPACKED)
+  if (extension && extension->location() == mojom::ManifestLocation::kUnpacked)
     return (1 << ExtensionError::NUM_ERROR_TYPES) - 1;
 
   // Otherwise, use the default mask.

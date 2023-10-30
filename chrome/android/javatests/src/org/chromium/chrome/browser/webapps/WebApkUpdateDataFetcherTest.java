@@ -1,10 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.webapps;
 
-import android.support.test.filters.MediumTest;
+import androidx.test.filters.MediumTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -13,24 +13,29 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.task.PostTask;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider;
+import org.chromium.chrome.browser.browserservices.intents.WebappExtras;
+import org.chromium.chrome.browser.browserservices.intents.WebappInfo;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
-import org.chromium.chrome.test.util.browser.WebappTestPage;
+import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
+import org.chromium.chrome.test.util.browser.webapps.WebApkIntentDataProviderBuilder;
+import org.chromium.chrome.test.util.browser.webapps.WebappTestPage;
+import org.chromium.components.webapps.WebappsIconUtils;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.net.test.EmbeddedTestServerRule;
-
-import java.util.HashMap;
-
 /**
  * Tests the WebApkUpdateDataFetcher.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
+@Batch(Batch.PER_CLASS)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class WebApkUpdateDataFetcherTest {
     @Rule
@@ -38,6 +43,9 @@ public class WebApkUpdateDataFetcherTest {
 
     @Rule
     public EmbeddedTestServerRule mTestServerRule = new EmbeddedTestServerRule();
+
+    private static final String WEBAPK_START_URL =
+            "/chrome/test/data/banners/manifest_test_page.html";
 
     private static final String WEB_MANIFEST_URL1 = "/chrome/test/data/banners/manifest.json";
     // Name for Web Manifest at {@link WEB_MANIFEST_URL1}.
@@ -48,11 +56,19 @@ public class WebApkUpdateDataFetcherTest {
     // Name for Web Manifest at {@link WEB_MANIFEST_URL2}.
     private static final String WEB_MANIFEST_NAME2 = "Manifest";
 
+    private static final String WEB_MANIFEST_URL3 =
+            "/chrome/test/data/banners/manifest_with_id.json";
+    // Name for Web Manifest at {@link WEB_MANIFEST_URL3}.
+    private static final String WEB_MANIFEST_NAME3 = "Manifest test app with id specified";
+
     // Web Manifest with Murmur2 icon hash with value > {@link Long#MAX_VALUE}
     private static final String WEB_MANIFEST_WITH_LONG_ICON_MURMUR2_HASH =
             "/chrome/test/data/banners/manifest_long_icon_murmur2_hash.json";
     // Murmur2 hash of icon at {@link WEB_MANIFEST_WITH_LONG_ICON_MURMUR2_HASH}.
     private static final String LONG_ICON_MURMUR2_HASH = "13495109619211221667";
+
+    private static final String WEB_MANIFEST_URL_MASKABLE =
+            "/chrome/test/data/banners/manifest_maskable.json";
 
     // Scope for {@link WEB_MANIFEST_URL1}, {@link WEB_MANIFEST_URL2} and
     // {@link WEB_MANIFEST_WITH_LONG_ICON_MURMUR2_HASH}.
@@ -66,15 +82,22 @@ public class WebApkUpdateDataFetcherTest {
             extends CallbackHelper implements WebApkUpdateDataFetcher.Observer {
         private boolean mWebApkCompatible;
         private String mName;
+        private String mManifestId;
         private String mPrimaryIconMurmur2Hash;
+        private boolean mIsPrimaryIconMaskable;
 
         @Override
-        public void onGotManifestData(
-                WebApkInfo fetchedInfo, String primaryIconUrl, String badgeIconUrl) {
+        public void onGotManifestData(BrowserServicesIntentDataProvider fetchedInfo,
+                String primaryIconUrl, String splashIconUrl) {
             Assert.assertNull(mName);
             mWebApkCompatible = true;
-            mName = fetchedInfo.name();
-            mPrimaryIconMurmur2Hash = fetchedInfo.iconUrlToMurmur2HashMap().get(primaryIconUrl);
+
+            WebappExtras fetchedWebappExtras = fetchedInfo.getWebappExtras();
+            mName = fetchedWebappExtras.name;
+            mManifestId = fetchedInfo.getWebApkExtras().manifestId;
+            mPrimaryIconMurmur2Hash =
+                    fetchedInfo.getWebApkExtras().iconUrlToMurmur2HashMap.get(primaryIconUrl);
+            mIsPrimaryIconMaskable = fetchedWebappExtras.isIconAdaptive;
             notifyCalled();
         }
 
@@ -86,8 +109,16 @@ public class WebApkUpdateDataFetcherTest {
             return mName;
         }
 
+        public String manifestId() {
+            return mManifestId;
+        }
+
         public String primaryIconMurmur2Hash() {
             return mPrimaryIconMurmur2Hash;
+        }
+
+        public boolean isPrimaryIconMaskable() {
+            return mIsPrimaryIconMaskable;
         }
     }
 
@@ -97,18 +128,21 @@ public class WebApkUpdateDataFetcherTest {
         mTab = mActivityTestRule.getActivity().getActivityTab();
     }
 
+    private WebApkIntentDataProviderBuilder getTestIntentDataProviderBuilder(
+            final String manifestUrl) {
+        WebApkIntentDataProviderBuilder builder = new WebApkIntentDataProviderBuilder(
+                "random.package", mTestServerRule.getServer().getURL(WEBAPK_START_URL));
+        builder.setScope(mTestServerRule.getServer().getURL(WEB_MANIFEST_SCOPE));
+        builder.setManifestUrl(mTestServerRule.getServer().getURL(manifestUrl));
+        return builder;
+    }
+
     /** Creates and starts a WebApkUpdateDataFetcher. */
-    private void startWebApkUpdateDataFetcher(final String scopeUrl,
-            final String manifestUrl, final WebApkUpdateDataFetcher.Observer observer) {
+    private void startWebApkUpdateDataFetcher(final WebApkIntentDataProviderBuilder builder,
+            final WebApkUpdateDataFetcher.Observer observer) {
         final WebApkUpdateDataFetcher fetcher = new WebApkUpdateDataFetcher();
-        PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
-            WebApkInfo oldInfo = WebApkInfo.create("", "", scopeUrl, null, null, null, null, null,
-                    -1, -1, -1, -1, -1, -1, false, "random.package", -1, manifestUrl, "",
-                    WebApkInfo.WebApkDistributor.BROWSER, new HashMap<String, String>(), null,
-                    null /*shareTargetActivityName*/, false /* forceNavigation */,
-                    false /* isSplashProvidedByWebApk */, null /* shareData */);
-            fetcher.start(mTab, oldInfo, observer);
-        });
+        PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT,
+                () -> { fetcher.start(mTab, WebappInfo.create(builder.build()), observer); });
     }
 
     /**
@@ -122,12 +156,33 @@ public class WebApkUpdateDataFetcherTest {
                 mTestServerRule.getServer(), mTab, WEB_MANIFEST_URL1);
 
         CallbackWaiter waiter = new CallbackWaiter();
-        startWebApkUpdateDataFetcher(mTestServerRule.getServer().getURL(WEB_MANIFEST_SCOPE),
-                mTestServerRule.getServer().getURL(WEB_MANIFEST_URL1), waiter);
+        startWebApkUpdateDataFetcher(getTestIntentDataProviderBuilder(WEB_MANIFEST_URL1), waiter);
         waiter.waitForCallback(0);
 
         Assert.assertTrue(waiter.isWebApkCompatible());
         Assert.assertEquals(WEB_MANIFEST_NAME1, waiter.name());
+        Assert.assertFalse(waiter.isPrimaryIconMaskable());
+    }
+
+    /**
+     * Test that WebApkUpdateDataFetcher selects a maskable icon when
+     * 1. the manifest has a maskable icon, and
+     * 2. the Android version >= 26 (which supports adaptive icon).
+     */
+    @Test
+    @MediumTest
+    @Feature({"WebApk"})
+    public void testLaunchWithMaskablePrimaryIconManifestUrl() throws Exception {
+        WebappTestPage.navigateToServiceWorkerPageWithManifest(
+                mTestServerRule.getServer(), mTab, WEB_MANIFEST_URL_MASKABLE);
+
+        CallbackWaiter waiter = new CallbackWaiter();
+        startWebApkUpdateDataFetcher(
+                getTestIntentDataProviderBuilder(WEB_MANIFEST_URL_MASKABLE), waiter);
+        waiter.waitForCallback(0);
+
+        Assert.assertEquals(
+                WebappsIconUtils.doesAndroidSupportMaskableIcons(), waiter.isPrimaryIconMaskable());
     }
 
     /**
@@ -138,14 +193,12 @@ public class WebApkUpdateDataFetcherTest {
     @Test
     @MediumTest
     @Feature({"Webapps"})
-    @RetryOnFailure
     public void testLaunchWithDifferentManifestUrl() throws Exception {
         WebappTestPage.navigateToServiceWorkerPageWithManifest(
                 mTestServerRule.getServer(), mTab, WEB_MANIFEST_URL1);
 
         CallbackWaiter waiter = new CallbackWaiter();
-        startWebApkUpdateDataFetcher(mTestServerRule.getServer().getURL(WEB_MANIFEST_SCOPE),
-                mTestServerRule.getServer().getURL(WEB_MANIFEST_URL2), waiter);
+        startWebApkUpdateDataFetcher(getTestIntentDataProviderBuilder(WEB_MANIFEST_URL2), waiter);
 
         WebappTestPage.navigateToServiceWorkerPageWithManifest(
                 mTestServerRule.getServer(), mTab, WEB_MANIFEST_URL2);
@@ -166,11 +219,80 @@ public class WebApkUpdateDataFetcherTest {
                 mTestServerRule.getServer(), mTab, WEB_MANIFEST_WITH_LONG_ICON_MURMUR2_HASH);
 
         CallbackWaiter waiter = new CallbackWaiter();
-        startWebApkUpdateDataFetcher(mTestServerRule.getServer().getURL(WEB_MANIFEST_SCOPE),
-                mTestServerRule.getServer().getURL(WEB_MANIFEST_WITH_LONG_ICON_MURMUR2_HASH),
-                waiter);
+        startWebApkUpdateDataFetcher(
+                getTestIntentDataProviderBuilder(WEB_MANIFEST_WITH_LONG_ICON_MURMUR2_HASH), waiter);
         waiter.waitForCallback(0);
 
         Assert.assertEquals(LONG_ICON_MURMUR2_HASH, waiter.primaryIconMurmur2Hash());
+    }
+
+    /**
+     * Test starting WebApkUpdateDataFetcher on page which uses a different manifest URL but same
+     * manifest ID than the ManifestUpgradeDetectorFetcher is looking for.
+     */
+    @Test
+    @MediumTest
+    @Feature({"Webapps"})
+    @EnableFeatures(ChromeFeatureList.WEB_APK_UNIQUE_ID)
+    public void testLaunchWithDifferentManifestUrlSameId() throws Exception {
+        WebappTestPage.navigateToServiceWorkerPageWithManifest(
+                mTestServerRule.getServer(), mTab, WEB_MANIFEST_URL1);
+
+        CallbackWaiter waiter = new CallbackWaiter();
+        startWebApkUpdateDataFetcher(getTestIntentDataProviderBuilder(WEB_MANIFEST_URL2), waiter);
+
+        waiter.waitForFirst();
+        Assert.assertTrue(waiter.isWebApkCompatible());
+        Assert.assertEquals(WEB_MANIFEST_NAME1, waiter.name());
+        Assert.assertNotNull(waiter.manifestId());
+    }
+
+    /**
+     * Test starting WebApkUpdateDataFetcher on page with different manifest ID. Check that the
+     * callback is only called once the user navigates to a page which uses the desired manifest ID.
+     */
+    @Test
+    @MediumTest
+    @Feature({"Webapps"})
+    @EnableFeatures(ChromeFeatureList.WEB_APK_UNIQUE_ID)
+    public void testLaunchWithDifferentManifestId() throws Exception {
+        WebappTestPage.navigateToServiceWorkerPageWithManifest(
+                mTestServerRule.getServer(), mTab, WEB_MANIFEST_URL3);
+
+        CallbackWaiter waiter = new CallbackWaiter();
+        startWebApkUpdateDataFetcher(getTestIntentDataProviderBuilder(WEB_MANIFEST_URL1), waiter);
+
+        WebappTestPage.navigateToServiceWorkerPageWithManifest(
+                mTestServerRule.getServer(), mTab, WEB_MANIFEST_URL2);
+        waiter.waitForFirst();
+        Assert.assertTrue(waiter.isWebApkCompatible());
+        Assert.assertEquals(WEB_MANIFEST_NAME2, waiter.name());
+        Assert.assertNotNull(waiter.manifestId());
+    }
+
+    /**
+     * Test starting WebApkUpdateDataFetcher when current WebAPK has no ID specified.
+     */
+    @Test
+    @MediumTest
+    @Feature({"Webapps"})
+    @EnableFeatures(ChromeFeatureList.WEB_APK_UNIQUE_ID)
+    public void testLaunchWithEmptyOldManifestId() throws Exception {
+        WebappTestPage.navigateToServiceWorkerPageWithManifest(
+                mTestServerRule.getServer(), mTab, WEB_MANIFEST_URL3);
+
+        CallbackWaiter waiter = new CallbackWaiter();
+
+        WebApkIntentDataProviderBuilder oldIntentDataProviderBuilder =
+                getTestIntentDataProviderBuilder(WEB_MANIFEST_URL1);
+        // Set manifestId to empty string.
+        oldIntentDataProviderBuilder.setWebApkManifestId("");
+
+        startWebApkUpdateDataFetcher(oldIntentDataProviderBuilder, waiter);
+
+        waiter.waitForFirst();
+        Assert.assertTrue(waiter.isWebApkCompatible());
+        Assert.assertEquals(WEB_MANIFEST_NAME3, waiter.name());
+        Assert.assertNotNull(waiter.manifestId());
     }
 }

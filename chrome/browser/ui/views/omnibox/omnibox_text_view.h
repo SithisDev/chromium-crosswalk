@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,11 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_result_view.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/suggestion_answer.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/font_list.h"
 #include "ui/views/view.h"
 
@@ -26,35 +27,36 @@ class RenderText;
 // as selection) and more specific features (such as suggestion answer styling).
 class OmniboxTextView : public views::View {
  public:
+  METADATA_HEADER(OmniboxTextView);
   explicit OmniboxTextView(OmniboxResultView* result_view);
+  OmniboxTextView(const OmniboxTextView&) = delete;
+  OmniboxTextView& operator=(const OmniboxTextView&) = delete;
   ~OmniboxTextView() override;
 
-  // views::View.
+  // views::View:
   gfx::Size CalculatePreferredSize() const override;
-  bool CanProcessEventsWithinSubtree() const override;
-  const char* GetClassName() const override;
+  bool GetCanProcessEventsWithinSubtree() const override;
   int GetHeightForWidth(int width) const override;
   void OnPaint(gfx::Canvas* canvas) override;
 
-  // Applies given part's theme color to underlying render text. Using
-  // OmniboxPart::RESULTS_TEXT_DIMMED gives the gray used by Dim() in the past.
-  // This is called Apply* instead of Set* because the only state kept is in
-  // render_text, so call this after setting text with methods below.
-  void ApplyTextColor(OmniboxPart part);
+  // Applies given theme color to underlying render text. This is called Apply*
+  // instead of Set* because the only state kept is in render_text, so call this
+  // after setting text with methods below.
+  void ApplyTextColor(ui::ColorId id);
 
   // Returns the render text, or an empty string if there is none.
-  const base::string16& text() const;
+  const std::u16string& GetText() const;
 
-  // Sets the render text with default rendering for the given |text|. The
+  // Sets the render text with default rendering for the given |new_text|. The
   // |classifications| are used to style the text. An ImageLine incorporates
   // both the text and the styling.
   // |deemphasize| specifies whether to use a slightly smaller font than normal.
-  void SetText(const base::string16& text, bool deemphasize = false);
-  void SetText(const base::string16& text,
-               const ACMatchClassifications& classifications,
-               bool deemphasize = false);
-  void SetText(const SuggestionAnswer::ImageLine& line,
-               bool deemphasize = false);
+  void SetText(const std::u16string& new_text);
+  void SetTextWithStyling(const std::u16string& new_text,
+                          const ACMatchClassifications& classifications,
+                          bool deemphasize = false);
+  void SetTextWithStyling(const SuggestionAnswer::ImageLine& line,
+                          bool deemphasize);
 
   // Adds the "additional" and "status" text from |line|, if any.
   void AppendExtraText(const SuggestionAnswer::ImageLine& line);
@@ -70,30 +72,30 @@ class OmniboxTextView : public views::View {
   // Creates a platform-approriate RenderText, sets its format to that of
   // a suggestion and inserts (renders) the provided |text|.
   std::unique_ptr<gfx::RenderText> CreateRenderText(
-      const base::string16& text) const;
+      const std::u16string& text) const;
 
  private:
   // Adds text from an answer field to the render text using appropriate style.
   // A prefix (such as separating space) may also be prepended to field text.
   void AppendText(const SuggestionAnswer::TextField& field,
-                  const base::string16& prefix);
+                  const std::u16string& prefix);
 
-  // Updates the cached maximum line height.
-  void UpdateLineHeight();
+  // Updates the cached maximum line height and recomputes the preferred size.
+  void OnStyleChanged();
 
   // To get color values.
-  OmniboxResultView* result_view_;
+  raw_ptr<OmniboxResultView> result_view_;
 
   // Font settings for this view.
-  int font_height_;
+  int font_height_ = 0;
 
   // Whether to apply deemphasized font instead of primary omnibox font.
   // TODO(orinj): Use a more general ChromeTextContext for flexibility, or
   // otherwise clean up & unify the different ways of selecting fonts & styles.
-  bool use_deemphasized_font_;
+  bool use_deemphasized_font_ = false;
 
   // Whether to wrap lines if the width is too narrow for the whole string.
-  bool wrap_text_lines_;
+  bool wrap_text_lines_ = false;
 
   // The primary data for this class.
   std::unique_ptr<gfx::RenderText> render_text_;
@@ -101,8 +103,6 @@ class OmniboxTextView : public views::View {
   // early instead of setting text when the text and classifications
   // match the current state of the view.
   std::unique_ptr<ACMatchClassifications> cached_classifications_;
-
-  DISALLOW_COPY_AND_ASSIGN(OmniboxTextView);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_OMNIBOX_OMNIBOX_TEXT_VIEW_H_

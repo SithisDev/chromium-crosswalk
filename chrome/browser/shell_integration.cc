@@ -1,8 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/shell_integration.h"
+
+#include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -12,12 +14,12 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/lazy_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/lazy_thread_pool_task_runner.h"
 #include "base/task/single_thread_task_runner_thread_mode.h"
 #include "base/task/task_traits.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/policy/policy_path_parser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -26,17 +28,17 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
-#if defined(OS_CHROMEOS)
-#include "chromeos/constants/chromeos_switches.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/constants/ash_switches.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/windows_version.h"
 #include "chrome/browser/shell_integration_win.h"
 #include "chrome/installer/util/shell_util.h"
 #endif
 
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
 #include "chrome/common/channel_info.h"
 #include "chrome/grit/chromium_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -52,16 +54,33 @@ const struct AppModeInfo* gAppModeInfo = nullptr;
 
 // TODO(crbug.com/773563): Remove |g_sequenced_task_runner| and use an instance
 // field / singleton instead.
-#if defined(OS_WIN)
-base::LazyCOMSTATaskRunner g_sequenced_task_runner =
+#if BUILDFLAG(IS_WIN)
+base::LazyThreadPoolCOMSTATaskRunner g_sequenced_task_runner =
     LAZY_COM_STA_TASK_RUNNER_INITIALIZER(
-        base::TaskTraits(base::ThreadPool(), base::MayBlock()),
+        base::TaskTraits(base::MayBlock()),
         base::SingleThreadTaskRunnerThreadMode::SHARED);
 #else
-base::LazySequencedTaskRunner g_sequenced_task_runner =
-    LAZY_SEQUENCED_TASK_RUNNER_INITIALIZER(
-        base::TaskTraits(base::ThreadPool(), base::MayBlock()));
+base::LazyThreadPoolSequencedTaskRunner g_sequenced_task_runner =
+    LAZY_THREAD_POOL_SEQUENCED_TASK_RUNNER_INITIALIZER(
+        base::TaskTraits(base::MayBlock()));
 #endif
+
+void RunCallback(DefaultWebClientWorkerCallback callback,
+                 DefaultWebClientState state) {
+  if (!callback.is_null()) {
+    switch (state) {
+      case NOT_DEFAULT:
+      case IS_DEFAULT:
+      case UNKNOWN_DEFAULT:
+      case OTHER_MODE_IS_DEFAULT:
+        std::move(callback).Run(state);
+        return;
+      case NUM_DEFAULT_STATES:
+        break;
+    }
+    NOTREACHED();
+  }
+}
 
 }  // namespace
 
@@ -69,11 +88,11 @@ bool CanSetAsDefaultBrowser() {
   return GetDefaultWebClientSetPermission() != SET_DEFAULT_NOT_ALLOWED;
 }
 
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
 bool IsElevationNeededForSettingDefaultProtocolClient() {
   return false;
 }
-#endif  // !defined(OS_WIN)
+#endif  // !BUILDFLAG(IS_WIN)
 
 void SetAppModeInfo(const struct AppModeInfo* info) {
   gAppModeInfo = info;
@@ -84,13 +103,14 @@ const struct AppModeInfo* AppModeInfo() {
 }
 
 bool IsRunningInAppMode() {
-  return gAppModeInfo != NULL;
+  return gAppModeInfo != nullptr;
 }
 
 base::CommandLine CommandLineArgsForLauncher(
     const GURL& url,
     const std::string& extension_app_id,
-    const base::FilePath& profile_path) {
+    const base::FilePath& profile_path,
+    const std::string& run_on_os_login_mode) {
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
   base::CommandLine new_cmd_line(base::CommandLine::NO_PROGRAM);
@@ -110,6 +130,12 @@ base::CommandLine CommandLineArgsForLauncher(
     // Note: Do not change this flag!  Old Gears shortcuts will break if you do!
     new_cmd_line.AppendSwitchASCII(switches::kApp, url.spec());
   }
+
+  if (!run_on_os_login_mode.empty()) {
+    new_cmd_line.AppendSwitchASCII(switches::kAppRunOnOsLoginMode,
+                                   run_on_os_login_mode);
+  }
+
   return new_cmd_line;
 }
 
@@ -121,7 +147,7 @@ void AppendProfileArgs(const base::FilePath& profile_path,
   // Use the same UserDataDir for new launches that we currently have set.
   base::FilePath user_data_dir =
       cmd_line.GetSwitchValuePath(switches::kUserDataDir);
-#if defined(OS_MACOSX) || defined(OS_WIN)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
   policy::path_parser::CheckUserDataDirPolicy(&user_data_dir);
 #endif
   if (!user_data_dir.empty()) {
@@ -131,11 +157,11 @@ void AppendProfileArgs(const base::FilePath& profile_path,
       command_line->AppendSwitchPath(switches::kUserDataDir, user_data_dir);
   }
 
-#if defined(OS_CHROMEOS)
-  base::FilePath profile = cmd_line.GetSwitchValuePath(
-      chromeos::switches::kLoginProfile);
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  base::FilePath profile =
+      cmd_line.GetSwitchValuePath(ash::switches::kLoginProfile);
   if (!profile.empty())
-    command_line->AppendSwitchPath(chromeos::switches::kLoginProfile, profile);
+    command_line->AppendSwitchPath(ash::switches::kLoginProfile, profile);
 #else
   if (!profile_path.empty())
     command_line->AppendSwitchPath(switches::kProfileDirectory,
@@ -143,44 +169,46 @@ void AppendProfileArgs(const base::FilePath& profile_path,
 #endif
 }
 
-#if !defined(OS_WIN)
-base::string16 GetAppShortcutsSubdirName() {
+#if !BUILDFLAG(IS_WIN)
+std::u16string GetAppShortcutsSubdirName() {
   if (chrome::GetChannel() == version_info::Channel::CANARY)
     return l10n_util::GetStringUTF16(IDS_APP_SHORTCUTS_SUBDIR_NAME_CANARY);
   return l10n_util::GetStringUTF16(IDS_APP_SHORTCUTS_SUBDIR_NAME);
 }
-#endif  // !defined(OS_WIN)
+#endif  // !BUILDFLAG(IS_WIN)
 
 ///////////////////////////////////////////////////////////////////////////////
 // DefaultWebClientWorker
 //
 
-void DefaultWebClientWorker::StartCheckIsDefault() {
+void DefaultWebClientWorker::StartCheckIsDefault(
+    DefaultWebClientWorkerCallback callback) {
   g_sequenced_task_runner.Get()->PostTask(
-      FROM_HERE,
-      base::BindOnce(&DefaultWebClientWorker::CheckIsDefault, this, false));
+      FROM_HERE, base::BindOnce(&DefaultWebClientWorker::CheckIsDefault, this,
+                                false, std::move(callback)));
 }
 
-void DefaultWebClientWorker::StartSetAsDefault() {
+void DefaultWebClientWorker::StartSetAsDefault(
+    DefaultWebClientWorkerCallback callback) {
   g_sequenced_task_runner.Get()->PostTask(
-      FROM_HERE, base::BindOnce(&DefaultWebClientWorker::SetAsDefault, this));
+      FROM_HERE, base::BindOnce(&DefaultWebClientWorker::SetAsDefault, this,
+                                std::move(callback)));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // DefaultWebClientWorker, protected:
 
-DefaultWebClientWorker::DefaultWebClientWorker(
-    const DefaultWebClientWorkerCallback& callback,
-    const char* worker_name)
-    : callback_(callback), worker_name_(worker_name) {}
+DefaultWebClientWorker::DefaultWebClientWorker(const char* worker_name)
+    : worker_name_(worker_name) {}
 
 DefaultWebClientWorker::~DefaultWebClientWorker() = default;
 
 void DefaultWebClientWorker::OnCheckIsDefaultComplete(
     DefaultWebClientState state,
-    bool is_following_set_as_default) {
+    bool is_following_set_as_default,
+    DefaultWebClientWorkerCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  UpdateUI(state);
+  RunCallback(std::move(callback), state);
 
   if (is_following_set_as_default)
     ReportSetDefaultResult(state);
@@ -189,24 +217,27 @@ void DefaultWebClientWorker::OnCheckIsDefaultComplete(
 ///////////////////////////////////////////////////////////////////////////////
 // DefaultWebClientWorker, private:
 
-void DefaultWebClientWorker::CheckIsDefault(bool is_following_set_as_default) {
+void DefaultWebClientWorker::CheckIsDefault(
+    bool is_following_set_as_default,
+    DefaultWebClientWorkerCallback callback) {
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
 
   DefaultWebClientState state = CheckIsDefaultImpl();
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&DefaultBrowserWorker::OnCheckIsDefaultComplete, this,
-                     state, is_following_set_as_default));
+                     state, is_following_set_as_default, std::move(callback)));
 }
 
-void DefaultWebClientWorker::SetAsDefault() {
+void DefaultWebClientWorker::SetAsDefault(
+    DefaultWebClientWorkerCallback callback) {
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
 
   // SetAsDefaultImpl will make sure the callback is executed exactly once.
-  SetAsDefaultImpl(
-      base::Bind(&DefaultWebClientWorker::CheckIsDefault, this, true));
+  SetAsDefaultImpl(base::BindOnce(&DefaultWebClientWorker::CheckIsDefault, this,
+                                  true, std::move(callback)));
 }
 
 void DefaultWebClientWorker::ReportSetDefaultResult(
@@ -219,29 +250,12 @@ void DefaultWebClientWorker::ReportSetDefaultResult(
       ->Add(state);
 }
 
-void DefaultWebClientWorker::UpdateUI(DefaultWebClientState state) {
-  if (!callback_.is_null()) {
-    switch (state) {
-      case NOT_DEFAULT:
-      case IS_DEFAULT:
-      case UNKNOWN_DEFAULT:
-      case OTHER_MODE_IS_DEFAULT:
-        callback_.Run(state);
-        return;
-      case NUM_DEFAULT_STATES:
-        break;
-    }
-    NOTREACHED();
-  }
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // DefaultBrowserWorker
 //
 
-DefaultBrowserWorker::DefaultBrowserWorker(
-    const DefaultWebClientWorkerCallback& callback)
-    : DefaultWebClientWorker(callback, "DefaultBrowser") {}
+DefaultBrowserWorker::DefaultBrowserWorker()
+    : DefaultWebClientWorker("DefaultBrowser") {}
 
 ///////////////////////////////////////////////////////////////////////////////
 // DefaultBrowserWorker, private:
@@ -253,32 +267,34 @@ DefaultWebClientState DefaultBrowserWorker::CheckIsDefaultImpl() {
 }
 
 void DefaultBrowserWorker::SetAsDefaultImpl(
-    const base::Closure& on_finished_callback) {
+    base::OnceClosure on_finished_callback) {
   switch (GetDefaultWebClientSetPermission()) {
     case SET_DEFAULT_NOT_ALLOWED:
-      NOTREACHED();
+      // This is a no-op on channels where set-default is not allowed, but not
+      // an error.
       break;
     case SET_DEFAULT_UNATTENDED:
       SetAsDefaultBrowser();
       break;
     case SET_DEFAULT_INTERACTIVE:
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       if (interactive_permitted_) {
         switch (ShellUtil::GetInteractiveSetDefaultMode()) {
           case ShellUtil::INTENT_PICKER:
             win::SetAsDefaultBrowserUsingIntentPicker();
             break;
           case ShellUtil::SYSTEM_SETTINGS:
-            win::SetAsDefaultBrowserUsingSystemSettings(on_finished_callback);
+            win::SetAsDefaultBrowserUsingSystemSettings(
+                std::move(on_finished_callback));
             // Early return because the function above takes care of calling
             // |on_finished_callback|.
             return;
         }
       }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
       break;
   }
-  on_finished_callback.Run();
+  std::move(on_finished_callback).Run();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -286,10 +302,8 @@ void DefaultBrowserWorker::SetAsDefaultImpl(
 //
 
 DefaultProtocolClientWorker::DefaultProtocolClientWorker(
-    const DefaultWebClientWorkerCallback& callback,
     const std::string& protocol)
-    : DefaultWebClientWorker(callback, "DefaultProtocolClient"),
-      protocol_(protocol) {}
+    : DefaultWebClientWorker("DefaultProtocolClient"), protocol_(protocol) {}
 
 ///////////////////////////////////////////////////////////////////////////////
 // DefaultProtocolClientWorker, protected:
@@ -304,7 +318,7 @@ DefaultWebClientState DefaultProtocolClientWorker::CheckIsDefaultImpl() {
 }
 
 void DefaultProtocolClientWorker::SetAsDefaultImpl(
-    const base::Closure& on_finished_callback) {
+    base::OnceClosure on_finished_callback) {
   switch (GetDefaultWebClientSetPermission()) {
     case SET_DEFAULT_NOT_ALLOWED:
       // Not allowed, do nothing.
@@ -313,7 +327,7 @@ void DefaultProtocolClientWorker::SetAsDefaultImpl(
       SetAsDefaultProtocolClient(protocol_);
       break;
     case SET_DEFAULT_INTERACTIVE:
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       if (interactive_permitted_) {
         switch (ShellUtil::GetInteractiveSetDefaultMode()) {
           case ShellUtil::INTENT_PICKER:
@@ -321,16 +335,16 @@ void DefaultProtocolClientWorker::SetAsDefaultImpl(
             break;
           case ShellUtil::SYSTEM_SETTINGS:
             win::SetAsDefaultProtocolClientUsingSystemSettings(
-                protocol_, on_finished_callback);
+                protocol_, std::move(on_finished_callback));
             // Early return because the function above takes care of calling
             // |on_finished_callback|.
             return;
         }
       }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
       break;
   }
-  on_finished_callback.Run();
+  std::move(on_finished_callback).Run();
 }
 
 }  // namespace shell_integration

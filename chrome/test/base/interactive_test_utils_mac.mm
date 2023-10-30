@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
 
+#include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_objc_class_swizzler.h"
@@ -17,6 +18,11 @@
 #include "ui/events/cocoa/cocoa_event_utils.h"
 #include "ui/events/event_constants.h"
 
+@interface NSApplication (Private)
+// (Apparently) forces the application to activate itself.
+- (void)_handleActivatedEvent:(id)arg1;
+@end
+
 namespace {
 
 // A helper singleton for sending key events as Quartz events to the window
@@ -24,12 +30,17 @@ namespace {
 class SendGlobalKeyEventsHelper {
  public:
   SendGlobalKeyEventsHelper();
+  SendGlobalKeyEventsHelper(const SendGlobalKeyEventsHelper&) = delete;
+  SendGlobalKeyEventsHelper& operator=(const SendGlobalKeyEventsHelper&) =
+      delete;
   ~SendGlobalKeyEventsHelper();
 
   // Callback for MockCrApplication.
   void ObserveSendEvent(NSEvent* event);
 
-  IMP original_send_event() const { return original_send_event_; }
+  void OriginalSendEvent(id receiver, SEL selector, NSEvent* event) {
+    scoped_swizzler_->InvokeOriginal<void, NSEvent*>(receiver, selector, event);
+  }
 
   void SendGlobalKeyEventsAndWait(int key_code, int modifier_flags);
 
@@ -39,15 +50,12 @@ class SendGlobalKeyEventsHelper {
                           bool key_down);
 
   std::unique_ptr<base::mac::ScopedObjCClassSwizzler> scoped_swizzler_;
-  IMP original_send_event_ = nullptr;
   base::ScopedCFTypeRef<CGEventSourceRef> event_source_;
   CGEventTapLocation event_tap_location_;
   base::RunLoop run_loop_;
   // First key code pressed in the event sequence. This is also the last key
   // code to be released and so it will be waited for.
-  base::Optional<int> first_key_down_code_;
-
-  DISALLOW_COPY_AND_ASSIGN(SendGlobalKeyEventsHelper);
+  absl::optional<int> first_key_down_code_;
 };
 
 SendGlobalKeyEventsHelper* g_global_key_events_helper = nullptr;
@@ -62,7 +70,7 @@ SendGlobalKeyEventsHelper* g_global_key_events_helper = nullptr;
 - (void)sendEvent:(NSEvent*)event {
   DCHECK(g_global_key_events_helper);
   g_global_key_events_helper->ObserveSendEvent(event);
-  g_global_key_events_helper->original_send_event()(self, _cmd, event);
+  g_global_key_events_helper->OriginalSendEvent(self, _cmd, event);
 }
 
 @end
@@ -78,7 +86,6 @@ SendGlobalKeyEventsHelper::SendGlobalKeyEventsHelper()
   scoped_swizzler_ = std::make_unique<base::mac::ScopedObjCClassSwizzler>(
       [BrowserCrApplication class], [MockCrApplication class],
       @selector(sendEvent:));
-  original_send_event_ = scoped_swizzler_->GetOriginalImplementation();
 }
 
 SendGlobalKeyEventsHelper::~SendGlobalKeyEventsHelper() {
@@ -143,7 +150,7 @@ void SendGlobalKeyEventsHelper::SendGlobalKeyEvent(int key_code,
   // Starting in 10.14, CGEventPost() pops up a modal that asks the user to
   // confirm whether the app should be allowed to use accessibility APIs, which
   // hangs tests on the bots. https://crbug.com/904403
-  DCHECK(base::mac::IsAtMostOS10_13());
+  DCHECK(base::mac::IsOS10_13());
 
   CGEventPost(event_tap_location_, key_event);
   if (key_down && !first_key_down_code_)
@@ -164,7 +171,11 @@ bool ShowAndFocusNativeWindow(gfx::NativeWindow native_window) {
   // Make sure an unbundled program can get the input focus.
   ProcessSerialNumber psn = { 0, kCurrentProcess };
   TransformProcessType(&psn,kProcessTransformToForegroundApplication);
-  [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
+  // We used to call [NSApp activateIgnoringOtherApps:YES] but this
+  // would not reliably activate the app, causing the window to never
+  // become key. This bit of private API appears to be the secret
+  // incantation that gets us what we want. See crbug.com/1215570 .
+  [[NSApplication sharedApplication] _handleActivatedEvent:nil];
 
   base::scoped_nsobject<WindowedNSNotificationObserver> async_waiter;
   if (![window isKeyWindow]) {

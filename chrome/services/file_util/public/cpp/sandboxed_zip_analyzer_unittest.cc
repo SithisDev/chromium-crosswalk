@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <stdint.h>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -17,21 +17,20 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/safe_browsing/archive_analyzer_results.h"
 #include "chrome/services/file_util/file_util_service.h"
-#include "chrome/services/file_util/public/mojom/constants.mojom.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "crypto/sha2.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 namespace {
 
 const char kAppInZipHistogramName[] =
     "SBClientDownload.ZipFileContainsAppDirectory";
 }
-#endif  // OS_MACOSX
+#endif  // BUILDFLAG(IS_MAC)
 
 class SandboxedZipAnalyzerTest : public ::testing::Test {
  protected:
@@ -48,35 +47,34 @@ class SandboxedZipAnalyzerTest : public ::testing::Test {
   // store a copy of an analyzer's results and then run a closure.
   class ResultsGetter {
    public:
-    ResultsGetter(const base::Closure& quit_closure,
+    ResultsGetter(base::OnceClosure quit_closure,
                   safe_browsing::ArchiveAnalyzerResults* results)
-        : quit_closure_(quit_closure), results_(results) {
+        : quit_closure_(std::move(quit_closure)), results_(results) {
       DCHECK(results);
       results->success = false;
     }
 
+    ResultsGetter(const ResultsGetter&) = delete;
+    ResultsGetter& operator=(const ResultsGetter&) = delete;
+
     SandboxedZipAnalyzer::ResultCallback GetCallback() {
-      return base::Bind(&ResultsGetter::OnZipAnalyzerResults,
-                        base::Unretained(this));
+      return base::BindOnce(&ResultsGetter::OnZipAnalyzerResults,
+                            base::Unretained(this));
     }
 
    private:
     void OnZipAnalyzerResults(
         const safe_browsing::ArchiveAnalyzerResults& results) {
       *results_ = results;
-      quit_closure_.Run();
+      std::move(quit_closure_).Run();
     }
 
-    base::Closure quit_closure_;
-    safe_browsing::ArchiveAnalyzerResults* results_;
-
-    DISALLOW_COPY_AND_ASSIGN(ResultsGetter);
+    base::OnceClosure quit_closure_;
+    raw_ptr<safe_browsing::ArchiveAnalyzerResults> results_;
   };
 
   SandboxedZipAnalyzerTest()
-      : browser_thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
-        file_util_service_(test_connector_factory_.RegisterInstance(
-            chrome::mojom::kFileUtilServiceName)) {}
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP) {}
 
   void SetUp() override {
     ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &dir_test_data_));
@@ -88,16 +86,17 @@ class SandboxedZipAnalyzerTest : public ::testing::Test {
   void RunAnalyzer(const base::FilePath& file_path,
                    safe_browsing::ArchiveAnalyzerResults* results) {
     DCHECK(results);
+    mojo::PendingRemote<chrome::mojom::FileUtilService> remote;
+    FileUtilService service(remote.InitWithNewPipeAndPassReceiver());
     base::RunLoop run_loop;
     ResultsGetter results_getter(run_loop.QuitClosure(), results);
     scoped_refptr<SandboxedZipAnalyzer> analyzer(new SandboxedZipAnalyzer(
-        file_path, results_getter.GetCallback(),
-        test_connector_factory_.GetDefaultConnector()));
+        file_path, results_getter.GetCallback(), std::move(remote)));
     analyzer->Start();
     run_loop.Run();
   }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   void ExpectPEHeaders(
       const BinaryData& data,
       const safe_browsing::ClientDownloadRequest_ArchivedBinary& binary) {
@@ -115,7 +114,7 @@ class SandboxedZipAnalyzerTest : public ::testing::Test {
   }
 #endif
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
   void ExpectMachOHeaders(
       const BinaryData& data,
       const safe_browsing::ClientDownloadRequest_ArchivedBinary& binary) {
@@ -147,22 +146,22 @@ class SandboxedZipAnalyzerTest : public ::testing::Test {
     EXPECT_FALSE(binary.digests().has_md5());
     ASSERT_TRUE(binary.has_length());
     EXPECT_EQ(data.length, binary.length());
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     // ExtractImageFeatures for Windows, which only works on PE
     // files.
     if (binary.file_basename().find(".exe") != std::string::npos) {
       ExpectPEHeaders(data, binary);
       return;
     }
-#endif  // OS_WIN
-#if defined(OS_MACOSX)
+#endif  // BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_MAC)
     // ExtractImageFeatures for Mac, which only works on MachO
     // files.
     if (binary.file_basename().find("executablefat") != std::string::npos) {
       ExpectMachOHeaders(data, binary);
       return;
     }
-#endif  // OS_MACOSX
+#endif  // BUILDFLAG(IS_MAC)
     // No signature/image headers should be extracted on the wrong platform
     // (e.g. analyzing .exe on Mac).
     ASSERT_FALSE(binary.has_signature());
@@ -176,18 +175,15 @@ class SandboxedZipAnalyzerTest : public ::testing::Test {
   static const BinaryData kSignedExe;
   static const BinaryData kJSEFile;
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
   static const uint8_t kUnsignedMachODigest[];
   static const uint8_t kSignedMachODigest[];
   static const BinaryData kUnsignedMachO;
   static const BinaryData kSignedMachO;
-#endif  // OS_MACOSX
+#endif  // BUILDFLAG(IS_MAC)
 
   base::FilePath dir_test_data_;
-  content::TestBrowserThreadBundle browser_thread_bundle_;
-  content::InProcessUtilityThreadHelper utility_thread_helper_;
-  service_manager::TestConnectorFactory test_connector_factory_;
-  FileUtilService file_util_service_;
+  content::BrowserTaskEnvironment task_environment_;
 };
 
 // static
@@ -228,7 +224,7 @@ const SandboxedZipAnalyzerTest::BinaryData SandboxedZipAnalyzerTest::kJSEFile =
         false,  // is_signed
 };
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 const uint8_t SandboxedZipAnalyzerTest::kUnsignedMachODigest[] = {
     0xe4, 0x62, 0xff, 0x75, 0x2f, 0xf9, 0xd8, 0x4e, 0x34, 0xd8, 0x43,
     0xe5, 0xd4, 0x6e, 0x20, 0x12, 0xad, 0xcb, 0xd4, 0x85, 0x40, 0xa8,
@@ -253,7 +249,7 @@ const SandboxedZipAnalyzerTest::BinaryData
         34176,
         true,  // !is_signed
 };
-#endif  // OS_MACOSX
+#endif  // BUILDFLAG(IS_MAC)
 
 TEST_F(SandboxedZipAnalyzerTest, NoBinaries) {
   safe_browsing::ArchiveAnalyzerResults results;
@@ -263,7 +259,10 @@ TEST_F(SandboxedZipAnalyzerTest, NoBinaries) {
   ASSERT_TRUE(results.success);
   EXPECT_FALSE(results.has_executable);
   EXPECT_FALSE(results.has_archive);
-  EXPECT_EQ(0, results.archived_binary.size());
+  ASSERT_EQ(1, results.archived_binary.size());
+  EXPECT_EQ(results.archived_binary[0].file_basename(), "simple_exe.txt");
+  EXPECT_FALSE(results.archived_binary[0].is_executable());
+  EXPECT_FALSE(results.archived_binary[0].is_archive());
 }
 
 TEST_F(SandboxedZipAnalyzerTest, OneUnsignedBinary) {
@@ -372,7 +371,7 @@ TEST_F(SandboxedZipAnalyzerTest, ZippedJSEFile) {
   EXPECT_TRUE(results.archived_archive_filenames.empty());
 }
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 TEST_F(SandboxedZipAnalyzerTest, ZippedAppWithUnsignedAndSignedExecutable) {
   base::HistogramTester histograms;
   histograms.ExpectTotalCount(kAppInZipHistogramName, 0);
@@ -405,4 +404,4 @@ TEST_F(SandboxedZipAnalyzerTest, ZippedAppWithUnsignedAndSignedExecutable) {
   EXPECT_TRUE(found_unsigned);
   EXPECT_TRUE(found_signed);
 }
-#endif  // OS_MACOSX
+#endif  // BUILDFLAG(IS_MAC)

@@ -1,18 +1,22 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_POLICY_CLOUD_REMOTE_COMMANDS_INVALIDATOR_H_
 #define CHROME_BROWSER_POLICY_CLOUD_REMOTE_COMMANDS_INVALIDATOR_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "components/invalidation/public/invalidation_handler.h"
+#include "components/invalidation/public/invalidation_util.h"
 #include "components/policy/proto/device_management_backend.pb.h"
-#include "google/cacheinvalidation/include/types.h"
 
 namespace invalidation {
 class InvalidationService;
+}  // namespace invalidation
+
+namespace invalidation {
+class Invalidation;
 }  // namespace invalidation
 
 namespace policy {
@@ -21,9 +25,12 @@ namespace policy {
 // services. It's not interacting with CloudPolicyClient/CloudPolicyCore
 // directly, instead, it handles the interacting with invalidation service
 // only and leaves interfaces to integrate with subclasses.
-class RemoteCommandsInvalidator : public syncer::InvalidationHandler {
+class RemoteCommandsInvalidator : public invalidation::InvalidationHandler {
  public:
-  RemoteCommandsInvalidator();
+  explicit RemoteCommandsInvalidator(std::string owner_name);
+  RemoteCommandsInvalidator(const RemoteCommandsInvalidator&) = delete;
+  RemoteCommandsInvalidator& operator=(const RemoteCommandsInvalidator&) =
+      delete;
   ~RemoteCommandsInvalidator() override;
 
   // Initialize this invalidator to pair with |invalidation_service|. Must be
@@ -50,12 +57,12 @@ class RemoteCommandsInvalidator : public syncer::InvalidationHandler {
   // Whether the invalidator currently has the ability to receive invalidations.
   bool invalidations_enabled() { return invalidations_enabled_; }
 
-  // syncer::InvalidationHandler:
-  void OnInvalidatorStateChange(syncer::InvalidatorState state) override;
+  // invalidation::InvalidationHandler:
+  void OnInvalidatorStateChange(invalidation::InvalidatorState state) override;
   void OnIncomingInvalidation(
-      const syncer::ObjectIdInvalidationMap& invalidation_map) override;
+      const invalidation::TopicInvalidationMap& invalidation_map) override;
   std::string GetOwnerName() const override;
-  bool IsPublicTopic(const syncer::Topic& topic) const override;
+  bool IsPublicTopic(const invalidation::Topic& topic) const override;
 
  protected:
   virtual void OnInitialize() = 0;
@@ -65,18 +72,24 @@ class RemoteCommandsInvalidator : public syncer::InvalidationHandler {
 
   // Subclasses must override this method to implement the actual remote
   // commands fetch.
-  virtual void DoRemoteCommandsFetch() = 0;
+  virtual void DoRemoteCommandsFetch(
+      const invalidation::Invalidation& invalidation) = 0;
 
-  // Subclasses must call this function to set the object id for remote command
+  // Subclasses must call this function to set the topic for remote command
   // invalidations.
   void ReloadPolicyData(const enterprise_management::PolicyData* policy);
 
  private:
-  // Registers the given object with the invalidation service.
-  void Register(const invalidation::ObjectId& object_id);
+  // Registers this handler with |invalidation_service_| if needed and
+  // subscribes to the given |topic| with the invalidation service.
+  void Register(const invalidation::Topic& topic);
 
-  // Unregisters the current object with the invalidation service.
+  // Unregisters this handler but keeps the current topic subscribed with
+  // the invalidation service.
   void Unregister();
+
+  // Unsubscribes from the current topics but keeps the registration as is.
+  void UnsubscribeFromTopics();
 
   // Updates invalidations_enabled_.
   void UpdateInvalidationsEnabled();
@@ -89,8 +102,11 @@ class RemoteCommandsInvalidator : public syncer::InvalidationHandler {
   };
   State state_ = SHUT_DOWN;
 
+  // The unique name to be returned with by GetOwnerName().
+  const std::string owner_name_;
+
   // The invalidation service.
-  invalidation::InvalidationService* invalidation_service_ = nullptr;
+  raw_ptr<invalidation::InvalidationService> invalidation_service_ = nullptr;
 
   // Whether the invalidator currently has the ability to receive invalidations.
   // This is true if the invalidation service is enabled and the invalidator
@@ -103,14 +119,12 @@ class RemoteCommandsInvalidator : public syncer::InvalidationHandler {
   // Whether this object has registered for remote commands invalidations.
   bool is_registered_ = false;
 
-  // The object id representing the remote commands in the invalidation service.
-  invalidation::ObjectId object_id_;
+  // The Topic representing the remote commands in the invalidation service.
+  invalidation::Topic topic_;
 
   // A thread checker to make sure that callbacks are invoked on the correct
   // thread.
   base::ThreadChecker thread_checker_;
-
-  DISALLOW_COPY_AND_ASSIGN(RemoteCommandsInvalidator);
 };
 
 }  // namespace policy

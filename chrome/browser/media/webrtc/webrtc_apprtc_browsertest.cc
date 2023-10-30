@@ -1,8 +1,9 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/rand_util.h"
@@ -10,16 +11,17 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/infobars/infobar_responder.h"
-#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/media/webrtc/webrtc_browsertest_base.h"
 #include "chrome/browser/media/webrtc/webrtc_browsertest_common.h"
-#include "chrome/browser/permissions/permission_request_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/infobars/content/content_infobar_manager.h"
+#include "components/permissions/permission_request_manager.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "media/base/media_switches.h"
 #include "net/test/python_utils.h"
@@ -51,6 +53,7 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
     command_line->AppendSwitch(switches::kUseGpuInTests);
     // This test fails on some Mac bots if no default devices are specified on
     // the command line.
+    command_line->RemoveSwitch(switches::kUseFakeDeviceForMediaStream);
     base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         switches::kUseFakeDeviceForMediaStream,
         "audio-input-default-id=default,video-input-default-id=default");
@@ -69,9 +72,9 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
 
  protected:
   bool LaunchApprtcInstanceOnLocalhost(const std::string& port) {
-    base::FilePath appengine_dev_appserver =
-        GetSourceDir().Append(FILE_PATH_LITERAL(
-            "out/apprtc/temp/google-cloud-sdk/bin/dev_appserver.py"));
+    base::FilePath appengine_dev_appserver = GetSourceDir().Append(
+        FILE_PATH_LITERAL("third_party/webrtc/rtc_tools/testing/browsertest/"
+                          "apprtc/temp/google-cloud-sdk/bin/dev_appserver.py"));
     if (!base::PathExists(appengine_dev_appserver)) {
       LOG(ERROR) << "Missing appengine sdk at " <<
           appengine_dev_appserver.value() << ".\n" <<
@@ -79,8 +82,9 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
       return false;
     }
 
-    base::FilePath apprtc_dir =
-        GetSourceDir().Append(FILE_PATH_LITERAL("out/apprtc/out/app_engine"));
+    base::FilePath apprtc_dir = GetSourceDir().Append(
+        FILE_PATH_LITERAL("third_party/webrtc/rtc_tools/testing/"
+                          "browsertest/apprtc/out/app_engine"));
     if (!base::PathExists(apprtc_dir)) {
       LOG(ERROR) << "Missing AppRTC AppEngine app at " <<
           apprtc_dir.value() << ".\n" << test::kAdviseOnGclientSolution;
@@ -94,7 +98,7 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
     }
 
     base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
-    EXPECT_TRUE(GetPythonCommand(&command_line));
+    EXPECT_TRUE(GetPython3Command(&command_line));
 
     command_line.AppendArgPath(appengine_dev_appserver);
     command_line.AppendArgPath(apprtc_dir);
@@ -112,12 +116,14 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
                                  const std::string& collider_port) {
     // The go workspace should be created, and collidermain built, at the
     // runhooks stage when webrtc.DEPS/build_apprtc_collider.py runs.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     base::FilePath collider_server = GetSourceDir().Append(
-        FILE_PATH_LITERAL("out/collider/collidermain.exe"));
+        FILE_PATH_LITERAL("third_party/webrtc/rtc_tools/testing/"
+                          "browsertest/collider/collidermain.exe"));
 #else
-    base::FilePath collider_server =
-        GetSourceDir().Append(FILE_PATH_LITERAL("out/collider/collidermain"));
+    base::FilePath collider_server = GetSourceDir().Append(
+        FILE_PATH_LITERAL("third_party/webrtc/rtc_tools/testing/"
+                          "browsertest/collider/collidermain"));
 #endif
     if (!base::PathExists(collider_server)) {
       LOG(ERROR) << "Missing Collider server binary at " <<
@@ -138,7 +144,8 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
 
   bool LocalApprtcInstanceIsUp() {
     // Load the admin page and see if we manage to load it right.
-    ui_test_utils::NavigateToURL(browser(), GURL("localhost:9998"));
+    EXPECT_TRUE(
+        ui_test_utils::NavigateToURL(browser(), GURL("http://localhost:9998")));
     content::WebContents* tab_contents =
         browser()->tab_strip_model()->GetActiveWebContents();
     std::string javascript =
@@ -222,11 +229,13 @@ IN_PROC_BROWSER_TEST_F(WebRtcApprtcBrowserTest, MANUAL_WorksOnApprtc) {
   chrome::AddTabAt(browser(), GURL(), -1, true);
   content::WebContents* left_tab =
       browser()->tab_strip_model()->GetActiveWebContents();
-  PermissionRequestManager::FromWebContents(left_tab)
-      ->set_auto_response_for_test(PermissionRequestManager::ACCEPT_ALL);
+  permissions::PermissionRequestManager::FromWebContents(left_tab)
+      ->set_auto_response_for_test(
+          permissions::PermissionRequestManager::ACCEPT_ALL);
   InfoBarResponder left_infobar_responder(
-      InfoBarService::FromWebContents(left_tab), InfoBarResponder::ACCEPT);
-  ui_test_utils::NavigateToURL(browser(), room_url);
+      infobars::ContentInfoBarManager::FromWebContents(left_tab),
+      InfoBarResponder::ACCEPT);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), room_url));
 
   // Wait for the local video to start playing. This is needed, because opening
   // a new tab too quickly, by sending the current tab to the background, can
@@ -239,11 +248,13 @@ IN_PROC_BROWSER_TEST_F(WebRtcApprtcBrowserTest, MANUAL_WorksOnApprtc) {
   chrome::AddTabAt(browser(), GURL(), -1, true);
   content::WebContents* right_tab =
       browser()->tab_strip_model()->GetActiveWebContents();
-  PermissionRequestManager::FromWebContents(right_tab)
-      ->set_auto_response_for_test(PermissionRequestManager::ACCEPT_ALL);
+  permissions::PermissionRequestManager::FromWebContents(right_tab)
+      ->set_auto_response_for_test(
+          permissions::PermissionRequestManager::ACCEPT_ALL);
   InfoBarResponder right_infobar_responder(
-      InfoBarService::FromWebContents(right_tab), InfoBarResponder::ACCEPT);
-  ui_test_utils::NavigateToURL(browser(), room_url);
+      infobars::ContentInfoBarManager::FromWebContents(right_tab),
+      InfoBarResponder::ACCEPT);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), room_url));
 
   ASSERT_TRUE(WaitForCallToComeUp(left_tab));
   ASSERT_TRUE(WaitForCallToComeUp(right_tab));

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,15 +39,10 @@ function test() {
       assertRuntimeIsRegistered();
       assertStorageIsRegistered();
 
-      var jsBindingsError =
-          "'storage' requires a different Feature that is not present.";
-      var nativeBindingsError =
-          "'storage.get' is not available in this context.";
-      var regexp = new RegExp(nativeBindingsError + '|' + jsBindingsError);
       // Although storage should throw an error on use since it's removed.
       chrome.test.assertThrows(
           chrome.storage.local.get, chrome.storage.local, [function(){}],
-          regexp);
+          `'storage.get' is not available in this context.`);
 
       chrome.test.succeed();
     }));

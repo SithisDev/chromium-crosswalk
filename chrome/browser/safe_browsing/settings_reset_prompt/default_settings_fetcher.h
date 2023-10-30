@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@ namespace safe_browsing {
 class DefaultSettingsFetcher {
  public:
   using SettingsCallback =
-      base::Callback<void(std::unique_ptr<BrandcodedDefaultSettings>)>;
+      base::OnceCallback<void(std::unique_ptr<BrandcodedDefaultSettings>)>;
 
   // Fetches default settings and passes the corresponding
   // |BrandcodedDefaultSettings| object to |callback| on the UI thread. This

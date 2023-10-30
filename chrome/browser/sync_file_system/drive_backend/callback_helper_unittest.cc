@@ -1,14 +1,15 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync_file_system/drive_backend/callback_helper.h"
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/location.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -30,7 +31,7 @@ void CallbackWithPassed(bool* called, std::unique_ptr<int>) {
   *called = true;
 }
 
-void VerifyCalledOnTaskRunner(base::TaskRunner* task_runner,
+void VerifyCalledOnTaskRunner(base::SingleThreadTaskRunner* task_runner,
                               bool* called) {
   ASSERT_TRUE(called);
   ASSERT_TRUE(task_runner);
@@ -43,19 +44,19 @@ void VerifyCalledOnTaskRunner(base::TaskRunner* task_runner,
 }  // namespace
 
 TEST(DriveBackendCallbackHelperTest, BasicTest) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
 
   bool called = false;
-  RelayCallbackToCurrentThread(
-      FROM_HERE,
-      base::Bind(&SimpleCallback, &called)).Run(0);
+  RelayCallbackToCurrentThread(FROM_HERE,
+                               base::BindOnce(&SimpleCallback, &called))
+      .Run(0);
   EXPECT_FALSE(called);
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(called);
 
   called = false;
   RelayCallbackToCurrentThread(FROM_HERE,
-                               base::Bind(&CallbackWithPassed, &called))
+                               base::BindOnce(&CallbackWithPassed, &called))
       .Run(std::unique_ptr<int>(new int));
   EXPECT_FALSE(called);
   base::RunLoop().RunUntilIdle();
@@ -63,7 +64,7 @@ TEST(DriveBackendCallbackHelperTest, BasicTest) {
 }
 
 TEST(DriveBackendCallbackHelperTest, RunOnOtherThreadTest) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
   base::Thread thread("WorkerThread");
   thread.Start();
 
@@ -75,10 +76,11 @@ TEST(DriveBackendCallbackHelperTest, RunOnOtherThreadTest) {
   bool called = false;
   base::RunLoop run_loop;
   worker_task_runner->PostTask(
-      FROM_HERE, RelayCallbackToTaskRunner(
-                     ui_task_runner.get(), FROM_HERE,
-                     base::Bind(&VerifyCalledOnTaskRunner,
-                                base::RetainedRef(ui_task_runner), &called)));
+      FROM_HERE,
+      RelayCallbackToTaskRunner(
+          ui_task_runner.get(), FROM_HERE,
+          base::BindOnce(&VerifyCalledOnTaskRunner,
+                         base::RetainedRef(ui_task_runner), &called)));
   worker_task_runner->PostTask(
       FROM_HERE,
       RelayCallbackToTaskRunner(
@@ -91,10 +93,9 @@ TEST(DriveBackendCallbackHelperTest, RunOnOtherThreadTest) {
 }
 
 TEST(DriveBackendCallbackHelperTest, PassNullFunctionTest) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
-  base::Closure closure = RelayCallbackToCurrentThread(
-      FROM_HERE,
-      base::Closure());
+  base::test::SingleThreadTaskEnvironment task_environment;
+  base::OnceClosure closure =
+      RelayCallbackToCurrentThread(FROM_HERE, base::OnceClosure());
   EXPECT_TRUE(closure.is_null());
 }
 

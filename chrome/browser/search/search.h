@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 class GURL;
 class Profile;
-class TemplateURLService;
 
 namespace content {
 class BrowserContext;
@@ -21,8 +20,6 @@ namespace search {
 
 // Returns whether Google is selected as the default search engine.
 bool DefaultSearchProviderIsGoogle(Profile* profile);
-bool DefaultSearchProviderIsGoogle(
-    const TemplateURLService* template_url_service);
 
 // Returns true if |url| corresponds to a New Tab page or its service worker.
 bool IsNTPOrRelatedURL(const GURL& url, Profile* profile);
@@ -47,13 +44,14 @@ bool IsInstantNTPURL(const GURL& url, Profile* profile);
 // Returns the New Tab page URL for the given |profile|.
 GURL GetNewTabPageURL(Profile* profile);
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 
 // Returns true if |url| should be rendered in the Instant renderer process.
 bool ShouldAssignURLToInstantRenderer(const GURL& url, Profile* profile);
 
-// Returns true if the Instant |url| should use process per site.
-bool ShouldUseProcessPerSiteForInstantURL(const GURL& url, Profile* profile);
+// Returns true if the Instant |site_url| should use process per site.
+bool ShouldUseProcessPerSiteForInstantSiteURL(const GURL& site_url,
+                                              Profile* profile);
 
 // Transforms the input |url| into its "effective URL". |url| must be an
 // Instant URL, i.e. ShouldAssignURLToInstantRenderer must return true. The
@@ -76,16 +74,18 @@ bool ShouldUseProcessPerSiteForInstantURL(const GURL& url, Profile* profile);
 GURL GetEffectiveURLForInstant(const GURL& url, Profile* profile);
 
 // Rewrites |url| to the actual NTP URL to use if
-//   1. |url| is "chrome://newtab",
+//   1. |url| is "chrome://newtab" or starts with "chrome-search://local-ntp",
 //   2. InstantExtended is enabled, and
 //   3. |browser_context| doesn't correspond to an incognito profile.
+// chrome://new-tab-page or chrome://new-tab-page-third-party to handle
+// unexplained usage.
 bool HandleNewTabURLRewrite(GURL* url,
                             content::BrowserContext* browser_context);
 // Reverses the operation from HandleNewTabURLRewrite.
 bool HandleNewTabURLReverseRewrite(GURL* url,
                                    content::BrowserContext* browser_context);
 
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace search
 

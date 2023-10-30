@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,20 +6,19 @@
 #define CHROME_BROWSER_UI_VIEWS_DEVICE_CHOOSER_CONTENT_VIEW_H_
 
 #include <memory>
+#include <string>
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/chooser_controller/chooser_controller.h"
+#include "base/memory/raw_ptr.h"
+#include "components/permissions/chooser_controller.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/base/models/table_model.h"
 #include "ui/gfx/range/range.h"
-#include "ui/views/controls/button/button.h"
-#include "ui/views/controls/label.h"
-#include "ui/views/controls/styled_label_listener.h"
 #include "ui/views/view.h"
 
 namespace views {
+class Checkbox;
+class Label;
 class LabelButton;
-class StyledLabel;
 class TableView;
 class TableViewObserver;
 class Throbber;
@@ -29,94 +28,85 @@ class Throbber;
 // Used for WebUSB/WebBluetooth device selection for Chrome and extensions.
 class DeviceChooserContentView : public views::View,
                                  public ui::TableModel,
-                                 public ChooserController::View,
-                                 public views::StyledLabelListener,
-                                 public views::ButtonListener {
+                                 public permissions::ChooserController::View {
  public:
+  METADATA_HEADER(DeviceChooserContentView);
   DeviceChooserContentView(
       views::TableViewObserver* table_view_observer,
-      std::unique_ptr<ChooserController> chooser_controller);
+      std::unique_ptr<permissions::ChooserController> chooser_controller);
+  DeviceChooserContentView(const DeviceChooserContentView&) = delete;
+  DeviceChooserContentView& operator=(const DeviceChooserContentView&) = delete;
   ~DeviceChooserContentView() override;
 
   // views::View:
   gfx::Size GetMinimumSize() const override;
-  void Layout() override;
-  gfx::Size CalculatePreferredSize() const override;
 
   // ui::TableModel:
-  int RowCount() override;
-  base::string16 GetText(int row, int column_id) override;
+  size_t RowCount() override;
+  std::u16string GetText(size_t row, int column_id) override;
   void SetObserver(ui::TableModelObserver* observer) override;
-  gfx::ImageSkia GetIcon(int row) override;
+  ui::ImageModel GetIcon(size_t row) override;
 
-  // ChooserController::View:
+  // permissions::ChooserController::View:
   void OnOptionsInitialized() override;
   void OnOptionAdded(size_t index) override;
   void OnOptionRemoved(size_t index) override;
   void OnOptionUpdated(size_t index) override;
   void OnAdapterEnabledChanged(bool enabled) override;
+  void OnAdapterAuthorizationChanged(bool authorized) override;
   void OnRefreshStateChanged(bool refreshing) override;
 
-  // views::StyledLabelListener:
-  void StyledLabelLinkClicked(views::StyledLabel* label,
-                              const gfx::Range& range,
-                              int event_flags) override;
-
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
-  base::string16 GetWindowTitle() const;
+  // Note that there is no way to update the window title - for any given
+  // instance of DeviceChooserContentView, this method is only called once to
+  // initially set the window title.
+  std::u16string GetWindowTitle() const;
   std::unique_ptr<views::View> CreateExtraView();
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const;
   bool IsDialogButtonEnabled(ui::DialogButton button) const;
   void Accept();
   void Cancel();
   void Close();
   void UpdateTableView();
+  void SelectAllCheckboxChanged();
+
+  void ShowThrobber();
+  void HideThrobber();
+  void ShowReScanButton(bool enable);
+
+  // Test-only accessors to children.
+  views::TableView* table_view_for_testing() { return table_view_; }
+  views::LabelButton* ReScanButtonForTesting();
+  views::Throbber* ThrobberForTesting();
+  views::Label* ThrobberLabelForTesting();
 
  private:
-  friend class ChooserDialogViewTest;
   friend class DeviceChooserContentViewTest;
-  FRIEND_TEST_ALL_PREFIXES(DeviceChooserContentViewTest, ClickRescanLink);
-  FRIEND_TEST_ALL_PREFIXES(DeviceChooserContentViewTest, ClickGetHelpLink);
 
-  class BluetoothStatusContainer : public views::View {
-   public:
-    explicit BluetoothStatusContainer(views::ButtonListener* listener);
+  std::unique_ptr<permissions::ChooserController> chooser_controller_;
 
-    // view::Views:
-    gfx::Size CalculatePreferredSize() const override;
-    void Layout() override;
-
-    void ShowScanningLabelAndThrobber();
-    void ShowReScanButton(bool enabled);
-
-    views::LabelButton* re_scan_button() { return re_scan_button_; }
-    views::Throbber* throbber() { return throbber_; }
-    views::Label* scanning_label() { return scanning_label_; }
-
-   private:
-    int GetThrobberLabelSpacing() const;
-    void CenterVertically(views::View* view);
-
-    views::LabelButton* re_scan_button_;
-    views::Throbber* throbber_;
-    views::Label* scanning_label_;
-
-    DISALLOW_COPY_AND_ASSIGN(BluetoothStatusContainer);
-  };
-
-  std::unique_ptr<ChooserController> chooser_controller_;
-
+  // Boolean reflecting the status of the device adapter. For example if the
+  // user has bluetooth turned on or off on their device. This is used to
+  // ensure the users are always informed as to what is needed to get the
+  // devices working.
   bool adapter_enabled_ = true;
 
-  views::TableView* table_view_ = nullptr;
-  views::View* table_parent_ = nullptr;
-  views::Label* no_options_help_ = nullptr;
-  views::StyledLabel* adapter_off_help_ = nullptr;
-  BluetoothStatusContainer* bluetooth_status_container_ = nullptr;
+  // Boolean reflecting the browsers authorization state. Currently only
+  // Bluetooth on macOS requires applications to acquire permission. This
+  // is used to ensure the users are always informed as to what is needed
+  // to get the devices working in the browser.
+  bool adapter_authorized_ = true;
 
-  DISALLOW_COPY_AND_ASSIGN(DeviceChooserContentView);
+  raw_ptr<views::ScrollView> table_parent_ = nullptr;
+  raw_ptr<views::Checkbox> select_all_view_ = nullptr;
+  raw_ptr<views::TableView> table_view_ = nullptr;
+  raw_ptr<views::View> no_options_view_ = nullptr;
+  raw_ptr<views::View> adapter_off_view_ = nullptr;
+  raw_ptr<views::LabelButton> re_scan_button_ = nullptr;
+  raw_ptr<views::Throbber> throbber_ = nullptr;
+  raw_ptr<views::Label> throbber_label_ = nullptr;
+  raw_ptr<views::View> adapter_unauthorized_view_ = nullptr;
+
+  bool is_initialized_ = false;
+  base::CallbackListSubscription select_all_subscription_;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_DEVICE_CHOOSER_CONTENT_VIEW_H_

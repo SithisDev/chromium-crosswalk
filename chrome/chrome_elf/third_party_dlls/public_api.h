@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,6 +64,9 @@ uint32_t GetLogEntrySize(uint32_t path_len);
 }  // namespace third_party_dlls
 
 // Exported API for calling from outside chrome_elf.dll.
+
+// Third-party DLL control is enabled and initialized in this process.
+extern "C" bool IsThirdPartyInitialized();
 
 // Drains the load attempt LogEntries into the provided buffer.
 // - Returns the number of bytes written.  See comments above for LogEntry

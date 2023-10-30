@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,8 +90,9 @@ bool SignatureMatcher::RetrieveVersionInformation(
   if (!version.get())
     return false;
 
-  information->company_name = version->company_name();
-  information->original_filename = version->original_filename();
+  information->company_name = base::AsWString(version->company_name());
+  information->original_filename =
+      base::AsWString(version->original_filename());
   return true;
 }
 

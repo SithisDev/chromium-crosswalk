@@ -1,209 +1,358 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
 
+#include <stdint.h>
 #include <algorithm>
+#include <set>
+#include <utility>
 
 #include "base/bind.h"
+#include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
-#include "chrome/browser/profiles/profile.h"
+#include "base/no_destructor.h"
+#include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/ui/tabs/tab_style.h"
-#include "chrome/browser/ui/thumbnails/thumbnail_utils.h"
+#include "chrome/browser/ui/thumbnails/background_thumbnail_video_capturer.h"
+#include "chrome/browser/ui/thumbnails/thumbnail_capture_driver.h"
+#include "chrome/browser/ui/thumbnails/thumbnail_readiness_tracker.h"
+#include "chrome/browser/ui/thumbnails/thumbnail_scheduler.h"
+#include "chrome/browser/ui/thumbnails/thumbnail_scheduler_impl.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/geometry/size_f.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/scrollbar_size.h"
+#include "ui/native_theme/native_theme.h"
 
 namespace {
 
-// Determine if two URLs are similar enough that we should not blank the preview
-// image when transitioning between them. This prevents webapps which do all of
-// their work through internal page transitions (and which can transition after
-// the page is loaded) from blanking randomly.
-bool AreSimilarURLs(const GURL& url1, const GURL& url2) {
-  const GURL origin1 = url1.GetOrigin();
+// Minimum scale factor to capture thumbnail images at. At 1.0x we want to
+// slightly over-sample the image so that it looks good for multiple uses and
+// cropped to different dimensions.
+constexpr float kMinThumbnailScaleFactor = 1.5f;
 
-  // For non-standard URLs, compare using normal logic.
-  if (origin1.is_empty())
-    return url1.EqualsIgnoringRef(url2);
+gfx::Size GetMinimumThumbnailSize() {
+  // Minimum thumbnail dimension (in DIP) for tablet tabstrip previews.
+  constexpr int kMinThumbnailDimensionForTablet = 175;
 
-  // TODO(dfried): make this logic a little smarter; maybe compare the first
-  // element of the path as well?
-  return origin1 == url2.GetOrigin();
+  // Compute minimum sizes for multiple uses of the thumbnail - currently,
+  // tablet tabstrip previews and tab hover card preview images.
+  gfx::Size min_target_size = TabStyle::GetPreviewImageSize();
+  min_target_size.SetToMax(
+      {kMinThumbnailDimensionForTablet, kMinThumbnailDimensionForTablet});
+
+  return min_target_size;
 }
 
-}  // namespace
+}  // anonymous namespace
+
+// ThumbnailTabHelper::CaptureType ---------------------------------------
+
+enum class ThumbnailTabHelper::CaptureType {
+  // The image was copied directly from a visible RenderWidgetHostView.
+  kCopyFromView = 0,
+  // The image is a frame from a background tab video capturer.
+  kVideoFrame = 1,
+
+  kMaxValue = kVideoFrame,
+};
+
+// ThumbnailTabHelper::TabStateTracker ---------------------------
+
+// Stores information about the state of the current WebContents and renderer.
+class ThumbnailTabHelper::TabStateTracker
+    : public content::WebContentsObserver,
+      public ThumbnailCaptureDriver::Client,
+      public ThumbnailImage::Delegate {
+ public:
+  TabStateTracker(ThumbnailTabHelper* thumbnail_tab_helper,
+                  content::WebContents* contents)
+      : content::WebContentsObserver(contents),
+        thumbnail_tab_helper_(thumbnail_tab_helper),
+        readiness_tracker_(
+            contents,
+            base::BindRepeating(&TabStateTracker::PageReadinessChanged,
+                                base::Unretained(this))) {
+    visible_ =
+        (web_contents()->GetVisibility() == content::Visibility::VISIBLE);
+  }
+  ~TabStateTracker() override = default;
+
+  // Returns the host view associated with the current web contents, or null if
+  // none.
+  content::RenderWidgetHostView* GetView() {
+    auto* const contents = web_contents();
+    return contents ? contents->GetPrimaryMainFrame()
+                          ->GetRenderViewHost()
+                          ->GetWidget()
+                          ->GetView()
+                    : nullptr;
+  }
+
+  // Returns true if we are capturing thumbnails from a tab and should continue
+  // to do so, false if we should stop.
+  bool ShouldContinueVideoCapture() const { return !!scoped_capture_; }
+
+  // Tells our scheduling logic that a frame was received.
+  void OnFrameCaptured(CaptureType capture_type) {
+    if (capture_type == CaptureType::kVideoFrame)
+      capture_driver_.GotFrame();
+  }
+
+ private:
+  using CaptureReadinesss = ThumbnailImage::CaptureReadiness;
+
+  // ThumbnailCaptureDriver::Client:
+  void RequestCapture() override {
+    if (!scoped_capture_) {
+      scoped_capture_ = web_contents()->IncrementCapturerCount(
+          gfx::Size(), /*stay_hidden=*/true,
+          /*stay_awake=*/false);
+    }
+  }
+
+  void StartCapture() override {
+    DCHECK(scoped_capture_);
+    thumbnail_tab_helper_->StartVideoCapture();
+  }
+
+  void StopCapture() override {
+    thumbnail_tab_helper_->StopVideoCapture();
+    scoped_capture_.RunAndReset();
+  }
+
+  // content::WebContentsObserver:
+  void OnVisibilityChanged(content::Visibility visibility) override {
+    const bool new_visible = (visibility == content::Visibility::VISIBLE);
+    if (new_visible == visible_)
+      return;
+
+    visible_ = new_visible;
+    capture_driver_.UpdatePageVisibility(visible_);
+    if (!visible_ && page_readiness_ != CaptureReadinesss::kNotReady)
+      thumbnail_tab_helper_->CaptureThumbnailOnTabHidden();
+  }
+
+  void RenderViewReady() override { capture_driver_.SetCanCapture(true); }
+
+  void PrimaryMainFrameRenderProcessGone(
+      base::TerminationStatus status) override {
+    // TODO(crbug.com/1073141): determine if there are other ways to
+    // lose the view.
+    capture_driver_.SetCanCapture(false);
+  }
+
+  // ThumbnailImage::Delegate:
+  void ThumbnailImageBeingObservedChanged(bool is_being_observed) override {
+    capture_driver_.UpdateThumbnailVisibility(is_being_observed);
+    if (is_being_observed)
+      web_contents()->GetController().LoadIfNecessary();
+  }
+
+  ThumbnailImage::CaptureReadiness GetCaptureReadiness() const override {
+    return page_readiness_;
+  }
+
+  void PageReadinessChanged(CaptureReadinesss readiness) {
+    if (page_readiness_ == readiness)
+      return;
+    // If we transition back to a kNotReady state, clear any existing thumbnail,
+    // as it will contain an old snapshot, possibly from a different domain.
+    if (readiness == CaptureReadinesss::kNotReady)
+      thumbnail_tab_helper_->ClearData();
+    page_readiness_ = readiness;
+    capture_driver_.UpdatePageReadiness(readiness);
+  }
+
+  const raw_ptr<ThumbnailTabHelper> thumbnail_tab_helper_;
+
+  ThumbnailCaptureDriver capture_driver_{
+      this, &thumbnail_tab_helper_->GetScheduler()};
+  ThumbnailReadinessTracker readiness_tracker_;
+
+  // The last known visibility WebContents visibility.
+  bool visible_ = false;
+
+  // Where we are in the page lifecycle.
+  CaptureReadinesss page_readiness_ = CaptureReadinesss::kNotReady;
+
+  // Scoped request for video capture.
+  base::ScopedClosureRunner scoped_capture_;
+};
+
+// ThumbnailTabHelper ----------------------------------------------------
 
 ThumbnailTabHelper::ThumbnailTabHelper(content::WebContents* contents)
-    : view_is_visible_(contents->GetVisibility() ==
-                       content::Visibility::VISIBLE),
-      adapter_(contents),
-      scoped_observer_(this) {
-  scoped_observer_.Add(&adapter_);
+    : content::WebContentsUserData<ThumbnailTabHelper>(*contents),
+      state_(std::make_unique<TabStateTracker>(this, contents)),
+      background_capturer_(std::make_unique<BackgroundThumbnailVideoCapturer>(
+          contents,
+          base::BindRepeating(
+              &ThumbnailTabHelper::StoreThumbnailForBackgroundCapture,
+              base::Unretained(this)))),
+      thumbnail_(base::MakeRefCounted<ThumbnailImage>(state_.get())) {}
+
+ThumbnailTabHelper::~ThumbnailTabHelper() {
+  StopVideoCapture();
 }
 
-ThumbnailTabHelper::~ThumbnailTabHelper() = default;
-
-void ThumbnailTabHelper::TopLevelNavigationStarted(const GURL& url) {
-  TransitionLoadingState(LoadingState::kNavigationStarted, url);
+// static
+ThumbnailScheduler& ThumbnailTabHelper::GetScheduler() {
+  static base::NoDestructor<ThumbnailSchedulerImpl> instance;
+  return *instance.get();
 }
 
-void ThumbnailTabHelper::TopLevelNavigationEnded(const GURL& url) {
-  TransitionLoadingState(LoadingState::kNavigationFinished, url);
-}
+void ThumbnailTabHelper::CaptureThumbnailOnTabHidden() {
+  const base::TimeTicks time_of_call = base::TimeTicks::Now();
 
-void ThumbnailTabHelper::PageLoadStarted() {
-  TransitionLoadingState(LoadingState::kLoadStarted,
-                         web_contents()->GetVisibleURL());
-}
+  // Ignore previous requests to capture a thumbnail on tab switch.
+  weak_factory_for_thumbnail_on_tab_hidden_.InvalidateWeakPtrs();
 
-void ThumbnailTabHelper::PagePainted() {
-  page_painted_ = true;
-}
-
-void ThumbnailTabHelper::PageLoadFinished() {
-  TransitionLoadingState(LoadingState::kLoadFinished,
-                         web_contents()->GetVisibleURL());
-}
-
-void ThumbnailTabHelper::VisibilityChanged(bool visible) {
-  // When the user switches away from a tab, we want to take a snapshot to
-  // capture e.g. its scroll position, so that the preview will look like the
-  // tab did when the user last visited it.
-  const bool was_visible = view_is_visible_;
-  view_is_visible_ = visible;
-  if (was_visible && !visible) {
-    StartThumbnailCapture();
-  }
-}
-
-void ThumbnailTabHelper::StartThumbnailCapture() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-
-  // Pages that are unloading do not need to be captured.
-  if (adapter_.is_unloading())
-    return;
-
-  // Don't capture if in the process of navigating or haven't started yet.
-  if (loading_state_ == LoadingState::kNone ||
-      loading_state_ == LoadingState::kNavigationStarted) {
-    return;
-  }
-
-  // Don't capture if there is no current page.
-  if (web_contents()->GetVisibleURL().is_empty())
-    return;
-
-  // Don't capture pages that have not been loading and visible long enough to
-  // actually paint.
-  if (!page_painted_)
-    return;
-
-  content::RenderWidgetHostView* const source_view =
-      web_contents()->GetRenderViewHost()->GetWidget()->GetView();
-
-  // If there's no view or the view isn't available right now, don't bother.
-  if (!source_view || !source_view->IsSurfaceAvailableForCopy())
+  // Get the WebContents' main view. Note that during shutdown there may not be
+  // a view to capture.
+  content::RenderWidgetHostView* const source_view = state_->GetView();
+  if (!source_view)
     return;
 
   // Note: this is the size in pixels on-screen, not the size in DIPs.
   gfx::Size source_size = source_view->GetViewBounds().size();
-  // Clip the pixels that will commonly hold a scrollbar, which looks bad in
-  // thumbnails.
-  const float scale_factor = source_view->GetDeviceScaleFactor();
-  const int scrollbar_size = gfx::scrollbar_size() * scale_factor;
-  source_size.Enlarge(-scrollbar_size, -scrollbar_size);
-
   if (source_size.IsEmpty())
     return;
 
-  const gfx::Size desired_size = TabStyle::GetPreviewImageSize();
-  thumbnails::CanvasCopyInfo copy_info =
-      thumbnails::GetCanvasCopyInfo(source_size, scale_factor, desired_size);
+  const float scale_factor = source_view->GetDeviceScaleFactor();
+  ThumbnailCaptureInfo copy_info = GetInitialCaptureInfo(
+      source_size, scale_factor, /* include_scrollbars_in_capture */ false);
+
   source_view->CopyFromSurface(
       copy_info.copy_rect, copy_info.target_size,
-      base::BindOnce(&ThumbnailTabHelper::ProcessCapturedThumbnail,
-                     weak_factory_.GetWeakPtr(), base::TimeTicks::Now()));
+      base::BindOnce(&ThumbnailTabHelper::StoreThumbnailForTabSwitch,
+                     weak_factory_for_thumbnail_on_tab_hidden_.GetWeakPtr(),
+                     time_of_call));
 }
 
-void ThumbnailTabHelper::ProcessCapturedThumbnail(
-    base::TimeTicks start_time,
-    const SkBitmap& bitmap) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+void ThumbnailTabHelper::StoreThumbnailForTabSwitch(base::TimeTicks start_time,
+                                                    const SkBitmap& bitmap) {
+  UMA_HISTOGRAM_CUSTOM_TIMES("Tab.Preview.TimeToStoreAfterTabSwitch",
+                             base::TimeTicks::Now() - start_time,
+                             base::Milliseconds(1), base::Seconds(1), 50);
+  StoreThumbnail(CaptureType::kCopyFromView, bitmap, absl::nullopt);
+}
 
-  const base::TimeTicks finish_time = base::TimeTicks::Now();
-  const base::TimeDelta copy_from_surface_time = finish_time - start_time;
-  UMA_HISTOGRAM_TIMES("Thumbnails.CopyFromSurfaceTime", copy_from_surface_time);
+void ThumbnailTabHelper::StoreThumbnailForBackgroundCapture(
+    const SkBitmap& bitmap,
+    uint64_t frame_id) {
+  StoreThumbnail(CaptureType::kVideoFrame, bitmap, frame_id);
+}
 
+void ThumbnailTabHelper::StoreThumbnail(CaptureType type,
+                                        const SkBitmap& bitmap,
+                                        absl::optional<uint64_t> frame_id) {
+  // Failed requests will return an empty bitmap. In tests this can be triggered
+  // on threads other than the UI thread.
   if (bitmap.drawsNothing())
     return;
 
-  // TODO(dfried): Log capture succeeded.
-  ThumbnailImage::FromSkBitmapAsync(
-      bitmap, base::BindOnce(&ThumbnailTabHelper::StoreThumbnail,
-                             weak_factory_.GetWeakPtr(), finish_time));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  state_->OnFrameCaptured(type);
+  thumbnail_->AssignSkBitmap(bitmap, frame_id);
 }
 
-void ThumbnailTabHelper::StoreThumbnail(base::TimeTicks start_time,
-                                        ThumbnailImage thumbnail) {
-  DCHECK(thumbnail.HasData());
-  const base::TimeTicks finish_time = base::TimeTicks::Now();
-  const base::TimeDelta process_time = finish_time - start_time;
-  UMA_HISTOGRAM_TIMES("Thumbnails.ProcessBitmapTime", process_time);
-  thumbnail_ = thumbnail;
-
-  NotifyTabPreviewChanged();
+void ThumbnailTabHelper::ClearData() {
+  thumbnail_->ClearData();
 }
 
-void ThumbnailTabHelper::NotifyTabPreviewChanged() {
-  web_contents()->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
-}
-
-void ThumbnailTabHelper::TransitionLoadingState(LoadingState state,
-                                                const GURL& url) {
-  // Because the loading process is unpredictable, and because there are a large
-  // number of events which could be interpreted as navigation of the main frame
-  // or loading, only move the loading progress forward.
-  const bool is_similar_url = AreSimilarURLs(url, current_url_);
-  switch (state) {
-    case LoadingState::kNavigationStarted:
-    case LoadingState::kNavigationFinished:
-      if (!is_similar_url) {
-        current_url_ = url;
-        ClearThumbnail();
-        page_painted_ = false;
-        loading_state_ = state;
-      } else {
-        loading_state_ = std::max(loading_state_, state);
-      }
-      break;
-    case LoadingState::kLoadStarted:
-    case LoadingState::kLoadFinished:
-      if (!is_similar_url &&
-          (loading_state_ == LoadingState::kNavigationStarted ||
-           loading_state_ == LoadingState::kNavigationFinished)) {
-        // This probably refers to an old page, so ignore it.
-        return;
-      }
-      current_url_ = url;
-      loading_state_ = std::max(loading_state_, state);
-      break;
-    case LoadingState::kNone:
-      NOTREACHED();
-      break;
-  }
-}
-
-void ThumbnailTabHelper::ClearThumbnail() {
-  if (!thumbnail_.HasData())
+void ThumbnailTabHelper::StartVideoCapture() {
+  content::RenderWidgetHostView* const source_view = state_->GetView();
+  if (!source_view)
     return;
-  thumbnail_ = ThumbnailImage();
-  NotifyTabPreviewChanged();
+
+  const float scale_factor = source_view->GetDeviceScaleFactor();
+  const gfx::Size source_size = source_view->GetViewBounds().size();
+  if (source_size.IsEmpty())
+    return;
+
+  last_frame_capture_info_ = GetInitialCaptureInfo(
+      source_size, scale_factor, /* include_scrollbars_in_capture */ true);
+  background_capturer_->Start(last_frame_capture_info_);
 }
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(ThumbnailTabHelper)
+void ThumbnailTabHelper::StopVideoCapture() {
+  background_capturer_->Stop();
+}
+
+// static
+ThumbnailCaptureInfo ThumbnailTabHelper::GetInitialCaptureInfo(
+    const gfx::Size& source_size,
+    float scale_factor,
+    bool include_scrollbars_in_capture) {
+  ThumbnailCaptureInfo capture_info;
+  capture_info.source_size = source_size;
+
+  scale_factor = std::max(scale_factor, kMinThumbnailScaleFactor);
+
+  // Minimum thumbnail dimension (in DIP) for tablet tabstrip previews.
+  const gfx::Size smallest_thumbnail = GetMinimumThumbnailSize();
+  const int smallest_dimension =
+      scale_factor *
+      std::min(smallest_thumbnail.width(), smallest_thumbnail.height());
+
+  // Clip the pixels that will commonly hold a scrollbar, which looks bad in
+  // thumbnails - but only if that wouldn't make the thumbnail too small. We
+  // can't just use gfx::scrollbar_size() because that reports default system
+  // scrollbar width which is different from the width used in web rendering.
+  const int scrollbar_size_dip =
+      ui::NativeTheme::GetInstanceForWeb()
+          ->GetPartSize(ui::NativeTheme::Part::kScrollbarVerticalTrack,
+                        ui::NativeTheme::State::kNormal,
+                        ui::NativeTheme::ExtraParams())
+          .width();
+  // Round up to make sure any scrollbar pixls are eliminated. It's better to
+  // lose a single pixel of content than having a single pixel of scrollbar.
+  const int scrollbar_size = std::ceil(scale_factor * scrollbar_size_dip);
+  if (source_size.width() - scrollbar_size > smallest_dimension)
+    capture_info.scrollbar_insets.set_right(scrollbar_size);
+  if (source_size.height() - scrollbar_size > smallest_dimension)
+    capture_info.scrollbar_insets.set_bottom(scrollbar_size);
+
+  // Calculate the region to copy from.
+  capture_info.copy_rect = gfx::Rect(source_size);
+  if (!include_scrollbars_in_capture)
+    capture_info.copy_rect.Inset(capture_info.scrollbar_insets);
+
+  // Compute minimum sizes for multiple uses of the thumbnail - currently,
+  // tablet tabstrip previews and tab hover card preview images.
+  const gfx::Size min_target_size =
+      gfx::ScaleToFlooredSize(smallest_thumbnail, scale_factor);
+
+  // Calculate the target size to be the smallest size which meets the minimum
+  // requirements but has the same aspect ratio as the source (with or without
+  // scrollbars).
+  const float width_ratio = static_cast<float>(capture_info.copy_rect.width()) /
+                            min_target_size.width();
+  const float height_ratio =
+      static_cast<float>(capture_info.copy_rect.height()) /
+      min_target_size.height();
+  const float scale_ratio = std::min(width_ratio, height_ratio);
+  capture_info.target_size =
+      scale_ratio <= 1.0f
+          ? capture_info.copy_rect.size()
+          : gfx::ScaleToCeiledSize(capture_info.copy_rect.size(),
+                                   1.0f / scale_ratio);
+
+  return capture_info;
+}
+
+WEB_CONTENTS_USER_DATA_KEY_IMPL(ThumbnailTabHelper);

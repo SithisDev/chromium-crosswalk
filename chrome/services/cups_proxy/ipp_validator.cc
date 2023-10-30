@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,28 +13,29 @@
 #include <utility>
 #include <vector>
 
+#include "base/containers/cxx20_erase.h"
 #include "base/containers/span.h"
 #include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "chrome/services/cups_proxy/ipp_attribute_validator.h"
 #include "chrome/services/cups_proxy/public/cpp/cups_util.h"
 #include "net/http/http_util.h"
-#include "printing/backend/cups_ipp_util.h"
+#include "printing/backend/cups_ipp_helper.h"
 
 namespace cups_proxy {
 namespace {
+
+using ValueType = ipp_parser::mojom::IppAttributeValue::Tag;
 
 // Initial version only supports english lcoales.
 // TODO(crbug.com/945409): Extending to supporting arbitrary locales.
 const char kLocaleEnglish[] = "en";
 
-// Following ConvertXxx methods translate IPP attribute values to formats'
-// libCUPS APIs accept.
-
 // Converting to vector<char> for libCUPS API:
 // ippAddBooleans(..., int num_values, const char *values)
-std::vector<char> ConvertBooleans(std::vector<bool> bools) {
+std::vector<char> ConvertBooleans(const std::vector<bool>& bools) {
   std::vector<char> ret;
   for (bool value : bools) {
     ret.push_back(value ? 1 : 0);
@@ -55,31 +56,47 @@ std::vector<const char*> ConvertStrings(
   return ret;
 }
 
-// Depending on |type|, returns the number of values associated with
-// |attr_value|.
-size_t GetAttributeValuesSize(
-    const cups_ipp_parser::mojom::IppAttributePtr& attr) {
+std::array<std::vector<int>, 2> ConvertResolutions(
+    const std::vector<ipp_parser::mojom::ResolutionPtr>& resolutions) {
+  std::array<std::vector<int>, 2> ret;
+  for (auto& res : resolutions) {
+    if (res->xres <= 0 || res->yres <= 0)
+      continue;
+    ret[0].push_back(res->xres);
+    ret[1].push_back(res->yres);
+  }
+  return ret;
+}
+
+// Depending on |type|, returns the number of values associated with |attr|.
+size_t GetAttributeValuesSize(const ipp_parser::mojom::IppAttributePtr& attr) {
   const auto& attr_value = attr->value;
-  switch (attr->type) {
-    case cups_ipp_parser::mojom::ValueType::DATE:
+  switch (attr->value->which()) {
+    case ValueType::kDate:
       return 1;
 
-    case cups_ipp_parser::mojom::ValueType::BOOLEAN:
-      DCHECK(attr_value->is_bools());
+    case ValueType::kBools:
       return attr_value->get_bools().size();
-    case cups_ipp_parser::mojom::ValueType::INTEGER:
-      DCHECK(attr_value->is_ints());
+    case ValueType::kInts:
       return attr_value->get_ints().size();
-    case cups_ipp_parser::mojom::ValueType::STRING:
-      DCHECK(attr_value->is_strings());
+    case ValueType::kStrings:
       return attr_value->get_strings().size();
-
-    default:
-      break;
+    case ValueType::kOctets:
+      return attr_value->get_octets().size();
+    case ValueType::kResolutions:
+      return attr_value->get_resolutions().size();
   }
 
-  DVLOG(1) << "Unknown CupsIppParser ValueType " << attr->type;
+  NOTREACHED();
   return 0;
+}
+
+// Returns true if |data| starts with the full |prefix|, false otherwise.
+bool StartsWith(base::span<uint8_t const> data,
+                base::span<uint8_t const> prefix) {
+  if (data.size() < prefix.size())
+    return false;
+  return std::equal(data.begin(), data.begin() + prefix.size(), prefix.begin());
 }
 
 }  // namespace
@@ -87,54 +104,66 @@ size_t GetAttributeValuesSize(
 // Verifies that |method|, |endpoint|, and |http_version| form a valid HTTP
 // request-line. On success, returns a wrapper obj containing the verified
 // request-line.
-base::Optional<HttpRequestLine> IppValidator::ValidateHttpRequestLine(
+absl::optional<HttpRequestLine> IppValidator::ValidateHttpRequestLine(
     base::StringPiece method,
     base::StringPiece endpoint,
     base::StringPiece http_version) {
   if (method != "POST") {
-    return base::nullopt;
+    return absl::nullopt;
   }
   if (http_version != "HTTP/1.1") {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   // Empty endpoint is allowed.
   if (endpoint == "/") {
-    return HttpRequestLine{method.as_string(), endpoint.as_string(),
-                           http_version.as_string()};
+    return HttpRequestLine{std::string(method), std::string(endpoint),
+                           std::string(http_version)};
   }
 
   // Ensure endpoint is a known printer.
-  auto printer_id = ParseEndpointForPrinterId(endpoint.as_string());
+  auto printer_id = ParseEndpointForPrinterId(std::string(endpoint));
   if (!printer_id.has_value()) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   auto printer = delegate_->GetPrinter(*printer_id);
   if (!printer.has_value()) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
-  return HttpRequestLine{method.as_string(), endpoint.as_string(),
-                         http_version.as_string()};
+  return HttpRequestLine{std::string(method), std::string(endpoint),
+                         std::string(http_version)};
 }
 
-base::Optional<std::vector<ipp_converter::HttpHeader>>
+absl::optional<std::vector<ipp_converter::HttpHeader>>
 IppValidator::ValidateHttpHeaders(
+    const size_t http_content_length,
     const base::flat_map<std::string, std::string>& headers) {
   // Sane, character-set checks.
   for (const auto& header : headers) {
     if (!net::HttpUtil::IsValidHeaderName(header.first) ||
         !net::HttpUtil::IsValidHeaderValue(header.second)) {
-      return base::nullopt;
+      return absl::nullopt;
     }
   }
 
-  return std::vector<ipp_converter::HttpHeader>(headers.begin(), headers.end());
+  std::vector<ipp_converter::HttpHeader> ret(headers.begin(), headers.end());
+
+  // Update the ContentLength.
+  base::EraseIf(ret, [](const ipp_converter::HttpHeader& header) {
+    return header.first == "Content-Length";
+  });
+  ret.push_back({"Content-Length", base::NumberToString(http_content_length)});
+
+  return ret;
 }
 
+// Note: Since its possible to have valid IPP attributes that our
+// ipp_attribute_validator.cc is unaware of, we drop unknown attributes, rather
+// than fail the request.
 ipp_t* IppValidator::ValidateIppMessage(
-    cups_ipp_parser::mojom::IppMessagePtr ipp_message) {
+    ipp_parser::mojom::IppMessagePtr ipp_message) {
   printing::ScopedIppPtr ipp = printing::WrapIpp(ippNew());
 
   // Fill ids.
@@ -153,7 +182,7 @@ ipp_t* IppValidator::ValidateIppMessage(
 
   // Fill attributes.
   for (size_t i = 0; i < ipp_message->attributes.size(); ++i) {
-    cups_ipp_parser::mojom::IppAttributePtr attribute =
+    ipp_parser::mojom::IppAttributePtr attribute =
         std::move(ipp_message->attributes[i]);
 
     size_t num_values = GetAttributeValuesSize(attribute);
@@ -161,14 +190,20 @@ ipp_t* IppValidator::ValidateIppMessage(
       return nullptr;
     }
 
-    if (!ValidateAttribute(ipp_oper_id, attribute->name, attribute->type,
-                           num_values)) {
+    auto ret = ValidateAttribute(ipp_oper_id, attribute->name,
+                                 attribute->value->which(), num_values);
+    if (ret == ValidateAttributeResult::kFatalError) {
       return nullptr;
     }
+    if (ret == ValidateAttributeResult::kUnknownAttribute) {
+      // We drop unknown attributes.
+      DVLOG(1) << "CupsProxy validation: dropping unknown attribute "
+               << attribute->name;
+      continue;
+    }
 
-    switch (attribute->type) {
-      case cups_ipp_parser::mojom::ValueType::BOOLEAN: {
-        DCHECK(attribute->value->is_bools());
+    switch (attribute->value->which()) {
+      case ValueType::kBools: {
         std::vector<char> values =
             ConvertBooleans(attribute->value->get_bools());
 
@@ -180,8 +215,7 @@ ipp_t* IppValidator::ValidateIppMessage(
         }
         break;
       }
-      case cups_ipp_parser::mojom::ValueType::DATE: {
-        DCHECK(attribute->value->is_date());
+      case ValueType::kDate: {
         std::vector<uint8_t> date = attribute->value->get_date();
 
         // Per RFC2910, ipp_uchar_t is defined as an OCTET, so below
@@ -195,8 +229,7 @@ ipp_t* IppValidator::ValidateIppMessage(
         }
         break;
       }
-      case cups_ipp_parser::mojom::ValueType::INTEGER: {
-        DCHECK(attribute->value->is_ints());
+      case ValueType::kInts: {
         std::vector<int> values = attribute->value->get_ints();
 
         auto* attr = ippAddIntegers(
@@ -208,9 +241,7 @@ ipp_t* IppValidator::ValidateIppMessage(
         }
         break;
       }
-      case cups_ipp_parser::mojom::ValueType::STRING: {
-        DCHECK(attribute->value->is_strings());
-
+      case ValueType::kStrings: {
         // Note: cstrings_values references attribute->value's strings, i.e.
         // attribute->value MUST outlive cstrings_values.
         std::vector<const char*> cstrings_values =
@@ -221,6 +252,40 @@ ipp_t* IppValidator::ValidateIppMessage(
             static_cast<ipp_tag_t>(attribute->value_tag),
             attribute->name.c_str(), cstrings_values.size(), kLocaleEnglish,
             cstrings_values.data());
+        if (!attr) {
+          return nullptr;
+        }
+        break;
+      }
+      case ValueType::kOctets: {
+        size_t num = attribute->value->get_octets().size();
+        if (num != 1) {
+          LOG(ERROR) << "CUPS API only supports adding a single octet string "
+                        "- cannot add "
+                     << num << " octet strings.";
+          return nullptr;
+        }
+        int size = attribute->value->get_octets()[0].size();
+        if (size < 1) {
+          LOG(ERROR) << "Invalid octet string size=" << size;
+          return nullptr;
+        }
+        auto* attr = ippAddOctetString(
+            ipp.get(), static_cast<ipp_tag_t>(attribute->group_tag),
+            attribute->name.c_str(), attribute->value->get_octets()[0].data(),
+            size);
+        if (!attr) {
+          return nullptr;
+        }
+        break;
+      }
+      case ValueType::kResolutions: {
+        std::array<std::vector<int>, 2> res =
+            ConvertResolutions(attribute->value->get_resolutions());
+        auto* attr = ippAddResolutions(
+            ipp.get(), static_cast<ipp_tag_t>(attribute->group_tag),
+            attribute->name.c_str(), res[0].size(), IPP_RES_PER_INCH,
+            res[0].data(), res[1].data());
         if (!attr) {
           return nullptr;
         }
@@ -240,67 +305,54 @@ ipp_t* IppValidator::ValidateIppMessage(
   return ipp.release();
 }
 
-// Requires IPP data portion is either empty or looks like a pdf.
+// Requires |ipp_data| to be empty or look like a PDF or PostScript document.
 bool IppValidator::ValidateIppData(const std::vector<uint8_t>& ipp_data) {
-  const int pdf_magic_bytes_size = 4;
-  constexpr std::array<uint8_t, pdf_magic_bytes_size> pdf_magic_bytes = {
-      0x25, 0x50, 0x44, 0x46};  // { %PDF }
-
   // Empty IPP data portion.
   if (ipp_data.empty()) {
     return true;
   }
 
-  if (ipp_data.size() < pdf_magic_bytes_size) {
-    return false;
-  }
-
-  // Check that |ipp_data| starts with pdf_magic_bytes.
-  return std::equal(ipp_data.begin(), ipp_data.begin() + pdf_magic_bytes_size,
-                    pdf_magic_bytes.begin());
+  // Check if |ipp_data| looks like a PDF or PostScript document.
+  return StartsWith(ipp_data, pdf_magic_bytes) ||
+         StartsWith(ipp_data, ps_magic_bytes);
 }
 
-IppValidator::IppValidator(
-    base::WeakPtr<chromeos::printing::CupsProxyServiceDelegate> delegate)
-    : delegate_(std::move(delegate)) {
-  DETACH_FROM_SEQUENCE(sequence_checker_);
-}
+IppValidator::IppValidator(CupsProxyServiceDelegate* const delegate)
+    : delegate_(delegate) {}
 
 IppValidator::~IppValidator() = default;
 
-base::Optional<IppRequest> IppValidator::ValidateIppRequest(
-    cups_ipp_parser::mojom::IppRequestPtr to_validate) {
+absl::optional<IppRequest> IppValidator::ValidateIppRequest(
+    ipp_parser::mojom::IppRequestPtr to_validate) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!delegate_) {
-    // TODO(crbug/495409): Add fatal error option to bring down service.
-    return base::nullopt;
+  // Build ipp message.
+  // Note: Moving ipp here, to_validate->ipp no longer valid below.
+  printing::ScopedIppPtr ipp =
+      printing::WrapIpp(ValidateIppMessage(std::move(to_validate->ipp)));
+  if (ipp == nullptr) {
+    return absl::nullopt;
+  }
+
+  // Validate ipp data.
+  // TODO(crbug/894607): Validate ippData (pdf).
+  if (!ValidateIppData(to_validate->data)) {
+    return absl::nullopt;
   }
 
   // Build request line.
   auto request_line = ValidateHttpRequestLine(
       to_validate->method, to_validate->endpoint, to_validate->http_version);
   if (!request_line.has_value()) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
-  // Build headers.
-  auto headers = ValidateHttpHeaders(to_validate->headers);
+  // Build headers; must happen after ipp message/data since it requires the
+  // ContentLength.
+  const size_t http_content_length =
+      ippLength(ipp.get()) + to_validate->data.size();
+  auto headers = ValidateHttpHeaders(http_content_length, to_validate->headers);
   if (!headers.has_value()) {
-    return base::nullopt;
-  }
-
-  // Build ipp message.
-  // Note: Moving ipp here, to_validate->ipp no longer valid below.
-  printing::ScopedIppPtr ipp =
-      printing::WrapIpp(ValidateIppMessage(std::move(to_validate->ipp)));
-  if (ipp == nullptr) {
-    return base::nullopt;
-  }
-
-  // Validate ipp data.
-  // TODO(crbug/894607): Validate ippData (pdf).
-  if (!ValidateIppData(to_validate->data)) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   // Marshall request
@@ -315,7 +367,7 @@ base::Optional<IppRequest> IppValidator::ValidateIppRequest(
       ret.request_line.method, ret.request_line.endpoint,
       ret.request_line.http_version, ret.headers, ret.ipp.get(), ret.ipp_data);
   if (!request_buffer.has_value()) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   ret.buffer = std::move(*request_buffer);

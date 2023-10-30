@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/file_version_info.h"
 #include "base/logging.h"
+#include "base/strings/string_util.h"
 #include "base/win/current_module.h"
 #include "chrome/chrome_cleaner/http/http_agent_impl.h"
 
@@ -23,8 +24,8 @@ std::unique_ptr<chrome_cleaner::HttpAgent> HttpAgentFactory::CreateHttpAgent()
   DCHECK(file_version_info.get());
   if (file_version_info.get()) {
     return std::make_unique<chrome_cleaner::HttpAgentImpl>(
-        file_version_info->product_short_name(),
-        file_version_info->product_version());
+        base::AsWStringPiece(file_version_info->product_short_name()),
+        base::AsWStringPiece(file_version_info->product_version()));
   } else {
     LOG(ERROR) << "Unable to get version string for Chrome Cleanup Tool.";
     return std::make_unique<chrome_cleaner::HttpAgentImpl>(

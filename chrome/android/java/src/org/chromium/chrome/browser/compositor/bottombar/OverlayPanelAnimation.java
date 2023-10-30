@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,17 @@ package org.chromium.chrome.browser.compositor.bottombar;
 
 import android.animation.Animator;
 import android.content.Context;
-import android.support.annotation.Nullable;
 
-import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.compositor.animation.CompositorAnimationHandler;
-import org.chromium.chrome.browser.compositor.animation.CompositorAnimator;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
+import org.chromium.base.MathUtils;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.PanelState;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
-import org.chromium.chrome.browser.util.MathUtils;
-import org.chromium.chrome.browser.widget.animation.CancelAwareAnimatorListener;
+import org.chromium.chrome.browser.layouts.animation.CompositorAnimationHandler;
+import org.chromium.chrome.browser.layouts.animation.CompositorAnimator;
+import org.chromium.components.browser_ui.widget.animation.CancelAwareAnimatorListener;
 
 /**
  * Base abstract class for animating the Overlay Panel.
@@ -31,7 +32,7 @@ public abstract class OverlayPanelAnimation extends OverlayPanelBase {
     public static final long MAXIMUM_ANIMATION_DURATION_MS = 350;
 
     /** The minimum animation duration in milliseconds. */
-    private static final long MINIMUM_ANIMATION_DURATION_MS = Math.round(7 * 1000 / 60);
+    private static final long MINIMUM_ANIMATION_DURATION_MS = 7 * 1000 / 60;
 
     /** Average animation velocity in dps per second. */
     private static final float INITIAL_ANIMATION_VELOCITY_DP_PER_SECOND = 1750f;
@@ -55,9 +56,11 @@ public abstract class OverlayPanelAnimation extends OverlayPanelBase {
     /**
      * @param context The current Android {@link Context}.
      * @param updateHost The {@link LayoutUpdateHost} used to request updates in the Layout.
+     * @param toolbarHeightDp The height of the toolbar in dp.
      */
-    public OverlayPanelAnimation(Context context, LayoutUpdateHost updateHost) {
-        super(context);
+    public OverlayPanelAnimation(
+            Context context, LayoutUpdateHost updateHost, float toolbarHeightDp) {
+        super(context, toolbarHeightDp);
         mUpdateHost = updateHost;
     }
 
@@ -379,17 +382,13 @@ public abstract class OverlayPanelAnimation extends OverlayPanelBase {
 
     /**
      * Called when layout-specific actions are needed after the animation finishes.
+     * This method should only be called when the animation ends normally and not when it is
+     * canceled.
      */
     protected void onHeightAnimationFinished() {
-        // If animating to a particular PanelState, and after completing
-        // resizing the Panel to its desired state, then the Panel's state
-        // should be updated. This method also is called when an animation
-        // is cancelled (which can happen by a subsequent gesture while
-        // an animation is happening). That's why the actual height should
-        // be checked.
-        if (mAnimatingState != null && mAnimatingState != PanelState.UNDEFINED
-                && MathUtils.areFloatsEqual(
-                        getHeight(), getPanelHeightFromState(mAnimatingState))) {
+        // If animating to a particular PanelState, and after completing resizing the Panel to its
+        // desired state, then the Panel's state should be updated.
+        if (mAnimatingState != null && mAnimatingState != PanelState.UNDEFINED) {
             setPanelState(mAnimatingState, mAnimatingStateReason);
         }
 

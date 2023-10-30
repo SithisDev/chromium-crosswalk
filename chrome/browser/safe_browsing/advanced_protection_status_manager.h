@@ -1,10 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SAFE_BROWSING_ADVANCED_PROTECTION_STATUS_MANAGER_H_
 #define CHROME_BROWSER_SAFE_BROWSING_ADVANCED_PROTECTION_STATUS_MANAGER_H_
 
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
+#include "base/sequence_checker.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
@@ -15,7 +19,7 @@ namespace signin {
 class PrimaryAccountAccessTokenFetcher;
 }
 
-class Profile;
+class PrefService;
 
 namespace safe_browsing {
 
@@ -29,26 +33,26 @@ class AdvancedProtectionStatusManager
     : public KeyedService,
       public signin::IdentityManager::Observer {
  public:
-  explicit AdvancedProtectionStatusManager(Profile* profile);
+  AdvancedProtectionStatusManager(PrefService* pref_service,
+                                  signin::IdentityManager* identity_manager);
+
+  AdvancedProtectionStatusManager(const AdvancedProtectionStatusManager&) =
+      delete;
+  AdvancedProtectionStatusManager& operator=(
+      const AdvancedProtectionStatusManager&) = delete;
+
   ~AdvancedProtectionStatusManager() override;
 
-  // If the primary account of |profile| is under advanced protection.
-  static bool IsUnderAdvancedProtection(Profile* profile);
-
-  // If the primary account of |profile| is requesting advanced protection
-  // verdicts.
-  static bool RequestsAdvancedProtectionVerdicts(Profile* profile);
-
-  bool is_under_advanced_protection() const {
-    return is_under_advanced_protection_;
-  }
-
-  Profile* profile() const { return profile_; }
+  // Returns whether the unconsented primary account of the associated profile
+  // is under Advanced Protection.
+  bool IsUnderAdvancedProtection() const;
 
   // KeyedService:
   void Shutdown() override;
 
   bool IsRefreshScheduled();
+
+  void SetAdvancedProtectionStatusForTesting(bool enrolled);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(AdvancedProtectionStatusManagerTest,
@@ -69,13 +73,13 @@ class AdvancedProtectionStatusManager
   FRIEND_TEST_ALL_PREFIXES(AdvancedProtectionStatusManagerTest,
                            StayInAdvancedProtection);
   FRIEND_TEST_ALL_PREFIXES(AdvancedProtectionStatusManagerTest,
-                           AlreadySignedInAndUnderAPIncognito);
-  FRIEND_TEST_ALL_PREFIXES(AdvancedProtectionStatusManagerTest,
-                           AlreadySignedInAndNotUnderAPIncognito);
+                           AlreadySignedInAndNotUnderAP);
   FRIEND_TEST_ALL_PREFIXES(AdvancedProtectionStatusManagerTest,
                            AdvancedProtectionDisabledAfterSignin);
   FRIEND_TEST_ALL_PREFIXES(AdvancedProtectionStatusManagerTest,
                            StartupAfterLongWaitRefreshesImmediately);
+  FRIEND_TEST_ALL_PREFIXES(AdvancedProtectionStatusManagerTest,
+                           TracksUnconsentedPrimaryAccount);
 
   void Initialize();
 
@@ -90,8 +94,8 @@ class AdvancedProtectionStatusManager
   void UnsubscribeFromSigninEvents();
 
   // IdentityManager::Observer implementations.
-  void OnPrimaryAccountSet(const CoreAccountInfo& account_info) override;
-  void OnPrimaryAccountCleared(const CoreAccountInfo& account_info) override;
+  void OnPrimaryAccountChanged(
+      const signin::PrimaryAccountChangeEvent& event) override;
   void OnExtendedAccountInfoUpdated(const AccountInfo& info) override;
   void OnExtendedAccountInfoRemoved(const AccountInfo& info) override;
 
@@ -99,7 +103,7 @@ class AdvancedProtectionStatusManager
 
   void OnAdvancedProtectionDisabled();
 
-  void OnAccessTokenFetchComplete(std::string account_id,
+  void OnAccessTokenFetchComplete(CoreAccountId account_id,
                                   GoogleServiceAuthError error,
                                   signin::AccessTokenInfo token_info);
 
@@ -115,37 +119,37 @@ class AdvancedProtectionStatusManager
   // Sets |last_refresh_| to now and persists it.
   void UpdateLastRefreshTime();
 
-  bool IsPrimaryAccount(const CoreAccountInfo& account_info);
+  bool IsUnconsentedPrimaryAccount(const CoreAccountInfo& account_info);
 
   // Decodes |id_token| to get advanced protection status.
-  void OnGetIDToken(const std::string& account_id, const std::string& id_token);
+  void OnGetIDToken(const CoreAccountId& account_id,
+                    const std::string& id_token);
 
   // Only called in tests.
   void SetMinimumRefreshDelay(const base::TimeDelta& delay);
 
-  // Gets the account ID of the primary account of |profile_|.
+  // Gets the account ID of the unconsented primary account of |profile_|.
   // Returns an empty string if user is not signed in.
-  std::string GetPrimaryAccountId() const;
+  CoreAccountId GetUnconsentedPrimaryAccountId() const;
 
   // Only called in tests to set a customized minimum delay.
-  AdvancedProtectionStatusManager(Profile* profile,
+  AdvancedProtectionStatusManager(PrefService* pref_service,
+                                  signin::IdentityManager* identity_manager,
                                   const base::TimeDelta& min_delay);
 
-  Profile* const profile_;
+  SEQUENCE_CHECKER(sequence_checker_);
 
-  signin::IdentityManager* identity_manager_;
+  raw_ptr<PrefService> pref_service_ = nullptr;
+  raw_ptr<signin::IdentityManager> identity_manager_ = nullptr;
   std::unique_ptr<signin::PrimaryAccountAccessTokenFetcher>
       access_token_fetcher_;
-  AccountTrackerService* account_tracker_service_;
 
   // Is the profile account under advanced protection.
-  bool is_under_advanced_protection_;
+  bool is_under_advanced_protection_ = false;
 
   base::OneShotTimer timer_;
   base::Time last_refreshed_;
   base::TimeDelta minimum_delay_;
-
-  DISALLOW_COPY_AND_ASSIGN(AdvancedProtectionStatusManager);
 };
 
 }  // namespace safe_browsing

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,14 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "chrome/browser/ui/webui/feed_internals/feed_internals_page_handler.h"
+#include "base/memory/raw_ptr.h"
+#include "chrome/browser/ui/webui/feed_internals/feed_internals.mojom-forward.h"
+#include "components/feed/buildflags.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "ui/webui/mojo_web_ui_controller.h"
 
 class Profile;
+class FeedV2InternalsPageHandler;
 
 // During the interim migration to Feed, this page will be co-located with
 // snippets-internals. Once migration is complete, and snippets-internals is
@@ -23,17 +26,21 @@ class Profile;
 class FeedInternalsUI : public ui::MojoWebUIController {
  public:
   explicit FeedInternalsUI(content::WebUI* web_ui);
+
+  FeedInternalsUI(const FeedInternalsUI&) = delete;
+  FeedInternalsUI& operator=(const FeedInternalsUI&) = delete;
+
   ~FeedInternalsUI() override;
 
+  // Instantiates the implementor of the feed_internals::mojom::PageHandler mojo
+  // interface passing the pending receiver that will be internally bound.
+  void BindInterface(
+      mojo::PendingReceiver<feed_internals::mojom::PageHandler> receiver);
+
  private:
-  void BindFeedInternalsPageHandler(
-      feed_internals::mojom::PageHandlerRequest request);
-
-  Profile* profile_;
-
-  std::unique_ptr<FeedInternalsPageHandler> page_handler_;
-
-  DISALLOW_COPY_AND_ASSIGN(FeedInternalsUI);
+  raw_ptr<Profile> profile_;
+  std::unique_ptr<FeedV2InternalsPageHandler> v2_page_handler_;
+  WEB_UI_CONTROLLER_TYPE_DECL();
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_FEED_INTERNALS_FEED_INTERNALS_UI_H_

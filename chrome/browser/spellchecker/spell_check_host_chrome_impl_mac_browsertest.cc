@@ -1,8 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/spellchecker/spell_check_host_chrome_impl.h"
+
+#include <memory>
 
 #include "base/bind.h"
 #include "base/run_loop.h"
@@ -11,18 +13,17 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/mock_render_process_host.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 class SpellCheckHostChromeImplMacBrowserTest : public InProcessBrowserTest {
  public:
   void SetUpOnMainThread() override {
     content::BrowserContext* context = browser()->profile();
-    renderer_.reset(new content::MockRenderProcessHost(context));
-
-    service_manager::BindSourceInfo source_info;
-    source_info.identity = renderer_->GetChildIdentity();
-    SpellCheckHostChromeImpl::Create(mojo::MakeRequest(&spell_check_host_),
-                                     source_info);
+    renderer_ = std::make_unique<content::MockRenderProcessHost>(context);
+    SpellCheckHostChromeImpl::Create(
+        renderer_->GetID(), spell_check_host_.BindNewPipeAndPassReceiver());
   }
 
   void TearDownOnMainThread() override { renderer_.reset(); }
@@ -44,7 +45,7 @@ class SpellCheckHostChromeImplMacBrowserTest : public InProcessBrowserTest {
 
  protected:
   std::unique_ptr<content::MockRenderProcessHost> renderer_;
-  spellcheck::mojom::SpellCheckHostPtr spell_check_host_;
+  mojo::Remote<spellcheck::mojom::SpellCheckHost> spell_check_host_;
 
   bool received_result_ = false;
   std::vector<SpellCheckResult> result_;
@@ -55,7 +56,7 @@ class SpellCheckHostChromeImplMacBrowserTest : public InProcessBrowserTest {
 IN_PROC_BROWSER_TEST_F(SpellCheckHostChromeImplMacBrowserTest,
                        SpellCheckReturnMessage) {
   spell_check_host_->RequestTextCheck(
-      base::UTF8ToUTF16("zz."), 123,
+      u"zz.", 123,
       base::BindOnce(&SpellCheckHostChromeImplMacBrowserTest::LogResult,
                      base::Unretained(this)));
   RunUntilResultReceived();

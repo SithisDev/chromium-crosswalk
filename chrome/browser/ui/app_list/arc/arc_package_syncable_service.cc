@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,18 @@
 #include <utility>
 #include <vector>
 
+#include "ash/components/arc/arc_util.h"
+#include "ash/components/arc/session/connection_holder.h"
+#include "base/containers/contains.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_package_syncable_service_factory.h"
 #include "chrome/common/pref_names.h"
-#include "components/arc/arc_util.h"
-#include "components/arc/session/connection_holder.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/sync/model/sync_change_processor.h"
 #include "components/sync/model/sync_data.h"
-#include "components/sync/model/sync_merge_result.h"
-#include "components/sync/protocol/sync.pb.h"
+#include "components/sync/protocol/arc_package_specifics.pb.h"
+#include "components/sync/protocol/entity_specifics.pb.h"
 
 namespace arc {
 
@@ -133,7 +134,8 @@ void ArcPackageSyncableService::WaitUntilReadyToSync(base::OnceClosure done) {
   wait_until_ready_to_sync_cb_ = std::move(done);
 }
 
-syncer::SyncMergeResult ArcPackageSyncableService::MergeDataAndStartSyncing(
+absl::optional<syncer::ModelError>
+ArcPackageSyncableService::MergeDataAndStartSyncing(
     syncer::ModelType type,
     const syncer::SyncDataList& initial_sync_data,
     std::unique_ptr<syncer::SyncChangeProcessor> sync_processor,
@@ -143,11 +145,10 @@ syncer::SyncMergeResult ArcPackageSyncableService::MergeDataAndStartSyncing(
   DCHECK_EQ(type, syncer::ARC_PACKAGE);
   DCHECK(!sync_processor_.get());
   DCHECK(!IsArcAppSyncFlowDisabled());
+  DCHECK(prefs_->package_list_initial_refreshed());
 
   sync_processor_ = std::move(sync_processor);
   sync_error_handler_ = std::move(error_handler);
-
-  syncer::SyncMergeResult result = syncer::SyncMergeResult(type);
 
   const std::vector<std::string> local_packages =
       prefs_->GetPackagesFromPrefs();
@@ -159,6 +160,10 @@ syncer::SyncMergeResult ArcPackageSyncableService::MergeDataAndStartSyncing(
     std::unique_ptr<ArcSyncItem> sync_item(
         CreateSyncItemFromSyncData(sync_data));
     const std::string& package_name = sync_item->package_name;
+
+    if (!ShouldSyncPackage(package_name))
+      continue;
+
     if (!base::Contains(local_package_set, package_name)) {
       pending_install_items_[package_name] = std::move(sync_item);
       InstallPackage(pending_install_items_[package_name].get());
@@ -184,7 +189,7 @@ syncer::SyncMergeResult ArcPackageSyncableService::MergeDataAndStartSyncing(
     sync_items_[local_package_name] = std::move(sync_item);
   }
   sync_processor_->ProcessSyncChanges(FROM_HERE, change_list);
-  return result;
+  return absl::nullopt;
 }
 
 void ArcPackageSyncableService::StopSyncing(syncer::ModelType type) {
@@ -199,33 +204,25 @@ void ArcPackageSyncableService::StopSyncing(syncer::ModelType type) {
   pending_uninstall_items_.clear();
 }
 
-syncer::SyncDataList ArcPackageSyncableService::GetAllSyncData(
-    syncer::ModelType type) const {
-  DCHECK_EQ(type, syncer::ARC_PACKAGE);
-
-  syncer::SyncDataList list;
-  for (const auto& item : sync_items_)
-    list.emplace_back(GetSyncDataFromSyncItem(item.second.get()));
-
-  for (const auto& item : pending_install_items_)
-    list.emplace_back(GetSyncDataFromSyncItem(item.second.get()));
-
-  return list;
-}
-
-syncer::SyncError ArcPackageSyncableService::ProcessSyncChanges(
+absl::optional<syncer::ModelError>
+ArcPackageSyncableService::ProcessSyncChanges(
     const base::Location& from_here,
     const syncer::SyncChangeList& change_list) {
   if (!sync_processor_.get()) {
-    return syncer::SyncError(FROM_HERE, syncer::SyncError::DATATYPE_ERROR,
-                             "ARC package syncable service is not started.",
-                             syncer::ARC_PACKAGE);
+    return syncer::ModelError(FROM_HERE,
+                              "ARC package syncable service is not started.");
   }
 
   for (const auto& change : change_list) {
-    VLOG(2) << this << "  Change: "
-            << change.sync_data().GetSpecifics().arc_package().package_name()
-            << " (" << change.change_type() << ")";
+    const std::string package_name =
+        change.sync_data().GetSpecifics().arc_package().package_name();
+    VLOG(2) << this << "  Change: " << package_name << " ("
+            << change.change_type() << ")";
+    if (!ShouldSyncPackage(package_name)) {
+      VLOG(2) << this << package_name
+              << " is default app, ignore remote update.";
+      continue;
+    }
 
     if (change.change_type() == SyncChange::ACTION_ADD ||
         change.change_type() == SyncChange::ACTION_UPDATE) {
@@ -237,7 +234,7 @@ syncer::SyncError ArcPackageSyncableService::ProcessSyncChanges(
     }
   }
 
-  return syncer::SyncError();
+  return absl::nullopt;
 }
 
 bool ArcPackageSyncableService::SyncStarted() {
@@ -257,6 +254,9 @@ void ArcPackageSyncableService::OnPackageRemoved(
     const std::string& package_name,
     bool uninstalled) {
   if (!uninstalled)
+    return;
+
+  if (!ShouldSyncPackage(package_name))
     return;
 
   SyncItemMap::iterator delete_iter =
@@ -289,10 +289,11 @@ void ArcPackageSyncableService::OnPackageRemoved(
 
 void ArcPackageSyncableService::OnPackageInstalled(
     const mojom::ArcPackageInfo& package_info) {
-  if (!package_info.sync)
+  const std::string& package_name = package_info.package_name;
+
+  if (!ShouldSyncPackage(package_name))
     return;
 
-  const std::string& package_name = package_info.package_name;
   SyncItemMap::iterator install_iter =
       pending_install_items_.find(package_name);
 
@@ -323,7 +324,7 @@ void ArcPackageSyncableService::OnPackageModified(
     const mojom::ArcPackageInfo& package_info) {
   const std::string& package_name = package_info.package_name;
 
-  if (!package_info.sync)
+  if (!ShouldSyncPackage(package_name))
     return;
 
   SyncItemMap::iterator iter = sync_items_.find(package_name);
@@ -464,10 +465,17 @@ void ArcPackageSyncableService::UninstallPackage(const ArcSyncItem* sync_item) {
 
 bool ArcPackageSyncableService::ShouldSyncPackage(
     const std::string& package_name) const {
+  // Don't sync default apps.
+  if (prefs_->IsDefaultPackage(package_name))
+    return false;
+
   std::unique_ptr<ArcAppListPrefs::PackageInfo> package(
       prefs_->GetPackage(package_name));
-  DCHECK(package.get());
-  return package->should_sync;
+  if (package.get())
+    return package->should_sync;
+
+  // A non default package from remote should be synced.
+  return true;
 }
 
 }  // namespace arc

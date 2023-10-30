@@ -1,8 +1,11 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/base/test_browser_window_aura.h"
+
+#include <memory>
+#include <utility>
 
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/ui/browser.h"
@@ -16,8 +19,8 @@ std::unique_ptr<Browser> CreateBrowserWithAuraTestWindowForParams(
     std::unique_ptr<aura::Window> window,
     Browser::CreateParams* params) {
   if (window.get() == nullptr) {
-    window.reset(new aura::Window(nullptr));
-    window->set_id(0);
+    window = std::make_unique<aura::Window>(nullptr);
+    window->SetId(0);
     window->SetType(aura::client::WINDOW_TYPE_NORMAL);
     window->Init(ui::LAYER_TEXTURED);
     window->Show();
@@ -82,8 +85,8 @@ gfx::Rect TestBrowserWindowAura::GetBounds() const {
 std::unique_ptr<Browser> TestBrowserWindowAura::CreateBrowser(
     Browser::CreateParams* params) {
   params->window = this;
-  browser_ = new Browser(*params);
-  return base::WrapUnique(browser_);
+  browser_ = Browser::Create(*params);
+  return base::WrapUnique(browser_.get());
 }
 
 TestBrowserWindowViews::TestBrowserWindowViews(aura::Window* parent)
@@ -92,7 +95,7 @@ TestBrowserWindowViews::TestBrowserWindowViews(aura::Window* parent)
   params.bounds = gfx::Rect(5, 5, 20, 20);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.parent = parent;
-  widget_->Init(params);
+  widget_->Init(std::move(params));
 }
 
 TestBrowserWindowViews::~TestBrowserWindowViews() {}
@@ -129,7 +132,7 @@ std::unique_ptr<Browser> TestBrowserWindowViews::CreateBrowser(
     const Browser::CreateParams& params) {
   Browser::CreateParams params_copy = params;
   params_copy.window = this;
-  std::unique_ptr<Browser> browser = std::make_unique<Browser>(params_copy);
+  std::unique_ptr<Browser> browser(Browser::Create(params_copy));
   browser_ = browser.get();
   return browser;
 }

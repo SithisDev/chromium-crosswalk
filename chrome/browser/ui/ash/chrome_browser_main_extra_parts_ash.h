@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,18 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
+#include "chrome/browser/ui/ash/in_session_auth_token_provider_impl.h"
 #include "chrome/common/buildflags.h"
 
-namespace chromeos {
+namespace ash {
 class NetworkPortalNotificationController;
+class NewWindowDelegateProvider;
+class NightLightClient;
+}  // namespace ash
+
+namespace game_mode {
+class GameModeController;
 }
 
 namespace policy {
@@ -20,31 +26,38 @@ class DisplaySettingsHandler;
 }
 
 class AccessibilityControllerClient;
+class AmbientClientImpl;
+class AppAccessNotifier;
 class AppListClientImpl;
-class ArcChromeActionsClient;
+class ArcOpenUrlDelegateImpl;
 class AshShellInit;
+class AshWebViewFactoryImpl;
 class CastConfigControllerMediaRouter;
-class ChromeNewWindowClient;
-class ImeControllerClient;
-class LoginScreenClient;
+class DesksClient;
+class ImeControllerClientImpl;
+class InSessionAuthDialogClient;
+class LoginScreenClientImpl;
 class MediaClientImpl;
 class MobileDataNotifications;
 class NetworkConnectDelegateChromeOS;
 class NightLightClient;
-class PhotoControllerImpl;
+class ProjectorAppClientImpl;
+class ProjectorClientImpl;
+class QuickAnswersController;
 class ScreenOrientationDelegateChromeos;
 class SessionControllerClientImpl;
-class SystemTrayClient;
-class TabletModeClient;
+class SystemTrayClientImpl;
+class TabClusterUIClient;
+class TabletModePageBehavior;
 class VpnListForwarder;
-class WallpaperControllerClient;
+class WallpaperControllerClientImpl;
 
 #if BUILDFLAG(ENABLE_WAYLAND_SERVER)
 class ExoParts;
 #endif
 
 namespace internal {
-class ChromeLauncherControllerInitializer;
+class ChromeShelfControllerInitializer;
 }
 
 // Browser initialization for Ash UI. Only use this for Ash specific
@@ -52,18 +65,25 @@ class ChromeLauncherControllerInitializer;
 class ChromeBrowserMainExtraPartsAsh : public ChromeBrowserMainExtraParts {
  public:
   ChromeBrowserMainExtraPartsAsh();
+
+  ChromeBrowserMainExtraPartsAsh(const ChromeBrowserMainExtraPartsAsh&) =
+      delete;
+  ChromeBrowserMainExtraPartsAsh& operator=(
+      const ChromeBrowserMainExtraPartsAsh&) = delete;
+
   ~ChromeBrowserMainExtraPartsAsh() override;
 
   // Overridden from ChromeBrowserMainExtraParts:
+  void PreCreateMainMessageLoop() override;
   void PreProfileInit() override;
-  void PostProfileInit() override;
+  void PostProfileInit(Profile* profile, bool is_initial_profile) override;
   void PostBrowserStart() override;
   void PostMainMessageLoopRun() override;
 
  private:
-  class NotificationObserver;
+  class UserProfileLoadedObserver;
 
-  std::unique_ptr<NotificationObserver> notification_observer_;
+  std::unique_ptr<UserProfileLoadedObserver> user_profile_loaded_observer_;
 
   // Initialized in PreProfileInit in all configs before Shell init:
   std::unique_ptr<NetworkConnectDelegateChromeOS> network_connect_delegate_;
@@ -77,39 +97,46 @@ class ChromeBrowserMainExtraPartsAsh : public ChromeBrowserMainExtraParts {
   std::unique_ptr<AccessibilityControllerClient>
       accessibility_controller_client_;
   std::unique_ptr<AppListClientImpl> app_list_client_;
-  std::unique_ptr<ArcChromeActionsClient> arc_chrome_actions_client_;
-  std::unique_ptr<ChromeNewWindowClient> chrome_new_window_client_;
-  std::unique_ptr<ImeControllerClient> ime_controller_client_;
+  std::unique_ptr<ash::NewWindowDelegateProvider> new_window_delegate_provider_;
+  std::unique_ptr<ArcOpenUrlDelegateImpl> arc_open_url_delegate_impl_;
+  std::unique_ptr<ImeControllerClientImpl> ime_controller_client_;
+  std::unique_ptr<InSessionAuthDialogClient> in_session_auth_dialog_client_;
+  std::unique_ptr<ash::InSessionAuthTokenProviderImpl>
+      in_session_auth_token_provider_;
   std::unique_ptr<ScreenOrientationDelegateChromeos>
       screen_orientation_delegate_;
   std::unique_ptr<SessionControllerClientImpl> session_controller_client_;
-  std::unique_ptr<SystemTrayClient> system_tray_client_;
-  std::unique_ptr<TabletModeClient> tablet_mode_client_;
+  std::unique_ptr<SystemTrayClientImpl> system_tray_client_;
+  std::unique_ptr<TabClusterUIClient> tab_cluster_ui_client_;
+  std::unique_ptr<TabletModePageBehavior> tablet_mode_page_behavior_;
   std::unique_ptr<VpnListForwarder> vpn_list_forwarder_;
-  std::unique_ptr<WallpaperControllerClient> wallpaper_controller_client_;
-  // TODO(stevenjb): Move NetworkPortalNotificationController to c/b/ui/ash and
-  // elim chromeos:: namespace. https://crbug.com/798569.
-  std::unique_ptr<chromeos::NetworkPortalNotificationController>
+  std::unique_ptr<WallpaperControllerClientImpl> wallpaper_controller_client_;
+  std::unique_ptr<ProjectorClientImpl> projector_client_;
+  std::unique_ptr<ProjectorAppClientImpl> projector_app_client_;
+  std::unique_ptr<QuickAnswersController> quick_answers_controller_;
+  std::unique_ptr<game_mode::GameModeController> game_mode_controller_;
+  std::unique_ptr<ash::NetworkPortalNotificationController>
       network_portal_notification_controller_;
 
-  std::unique_ptr<internal::ChromeLauncherControllerInitializer>
-      chrome_launcher_controller_initializer_;
+  std::unique_ptr<internal::ChromeShelfControllerInitializer>
+      chrome_shelf_controller_initializer_;
+  std::unique_ptr<DesksClient> desks_client_;
 
 #if BUILDFLAG(ENABLE_WAYLAND_SERVER)
   std::unique_ptr<ExoParts> exo_parts_;
 #endif
 
   // Initialized in PostProfileInit in all configs:
-  std::unique_ptr<LoginScreenClient> login_screen_client_;
+  std::unique_ptr<LoginScreenClientImpl> login_screen_client_;
   std::unique_ptr<MediaClientImpl> media_client_;
+  std::unique_ptr<AppAccessNotifier> app_access_notifier_;
   std::unique_ptr<policy::DisplaySettingsHandler> display_settings_handler_;
+  std::unique_ptr<AshWebViewFactoryImpl> ash_web_view_factory_;
 
   // Initialized in PostBrowserStart in all configs:
   std::unique_ptr<MobileDataNotifications> mobile_data_notifications_;
-  std::unique_ptr<NightLightClient> night_light_client_;
-  std::unique_ptr<PhotoControllerImpl> photo_controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainExtraPartsAsh);
+  std::unique_ptr<ash::NightLightClient> night_light_client_;
+  std::unique_ptr<AmbientClientImpl> ambient_client_;
 };
 
 #endif  // CHROME_BROWSER_UI_ASH_CHROME_BROWSER_MAIN_EXTRA_PARTS_ASH_H_

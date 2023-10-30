@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,62 +9,112 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/feature_list.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
-#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_runner.h"
 #include "chrome/browser/extensions/extension_view.h"
 #include "chrome/browser/extensions/extension_view_host.h"
 #include "chrome/browser/extensions/extension_view_host_factory.h"
+#include "chrome/browser/extensions/site_permissions_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/extensions/accelerator_priority.h"
 #include "chrome/browser/ui/extensions/extension_action_platform_delegate.h"
+#include "chrome/browser/ui/extensions/extension_popup_types.h"
 #include "chrome/browser/ui/extensions/extensions_container.h"
 #include "chrome/browser/ui/extensions/icon_with_badge_image_source.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_delegate.h"
-#include "chrome/browser/ui/ui_features.h"
-#include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/grit/generated_resources.h"
-#include "extensions/browser/extension_host.h"
+#include "components/sessions/content/session_tab_helper.h"
+#include "content/public/browser/web_contents.h"
+#include "extensions/browser/blocked_action_type.h"
+#include "extensions/browser/extension_action.h"
+#include "extensions/browser/extension_action_manager.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/common/api/extension_action/action_info.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_features.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/permissions/api_permission.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/color/color_provider_manager.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
+#include "ui/native_theme/native_theme.h"
 
 using extensions::ActionInfo;
 using extensions::CommandService;
 using extensions::ExtensionActionRunner;
 
-ExtensionActionViewController::ExtensionActionViewController(
-    const extensions::Extension* extension,
+namespace {
+
+void RecordInvocationSource(
+    ToolbarActionViewController::InvocationSource source) {
+  base::UmaHistogramEnumeration("Extensions.Toolbar.InvocationSource", source);
+}
+
+}  // namespace
+
+// static
+std::unique_ptr<ExtensionActionViewController>
+ExtensionActionViewController::Create(
+    const extensions::ExtensionId& extension_id,
     Browser* browser,
-    ExtensionAction* extension_action,
-    ExtensionsContainer* extensions_container,
-    bool in_overflow_mode)
-    : extension_(extension),
+    ExtensionsContainer* extensions_container) {
+  DCHECK(browser);
+  DCHECK(extensions_container);
+
+  auto* registry = extensions::ExtensionRegistry::Get(browser->profile());
+  scoped_refptr<const extensions::Extension> extension =
+      registry->enabled_extensions().GetByID(extension_id);
+  DCHECK(extension);
+  extensions::ExtensionAction* extension_action =
+      extensions::ExtensionActionManager::Get(browser->profile())
+          ->GetExtensionAction(*extension);
+  DCHECK(extension_action);
+
+  // WrapUnique() because the constructor is private.
+  return base::WrapUnique(new ExtensionActionViewController(
+      std::move(extension), browser, extension_action, registry,
+      extensions_container));
+}
+
+// static
+bool ExtensionActionViewController::AnyActionHasCurrentSiteAccess(
+    const std::vector<std::unique_ptr<ToolbarActionViewController>>& actions,
+    content::WebContents* web_contents) {
+  for (const auto& action : actions) {
+    if (action->GetSiteInteraction(web_contents) ==
+        extensions::SitePermissionsHelper::SiteInteraction::kGranted) {
+      return true;
+    }
+  }
+  return false;
+}
+
+ExtensionActionViewController::ExtensionActionViewController(
+    scoped_refptr<const extensions::Extension> extension,
+    Browser* browser,
+    extensions::ExtensionAction* extension_action,
+    extensions::ExtensionRegistry* extension_registry,
+    ExtensionsContainer* extensions_container)
+    : extension_(std::move(extension)),
       browser_(browser),
-      in_overflow_mode_(in_overflow_mode),
       extension_action_(extension_action),
       extensions_container_(extensions_container),
       popup_host_(nullptr),
       view_delegate_(nullptr),
       platform_delegate_(ExtensionActionPlatformDelegate::Create(this)),
-      icon_factory_(browser->profile(), extension, extension_action, this),
-      extension_registry_(
-          extensions::ExtensionRegistry::Get(browser_->profile())),
-      popup_host_observer_(this) {
-  DCHECK(extensions_container);
-  DCHECK(extension_action);
-  DCHECK(extension);
-}
+      icon_factory_(browser->profile(),
+                    extension_.get(),
+                    extension_action,
+                    this),
+      extension_registry_(extension_registry) {}
 
 ExtensionActionViewController::~ExtensionActionViewController() {
   DCHECK(!IsShowingPopup());
@@ -79,7 +129,6 @@ void ExtensionActionViewController::SetDelegate(
   DCHECK((delegate == nullptr) ^ (view_delegate_ == nullptr));
   if (delegate) {
     view_delegate_ = delegate;
-    platform_delegate_->OnDelegateSet();
   } else {
     HidePopup();
     platform_delegate_.reset();
@@ -97,17 +146,17 @@ gfx::Image ExtensionActionViewController::GetIcon(
       gfx::ImageSkia(GetIconImageSource(web_contents, size), size));
 }
 
-base::string16 ExtensionActionViewController::GetActionName() const {
+std::u16string ExtensionActionViewController::GetActionName() const {
   if (!ExtensionIsValid())
-    return base::string16();
+    return std::u16string();
 
   return base::UTF8ToUTF16(extension_->name());
 }
 
-base::string16 ExtensionActionViewController::GetAccessibleName(
+std::u16string ExtensionActionViewController::GetAccessibleName(
     content::WebContents* web_contents) const {
   if (!ExtensionIsValid())
-    return base::string16();
+    return std::u16string();
 
   // GetAccessibleName() can (surprisingly) be called during browser
   // teardown. Handle this gracefully.
@@ -115,38 +164,38 @@ base::string16 ExtensionActionViewController::GetAccessibleName(
     return base::UTF8ToUTF16(extension()->name());
 
   std::string title = extension_action()->GetTitle(
-      SessionTabHelper::IdForTab(web_contents).id());
+      sessions::SessionTabHelper::IdForTab(web_contents).id());
 
-  base::string16 title_utf16 =
+  std::u16string title_utf16 =
       base::UTF8ToUTF16(title.empty() ? extension()->name() : title);
 
-  // Include a "host access" portion of the tooltip if the extension has or
-  // wants access to the site.
-  PageInteractionStatus interaction_status =
-      GetPageInteractionStatus(web_contents);
-  int interaction_status_description_id = -1;
-  switch (interaction_status) {
-    case PageInteractionStatus::kNone:
+  // Include a "host access" portion of the tooltip if the extension has active
+  // or pending interaction with the site.
+  auto site_interaction = GetSiteInteraction(web_contents);
+  int site_interaction_description_id = -1;
+  switch (site_interaction) {
+    case extensions::SitePermissionsHelper::SiteInteraction::kNone:
       // No string for neither having nor wanting access.
       break;
-    case PageInteractionStatus::kPending:
-      interaction_status_description_id = IDS_EXTENSIONS_WANTS_ACCESS_TO_SITE;
+    case extensions::SitePermissionsHelper::SiteInteraction::kWithheld:
+    case extensions::SitePermissionsHelper::SiteInteraction::kActiveTab:
+      site_interaction_description_id = IDS_EXTENSIONS_WANTS_ACCESS_TO_SITE;
       break;
-    case PageInteractionStatus::kActive:
-      interaction_status_description_id = IDS_EXTENSIONS_HAS_ACCESS_TO_SITE;
+    case extensions::SitePermissionsHelper::SiteInteraction::kGranted:
+      site_interaction_description_id = IDS_EXTENSIONS_HAS_ACCESS_TO_SITE;
       break;
   }
 
-  if (interaction_status_description_id != -1) {
+  if (site_interaction_description_id != -1) {
     title_utf16 = base::StrCat(
-        {title_utf16, base::UTF8ToUTF16("\n"),
-         l10n_util::GetStringUTF16(interaction_status_description_id)});
+        {title_utf16, u"\n",
+         l10n_util::GetStringUTF16(site_interaction_description_id)});
   }
 
   return title_utf16;
 }
 
-base::string16 ExtensionActionViewController::GetTooltip(
+std::u16string ExtensionActionViewController::GetTooltip(
     content::WebContents* web_contents) const {
   return GetAccessibleName(web_contents);
 }
@@ -156,33 +205,33 @@ bool ExtensionActionViewController::IsEnabled(
   if (!ExtensionIsValid())
     return false;
 
+  extensions::SitePermissionsHelper::SiteInteraction site_interaction =
+      GetSiteInteraction(web_contents);
+
   return extension_action_->GetIsVisible(
-             SessionTabHelper::IdForTab(web_contents).id()) ||
-         HasBeenBlocked(web_contents);
-}
-
-bool ExtensionActionViewController::WantsToRun(
-    content::WebContents* web_contents) const {
-  return ExtensionIsValid() &&
-         (PageActionWantsToRun(web_contents) || HasBeenBlocked(web_contents));
-}
-
-bool ExtensionActionViewController::HasPopup(
-    content::WebContents* web_contents) const {
-  if (!ExtensionIsValid())
-    return false;
-
-  SessionID tab_id = SessionTabHelper::IdForTab(web_contents);
-  return tab_id.is_valid() ? extension_action_->HasPopup(tab_id.id()) : false;
+             sessions::SessionTabHelper::IdForTab(web_contents).id()) ||
+         site_interaction ==
+             extensions::SitePermissionsHelper::SiteInteraction::kWithheld ||
+         site_interaction ==
+             extensions::SitePermissionsHelper::SiteInteraction::kActiveTab;
 }
 
 bool ExtensionActionViewController::IsShowingPopup() const {
   return popup_host_ != nullptr;
 }
 
+bool ExtensionActionViewController::IsRequestingSiteAccess(
+    content::WebContents* web_contents) const {
+  return GetSiteInteraction(web_contents) ==
+         extensions::SitePermissionsHelper::SiteInteraction::kWithheld;
+}
+
 void ExtensionActionViewController::HidePopup() {
   if (IsShowingPopup()) {
-    popup_host_->Close();
+    // Only call Close() on the popup if it's been shown; otherwise, the popup
+    // will be cleaned up in ShowPopup().
+    if (has_opened_popup_)
+      popup_host_->Close();
     // We need to do these actions synchronously (instead of closing and then
     // performing the rest of the cleanup in OnExtensionHostDestroyed()) because
     // the extension host may close asynchronously, and we need to keep the view
@@ -196,46 +245,71 @@ gfx::NativeView ExtensionActionViewController::GetPopupNativeView() {
   return popup_host_ ? popup_host_->view()->GetNativeView() : nullptr;
 }
 
-ui::MenuModel* ExtensionActionViewController::GetContextMenu() {
+ui::MenuModel* ExtensionActionViewController::GetContextMenu(
+    extensions::ExtensionContextMenuModel::ContextMenuSource
+        context_menu_source) {
   if (!ExtensionIsValid())
     return nullptr;
 
-  extensions::ExtensionContextMenuModel::ButtonVisibility visibility =
-      extensions::ExtensionContextMenuModel::VISIBLE;
-
-  // The extension visibility always refers to the corresponding action on the
-  // main bar.
   ToolbarActionViewController* const action =
       extensions_container_->GetActionForId(GetId());
-  if (extensions_container_->GetPoppedOutAction() == action) {
-    visibility = extensions::ExtensionContextMenuModel::TRANSITIVELY_VISIBLE;
-  } else if (!extensions_container_->IsActionVisibleOnToolbar(action)) {
-    visibility = extensions::ExtensionContextMenuModel::OVERFLOWED;
-  }
+  extensions::ExtensionContextMenuModel::ButtonVisibility visibility =
+      extensions_container_->GetActionVisibility(action);
 
   // Reconstruct the menu every time because the menu's contents are dynamic.
-  context_menu_model_.reset(new extensions::ExtensionContextMenuModel(
+  context_menu_model_ = std::make_unique<extensions::ExtensionContextMenuModel>(
       extension(), browser_, visibility, this,
-      view_delegate_->CanShowIconInToolbar()));
+      view_delegate_->CanShowIconInToolbar(), context_menu_source);
   return context_menu_model_.get();
 }
 
-void ExtensionActionViewController::OnContextMenuClosed() {
-  if (extensions_container_->GetPoppedOutAction() == this && !IsShowingPopup())
-    extensions_container_->UndoPopOut();
+void ExtensionActionViewController::OnContextMenuShown() {
+  extensions_container_->OnContextMenuShown(this);
 }
 
-bool ExtensionActionViewController::ExecuteAction(bool by_user) {
+void ExtensionActionViewController::OnContextMenuClosed() {
+  extensions_container_->OnContextMenuClosed(this);
+}
+
+void ExtensionActionViewController::ExecuteUserAction(InvocationSource source) {
   if (!ExtensionIsValid())
-    return false;
+    return;
 
   if (!IsEnabled(view_delegate_->GetCurrentWebContents())) {
-    if (DisabledClickOpensMenu())
-      GetPreferredPopupViewController()->platform_delegate_->ShowContextMenu();
-    return false;
+    GetPreferredPopupViewController()
+        ->view_delegate_->ShowContextMenuAsFallback();
+    return;
   }
 
-  return ExecuteAction(SHOW_POPUP, by_user);
+  content::WebContents* const web_contents =
+      view_delegate_->GetCurrentWebContents();
+  ExtensionActionRunner* action_runner =
+      ExtensionActionRunner::GetForWebContents(web_contents);
+  if (!action_runner)
+    return;
+
+  RecordInvocationSource(source);
+
+  extensions_container_->CloseOverflowMenuIfOpen();
+
+  // This method is only called to execute an action by the user, so we can
+  // always grant tab permissions.
+  constexpr bool kGrantTabPermissions = true;
+  if (action_runner->RunAction(extension(), kGrantTabPermissions) ==
+      extensions::ExtensionAction::ACTION_SHOW_POPUP) {
+    constexpr bool kByUser = true;
+    GetPreferredPopupViewController()->TriggerPopup(
+        PopupShowAction::kShow, kByUser, ShowPopupCallback());
+  }
+}
+
+void ExtensionActionViewController::TriggerPopupForAPI(
+    ShowPopupCallback callback) {
+  RecordInvocationSource(InvocationSource::kApi);
+  // This method is called programmatically by an API; it should never be
+  // considered a user action.
+  constexpr bool kByUser = false;
+  TriggerPopup(PopupShowAction::kShow, kByUser, std::move(callback));
 }
 
 void ExtensionActionViewController::UpdateState() {
@@ -245,28 +319,13 @@ void ExtensionActionViewController::UpdateState() {
   view_delegate_->UpdateState();
 }
 
-bool ExtensionActionViewController::ExecuteAction(PopupShowAction show_action,
-                                                  bool grant_tab_permissions) {
+void ExtensionActionViewController::UpdateHoverCard(
+    ToolbarActionView* action_view,
+    ToolbarActionHoverCardUpdateType update_type) {
   if (!ExtensionIsValid())
-    return false;
+    return;
 
-  content::WebContents* web_contents = view_delegate_->GetCurrentWebContents();
-  ExtensionActionRunner* action_runner =
-      ExtensionActionRunner::GetForWebContents(web_contents);
-  if (!action_runner)
-    return false;
-
-  if (base::FeatureList::IsEnabled(features::kExtensionsToolbarMenu))
-    extensions_container_->CloseOverflowMenuIfOpen();
-
-  if (action_runner->RunAction(extension(), grant_tab_permissions) ==
-      ExtensionAction::ACTION_SHOW_POPUP) {
-    GURL popup_url = extension_action_->GetPopupUrl(
-        SessionTabHelper::IdForTab(web_contents).id());
-    return GetPreferredPopupViewController()
-        ->TriggerPopupWithUrl(show_action, popup_url, grant_tab_permissions);
-  }
-  return false;
+  extensions_container_->UpdateToolbarActionHoverCard(action_view, update_type);
 }
 
 void ExtensionActionViewController::RegisterCommand() {
@@ -276,12 +335,16 @@ void ExtensionActionViewController::RegisterCommand() {
   platform_delegate_->RegisterCommand();
 }
 
-bool ExtensionActionViewController::DisabledClickOpensMenu() const {
-  return true;
+void ExtensionActionViewController::UnregisterCommand() {
+  platform_delegate_->UnregisterCommand();
 }
 
 void ExtensionActionViewController::InspectPopup() {
-  ExecuteAction(SHOW_POPUP_AND_INSPECT, true);
+  // This method is only triggered through user action (clicking on the context
+  // menu entry).
+  constexpr bool kByUser = true;
+  GetPreferredPopupViewController()->TriggerPopup(
+      PopupShowAction::kShowAndInspect, kByUser, ShowPopupCallback());
 }
 
 void ExtensionActionViewController::OnIconUpdated() {
@@ -292,40 +355,15 @@ void ExtensionActionViewController::OnIconUpdated() {
 }
 
 void ExtensionActionViewController::OnExtensionHostDestroyed(
-    const extensions::ExtensionHost* host) {
+    extensions::ExtensionHost* host) {
   OnPopupClosed();
 }
 
-ExtensionActionViewController::PageInteractionStatus
-ExtensionActionViewController::GetPageInteractionStatus(
+extensions::SitePermissionsHelper::SiteInteraction
+ExtensionActionViewController::GetSiteInteraction(
     content::WebContents* web_contents) const {
-  // The |web_contents| can be null, if TabStripModel::GetActiveWebContents()
-  // returns null. In that case, default to kNone.
-  if (!web_contents)
-    return PageInteractionStatus::kNone;
-
-  // We give priority to kPending, because it's the one that's most important
-  // for users to see.
-  if (HasBeenBlocked(web_contents))
-    return PageInteractionStatus::kPending;
-
-  // NOTE(devlin): We could theoretically adjust this to only be considered
-  // active if the extension *did* act on the page, rather than if it *could*.
-  // This is a bit more complex, and it's unclear if this is a better UX, since
-  // it would lead to much less determinism in terms of what extensions look
-  // like on a given host.
-  const int tab_id = SessionTabHelper::IdForTab(web_contents).id();
-  const GURL& url = web_contents->GetLastCommittedURL();
-  if (extension_->permissions_data()->GetPageAccess(url, tab_id,
-                                                    /*error=*/nullptr) ==
-          extensions::PermissionsData::PageAccess::kAllowed ||
-      extension_->permissions_data()->GetContentScriptAccess(
-          url, tab_id, /*error=*/nullptr) ==
-          extensions::PermissionsData::PageAccess::kAllowed) {
-    return PageInteractionStatus::kActive;
-  }
-
-  return PageInteractionStatus::kNone;
+  return extensions::SitePermissionsHelper(browser_->profile())
+      .GetSiteInteraction(*extension(), web_contents);
 }
 
 bool ExtensionActionViewController::ExtensionIsValid() const {
@@ -333,18 +371,84 @@ bool ExtensionActionViewController::ExtensionIsValid() const {
 }
 
 bool ExtensionActionViewController::GetExtensionCommand(
-    extensions::Command* command) {
+    extensions::Command* command) const {
   DCHECK(command);
   if (!ExtensionIsValid())
     return false;
 
   CommandService* command_service = CommandService::Get(browser_->profile());
-  if (extension_action_->action_type() == ActionInfo::TYPE_PAGE) {
-    return command_service->GetPageActionCommand(
-        extension_->id(), CommandService::ACTIVE, command, NULL);
+  return command_service->GetExtensionActionCommand(
+      extension_->id(), extension_action_->action_type(),
+      CommandService::ACTIVE, command, nullptr);
+}
+
+ToolbarActionViewController::HoverCardState
+ExtensionActionViewController::GetHoverCardState(
+    content::WebContents* web_contents) const {
+  DCHECK(ExtensionIsValid());
+  DCHECK(web_contents);
+
+  url::Origin origin =
+      web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin();
+  extensions::PermissionsManager::UserSiteSetting site_setting =
+      extensions::PermissionsManager::Get(browser_->profile())
+          ->GetUserSiteSetting(origin);
+
+  // Compute hover card status based on:
+  // 1. Extension wants site access: user site settings takes precedence
+  // over the extension's site access.
+  // 2. Extension does not want access: if all extensions are blocked display
+  // such message because a) user could wrongly infer that an extension that
+  // does not want access has access if we only show the blocked message for
+  // extensions that want access; and b) it helps us work around tricky
+  // calculations where we get into collisions between withheld and denied
+  // permission. Otherwise, it should display "does not want access".
+  auto site_interaction = GetSiteInteraction(web_contents);
+  switch (site_interaction) {
+    case extensions::SitePermissionsHelper::SiteInteraction::kGranted:
+      return site_setting == extensions::PermissionsManager::UserSiteSetting::
+                                 kGrantAllExtensions
+                 ? HoverCardState::kAllExtensionsAllowed
+                 : HoverCardState::kExtensionHasAccess;
+
+    case extensions::SitePermissionsHelper::SiteInteraction::kWithheld:
+    case extensions::SitePermissionsHelper::SiteInteraction::kActiveTab:
+      return site_setting == extensions::PermissionsManager::UserSiteSetting::
+                                 kBlockAllExtensions
+                 ? HoverCardState::kAllExtensionsBlocked
+                 : HoverCardState::kExtensionRequestsAccess;
+
+    case extensions::SitePermissionsHelper::SiteInteraction::kNone:
+      // kNone site interaction includes extensions that don't want access when
+      // user site setting is "block all extensions".
+      return site_setting == extensions::PermissionsManager::UserSiteSetting::
+                                 kBlockAllExtensions
+                 ? HoverCardState::kAllExtensionsBlocked
+                 : HoverCardState::kExtensionDoesNotWantAccess;
   }
-  return command_service->GetBrowserActionCommand(
-      extension_->id(), CommandService::ACTIVE, command, NULL);
+}
+
+bool ExtensionActionViewController::CanHandleAccelerators() const {
+  if (!ExtensionIsValid())
+    return false;
+
+#if DCHECK_IS_ON()
+  {
+    extensions::Command command;
+    DCHECK(GetExtensionCommand(&command));
+  }
+#endif
+
+  // Page action accelerators are enabled if and only if the page action is
+  // enabled ("visible" in legacy terms) on the given tab. Other actions can
+  // always accept accelerators.
+  // TODO(devlin): Have all actions behave similarly; this should likely mean
+  // always checking IsEnabled(). It's weird to use a keyboard shortcut on a
+  // disabled action (in most cases, this will result in opening the context
+  // menu).
+  if (extension_action_->action_type() == extensions::ActionInfo::TYPE_PAGE)
+    return IsEnabled(view_delegate_->GetCurrentWebContents());
+  return true;
 }
 
 std::unique_ptr<IconWithBadgeImageSource>
@@ -354,70 +458,86 @@ ExtensionActionViewController::GetIconImageSourceForTesting(
   return GetIconImageSource(web_contents, size);
 }
 
+bool ExtensionActionViewController::HasBeenBlockedForTesting(
+    content::WebContents* web_contents) const {
+  return extensions::SitePermissionsHelper(browser_->profile())
+      .HasBeenBlocked(*extension(), web_contents);
+}
+
 ExtensionActionViewController*
 ExtensionActionViewController::GetPreferredPopupViewController() {
   return static_cast<ExtensionActionViewController*>(
       extensions_container_->GetActionForId(GetId()));
 }
 
-bool ExtensionActionViewController::TriggerPopupWithUrl(
-    PopupShowAction show_action,
-    const GURL& popup_url,
-    bool grant_tab_permissions) {
-  DCHECK(!in_overflow_mode_)
-      << "Only the main bar's extensions should ever try to show a popup";
-  if (!ExtensionIsValid())
-    return false;
+void ExtensionActionViewController::TriggerPopup(PopupShowAction show_action,
+                                                 bool by_user,
+                                                 ShowPopupCallback callback) {
+  DCHECK(ExtensionIsValid());
+  DCHECK_EQ(this, GetPreferredPopupViewController());
+
+  content::WebContents* const web_contents =
+      view_delegate_->GetCurrentWebContents();
+  const int tab_id = sessions::SessionTabHelper::IdForTab(web_contents).id();
+  DCHECK(extension_action_->GetIsVisible(tab_id));
+  DCHECK(extension_action_->HasPopup(tab_id));
+
+  const GURL popup_url = extension_action_->GetPopupUrl(tab_id);
+
+  std::unique_ptr<extensions::ExtensionViewHost> host =
+      extensions::ExtensionViewHostFactory::CreatePopupHost(popup_url,
+                                                            browser_);
+  // Creating a host should never fail in this case, since the extension is
+  // valid and has a valid popup URL.
+  CHECK(host);
 
   // Always hide the current popup, even if it's not owned by this extension.
   // Only one popup should be visible at a time.
   extensions_container_->HideActivePopup();
 
-  std::unique_ptr<extensions::ExtensionViewHost> host =
-      extensions::ExtensionViewHostFactory::CreatePopupHost(popup_url,
-                                                            browser_);
-  if (!host)
-    return false;
+  extensions_container_->CloseOverflowMenuIfOpen();
 
   popup_host_ = host.get();
-  popup_host_observer_.Add(popup_host_);
+  popup_host_observation_.Observe(popup_host_.get());
   extensions_container_->SetPopupOwner(this);
 
-  if (!extensions_container_->IsActionVisibleOnToolbar(this)) {
-    extensions_container_->CloseOverflowMenuIfOpen();
-    extensions_container_->PopOutAction(
-        this, show_action == SHOW_POPUP_AND_INSPECT,
-        base::Bind(&ExtensionActionViewController::ShowPopup,
-                   weak_factory_.GetWeakPtr(), base::Passed(std::move(host)),
-                   grant_tab_permissions, show_action));
-  } else {
-    ShowPopup(std::move(host), grant_tab_permissions, show_action);
-  }
-
-  return true;
+  extensions_container_->PopOutAction(
+      this, base::BindOnce(&ExtensionActionViewController::ShowPopup,
+                           weak_factory_.GetWeakPtr(), std::move(host), by_user,
+                           show_action, std::move(callback)));
 }
 
 void ExtensionActionViewController::ShowPopup(
     std::unique_ptr<extensions::ExtensionViewHost> popup_host,
     bool grant_tab_permissions,
-    PopupShowAction show_action) {
+    PopupShowAction show_action,
+    ShowPopupCallback callback) {
   // It's possible that the popup should be closed before it finishes opening
   // (since it can open asynchronously). Check before proceeding.
-  if (!popup_host_)
+  if (!popup_host_) {
+    if (callback)
+      std::move(callback).Run(nullptr);
     return;
-  platform_delegate_->ShowPopup(std::move(popup_host), grant_tab_permissions,
-                                show_action);
+  }
+  // NOTE: Today, ShowPopup() always synchronously creates the platform-specific
+  // popup class, which is what we care most about (since `has_opened_popup_`
+  // is used to determine whether we need to manually close the
+  // ExtensionViewHost). This doesn't necessarily mean that the popup has
+  // completed rendering on the screen.
+  has_opened_popup_ = true;
+  platform_delegate_->ShowPopup(std::move(popup_host), show_action,
+                                std::move(callback));
   view_delegate_->OnPopupShown(grant_tab_permissions);
 }
 
 void ExtensionActionViewController::OnPopupClosed() {
-  popup_host_observer_.Remove(popup_host_);
+  DCHECK(popup_host_observation_.IsObservingSource(popup_host_.get()));
+  popup_host_observation_.Reset();
   popup_host_ = nullptr;
+  has_opened_popup_ = false;
   extensions_container_->SetPopupOwner(nullptr);
-  if (extensions_container_->GetPoppedOutAction() == this &&
-      !view_delegate_->IsMenuRunning()) {
+  if (extensions_container_->GetPoppedOutAction() == this)
     extensions_container_->UndoPopOut();
-  }
   view_delegate_->OnPopupClosed();
 }
 
@@ -425,57 +545,50 @@ std::unique_ptr<IconWithBadgeImageSource>
 ExtensionActionViewController::GetIconImageSource(
     content::WebContents* web_contents,
     const gfx::Size& size) {
-  int tab_id = SessionTabHelper::IdForTab(web_contents).id();
-  std::unique_ptr<IconWithBadgeImageSource> image_source(
-      new IconWithBadgeImageSource(size));
+  // `web_contents` may be null during tab closure or in tests.  Fall back on a
+  // generic color provider.
+  auto get_color_provider_callback = base::BindRepeating(
+      [](base::WeakPtr<content::WebContents> weak_web_contents) {
+        return weak_web_contents
+                   ? &weak_web_contents->GetColorProvider()
+                   : ui::ColorProviderManager::Get().GetColorProviderFor(
+                         ui::NativeTheme::GetInstanceForNativeUi()
+                             ->GetColorProviderKey(nullptr));
+      },
+      web_contents ? web_contents->GetWeakPtr()
+                   : base::WeakPtr<content::WebContents>());
+  auto image_source = std::make_unique<IconWithBadgeImageSource>(
+      size, std::move(get_color_provider_callback));
 
+  int tab_id = sessions::SessionTabHelper::IdForTab(web_contents).id();
   image_source->SetIcon(icon_factory_.GetIcon(tab_id));
 
   std::unique_ptr<IconWithBadgeImageSource::Badge> badge;
-  std::string badge_text = extension_action_->GetBadgeText(tab_id);
+  std::string badge_text = extension_action_->GetDisplayBadgeText(tab_id);
   if (!badge_text.empty()) {
-    badge.reset(new IconWithBadgeImageSource::Badge(
-            badge_text,
-            extension_action_->GetBadgeTextColor(tab_id),
-            extension_action_->GetBadgeBackgroundColor(tab_id)));
+    badge = std::make_unique<IconWithBadgeImageSource::Badge>(
+        badge_text, extension_action_->GetBadgeTextColor(tab_id),
+        extension_action_->GetBadgeBackgroundColor(tab_id));
   }
   image_source->SetBadge(std::move(badge));
 
-  bool grayscale = false;
-  bool was_blocked = false;
-  bool action_is_visible = extension_action_->GetIsVisible(tab_id);
-  PageInteractionStatus interaction_status =
-      GetPageInteractionStatus(web_contents);
   // We only grayscale the icon if it cannot interact with the page and the icon
   // is disabled.
-  grayscale =
-      interaction_status == PageInteractionStatus::kNone && !action_is_visible;
-  was_blocked = interaction_status == PageInteractionStatus::kPending;
-
+  bool action_is_visible = extension_action_->GetIsVisible(tab_id);
+  bool grayscale =
+      GetSiteInteraction(web_contents) ==
+          extensions::SitePermissionsHelper::SiteInteraction::kNone &&
+      !action_is_visible;
   image_source->set_grayscale(grayscale);
+
+  if (base::FeatureList::IsEnabled(
+          extensions_features::kExtensionsMenuAccessControl)) {
+    return image_source;
+  }
+
+  bool was_blocked = extensions::SitePermissionsHelper(browser_->profile())
+                         .HasBeenBlocked(*extension(), web_contents);
   image_source->set_paint_blocked_actions_decoration(was_blocked);
 
-  // If the action has an active page action on the web contents and is also
-  // overflowed, we add a decoration so that the user can see which overflowed
-  // action wants to run (since they wouldn't be able to see the change from
-  // grayscale to color).
-  image_source->set_paint_page_action_decoration(
-      !was_blocked && in_overflow_mode_ && PageActionWantsToRun(web_contents));
-
   return image_source;
-}
-
-bool ExtensionActionViewController::PageActionWantsToRun(
-    content::WebContents* web_contents) const {
-  return extension_action_->action_type() ==
-             extensions::ActionInfo::TYPE_PAGE &&
-         extension_action_->GetIsVisible(
-             SessionTabHelper::IdForTab(web_contents).id());
-}
-
-bool ExtensionActionViewController::HasBeenBlocked(
-    content::WebContents* web_contents) const {
-  ExtensionActionRunner* action_runner =
-      ExtensionActionRunner::GetForWebContents(web_contents);
-  return action_runner && action_runner->WantsToRun(extension());
 }

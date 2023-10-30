@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,8 @@
 #include <string>
 #include <utility>
 
-#include "base/test/scoped_task_environment.h"
+#include "base/memory/raw_ptr.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/notifications/proto/client_state.pb.h"
 #include "chrome/browser/notifications/scheduler/internal/impression_types.h"
 #include "chrome/browser/notifications/scheduler/internal/proto_conversion.h"
@@ -34,6 +35,8 @@ const ClientState kDefaultClientState;
 class ImpressionStoreTest : public testing::Test {
  public:
   ImpressionStoreTest() : load_result_(false), db_(nullptr) {}
+  ImpressionStoreTest(const ImpressionStoreTest&) = delete;
+  ImpressionStoreTest& operator=(const ImpressionStoreTest&) = delete;
   ~ImpressionStoreTest() override = default;
 
   void SetUp() override {}
@@ -90,15 +93,13 @@ class ImpressionStoreTest : public testing::Test {
     }
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::map<std::string, proto::ClientState> db_entries_;
   bool load_result_;
   Entries loaded_entries_;
 
-  FakeDB<proto::ClientState, ClientState>* db_;
+  raw_ptr<FakeDB<proto::ClientState, ClientState>> db_;
   std::unique_ptr<CollectionStore<ClientState>> store_;
-
-  DISALLOW_COPY_AND_ASSIGN(ImpressionStoreTest);
 };
 
 // Initializes an empty database should success.

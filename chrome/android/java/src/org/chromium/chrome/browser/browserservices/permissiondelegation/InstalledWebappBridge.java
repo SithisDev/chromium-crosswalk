@@ -1,12 +1,16 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.browserservices.permissiondelegation;
 
+import android.net.Uri;
+
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.chrome.browser.browserservices.Origin;
-import org.chromium.chrome.browser.preferences.website.ContentSettingValues;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.components.content_settings.ContentSettingValues;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.components.embedder_support.util.Origin;
 
 /**
  * Provides Trusted Web Activity Client App permissions for native. The C++ counterpart is the
@@ -24,7 +28,7 @@ public class InstalledWebappBridge {
      * relevant for.
      *
      * It would make more sense for this to be a subclass of
-     * {@link TrustedWebActivityPermissionManager} or a top level class. Unfortunately for the JNI
+     * {@link InstalledWebappPermissionManager} or a top level class. Unfortunately for the JNI
      * tool to be able to handle passing a class over the JNI boundary the class either needs to be
      * in this file or imported explicitly. Our presubmits don't like explicitly importing classes
      * that we don't need to, so it's easier to just let the class live here.
@@ -39,10 +43,18 @@ public class InstalledWebappBridge {
         }
     }
 
-    public static void notifyPermissionsChange() {
+    public static void notifyPermissionsChange(@ContentSettingsType int type) {
         if (sNativeInstalledWebappProvider == 0) return;
 
-        nativeNotifyPermissionsChange(sNativeInstalledWebappProvider);
+        InstalledWebappBridgeJni.get().notifyPermissionsChange(
+                sNativeInstalledWebappProvider, type);
+    }
+
+    public static void runPermissionCallback(
+            long callback, @ContentSettingValues int settingValue) {
+        if (callback == 0) return;
+
+        InstalledWebappBridgeJni.get().runPermissionCallback(callback, settingValue);
     }
 
     @CalledByNative
@@ -51,8 +63,15 @@ public class InstalledWebappBridge {
     }
 
     @CalledByNative
-    private static Permission[] getNotificationPermissions() {
-        return TrustedWebActivityPermissionManager.get().getNotificationPermissions();
+    private static Permission[] getPermissions(@ContentSettingsType int type) {
+        return InstalledWebappPermissionManager.get().getPermissions(type);
+    }
+
+    @CalledByNative
+    @ContentSettingValues
+    private static int getPermission(@ContentSettingsType int type, String origin) {
+        return InstalledWebappPermissionManager.get().getPermission(
+                type, Origin.create(Uri.parse(origin)));
     }
 
     @CalledByNative
@@ -65,5 +84,30 @@ public class InstalledWebappBridge {
         return permission.setting;
     }
 
-    private static native void nativeNotifyPermissionsChange(long provider);
+    @CalledByNative
+    private static void decidePermission(@ContentSettingsType int type, String originUrl,
+            String lastCommittedUrl, long callback) {
+        Origin origin = Origin.create(Uri.parse(originUrl));
+        if (origin == null) {
+            runPermissionCallback(callback, ContentSettingValues.BLOCK);
+            return;
+        }
+        switch (type) {
+            case ContentSettingsType.GEOLOCATION:
+                PermissionUpdater.get().getLocationPermission(origin, lastCommittedUrl, callback);
+                break;
+            case ContentSettingsType.NOTIFICATIONS:
+                PermissionUpdater.get().requestNotificationPermission(
+                        origin, lastCommittedUrl, callback);
+                break;
+            default:
+                throw new IllegalStateException("Unsupported permission type.");
+        }
+    }
+
+    @NativeMethods
+    interface Natives {
+        void notifyPermissionsChange(long provider, int type);
+        void runPermissionCallback(long callback, @ContentSettingValues int settingValue);
+    }
 }

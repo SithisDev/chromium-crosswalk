@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,6 @@ Status LaunchChrome(network::mojom::URLLoaderFactory* factory,
 namespace internal {
 Status ProcessExtensions(const std::vector<std::string>& extensions,
                          const base::FilePath& temp_dir,
-                         bool include_automation_extension,
                          Switches* switches,
                          std::vector<std::string>* bg_pages);
 Status PrepareUserDataDir(

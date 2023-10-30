@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,19 @@
 #include <set>
 #include <string>
 
+#include "components/signin/public/identity_manager/account_info.h"
+
 namespace extensions {
 
 struct ExtensionTokenKey {
   ExtensionTokenKey(const std::string& extension_id,
-                    const std::string& account_id,
+                    const CoreAccountInfo& account_info,
                     const std::set<std::string>& scopes);
   ExtensionTokenKey(const ExtensionTokenKey& other);
   ~ExtensionTokenKey();
   bool operator<(const ExtensionTokenKey& rhs) const;
   std::string extension_id;
-  std::string account_id;
+  CoreAccountInfo account_info;
   std::set<std::string> scopes;
 };
 

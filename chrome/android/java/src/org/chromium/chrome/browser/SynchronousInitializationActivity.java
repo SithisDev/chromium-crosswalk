@@ -1,15 +1,14 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser;
 
 import android.os.Bundle;
-import android.support.annotation.CallSuper;
 
-import org.chromium.base.Log;
-import org.chromium.base.library_loader.ProcessInitException;
-import org.chromium.chrome.browser.bookmarks.BookmarkActivity;
+import androidx.annotation.CallSuper;
+
+import org.chromium.chrome.browser.app.bookmarks.BookmarkActivity;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 
 /**
@@ -20,18 +19,12 @@ import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
  * background with the Activity visible.  One example is {@link BookmarkActivity} and its kin.
  */
 public abstract class SynchronousInitializationActivity extends ChromeBaseAppCompatActivity {
-    private static final String TAG = "SyncInitActivity";
-
     @CallSuper
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // Make sure the native is initialized before calling super.onCreate(), as calling
+        // super.onCreate() will recreate fragments that might depend on the native code.
+        ChromeBrowserInitializer.getInstance().handleSynchronousStartup();
         super.onCreate(savedInstanceState);
-        // Ensure that native library is loaded.
-        try {
-            ChromeBrowserInitializer.getInstance(this).handleSynchronousStartup();
-        } catch (ProcessInitException e) {
-            Log.e(TAG, "Failed to start browser process.", e);
-            ChromeApplication.reportStartupErrorAndExit(e);
-        }
     }
 }

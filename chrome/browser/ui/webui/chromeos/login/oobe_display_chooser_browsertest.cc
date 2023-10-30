@@ -1,14 +1,15 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/chromeos/login/oobe_display_chooser.h"
 
+#include "ash/constants/ash_switches.h"
 #include "ash/shell.h"
 #include "base/run_loop.h"
-#include "chrome/browser/chromeos/login/test/oobe_base_test.h"
+#include "chrome/browser/ash/login/test/oobe_base_test.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chromeos/constants/chromeos_switches.h"
+#include "content/public/test/browser_test.h"
 #include "ui/display/display.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/manager/managed_display_info.h"
@@ -22,6 +23,10 @@ namespace {
 class OobeDisplayChooserTest : public OobeBaseTest {
  public:
   OobeDisplayChooserTest() {}
+
+  OobeDisplayChooserTest(const OobeDisplayChooserTest&) = delete;
+  OobeDisplayChooserTest& operator=(const OobeDisplayChooserTest&) = delete;
+
   ~OobeDisplayChooserTest() override {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -29,9 +34,6 @@ class OobeDisplayChooserTest : public OobeBaseTest {
 
     OobeBaseTest::SetUpCommandLine(command_line);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(OobeDisplayChooserTest);
 };
 
 display::DisplayManager* display_manager() {

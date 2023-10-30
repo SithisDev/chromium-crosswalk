@@ -1,16 +1,12 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.payments;
 
-import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.HAVE_INSTRUMENTS;
-import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.IMMEDIATE_RESPONSE;
-
-import android.support.test.filters.MediumTest;
+import androidx.test.filters.MediumTest;
 
 import org.junit.Assert;
-import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -18,13 +14,15 @@ import org.junit.runner.RunWith;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.FlakyTest;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.AppPresence;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.FactorySpeed;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ui.DisableAnimationsTestRule;
 
 import java.util.ArrayList;
 import java.util.concurrent.TimeoutException;
@@ -36,10 +34,6 @@ import java.util.concurrent.TimeoutException;
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PaymentRequestMultipleContactDetailsTest implements MainActivityStartCallback {
-    // Disable animations to reduce flakiness.
-    @ClassRule
-    public static DisableAnimationsTestRule sNoAnimationsRule = new DisableAnimationsTestRule();
-
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule =
             new PaymentRequestTestRule("payment_request_contact_details_test.html", this);
@@ -47,66 +41,73 @@ public class PaymentRequestMultipleContactDetailsTest implements MainActivitySta
     private static final AutofillProfile[] AUTOFILL_PROFILES = {
             // 0 - Incomplete (no phone) profile.
             new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */,
-                    "Bart Simpson", "Acme Inc.", "123 Main", "California", "Los Angeles", "",
-                    "90210", "", "US", "", "bart@simpson.com", ""),
+                    "" /* honorific prefix */, "Bart Simpson", "Acme Inc.", "123 Main",
+                    "California", "Los Angeles", "", "90210", "", "US", "", "bart@simpson.com", ""),
 
             // 1 - Incomplete (no email) profile.
             new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */,
-                    "Homer Simpson", "Acme Inc.", "123 Main", "California", "Los Angeles", "",
-                    "90210", "", "US", "555 123-4567", "", ""),
+                    "" /* honorific prefix */, "Homer Simpson", "Acme Inc.", "123 Main",
+                    "California", "Los Angeles", "", "90210", "", "US", "555 123-4567", "", ""),
 
             // 2 - Complete profile.
             new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */,
-                    "Lisa Simpson", "Acme Inc.", "123 Main", "California", "Los Angeles", "",
-                    "90210", "", "US", "555 123-4567", "lisa@simpson.com", ""),
+                    "" /* honorific prefix */, "Lisa Simpson", "Acme Inc.", "123 Main",
+                    "California", "Los Angeles", "", "90210", "", "US", "555 123-4567",
+                    "lisa@simpson.com", ""),
 
             // 3 - Complete profile.
             new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */,
-                    "Maggie Simpson", "Acme Inc.", "123 Main", "California", "Los Angeles", "",
-                    "90210", "", "US", "555 123-4567", "maggie@simpson.com", ""),
+                    "" /* honorific prefix */, "Maggie Simpson", "Acme Inc.", "123 Main",
+                    "California", "Los Angeles", "", "90210", "", "US", "555 123-4567",
+                    "maggie@simpson.com", ""),
 
             // 4 - Incomplete (no phone and email) profile.
             new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */,
-                    "Marge Simpson", "Acme Inc.", "123 Main", "California", "Los Angeles", "",
-                    "90210", "", "US", "", "", ""),
+                    "" /* honorific prefix */, "Marge Simpson", "Acme Inc.", "123 Main",
+                    "California", "Los Angeles", "", "90210", "", "US", "", "", ""),
 
             // 5 - Incomplete (no name) profile.
-            new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */, "",
-                    "Acme Inc.", "123 Main", "California", "Los Angeles", "", "90210", "", "US",
-                    "555 123-4567", "marge@simpson.com", ""),
+            new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */,
+                    "" /* honorific prefix */, "", "Acme Inc.", "123 Main", "California",
+                    "Los Angeles", "", "90210", "", "US", "555 123-4567", "marge@simpson.com", ""),
 
             // These profiles are used to test the dedupe of subset suggestions. They are based on
             // The Lisa Simpson profile.
 
             // 6 - Same as original, but with no name.
             new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */,
-                    "" /* name */, "Acme Inc.", "123 Main", "California", "Los Angeles", "",
-                    "90210", "", "US", "555 123-4567", "lisa@simpson.com", ""),
+                    "" /* honorific prefix */, "" /* name */, "Acme Inc.", "123 Main", "California",
+                    "Los Angeles", "", "90210", "", "US", "555 123-4567", "lisa@simpson.com", ""),
 
             // 7 - Same as original, but with no phone.
             new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */,
-                    "Lisa Simpson", "Acme Inc.", "123 Main", "California", "Los Angeles", "",
-                    "90210", "", "US", "" /* phoneNumber */, "lisa@simpson.com", ""),
+                    "" /* honorific prefix */, "Lisa Simpson", "Acme Inc.", "123 Main",
+                    "California", "Los Angeles", "", "90210", "", "US", "" /* phoneNumber */,
+                    "lisa@simpson.com", ""),
 
             // 8 - Same as original, but with no email.
             new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */,
-                    "Lisa Simpson", "Acme Inc.", "123 Main", "California", "Los Angeles", "",
-                    "90210", "", "US", "555 123-4567", "" /* emailAddress */, ""),
+                    "" /* honorific prefix */, "Lisa Simpson", "Acme Inc.", "123 Main",
+                    "California", "Los Angeles", "", "90210", "", "US", "555 123-4567",
+                    "" /* emailAddress */, ""),
 
             // 9 - Same as original, but with no phone and no email.
             new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */,
-                    "Lisa Simpson", "Acme Inc.", "123 Main", "California", "Los Angeles", "",
-                    "90210", "", "US", "" /* phoneNumber */, "" /* emailAddress */, ""),
+                    "" /* honorific prefix */, "Lisa Simpson", "Acme Inc.", "123 Main",
+                    "California", "Los Angeles", "", "90210", "", "US", "" /* phoneNumber */,
+                    "" /* emailAddress */, ""),
 
             // 10 - Has an email address that is a superset of the original profile's email.
             new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */,
-                    "Lisa Simpson", "Acme Inc.", "123 Main", "California", "Los Angeles", "",
-                    "90210", "", "US", "555 123-4567", "fakelisa@simpson.com", ""),
+                    "" /* honorific prefix */, "Lisa Simpson", "Acme Inc.", "123 Main",
+                    "California", "Los Angeles", "", "90210", "", "US", "555 123-4567",
+                    "fakelisa@simpson.com", ""),
 
             // 11 - Has the same name as the original but with no capitalization in the name.
             new AutofillProfile("" /* guid */, "https://www.example.com" /* origin */,
-                    "lisa simpson", "Acme Inc.", "123 Main", "California", "Los Angeles", "",
-                    "90210", "", "US", "555 123-4567", "lisa@simpson.com", ""),
+                    "" /* honorific prefix */, "lisa simpson", "Acme Inc.", "123 Main",
+                    "California", "Los Angeles", "", "90210", "", "US", "555 123-4567",
+                    "lisa@simpson.com", ""),
 
     };
 
@@ -115,7 +116,7 @@ public class PaymentRequestMultipleContactDetailsTest implements MainActivitySta
     private int[] mDatesToSet;
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {
+    public void onMainActivityStarted() throws TimeoutException {
         AutofillTestHelper helper = new AutofillTestHelper();
 
         // Add the profiles.
@@ -129,7 +130,8 @@ public class PaymentRequestMultipleContactDetailsTest implements MainActivitySta
             helper.setProfileUseStatsForTesting(guids.get(i), mCountsToSet[i], mDatesToSet[i]);
         }
 
-        mPaymentRequestTestRule.installPaymentApp(HAVE_INSTRUMENTS, IMMEDIATE_RESPONSE);
+        mPaymentRequestTestRule.addPaymentAppFactory(
+                AppPresence.HAVE_APPS, FactorySpeed.FAST_FACTORY);
     }
 
     /**
@@ -139,9 +141,9 @@ public class PaymentRequestMultipleContactDetailsTest implements MainActivitySta
      */
     @Test
     @MediumTest
+    @FlakyTest(message = "crbug.com/1182234")
     @Feature({"Payments"})
-    public void testContactDetailsSuggestionOrdering()
-            throws InterruptedException, TimeoutException {
+    public void testContactDetailsSuggestionOrdering() throws TimeoutException {
         // Set the use stats so that profile[0] has the highest frecency score, profile[1] the
         // second highest, profile[2] the third lowest, profile[3] the second lowest and profile[4]
         // the lowest.
@@ -176,9 +178,9 @@ public class PaymentRequestMultipleContactDetailsTest implements MainActivitySta
      */
     @Test
     @MediumTest
+    @FlakyTest(message = "crbug.com/1182234")
     @Feature({"Payments"})
-    public void testContactDetailsEditRequiredMessage()
-            throws InterruptedException, TimeoutException {
+    public void testContactDetailsEditRequiredMessage() throws TimeoutException {
         mProfilesToAdd = new AutofillProfile[] {AUTOFILL_PROFILES[0], AUTOFILL_PROFILES[1],
                 AUTOFILL_PROFILES[4], AUTOFILL_PROFILES[5]};
         mCountsToSet = new int[] {15, 10, 5, 1};
@@ -209,14 +211,17 @@ public class PaymentRequestMultipleContactDetailsTest implements MainActivitySta
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testContactDetailsDedupe_EmptyFields()
-            throws InterruptedException, TimeoutException {
+    @FlakyTest(message = "https://crbug.com/1182590")
+    public void testContactDetailsDedupe_EmptyFields() throws TimeoutException {
         // Add the original profile and a bunch of similar profiles with missing fields.
         // Make sure the original profile is suggested last, to test that the suggestions are
         // sorted by completeness.
         mProfilesToAdd = new AutofillProfile[] {
-                AUTOFILL_PROFILES[2], AUTOFILL_PROFILES[6], AUTOFILL_PROFILES[7],
-                AUTOFILL_PROFILES[8], AUTOFILL_PROFILES[9],
+                AUTOFILL_PROFILES[2],
+                AUTOFILL_PROFILES[6],
+                AUTOFILL_PROFILES[7],
+                AUTOFILL_PROFILES[8],
+                AUTOFILL_PROFILES[9],
         };
         mCountsToSet = new int[] {1, 20, 15, 10, 5};
         mDatesToSet = new int[] {1000, 4000, 3000, 2000, 1000};
@@ -237,9 +242,9 @@ public class PaymentRequestMultipleContactDetailsTest implements MainActivitySta
      */
     @Test
     @MediumTest
+    @FlakyTest(message = "crbug.com/1182234")
     @Feature({"Payments"})
-    public void testContactDetailsDedupe_Capitalization()
-            throws InterruptedException, TimeoutException {
+    public void testContactDetailsDedupe_Capitalization() throws TimeoutException {
         // Add the original profile and the one where the the name is not capitalized.
         // Make sure the original profile is suggested first (no particular reason).
         mProfilesToAdd = new AutofillProfile[] {AUTOFILL_PROFILES[2], AUTOFILL_PROFILES[11]};
@@ -260,9 +265,9 @@ public class PaymentRequestMultipleContactDetailsTest implements MainActivitySta
      */
     @Test
     @MediumTest
+    @FlakyTest(message = "crbug.com/1182234")
     @Feature({"Payments"})
-    public void testContactDetailsDontDedupe_FieldSubset()
-            throws InterruptedException, TimeoutException {
+    public void testContactDetailsDontDedupe_FieldSubset() throws TimeoutException {
         // Add the original profile and the one where the email is a superset of the original.
         // Make sure the one with the superset is suggested first, because to test the subset one
         // needs to be added after.
@@ -286,8 +291,8 @@ public class PaymentRequestMultipleContactDetailsTest implements MainActivitySta
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testContactDetailsAllMissingFieldsRecorded()
-            throws InterruptedException, TimeoutException {
+    @FlakyTest(message = "https://crbug.com/1182644")
+    public void testContactDetailsAllMissingFieldsRecorded() throws TimeoutException {
         // Don't add any profiles.
         mProfilesToAdd = new AutofillProfile[] {};
         mCountsToSet = new int[] {};

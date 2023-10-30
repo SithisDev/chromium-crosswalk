@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,17 @@
 #include <utility>
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/search/background/ntp_background_data.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "components/version_info/version_info.h"
+#include "content/public/test/browser_task_environment.h"
+#include "services/network/public/cpp/data_element.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,20 +29,12 @@ using testing::StartsWith;
 class NtpBackgroundServiceTest : public testing::Test {
  public:
   NtpBackgroundServiceTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
         test_shared_loader_factory_(
             base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
-                &test_url_loader_factory_)) {
-  }
+                &test_url_loader_factory_)) {}
 
   ~NtpBackgroundServiceTest() override {}
-
-  void SetUp() override {
-    testing::Test::SetUp();
-
-    service_ =
-        std::make_unique<NtpBackgroundService>(test_shared_loader_factory_);
-  }
 
   void SetUpResponseWithData(const GURL& load_url,
                              const std::string& response) {
@@ -48,21 +45,53 @@ class NtpBackgroundServiceTest : public testing::Test {
 
   void SetUpResponseWithNetworkError(const GURL& load_url) {
     test_url_loader_factory_.AddResponse(
-        load_url, network::ResourceResponseHead(), std::string(),
+        load_url, network::mojom::URLResponseHead::New(), std::string(),
         network::URLLoaderCompletionStatus(net::HTTP_NOT_FOUND));
   }
 
-  NtpBackgroundService* service() { return service_.get(); }
+  NtpBackgroundService* service() {
+    if (!service_) {
+      service_ =
+          std::make_unique<NtpBackgroundService>(test_shared_loader_factory_);
+    }
+    return service_.get();
+  }
+
+  network::TestURLLoaderFactory* test_url_loader_factory() {
+    return &test_url_loader_factory_;
+  }
 
  private:
   // Required to run tests from UI and threads.
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
 
   std::unique_ptr<NtpBackgroundService> service_;
 };
+
+TEST_F(NtpBackgroundServiceTest, CorrectCollectionRequest) {
+  g_browser_process->SetApplicationLocale("foo");
+  service()->FetchCollectionInfo();
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(1u, test_url_loader_factory()->pending_requests()->size());
+  std::string request_body(test_url_loader_factory()
+                               ->pending_requests()
+                               ->at(0)
+                               .request.request_body->elements()
+                               ->at(0)
+                               .As<network::DataElementBytes>()
+                               .AsStringPiece());
+  ntp::background::GetCollectionsRequest collection_request;
+  EXPECT_TRUE(collection_request.ParseFromString(request_body));
+  EXPECT_EQ("foo", collection_request.language());
+  EXPECT_EQ(2, collection_request.filtering_label_size());
+  EXPECT_EQ("chrome_desktop_ntp", collection_request.filtering_label(0));
+  EXPECT_EQ("chrome_desktop_ntp.M" + version_info::GetMajorVersionNumber(),
+            collection_request.filtering_label(1));
+}
 
 TEST_F(NtpBackgroundServiceTest, CollectionInfoNetworkError) {
   SetUpResponseWithNetworkError(service()->GetCollectionsLoadURLForTesting());
@@ -238,7 +267,7 @@ TEST_F(NtpBackgroundServiceTest, MultipleRequests) {
 TEST_F(NtpBackgroundServiceTest, NextImageNetworkError) {
   SetUpResponseWithNetworkError(service()->GetNextImageURLForTesting());
 
-  service()->FetchNextCollectionImage("shapes", base::nullopt);
+  service()->FetchNextCollectionImage("shapes", absl::nullopt);
   base::RunLoop().RunUntilIdle();
 
   EXPECT_THAT(service()->next_image_error_info().error_type,
@@ -249,7 +278,7 @@ TEST_F(NtpBackgroundServiceTest, BadNextImageResponse) {
   SetUpResponseWithData(service()->GetNextImageURLForTesting(),
                         "bad serialized GetImageFromCollectionResponse");
 
-  service()->FetchNextCollectionImage("shapes", base::nullopt);
+  service()->FetchNextCollectionImage("shapes", absl::nullopt);
   base::RunLoop().RunUntilIdle();
 
   EXPECT_THAT(service()->next_image_error_info().error_type,
@@ -310,7 +339,7 @@ TEST_F(NtpBackgroundServiceTest, MultipleRequestsNextImage) {
 
   // NOTE: the effect of the resume token in the request (i.e. prevent images
   // from being repeated) cannot be verified in a unit test.
-  service()->FetchNextCollectionImage("shapes", base::nullopt);
+  service()->FetchNextCollectionImage("shapes", absl::nullopt);
   // Subsequent requests are ignored while the loader is in use.
   service()->FetchNextCollectionImage("shapes", "resume0");
   base::RunLoop().RunUntilIdle();
@@ -368,4 +397,15 @@ TEST_F(NtpBackgroundServiceTest, GetThumbnailUrl) {
 
   EXPECT_EQ(kValidThumbnailUrl, service()->GetThumbnailUrl(kValidUrl));
   EXPECT_EQ(GURL::EmptyGURL(), service()->GetThumbnailUrl(kInvalidUrl));
+}
+
+TEST_F(NtpBackgroundServiceTest, OverrideBaseUrl) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      "collections-base-url", "https://foo.com");
+  service()->FetchCollectionInfo();
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(1u, test_url_loader_factory()->pending_requests()->size());
+  EXPECT_EQ("https://foo.com/cast/chromecast/home/wallpaper/collections?rt=b",
+            test_url_loader_factory()->pending_requests()->at(0).request.url);
 }

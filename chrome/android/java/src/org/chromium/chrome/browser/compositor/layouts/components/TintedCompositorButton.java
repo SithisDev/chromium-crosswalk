@@ -1,13 +1,15 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.compositor.layouts.components;
 
 import android.content.Context;
-import android.support.annotation.ColorInt;
-import android.support.annotation.DrawableRes;
-import android.support.annotation.IdRes;
+
+import androidx.annotation.ColorInt;
+import androidx.annotation.ColorRes;
+import androidx.annotation.DrawableRes;
+import androidx.appcompat.content.res.AppCompatResources;
 
 /**
  * Class for a CompositorButton that uses tint instead of multiple drawable resources.
@@ -15,10 +17,10 @@ import android.support.annotation.IdRes;
 public class TintedCompositorButton extends CompositorButton {
     private Context mContext;
 
-    private @IdRes int mDefaultTintResource;
-    private @IdRes int mPressedTintResource;
-    private @IdRes int mIncognitoTintResource;
-    private @IdRes int mIncognitoPressedTintResource;
+    private @ColorRes int mDefaultTintResource;
+    private @ColorRes int mPressedTintResource;
+    private @ColorRes int mIncognitoTintResource;
+    private @ColorRes int mIncognitoPressedTintResource;
 
     public TintedCompositorButton(
             Context context, float width, float height, CompositorOnClickHandler clickHandler) {
@@ -66,8 +68,8 @@ public class TintedCompositorButton extends CompositorButton {
      * @param incognitoTint         The incognito tint resource.
      * @param incognitoPressedTint  The incognito pressed tint resource.
      */
-    public void setTintResources(@IdRes int defaultTint, @IdRes int pressedTint,
-            @IdRes int incognitoTint, @IdRes int incognitoPressedTint) {
+    public void setTintResources(@ColorRes int defaultTint, @ColorRes int pressedTint,
+            @ColorRes int incognitoTint, @ColorRes int incognitoPressedTint) {
         mDefaultTintResource = defaultTint;
         mPressedTintResource = pressedTint;
         mIncognitoTintResource = incognitoTint;
@@ -84,6 +86,6 @@ public class TintedCompositorButton extends CompositorButton {
             tint = isIncognito() ? mIncognitoPressedTintResource : mPressedTintResource;
         }
 
-        return mContext.getResources().getColor(tint);
+        return AppCompatResources.getColorStateList(mContext, tint).getDefaultColor();
     }
 }

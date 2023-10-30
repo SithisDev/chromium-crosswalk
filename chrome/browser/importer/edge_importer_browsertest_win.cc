@@ -1,17 +1,16 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 
+#include <string>
 #include <vector>
 
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/registry.h"
@@ -29,14 +28,15 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/favicon_base/favicon_usage_data.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/zlib/google/compression_utils.h"
 
 namespace {
 
 struct FaviconGroup {
-  const base::char16* favicon_url;
-  const base::char16* site_url;
+  const wchar_t* favicon_url;
+  const wchar_t* site_url;
 };
 
 class TestObserver : public ProfileWriter,
@@ -70,7 +70,7 @@ class TestObserver : public ProfileWriter,
   bool TemplateURLServiceIsLoaded() const override { return true; }
 
   void AddBookmarks(const std::vector<ImportedBookmarkEntry>& bookmarks,
-                    const base::string16& top_level_folder_name) override {
+                    const std::u16string& top_level_folder_name) override {
     ASSERT_EQ(expected_bookmark_entries_.size(), bookmarks.size());
     for (size_t i = 0; i < bookmarks.size(); ++i) {
       EXPECT_NO_FATAL_FAILURE(
@@ -84,9 +84,11 @@ class TestObserver : public ProfileWriter,
     // Importer should group the favicon information for each favicon URL.
     ASSERT_EQ(expected_favicon_groups_.size(), usage.size());
     for (size_t i = 0; i < expected_favicon_groups_.size(); ++i) {
-      GURL favicon_url(expected_favicon_groups_[i].favicon_url);
+      GURL favicon_url(
+          base::WideToUTF16(expected_favicon_groups_[i].favicon_url));
       std::set<GURL> urls;
-      urls.insert(GURL(expected_favicon_groups_[i].site_url));
+      urls.insert(
+          GURL(base::WideToUTF16(expected_favicon_groups_[i].site_url)));
 
       bool expected_favicon_url_found = false;
       for (size_t j = 0; j < usage.size(); ++j) {
@@ -177,7 +179,7 @@ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporter) {
       {false, 0, {}, L"InvalidFavicon", "http://www.invalid-favicon.com/"},
   };
   std::vector<BookmarkInfo> bookmark_entries(
-      kEdgeBookmarks, kEdgeBookmarks + base::size(kEdgeBookmarks));
+      kEdgeBookmarks, kEdgeBookmarks + std::size(kEdgeBookmarks));
 
   const FaviconGroup kEdgeFaviconGroup[] = {
       {L"http://www.links-sublink.com/favicon.ico",
@@ -195,7 +197,7 @@ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporter) {
   };
 
   std::vector<FaviconGroup> favicon_groups(
-      kEdgeFaviconGroup, kEdgeFaviconGroup + base::size(kEdgeFaviconGroup));
+      kEdgeFaviconGroup, kEdgeFaviconGroup + std::size(kEdgeFaviconGroup));
 
   base::FilePath data_path;
   ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &data_path));
@@ -208,7 +210,7 @@ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporter) {
     ASSERT_TRUE(DecompressDatabase(temp_path.AppendASCII("edge_profile")));
   }
 
-  base::string16 key_path(importer::GetEdgeSettingsKey());
+  std::wstring key_path(importer::GetEdgeSettingsKey());
   base::win::RegKey key;
   ASSERT_EQ(ERROR_SUCCESS,
             key.Create(HKEY_CURRENT_USER, key_path.c_str(), KEY_WRITE));
@@ -239,11 +241,11 @@ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporterLegacyFallback) {
   const BookmarkInfo kEdgeBookmarks[] = {
       {false, 0, {}, L"Google", "http://www.google.com/"}};
   std::vector<BookmarkInfo> bookmark_entries(
-      kEdgeBookmarks, kEdgeBookmarks + base::size(kEdgeBookmarks));
+      kEdgeBookmarks, kEdgeBookmarks + std::size(kEdgeBookmarks));
   const FaviconGroup kEdgeFaviconGroup[] = {
       {L"http://www.google.com/favicon.ico", L"http://www.google.com/"}};
   std::vector<FaviconGroup> favicon_groups(
-      kEdgeFaviconGroup, kEdgeFaviconGroup + base::size(kEdgeFaviconGroup));
+      kEdgeFaviconGroup, kEdgeFaviconGroup + std::size(kEdgeFaviconGroup));
 
   base::FilePath data_path;
   ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &data_path));
@@ -287,7 +289,7 @@ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporterNoDatabase) {
   std::vector<BookmarkInfo> bookmark_entries;
   std::vector<FaviconGroup> favicon_groups;
 
-  base::string16 key_path(importer::GetEdgeSettingsKey());
+  std::wstring key_path(importer::GetEdgeSettingsKey());
   base::win::RegKey key;
   ASSERT_EQ(ERROR_SUCCESS,
             key.Create(HKEY_CURRENT_USER, key_path.c_str(), KEY_WRITE));

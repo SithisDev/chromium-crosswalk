@@ -1,15 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_SAD_TAB_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_SAD_TAB_VIEW_H_
 
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/sad_tab.h"
-#include "ui/views/controls/button/button.h"
-#include "ui/views/controls/link_listener.h"
-#include "ui/views/controls/styled_label.h"
-#include "ui/views/controls/styled_label_listener.h"
 #include "ui/views/view.h"
 
 namespace content {
@@ -18,7 +15,7 @@ class WebContents;
 
 namespace views {
 class Label;
-class LabelButton;
+class MdTextButton;
 class WebView;
 }  // namespace views
 
@@ -34,27 +31,22 @@ class SadTabViewTestApi;
 //  "sad tab" in the browser window when a renderer is destroyed unnaturally.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class SadTabView : public SadTab,
-                   public views::View,
-                   public views::LinkListener,
-                   public views::ButtonListener {
+class SadTabView : public SadTab, public views::View {
  public:
   METADATA_HEADER(SadTabView);
 
   SadTabView(content::WebContents* web_contents, SadTabKind kind);
+
+  SadTabView(const SadTabView&) = delete;
+  SadTabView& operator=(const SadTabView&) = delete;
+
   ~SadTabView() override;
 
   // Overridden from SadTab:
   void ReinstallInWebView() override;
 
   // Overridden from views::View:
-  void Layout() override;
-
-  // Overridden from views::LinkListener:
-  void LinkClicked(views::Link* source, int event_flags) override;
-
-  // Overridden from views::ButtonListener:
-  void ButtonPressed(views::Button* source, const ui::Event& event) override;
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
 
  protected:
   // Overridden from views::View:
@@ -69,14 +61,11 @@ class SadTabView : public SadTab,
   void AttachToWebView();
 
   bool painted_ = false;
-  views::Label* message_;
+  raw_ptr<views::Label> message_;
   std::vector<views::Label*> bullet_labels_;
-  views::Link* help_link_;
-  views::LabelButton* action_button_;
-  views::Label* title_;
-  views::WebView* owner_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(SadTabView);
+  raw_ptr<views::MdTextButton> action_button_;
+  raw_ptr<views::Label> title_;
+  raw_ptr<views::WebView> owner_ = nullptr;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_SAD_TAB_VIEW_H__

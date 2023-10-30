@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,20 +11,22 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/cancelable_callback.h"
 #include "base/command_line.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/simple_test_clock.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/activity_log/activity_log_task_runner.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -33,14 +35,14 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/common/extension_builder.h"
 #include "sql/statement.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
-#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/login/users/scoped_test_user_manager.h"
+#include "chrome/browser/ash/settings/scoped_cros_settings_test_helper.h"
 #endif
 
 namespace extensions {
@@ -48,25 +50,26 @@ namespace extensions {
 class CountingPolicyTest : public testing::Test {
  public:
   CountingPolicyTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {
-#if defined OS_CHROMEOS
-    test_user_manager_.reset(new chromeos::ScopedTestUserManager());
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    test_user_manager_ = std::make_unique<ash::ScopedTestUserManager>();
 #endif
-    profile_.reset(new TestingProfile());
+    profile_ = std::make_unique<TestingProfile>();
     base::CommandLine::ForCurrentProcess()->
         AppendSwitch(switches::kEnableExtensionActivityLogging);
     base::CommandLine no_program_command_line(base::CommandLine::NO_PROGRAM);
     extension_service_ = static_cast<TestExtensionSystem*>(
         ExtensionSystem::Get(profile_.get()))->CreateExtensionService
             (&no_program_command_line, base::FilePath(), false);
+    base::RunLoop().RunUntilIdle();
   }
 
   ~CountingPolicyTest() override {
-#if defined OS_CHROMEOS
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     test_user_manager_.reset();
 #endif
     base::RunLoop().RunUntilIdle();
-    profile_.reset(NULL);
+    profile_.reset();
     base::RunLoop().RunUntilIdle();
   }
 
@@ -110,8 +113,8 @@ class CountingPolicyTest : public testing::Test {
 
     // Set up a timeout for receiving results; if we haven't received anything
     // when the timeout triggers then assume that the test is broken.
-    base::CancelableClosure timeout(
-        base::Bind(&CountingPolicyTest::TimeoutCallback));
+    base::CancelableOnceClosure timeout(
+        base::BindOnce(&CountingPolicyTest::TimeoutCallback));
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, timeout.callback(), TestTimeouts::action_timeout());
 
@@ -304,15 +307,14 @@ class CountingPolicyTest : public testing::Test {
       base::OnceCallback<void(std::unique_ptr<Action::ActionVector>)> checker) {
     // Use a mock clock to ensure that events are not recorded on the wrong day
     // when the test is run close to local midnight.
-    mock_clock_.SetNow(base::Time::Now().LocalMidnight() +
-                       base::TimeDelta::FromHours(12));
+    mock_clock_.SetNow(base::Time::Now().LocalMidnight() + base::Hours(12));
     policy->SetClockForTesting(&mock_clock_);
 
     // Record some actions
-    scoped_refptr<Action> action = new Action(
-        "punky1", mock_clock_.Now() - base::TimeDelta::FromMinutes(40),
-        Action::ACTION_DOM_ACCESS, "lets1");
-    action->mutable_args()->AppendString("vamoose1");
+    scoped_refptr<Action> action =
+        new Action("punky1", mock_clock_.Now() - base::Minutes(40),
+                   Action::ACTION_DOM_ACCESS, "lets1");
+    action->mutable_args().Append("vamoose1");
     action->set_page_url(GURL("http://www.google1.com"));
     action->set_page_title("Google1");
     action->set_arg_url(GURL("http://www.args-url1.com"));
@@ -321,10 +323,9 @@ class CountingPolicyTest : public testing::Test {
     // database.
     policy->ProcessAction(action);
 
-    action = new Action("punky2",
-                        mock_clock_.Now() - base::TimeDelta::FromMinutes(30),
+    action = new Action("punky2", mock_clock_.Now() - base::Minutes(30),
                         Action::ACTION_API_CALL, "lets2");
-    action->mutable_args()->AppendString("vamoose2");
+    action->mutable_args().Append("vamoose2");
     action->set_page_url(GURL("http://www.google2.com"));
     action->set_page_title("Google2");
     action->set_arg_url(GURL("http://www.args-url2.com"));
@@ -381,13 +382,13 @@ class CountingPolicyTest : public testing::Test {
 
  protected:
   base::SimpleTestClock mock_clock_;
-  ExtensionService* extension_service_;
+  raw_ptr<ExtensionService> extension_service_;
   std::unique_ptr<TestingProfile> profile_;
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
-#if defined OS_CHROMEOS
-  chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
-  std::unique_ptr<chromeos::ScopedTestUserManager> test_user_manager_;
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  ash::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
+  std::unique_ptr<ash::ScopedTestUserManager> test_user_manager_;
 #endif
 };
 
@@ -403,12 +404,11 @@ TEST_F(CountingPolicyTest, Construct) {
                            .Build())
           .Build();
   extension_service_->AddExtension(extension.get());
-  std::unique_ptr<base::ListValue> args(new base::ListValue());
   scoped_refptr<Action> action = new Action(extension->id(),
                                             base::Time::Now(),
                                             Action::ACTION_API_CALL,
                                             "tabs.testMethod");
-  action->set_args(std::move(args));
+  action->set_args(base::Value::List());
   policy->ProcessAction(action);
   policy->Close();
 }
@@ -426,9 +426,9 @@ TEST_F(CountingPolicyTest, LogWithStrippedArguments) {
           .Build();
   extension_service_->AddExtension(extension.get());
 
-  std::unique_ptr<base::ListValue> args(new base::ListValue());
-  args->Set(0, std::make_unique<base::Value>("hello"));
-  args->Set(1, std::make_unique<base::Value>("world"));
+  base::Value::List args;
+  args.Append("hello");
+  args.Append("world");
   scoped_refptr<Action> action = new Action(extension->id(),
                                             base::Time::Now(),
                                             Action::ACTION_API_CALL,
@@ -446,46 +446,43 @@ TEST_F(CountingPolicyTest, GetTodaysActions) {
   policy->Init();
   // Disable row expiration for this test by setting a time before any actions
   // we generate.
-  policy->set_retention_time(base::TimeDelta::FromDays(14));
+  policy->set_retention_time(base::Days(14));
 
   // Use a mock clock to ensure that events are not recorded on the wrong day
   // when the test is run close to local midnight.  Note: Ownership is passed
   // to the policy, but we still keep a pointer locally.  The policy will take
   // care of destruction; this is safe since the policy outlives all our
   // accesses to the mock clock.
-  mock_clock_.SetNow(base::Time::Now().LocalMidnight() +
-                     base::TimeDelta::FromHours(12));
+  mock_clock_.SetNow(base::Time::Now().LocalMidnight() + base::Hours(12));
   policy->SetClockForTesting(&mock_clock_);
 
   // Record some actions
   scoped_refptr<Action> action =
-      new Action("punky", mock_clock_.Now() - base::TimeDelta::FromMinutes(40),
+      new Action("punky", mock_clock_.Now() - base::Minutes(40),
                  Action::ACTION_API_CALL, "brewster");
-  action->mutable_args()->AppendString("woof");
+  action->mutable_args().Append("woof");
   policy->ProcessAction(action);
 
-  action =
-      new Action("punky", mock_clock_.Now() - base::TimeDelta::FromMinutes(30),
-                 Action::ACTION_API_CALL, "brewster");
-  action->mutable_args()->AppendString("meow");
+  action = new Action("punky", mock_clock_.Now() - base::Minutes(30),
+                      Action::ACTION_API_CALL, "brewster");
+  action->mutable_args().Append("meow");
   policy->ProcessAction(action);
 
-  action =
-      new Action("punky", mock_clock_.Now() - base::TimeDelta::FromMinutes(20),
-                 Action::ACTION_API_CALL, "extension.sendMessage");
-  action->mutable_args()->AppendString("not");
-  action->mutable_args()->AppendString("stripped");
+  action = new Action("punky", mock_clock_.Now() - base::Minutes(20),
+                      Action::ACTION_API_CALL, "extension.sendMessage");
+  action->mutable_args().Append("not");
+  action->mutable_args().Append("stripped");
   policy->ProcessAction(action);
 
   action =
       new Action("punky", mock_clock_.Now(), Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google.com"));
   policy->ProcessAction(action);
 
   action = new Action("scoobydoo", mock_clock_.Now(), Action::ACTION_DOM_ACCESS,
                       "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google.com"));
   policy->ProcessAction(action);
 
@@ -499,38 +496,35 @@ TEST_F(CountingPolicyTest, GetTodaysActions) {
 TEST_F(CountingPolicyTest, GetOlderActions) {
   CountingPolicy* policy = new CountingPolicy(profile_.get());
   policy->Init();
-  policy->set_retention_time(base::TimeDelta::FromDays(14));
+  policy->set_retention_time(base::Days(14));
 
   // Use a mock clock to ensure that events are not recorded on the wrong day
   // when the test is run close to local midnight.
-  mock_clock_.SetNow(base::Time::Now().LocalMidnight() +
-                     base::TimeDelta::FromHours(12));
+  mock_clock_.SetNow(base::Time::Now().LocalMidnight() + base::Hours(12));
   policy->SetClockForTesting(&mock_clock_);
 
   // Record some actions
   scoped_refptr<Action> action =
-      new Action("punky",
-                 mock_clock_.Now() - base::TimeDelta::FromDays(3) -
-                     base::TimeDelta::FromMinutes(40),
+      new Action("punky", mock_clock_.Now() - base::Days(3) - base::Minutes(40),
                  Action::ACTION_API_CALL, "brewster");
-  action->mutable_args()->AppendString("woof");
+  action->mutable_args().Append("woof");
   policy->ProcessAction(action);
 
-  action = new Action("punky", mock_clock_.Now() - base::TimeDelta::FromDays(3),
+  action = new Action("punky", mock_clock_.Now() - base::Days(3),
                       Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google.com"));
   policy->ProcessAction(action);
 
   action =
       new Action("punky", mock_clock_.Now(), Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("too new");
+  action->mutable_args().Append("too new");
   action->set_page_url(GURL("http://www.google.com"));
   policy->ProcessAction(action);
 
-  action = new Action("punky", mock_clock_.Now() - base::TimeDelta::FromDays(7),
+  action = new Action("punky", mock_clock_.Now() - base::Days(7),
                       Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("too old");
+  action->mutable_args().Append("too old");
   action->set_page_url(GURL("http://www.google.com"));
   policy->ProcessAction(action);
 
@@ -559,14 +553,14 @@ TEST_F(CountingPolicyTest, LogAndFetchFilteredActions) {
                                                 base::Time::Now(),
                                                 Action::ACTION_API_CALL,
                                                 "tabs.testMethod");
-  action_api->set_args(std::make_unique<base::ListValue>());
+  action_api->set_args(base::Value::List());
   policy->ProcessAction(action_api);
 
   scoped_refptr<Action> action_dom = new Action(extension->id(),
                                                 base::Time::Now(),
                                                 Action::ACTION_DOM_ACCESS,
                                                 "document.write");
-  action_dom->set_args(std::make_unique<base::ListValue>());
+  action_dom->set_args(base::Value::List());
   action_dom->set_page_url(gurl);
   policy->ProcessAction(action_dom);
 
@@ -627,33 +621,28 @@ TEST_F(CountingPolicyTest, MergingAndExpiring) {
   policy->Init();
   // Initially disable expiration by setting a retention time before any
   // actions we generate.
-  policy->set_retention_time(base::TimeDelta::FromDays(14));
+  policy->set_retention_time(base::Days(14));
 
   // Use a mock clock to ensure that events are not recorded on the wrong day
   // when the test is run close to local midnight.
-  mock_clock_.SetNow(base::Time::Now().LocalMidnight() +
-                     base::TimeDelta::FromHours(12));
+  mock_clock_.SetNow(base::Time::Now().LocalMidnight() + base::Hours(12));
   policy->SetClockForTesting(&mock_clock_);
 
   // The first two actions should be merged; the last one is on a separate day
   // and should not be.
   scoped_refptr<Action> action =
-      new Action("punky",
-                 mock_clock_.Now() - base::TimeDelta::FromDays(3) -
-                     base::TimeDelta::FromMinutes(40),
+      new Action("punky", mock_clock_.Now() - base::Days(3) - base::Minutes(40),
                  Action::ACTION_API_CALL, "brewster");
   policy->ProcessAction(action);
 
-  action = new Action("punky",
-                      mock_clock_.Now() - base::TimeDelta::FromDays(3) -
-                          base::TimeDelta::FromMinutes(20),
-                      Action::ACTION_API_CALL, "brewster");
+  action =
+      new Action("punky", mock_clock_.Now() - base::Days(3) - base::Minutes(20),
+                 Action::ACTION_API_CALL, "brewster");
   policy->ProcessAction(action);
 
-  action = new Action("punky",
-                      mock_clock_.Now() - base::TimeDelta::FromDays(2) -
-                          base::TimeDelta::FromMinutes(20),
-                      Action::ACTION_API_CALL, "brewster");
+  action =
+      new Action("punky", mock_clock_.Now() - base::Days(2) - base::Minutes(20),
+                 Action::ACTION_API_CALL, "brewster");
   policy->ProcessAction(action);
 
   CheckReadData(
@@ -665,7 +654,7 @@ TEST_F(CountingPolicyTest, MergingAndExpiring) {
 
   // Clean actions before midnight two days ago.  Force expiration to run by
   // clearing last_database_cleaning_time_ and submitting a new action.
-  policy->set_retention_time(base::TimeDelta::FromDays(2));
+  policy->set_retention_time(base::Days(2));
   policy->last_database_cleaning_time_ = base::Time();
   action = new Action("punky", mock_clock_.Now(), Action::ACTION_API_CALL,
                       "brewster");
@@ -687,7 +676,7 @@ TEST_F(CountingPolicyTest, StringTableCleaning) {
   policy->Init();
   // Initially disable expiration by setting a retention time before any
   // actions we generate.
-  policy->set_retention_time(base::TimeDelta::FromDays(14));
+  policy->set_retention_time(base::Days(14));
 
   mock_clock_.SetNow(base::Time::Now());
   policy->SetClockForTesting(&mock_clock_);
@@ -695,7 +684,7 @@ TEST_F(CountingPolicyTest, StringTableCleaning) {
   // Insert an action; this should create entries in both the string table (for
   // the extension and API name) and the URL table (for page_url).
   scoped_refptr<Action> action =
-      new Action("punky", mock_clock_.Now() - base::TimeDelta::FromDays(7),
+      new Action("punky", mock_clock_.Now() - base::Days(7),
                  Action::ACTION_API_CALL, "brewster");
   action->set_page_url(GURL("http://www.google.com/"));
   policy->ProcessAction(action);
@@ -718,7 +707,7 @@ TEST_F(CountingPolicyTest, StringTableCleaning) {
   // Trigger a cleaning.  The oldest action is expired when we submit a
   // duplicate of the newer action.  After this, there should be two strings
   // and no URLs.
-  policy->set_retention_time(base::TimeDelta::FromDays(2));
+  policy->set_retention_time(base::Days(2));
   policy->last_database_cleaning_time_ = base::Time();
   policy->ProcessAction(action);
   policy->Flush();
@@ -737,24 +726,20 @@ TEST_F(CountingPolicyTest, StringTableCleaning) {
 TEST_F(CountingPolicyTest, MoreMerging) {
   CountingPolicy* policy = new CountingPolicy(profile_.get());
   policy->Init();
-  policy->set_retention_time(base::TimeDelta::FromDays(14));
+  policy->set_retention_time(base::Days(14));
 
   // Use a mock clock to ensure that events are not recorded on the wrong day
   // when the test is run close to local midnight.
-  mock_clock_.SetNow(base::Time::Now().LocalMidnight() +
-                     base::TimeDelta::FromHours(12));
+  mock_clock_.SetNow(base::Time::Now().LocalMidnight() + base::Hours(12));
   policy->SetClockForTesting(&mock_clock_);
 
   // Create an action 2 days ago, then 1 day ago, then 2 days ago.  Make sure
   // that we end up with two merged records (one for each day), and each has
   // the appropriate timestamp.  These merges should happen in the database
   // since the date keeps changing.
-  base::Time time1 = mock_clock_.Now() - base::TimeDelta::FromDays(2) -
-                     base::TimeDelta::FromMinutes(40);
-  base::Time time2 = mock_clock_.Now() - base::TimeDelta::FromDays(1) -
-                     base::TimeDelta::FromMinutes(40);
-  base::Time time3 = mock_clock_.Now() - base::TimeDelta::FromDays(2) -
-                     base::TimeDelta::FromMinutes(20);
+  base::Time time1 = mock_clock_.Now() - base::Days(2) - base::Minutes(40);
+  base::Time time2 = mock_clock_.Now() - base::Days(1) - base::Minutes(40);
+  base::Time time3 = mock_clock_.Now() - base::Days(2) - base::Minutes(20);
 
   scoped_refptr<Action> action =
       new Action("punky", time1, Action::ACTION_API_CALL, "brewster");
@@ -778,9 +763,9 @@ TEST_F(CountingPolicyTest, MoreMerging) {
   // Create three actions today, where the merges should happen in memory.
   // Again these are not chronological; timestamp time5 should win out since it
   // is the latest.
-  base::Time time4 = mock_clock_.Now() - base::TimeDelta::FromMinutes(60);
-  base::Time time5 = mock_clock_.Now() - base::TimeDelta::FromMinutes(20);
-  base::Time time6 = mock_clock_.Now() - base::TimeDelta::FromMinutes(40);
+  base::Time time4 = mock_clock_.Now() - base::Minutes(60);
+  base::Time time5 = mock_clock_.Now() - base::Minutes(20);
+  base::Time time6 = mock_clock_.Now() - base::Minutes(40);
 
   action = new Action("punky", time4, Action::ACTION_API_CALL, "brewster");
   policy->ProcessAction(action);
@@ -848,23 +833,22 @@ TEST_F(CountingPolicyTest, RemoveAllURLs) {
 
   // Use a mock clock to ensure that events are not recorded on the wrong day
   // when the test is run close to local midnight.
-  mock_clock_.SetNow(base::Time::Now().LocalMidnight() +
-                     base::TimeDelta::FromHours(12));
+  mock_clock_.SetNow(base::Time::Now().LocalMidnight() + base::Hours(12));
   policy->SetClockForTesting(&mock_clock_);
 
   // Record some actions
   scoped_refptr<Action> action =
       new Action("punky", mock_clock_.Now(), Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google.com"));
   action->set_page_title("Google");
   action->set_arg_url(GURL("http://www.args-url.com"));
   policy->ProcessAction(action);
 
-  mock_clock_.Advance(base::TimeDelta::FromSeconds(1));
+  mock_clock_.Advance(base::Seconds(1));
   action =
       new Action("punky", mock_clock_.Now(), Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google2.com"));
   action->set_page_title("Google");
   // Deliberately no arg url set to make sure it stills works if there is no arg
@@ -886,25 +870,24 @@ TEST_F(CountingPolicyTest, RemoveSpecificURLs) {
 
   // Use a mock clock to ensure that events are not recorded on the wrong day
   // when the test is run close to local midnight.
-  mock_clock_.SetNow(base::Time::Now().LocalMidnight() +
-                     base::TimeDelta::FromHours(12));
+  mock_clock_.SetNow(base::Time::Now().LocalMidnight() + base::Hours(12));
   policy->SetClockForTesting(&mock_clock_);
 
   // Record some actions
   // This should have the page url and args url cleared.
   scoped_refptr<Action> action =
       new Action("punky", mock_clock_.Now(), Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google1.com"));
   action->set_page_title("Google");
   action->set_arg_url(GURL("http://www.google1.com"));
   policy->ProcessAction(action);
 
   // This should have the page url cleared but not args url.
-  mock_clock_.Advance(base::TimeDelta::FromSeconds(1));
+  mock_clock_.Advance(base::Seconds(1));
   action =
       new Action("punky", mock_clock_.Now(), Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google1.com"));
   action->set_page_title("Google");
   action->set_arg_url(GURL("http://www.google.com"));
@@ -912,29 +895,29 @@ TEST_F(CountingPolicyTest, RemoveSpecificURLs) {
 
   // This should have the page url cleared. The args url is deliberately not
   // set to make sure this doesn't cause any issues.
-  mock_clock_.Advance(base::TimeDelta::FromSeconds(1));
+  mock_clock_.Advance(base::Seconds(1));
   action =
       new Action("punky", mock_clock_.Now(), Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google2.com"));
   action->set_page_title("Google");
   policy->ProcessAction(action);
 
   // This should have the args url cleared but not the page url or page title.
-  mock_clock_.Advance(base::TimeDelta::FromSeconds(1));
+  mock_clock_.Advance(base::Seconds(1));
   action =
       new Action("punky", mock_clock_.Now(), Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google.com"));
   action->set_page_title("Google");
   action->set_arg_url(GURL("http://www.google1.com"));
   policy->ProcessAction(action);
 
   // This should have neither cleared.
-  mock_clock_.Advance(base::TimeDelta::FromSeconds(1));
+  mock_clock_.Advance(base::Seconds(1));
   action =
       new Action("punky", mock_clock_.Now(), Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google.com"));
   action->set_page_title("Google");
   action->set_arg_url(GURL("http://www.args-url.com"));
@@ -959,15 +942,14 @@ TEST_F(CountingPolicyTest, RemoveExtensionData) {
 
   // Use a mock clock to ensure that events are not recorded on the wrong day
   // when the test is run close to local midnight.
-  mock_clock_.SetNow(base::Time::Now().LocalMidnight() +
-                     base::TimeDelta::FromHours(12));
+  mock_clock_.SetNow(base::Time::Now().LocalMidnight() + base::Hours(12));
   policy->SetClockForTesting(&mock_clock_);
 
   // Record some actions
   scoped_refptr<Action> action =
       new Action("deleteextensiondata", mock_clock_.Now(),
                  Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_title("Google");
   action->set_arg_url(GURL("http://www.google.com"));
   policy->ProcessAction(action);
@@ -976,7 +958,7 @@ TEST_F(CountingPolicyTest, RemoveExtensionData) {
 
   scoped_refptr<Action> action2 = new Action("dontdelete", mock_clock_.Now(),
                                              Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_title("Google");
   action->set_arg_url(GURL("http://www.google.com"));
   policy->ProcessAction(action2);
@@ -1001,46 +983,43 @@ TEST_F(CountingPolicyTest, DeleteDatabase) {
   policy->Init();
   // Disable row expiration for this test by setting a time before any actions
   // we generate.
-  policy->set_retention_time(base::TimeDelta::FromDays(14));
+  policy->set_retention_time(base::Days(14));
 
   // Use a mock clock to ensure that events are not recorded on the wrong day
   // when the test is run close to local midnight.  Note: Ownership is passed
   // to the policy, but we still keep a pointer locally.  The policy will take
   // care of destruction; this is safe since the policy outlives all our
   // accesses to the mock clock.
-  mock_clock_.SetNow(base::Time::Now().LocalMidnight() +
-                     base::TimeDelta::FromHours(12));
+  mock_clock_.SetNow(base::Time::Now().LocalMidnight() + base::Hours(12));
   policy->SetClockForTesting(&mock_clock_);
 
   // Record some actions
   scoped_refptr<Action> action =
-      new Action("punky", mock_clock_.Now() - base::TimeDelta::FromMinutes(40),
+      new Action("punky", mock_clock_.Now() - base::Minutes(40),
                  Action::ACTION_API_CALL, "brewster");
-  action->mutable_args()->AppendString("woof");
+  action->mutable_args().Append("woof");
   policy->ProcessAction(action);
 
-  action =
-      new Action("punky", mock_clock_.Now() - base::TimeDelta::FromMinutes(30),
-                 Action::ACTION_API_CALL, "brewster");
-  action->mutable_args()->AppendString("meow");
+  action = new Action("punky", mock_clock_.Now() - base::Minutes(30),
+                      Action::ACTION_API_CALL, "brewster");
+  action->mutable_args().Append("meow");
   policy->ProcessAction(action);
 
-  action =
-      new Action("punky", mock_clock_.Now() - base::TimeDelta::FromMinutes(20),
-                 Action::ACTION_API_CALL, "extension.sendMessage");
-  action->mutable_args()->AppendString("not");
-  action->mutable_args()->AppendString("stripped");
+  action = new Action("punky", mock_clock_.Now() - base::Minutes(20),
+                      Action::ACTION_API_CALL, "extension.sendMessage");
+  action->mutable_args().Append("not");
+  action->mutable_args().Append("stripped");
   policy->ProcessAction(action);
 
   action =
       new Action("punky", mock_clock_.Now(), Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google.com"));
   policy->ProcessAction(action);
 
   action = new Action("scoobydoo", mock_clock_.Now(), Action::ACTION_DOM_ACCESS,
                       "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google.com"));
   policy->ProcessAction(action);
 
@@ -1060,7 +1039,7 @@ TEST_F(CountingPolicyTest, DeleteDatabase) {
   // https://code.google.com/p/chromium/issues/detail?id=341674.
   action =
       new Action("punky", mock_clock_.Now(), Action::ACTION_DOM_ACCESS, "lets");
-  action->mutable_args()->AppendString("vamoose");
+  action->mutable_args().Append("vamoose");
   action->set_page_url(GURL("http://www.google.com"));
   policy->ProcessAction(action);
 
@@ -1083,14 +1062,12 @@ TEST_F(CountingPolicyTest, DeleteDatabase) {
 TEST_F(CountingPolicyTest, DuplicateRows) {
   CountingPolicy* policy = new CountingPolicy(profile_.get());
   policy->Init();
-  mock_clock_.SetNow(base::Time::Now().LocalMidnight() +
-                     base::TimeDelta::FromHours(12));
+  mock_clock_.SetNow(base::Time::Now().LocalMidnight() + base::Hours(12));
   policy->SetClockForTesting(&mock_clock_);
 
   // Record two actions with distinct URLs.
-  scoped_refptr<Action> action;
-  action = new Action("punky", mock_clock_.Now(), Action::ACTION_API_CALL,
-                      "brewster");
+  scoped_refptr<Action> action = base::MakeRefCounted<Action>(
+      "punky", mock_clock_.Now(), Action::ACTION_API_CALL, "brewster");
   action->set_page_url(GURL("http://www.google.com"));
   policy->ProcessAction(action);
 

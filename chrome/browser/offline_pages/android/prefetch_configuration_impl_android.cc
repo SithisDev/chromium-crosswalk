@@ -1,9 +1,9 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/android/jni_android.h"
-#include "chrome/android/chrome_jni_headers/PrefetchConfiguration_jni.h"
+#include "chrome/browser/offline_pages/android/jni_headers/PrefetchConfiguration_jni.h"
 #include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/profiles/profile_key_android.h"
 #include "components/offline_pages/core/offline_page_feature.h"

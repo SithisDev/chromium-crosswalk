@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,13 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
 #include "chrome/android/chrome_jni_headers/LaunchMetrics_jni.h"
-#include "chrome/browser/android/shortcut_info.h"
-#include "chrome/browser/banners/app_banner_settings_helper.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/prefs/pref_metrics_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/rappor/public/rappor_utils.h"
-#include "components/rappor/rappor_service_impl.h"
+#include "components/site_engagement/content/site_engagement_service.h"
+#include "components/webapps/browser/android/shortcut_info.h"
+#include "components/webapps/browser/banners/app_banner_settings_helper.h"
 #include "content/public/browser/web_contents.h"
-#include "third_party/blink/public/common/manifest/web_display_mode.h"
+#include "third_party/blink/public/mojom/manifest/display_mode.mojom.h"
 #include "url/gurl.h"
 
 using base::android::JavaParamRef;
@@ -36,11 +33,14 @@ static void JNI_LaunchMetrics_RecordLaunch(
   // homescreen source means a full PWA (with service worker) or a site that has
   // a manifest with display: standalone.
   int histogram_source = source;
-  if (histogram_source == ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_DEPRECATED) {
+  if (histogram_source ==
+      webapps::ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_DEPRECATED) {
     if (is_shortcut)
-      histogram_source = ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_SHORTCUT;
+      histogram_source =
+          webapps::ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_SHORTCUT;
     else
-      histogram_source = ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_STANDALONE;
+      histogram_source =
+          webapps::ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_STANDALONE;
   }
 
   GURL url(base::android::ConvertJavaStringToUTF8(env, jurl));
@@ -48,73 +48,42 @@ static void JNI_LaunchMetrics_RecordLaunch(
       content::WebContents::FromJavaWebContents(jweb_contents);
 
   if (web_contents &&
-      (histogram_source == ShortcutInfo::SOURCE_APP_BANNER ||
-       histogram_source == ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_PWA)) {
+      (histogram_source == webapps::ShortcutInfo::SOURCE_APP_BANNER ||
+       histogram_source ==
+           webapps::ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_PWA)) {
     // What a user has installed on the Home screen can become disconnected from
     // what Chrome believes is on the Home screen if the user clears their data.
     // Use the launch as a signal that the shortcut still exists.
-    AppBannerSettingsHelper::RecordBannerEvent(
+    webapps::AppBannerSettingsHelper::RecordBannerEvent(
         web_contents, url, url.spec(),
-        AppBannerSettingsHelper::APP_BANNER_EVENT_DID_ADD_TO_HOMESCREEN,
+        webapps::AppBannerSettingsHelper::
+            APP_BANNER_EVENT_DID_ADD_TO_HOMESCREEN,
         base::Time::Now());
 
     // Tell the Site Engagement Service about this launch as sites recently
     // launched from a shortcut receive a boost to their engagement.
-    SiteEngagementService* service = SiteEngagementService::Get(
-        Profile::FromBrowserContext(web_contents->GetBrowserContext()));
+    site_engagement::SiteEngagementService* service =
+        site_engagement::SiteEngagementService::Get(
+            Profile::FromBrowserContext(web_contents->GetBrowserContext()));
     service->SetLastShortcutLaunchTime(web_contents, url);
   }
 
-  std::string rappor_metric_source;
-  switch (histogram_source) {
-    case ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_DEPRECATED:
-    case ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_PWA:
-    case ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_STANDALONE:
-    case ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_SHORTCUT:
-      rappor_metric_source = "Launch.HomeScreenSource.AddToHomeScreen";
-      break;
-    case ShortcutInfo::SOURCE_APP_BANNER:
-      rappor_metric_source = "Launch.HomeScreenSource.AppBanner";
-      break;
-    case ShortcutInfo::SOURCE_BOOKMARK_NAVIGATOR_WIDGET:
-      rappor_metric_source = "Launch.HomeScreenSource.BookmarkNavigatorWidget";
-      break;
-    case ShortcutInfo::SOURCE_BOOKMARK_SHORTCUT_WIDGET:
-      rappor_metric_source = "Launch.HomeScreenSource.BookmarkShortcutWidget";
-      break;
-    case ShortcutInfo::SOURCE_NOTIFICATION:
-      rappor_metric_source = "Launch.HomeScreenSource.Notification";
-      break;
-    case ShortcutInfo::SOURCE_UNKNOWN:
-    case ShortcutInfo::SOURCE_COUNT:
-      rappor_metric_source = "Launch.HomeScreenSource.Unknown";
-      break;
-  }
-
-  UMA_HISTOGRAM_ENUMERATION("Launch.HomeScreenSource",
-                            static_cast<ShortcutInfo::Source>(histogram_source),
-                            ShortcutInfo::SOURCE_COUNT);
+  UMA_HISTOGRAM_ENUMERATION(
+      "Launch.HomeScreenSource",
+      static_cast<webapps::ShortcutInfo::Source>(histogram_source),
+      webapps::ShortcutInfo::SOURCE_COUNT);
 
   if (!is_shortcut) {
-    UMA_HISTOGRAM_ENUMERATION("Launch.WebAppDisplayMode",
-                              static_cast<blink::WebDisplayMode>(display_mode),
-                              blink::WebDisplayMode::kWebDisplayModeLast + 1);
+    UMA_HISTOGRAM_ENUMERATION(
+        "Launch.WebAppDisplayMode",
+        static_cast<blink::mojom::DisplayMode>(display_mode));
   }
-
-  rappor::SampleDomainAndRegistryFromGURL(g_browser_process->rappor_service(),
-                                          rappor_metric_source, url);
 
   HomeScreenLaunchType action = is_shortcut ? HomeScreenLaunchType::SHORTCUT
                                             : HomeScreenLaunchType::STANDALONE;
-  std::string rappor_metric_action = is_shortcut
-                                         ? "Launch.HomeScreen.Shortcut"
-                                         : "Launch.HomeScreen.Standalone";
 
   UMA_HISTOGRAM_ENUMERATION("Launch.HomeScreen", action,
                             HomeScreenLaunchType::COUNT);
-
-  rappor::SampleDomainAndRegistryFromGURL(g_browser_process->rappor_service(),
-                                          rappor_metric_action, url);
 }
 
 static void JNI_LaunchMetrics_RecordHomePageLaunchMetrics(

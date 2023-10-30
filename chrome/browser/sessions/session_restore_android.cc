@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,14 +37,12 @@ content::WebContents* SessionRestore::RestoreForeignSessionTab(
   content::WebContents* raw_new_web_contents = new_web_contents.get();
   int selected_index = session_tab.normalized_navigation_index();
   new_web_contents->GetController().Restore(
-      selected_index, content::RestoreType::LAST_SESSION_EXITED_CLEANLY,
-      &entries);
+      selected_index, content::RestoreType::kRestored, &entries);
 
   TabAndroid* current_tab = TabAndroid::FromWebContents(web_contents);
   DCHECK(current_tab);
   if (disposition == WindowOpenDisposition::CURRENT_TAB) {
-    web_contents->GetDelegate()->SwapWebContents(
-        web_contents, std::move(new_web_contents), false, false);
+    current_tab->SwapWebContents(std::move(new_web_contents), false, false);
   } else {
     DCHECK(disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB ||
            disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB);

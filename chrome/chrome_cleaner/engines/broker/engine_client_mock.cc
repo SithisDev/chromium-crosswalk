@@ -1,10 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/chrome_cleaner/engines/broker/engine_client_mock.h"
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/test/null_task_runner.h"
 #include "chrome/chrome_cleaner/ipc/mojo_task_runner.h"
 

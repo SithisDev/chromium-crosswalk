@@ -1,11 +1,12 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.compositor.bottombar;
 
-import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler;
-import org.chromium.components.navigation_interception.NavigationParams;
+import org.chromium.components.external_intents.ExternalNavigationHandler;
+import org.chromium.content_public.browser.NavigationHandle;
+import org.chromium.url.GURL;
 
 /**
  * An base class for tracking events on the overlay panel.
@@ -23,15 +24,22 @@ public class OverlayContentDelegate {
      * Called when a page navigation results in an error page.
      * @param url The URL that caused the failure.
      * @param isExternalUrl Whether the URL is different from the initially loaded URL.
-     * @param isFailure Whether the loaded page is an error page.
+     * @param isFailure Whether the loaded page is a page with an error response.
+     * @param isError Whether the loaded page is an error (interstitial) page.
      */
-    public void onMainFrameNavigation(String url, boolean isExternalUrl, boolean isFailure) {}
+    public void onMainFrameNavigation(
+            String url, boolean isExternalUrl, boolean isFailure, boolean isError) {}
+
+    /**
+     * Called when a page title gets updated.
+     * @param title Title string
+     */
+    public void onTitleUpdated(String title) {}
 
     /**
      * Called when content started loading in the panel.
-     * @param url The URL that is loading.
      */
-    public void onContentLoadStarted(String url) {}
+    public void onContentLoadStarted() {}
 
     /**
      * Called when the navigation entry has been committed.
@@ -41,11 +49,11 @@ public class OverlayContentDelegate {
     /**
      * Determine if a particular navigation should be intercepted.
      * @param externalNavHandler External navigation handler for the activity the panel is in.
-     * @param navigationParams The navigation params for the current navigation.
+     * @param navigationHandle The NavigationHandle for the current navigation.
      * @return True if the navigation should be intercepted.
      */
     public boolean shouldInterceptNavigation(ExternalNavigationHandler externalNavHandler,
-            NavigationParams navigationParams) {
+            NavigationHandle navigationHandle, GURL escapedUrl) {
         return true;
     }
 
@@ -60,6 +68,12 @@ public class OverlayContentDelegate {
     public void onVisibilityChanged(boolean isVisible) {}
 
     /**
+     * Called when the SSL state changes.
+     */
+
+    public void onSSLStateUpdated() {}
+
+    /**
      * Called once the WebContents has been seen.
      */
     public void onContentViewSeen() {}
@@ -70,7 +84,7 @@ public class OverlayContentDelegate {
     public void onContentViewCreated() {}
 
     /**
-     * Called once the WebContents has been destroyed.
+     * Notifies that the document has been loaded and painting started in the content view.
      */
-    public void onContentViewDestroyed() {}
+    public void onFirstNonEmptyPaint() {}
 }

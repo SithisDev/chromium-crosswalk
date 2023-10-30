@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,10 +24,10 @@ class View;
 class ChromeWebContentsViewFocusHelper
     : public content::WebContentsUserData<ChromeWebContentsViewFocusHelper> {
  public:
-  // Creates a ChromeWebContentsViewFocusHelper for the given
-  // WebContents. If a ChromeWebContentsViewFocusHelper is already
-  // associated with the WebContents, this method is a no-op.
-  static void CreateForWebContents(content::WebContents* web_contents);
+  ChromeWebContentsViewFocusHelper(const ChromeWebContentsViewFocusHelper&) =
+      delete;
+  ChromeWebContentsViewFocusHelper& operator=(
+      const ChromeWebContentsViewFocusHelper&) = delete;
 
   void StoreFocus();
   bool RestoreFocus();
@@ -47,11 +47,7 @@ class ChromeWebContentsViewFocusHelper
   // Used to store the last focused view.
   views::ViewTracker last_focused_view_tracker_;
 
-  content::WebContents* web_contents_;
-
   WEB_CONTENTS_USER_DATA_KEY_DECL();
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeWebContentsViewFocusHelper);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TAB_CONTENTS_CHROME_WEB_CONTENTS_VIEW_FOCUS_HELPER_H_

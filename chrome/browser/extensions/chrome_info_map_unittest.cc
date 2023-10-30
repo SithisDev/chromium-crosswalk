@@ -1,16 +1,18 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
 #include "chrome/common/chrome_paths.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/info_map.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using extensions::mojom::APIPermissionID;
 
 namespace extensions {
 namespace {
@@ -22,17 +24,16 @@ scoped_refptr<Extension> LoadManifest(const std::string& dir,
   path = path.AppendASCII("extensions").AppendASCII(dir).AppendASCII(test_file);
 
   JSONFileValueDeserializer deserializer(path);
-  std::unique_ptr<base::Value> result = deserializer.Deserialize(NULL, NULL);
+  std::unique_ptr<base::Value> result =
+      deserializer.Deserialize(nullptr, nullptr);
   if (!result)
-    return NULL;
+    return nullptr;
 
   std::string error;
   scoped_refptr<Extension> extension =
-      Extension::Create(path,
-                        Manifest::INVALID_LOCATION,
+      Extension::Create(path, mojom::ManifestLocation::kInvalidLocation,
                         *static_cast<base::DictionaryValue*>(result.get()),
-                        Extension::NO_FLAGS,
-                        &error);
+                        Extension::NO_FLAGS, &error);
   EXPECT_TRUE(extension.get()) << error;
 
   return extension;
@@ -47,7 +48,7 @@ class ChromeInfoMapTest : public testing::Test {
   ChromeInfoMapTest() = default;
 
  private:
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 };
 
 // Tests API access permissions given both extension and app URLs.
@@ -70,42 +71,26 @@ TEST_F(ChromeInfoMapTest, CheckPermissions) {
   // chrome-extension URL or from its web extent.
   const Extension* match = info_map->extensions().GetExtensionOrAppByURL(
       app->GetResourceURL("a.html"));
-  EXPECT_TRUE(match &&
-              match->permissions_data()->HasAPIPermission(
-                  APIPermission::kNotifications));
+  EXPECT_TRUE(match && match->permissions_data()->HasAPIPermission(
+                           APIPermissionID::kNotifications));
   match = info_map->extensions().GetExtensionOrAppByURL(app_url);
-  EXPECT_TRUE(match &&
-              match->permissions_data()->HasAPIPermission(
-                  APIPermission::kNotifications));
-  EXPECT_FALSE(
-      match &&
-      match->permissions_data()->HasAPIPermission(APIPermission::kTab));
+  EXPECT_TRUE(match && match->permissions_data()->HasAPIPermission(
+                           APIPermissionID::kNotifications));
+  EXPECT_FALSE(match && match->permissions_data()->HasAPIPermission(
+                            APIPermissionID::kTab));
 
   // The extension should have the tabs permission.
   match = info_map->extensions().GetExtensionOrAppByURL(
       extension->GetResourceURL("a.html"));
-  EXPECT_TRUE(match &&
-              match->permissions_data()->HasAPIPermission(APIPermission::kTab));
-  EXPECT_FALSE(match &&
-               match->permissions_data()->HasAPIPermission(
-                   APIPermission::kNotifications));
+  EXPECT_TRUE(match && match->permissions_data()->HasAPIPermission(
+                           APIPermissionID::kTab));
+  EXPECT_FALSE(match && match->permissions_data()->HasAPIPermission(
+                            APIPermissionID::kNotifications));
 
   // Random URL should not have any permissions.
   GURL evil_url("http://evil.com/a.html");
   match = info_map->extensions().GetExtensionOrAppByURL(evil_url);
   EXPECT_FALSE(match);
-}
-
-TEST_F(ChromeInfoMapTest, TestNotificationsDisabled) {
-  scoped_refptr<InfoMap> info_map(new InfoMap());
-  scoped_refptr<Extension> app(
-      LoadManifest("manifest_tests", "valid_app.json"));
-  info_map->AddExtension(app.get(), base::Time(), false, false);
-
-  EXPECT_FALSE(info_map->AreNotificationsDisabled(app->id()));
-  info_map->SetNotificationsDisabled(app->id(), true);
-  EXPECT_TRUE(info_map->AreNotificationsDisabled(app->id()));
-  info_map->SetNotificationsDisabled(app->id(), false);
 }
 
 }  // namespace extensions

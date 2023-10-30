@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,11 @@
 #include "chrome/browser/importer/in_process_importer_bridge.h"
 #include "chrome/common/importer/firefox_importer_utils.h"
 #include "chrome/common/importer/imported_bookmark_entry.h"
+#include "chrome/common/importer/profile_import.mojom.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
-#include "content/public/browser/system_connector.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "content/public/browser/service_process_host.h"
+#include "content/public/common/child_process_host.h"
 #include "ui/base/l10n/l10n_util.h"
 
 ExternalProcessImporterClient::ExternalProcessImporterClient(
@@ -31,18 +32,25 @@ ExternalProcessImporterClient::ExternalProcessImporterClient(
       source_profile_(source_profile),
       items_(items),
       bridge_(bridge),
-      cancelled_(false),
-      binding_(this) {
+      cancelled_(false) {
   process_importer_host_->NotifyImportStarted();
 }
 
 void ExternalProcessImporterClient::Start() {
   AddRef();  // balanced in Cleanup.
 
-  content::GetSystemConnector()->BindInterface(
-      chrome::mojom::kProfileImportServiceName, &profile_import_);
-
-  profile_import_.set_connection_error_handler(
+  content::ServiceProcessHost::Launch(
+      profile_import_.BindNewPipeAndPassReceiver(),
+      content::ServiceProcessHost::Options()
+          .WithDisplayName(IDS_UTILITY_PROCESS_PROFILE_IMPORTER_NAME)
+#if BUILDFLAG(IS_MAC)
+          // Importing from Firefox involves loading a Firefox dylib into the
+          // importer service process. Use the child process that doesn't
+          // enforce library validation so that this will work.
+          .WithChildFlags(content::ChildProcessHost::CHILD_PLUGIN)
+#endif
+          .Pass());
+  profile_import_.set_disconnect_handler(
       base::BindOnce(&ExternalProcessImporterClient::OnProcessCrashed, this));
 
   // Dictionary of all localized strings that could be needed by the importer
@@ -70,10 +78,8 @@ void ExternalProcessImporterClient::Start() {
 
   // If the utility process hasn't started yet the message will queue until it
   // does.
-  chrome::mojom::ProfileImportObserverPtr observer;
-  binding_.Bind(mojo::MakeRequest(&observer));
   profile_import_->StartImport(source_profile_, items_, localized_strings,
-                               std::move(observer));
+                               receiver_.BindNewPipeAndPassRemote());
 }
 
 void ExternalProcessImporterClient::Cancel() {
@@ -162,7 +168,7 @@ void ExternalProcessImporterClient::OnHomePageImportReady(
 }
 
 void ExternalProcessImporterClient::OnBookmarksImportStart(
-    const base::string16& first_folder_name,
+    const std::u16string& first_folder_name,
     uint32_t total_bookmarks_count) {
   if (cancelled_)
     return;
@@ -206,7 +212,7 @@ void ExternalProcessImporterClient::OnFaviconsImportGroup(
 }
 
 void ExternalProcessImporterClient::OnPasswordFormImportReady(
-    const autofill::PasswordForm& form) {
+    const importer::ImportedPasswordForm& form) {
   if (cancelled_)
     return;
 
@@ -219,13 +225,6 @@ void ExternalProcessImporterClient::OnKeywordsImportReady(
   if (cancelled_)
     return;
   bridge_->SetKeywords(search_engines, unique_on_host_and_path);
-}
-
-void ExternalProcessImporterClient::OnFirefoxSearchEngineDataReceived(
-    const std::vector<std::string>& search_engine_data) {
-  if (cancelled_)
-    return;
-  bridge_->SetFirefoxSearchEnginesXMLData(search_engine_data);
 }
 
 void ExternalProcessImporterClient::OnAutofillFormDataImportStart(
@@ -264,5 +263,5 @@ void ExternalProcessImporterClient::Cleanup() {
 
 void ExternalProcessImporterClient::CloseMojoHandles() {
   profile_import_.reset();
-  binding_.Close();
+  receiver_.reset();
 }

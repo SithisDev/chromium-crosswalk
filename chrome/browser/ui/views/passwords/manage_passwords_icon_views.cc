@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,26 +12,23 @@
 #include "components/password_manager/core/common/password_manager_ui.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/resource/resource_bundle.h"
-
-const char ManagePasswordsIconViews::kClassName[] = "ManagePasswordsIconViews";
 
 ManagePasswordsIconViews::ManagePasswordsIconViews(
     CommandUpdater* updater,
-    PageActionIconView::Delegate* delegate)
-    : PageActionIconView(updater, IDC_MANAGE_PASSWORDS_FOR_PAGE, delegate),
-      state_(password_manager::ui::INACTIVE_STATE) {
-  DCHECK(delegate);
-#if defined(OS_MACOSX)
-  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
-#else
-  SetFocusBehavior(FocusBehavior::ALWAYS);
-#endif
-
-  UpdateUiForState();
+    IconLabelBubbleView::Delegate* icon_label_bubble_delegate,
+    PageActionIconView::Delegate* page_action_icon_delegate)
+    : PageActionIconView(updater,
+                         IDC_MANAGE_PASSWORDS_FOR_PAGE,
+                         icon_label_bubble_delegate,
+                         page_action_icon_delegate,
+                         "ManagePasswords") {
+  // Password icon should not be mirrored in RTL.
+  image()->SetFlipCanvasOnPaintForRTLUI(false);
 }
 
-ManagePasswordsIconViews::~ManagePasswordsIconViews() {}
+ManagePasswordsIconViews::~ManagePasswordsIconViews() = default;
 
 void ManagePasswordsIconViews::SetState(password_manager::ui::State state) {
   if (state_ == state)
@@ -56,18 +53,16 @@ void ManagePasswordsIconViews::UpdateUiForState() {
   parent()->Layout();
 }
 
-views::BubbleDialogDelegateView* ManagePasswordsIconViews::GetBubble() const {
+views::BubbleDialogDelegate* ManagePasswordsIconViews::GetBubble() const {
   return PasswordBubbleViewBase::manage_password_bubble();
 }
 
-bool ManagePasswordsIconViews::Update() {
+void ManagePasswordsIconViews::UpdateImpl() {
   if (!GetWebContents())
-    return false;
+    return;
 
-  const bool was_visible = GetVisible();
   ManagePasswordsUIController::FromWebContents(GetWebContents())
       ->UpdateIconAndBubbleState(this);
-  return was_visible != GetVisible();
 }
 
 void ManagePasswordsIconViews::OnExecuting(
@@ -83,12 +78,26 @@ const gfx::VectorIcon& ManagePasswordsIconViews::GetVectorIcon() const {
   return kKeyIcon;
 }
 
-base::string16 ManagePasswordsIconViews::GetTextForTooltipAndAccessibleName()
+std::u16string ManagePasswordsIconViews::GetTextForTooltipAndAccessibleName()
     const {
-  return l10n_util::GetStringUTF16(
-      state_ == password_manager::ui::PENDING_PASSWORD_STATE
-          ? IDS_PASSWORD_MANAGER_TOOLTIP_SAVE
-          : IDS_PASSWORD_MANAGER_TOOLTIP_MANAGE);
+  switch (state_) {
+    case password_manager::ui::INACTIVE_STATE:
+    case password_manager::ui::CONFIRMATION_STATE:
+    case password_manager::ui::CREDENTIAL_REQUEST_STATE:
+    case password_manager::ui::AUTO_SIGNIN_STATE:
+    case password_manager::ui::WILL_DELETE_UNSYNCED_ACCOUNT_PASSWORDS_STATE:
+    case password_manager::ui::MANAGE_STATE:
+    case password_manager::ui::PASSWORD_UPDATED_SAFE_STATE:
+    case password_manager::ui::PASSWORD_UPDATED_MORE_TO_FIX:
+      return l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_TOOLTIP_MANAGE);
+    case password_manager::ui::PENDING_PASSWORD_UPDATE_STATE:
+    case password_manager::ui::PENDING_PASSWORD_STATE:
+      return l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_TOOLTIP_SAVE);
+    case password_manager::ui::CAN_MOVE_PASSWORD_TO_ACCOUNT_STATE:
+      return l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_TOOLTIP_MOVE);
+  }
+  NOTREACHED();
+  return std::u16string();
 }
 
 void ManagePasswordsIconViews::AboutToRequestFocusFromTabTraversal(
@@ -97,6 +106,5 @@ void ManagePasswordsIconViews::AboutToRequestFocusFromTabTraversal(
     PasswordBubbleViewBase::ActivateBubble();
 }
 
-const char* ManagePasswordsIconViews::GetClassName() const {
-  return kClassName;
-}
+BEGIN_METADATA(ManagePasswordsIconViews, PageActionIconView)
+END_METADATA

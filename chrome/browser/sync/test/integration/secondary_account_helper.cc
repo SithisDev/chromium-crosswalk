@@ -1,26 +1,26 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/test/integration/secondary_account_helper.h"
 
 #include "base/bind.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_test_util.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
-#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "components/signin/public/identity_manager/primary_account_mutator.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/net/network_portal_detector_test_impl.h"
-#include "chromeos/network/network_handler.h"
-#include "chromeos/network/network_state.h"
-#include "chromeos/network/network_state_handler.h"
-#include "chromeos/network/portal_detector/network_portal_detector.h"
-#endif  // defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/net/network_portal_detector_test_impl.h"
+#include "chromeos/ash/components/network/network_handler.h"
+#include "chromeos/ash/components/network/network_state.h"
+#include "chromeos/ash/components/network/network_state_handler.h"
+#include "chromeos/ash/components/network/portal_detector/network_portal_detector.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace secondary_account_helper {
 
@@ -36,38 +36,32 @@ void OnWillCreateBrowserContextServices(
 
 }  // namespace
 
-ScopedSigninClientFactory SetUpSigninClient(
+base::CallbackListSubscription SetUpSigninClient(
     network::TestURLLoaderFactory* test_url_loader_factory) {
   return BrowserContextDependencyManager::GetInstance()
-      ->RegisterWillCreateBrowserContextServicesCallbackForTesting(
-          base::BindRepeating(&OnWillCreateBrowserContextServices,
-                              test_url_loader_factory));
+      ->RegisterCreateServicesCallbackForTesting(base::BindRepeating(
+          &OnWillCreateBrowserContextServices, test_url_loader_factory));
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void InitNetwork() {
-  auto* portal_detector = new chromeos::NetworkPortalDetectorTestImpl();
+  auto* portal_detector = new ash::NetworkPortalDetectorTestImpl();
 
-  const chromeos::NetworkState* default_network =
-      chromeos::NetworkHandler::Get()
-          ->network_state_handler()
-          ->DefaultNetwork();
+  const ash::NetworkState* default_network =
+      ash::NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
 
   portal_detector->SetDefaultNetworkForTesting(default_network->guid());
 
-  chromeos::NetworkPortalDetector::CaptivePortalState online_state;
-  online_state.status =
-      chromeos::NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE;
-  online_state.response_code = 204;
-  portal_detector->SetDetectionResultsForTesting(default_network->guid(),
-                                                 online_state);
+  portal_detector->SetDetectionResultsForTesting(
+      default_network->guid(),
+      ash::NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204);
 
   // Takes ownership.
-  chromeos::network_portal_detector::InitializeForTesting(portal_detector);
+  ash::network_portal_detector::InitializeForTesting(portal_detector);
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
-void SignInSecondaryAccount(
+AccountInfo SignInUnconsentedAccount(
     Profile* profile,
     network::TestURLLoaderFactory* test_url_loader_factory,
     const std::string& email) {
@@ -75,21 +69,38 @@ void SignInSecondaryAccount(
       IdentityManagerFactory::GetForProfile(profile);
   AccountInfo account_info =
       signin::MakeAccountAvailable(identity_manager, email);
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  // Unlike other platforms, ChromeOS does not get the primary account from the
+  // cookies, and it needs to be set explicitly.
+  identity_manager->GetPrimaryAccountMutator()->SetPrimaryAccount(
+      account_info.account_id, signin::ConsentLevel::kSignin);
+#endif
   signin::SetCookieAccounts(identity_manager, test_url_loader_factory,
                             {{account_info.email, account_info.gaia}});
+  return account_info;
 }
 
-#if !defined(OS_CHROMEOS)
-void MakeAccountPrimary(Profile* profile, const std::string& email) {
+void SignOutAccount(Profile* profile,
+                    network::TestURLLoaderFactory* test_url_loader_factory,
+                    const CoreAccountId& account_id) {
   signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
-  base::Optional<AccountInfo> maybe_account =
-      identity_manager->FindAccountInfoForAccountWithRefreshTokenByEmailAddress(
-          email);
-  DCHECK(maybe_account.has_value());
-  auto* primary_account_mutator = identity_manager->GetPrimaryAccountMutator();
-  primary_account_mutator->SetPrimaryAccount(maybe_account->account_id);
+  signin::SetCookieAccounts(identity_manager, test_url_loader_factory, {});
+  signin::RemoveRefreshTokenForAccount(identity_manager, account_id);
 }
-#endif  // !defined(OS_CHROMEOS)
+
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+void GrantSyncConsent(Profile* profile, const std::string& email) {
+  signin::IdentityManager* identity_manager =
+      IdentityManagerFactory::GetForProfile(profile);
+  AccountInfo account =
+      identity_manager->FindExtendedAccountInfoByEmailAddress(email);
+  DCHECK(!account.IsEmpty());
+  signin::PrimaryAccountMutator* primary_account_mutator =
+      identity_manager->GetPrimaryAccountMutator();
+  primary_account_mutator->SetPrimaryAccount(account.account_id,
+                                             signin::ConsentLevel::kSync);
+}
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace secondary_account_helper

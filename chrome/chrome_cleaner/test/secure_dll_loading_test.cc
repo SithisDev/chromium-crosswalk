@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,16 +14,12 @@
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/process/process.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
-#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
@@ -32,67 +28,25 @@
 #include "chrome/chrome_cleaner/constants/chrome_cleaner_switches.h"
 #include "chrome/chrome_cleaner/os/inheritable_event.h"
 #include "chrome/chrome_cleaner/os/process.h"
+#include "chrome/chrome_cleaner/test/child_process_logger.h"
 #include "chrome/chrome_cleaner/test/test_util.h"
 #include "components/chrome_cleaner/public/constants/constants.h"
 #include "components/chrome_cleaner/test/test_name_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace {
-
-void PrintChildProcessLogs(const base::FilePath& log_dir,
-                           base::StringPiece16 file_name) {
-  base::string16 base_name;
-  if (file_name == L"software_reporter_tool") {
-    base_name = L"software_reporter_tool";
-  } else if (file_name == L"chrome_cleanup_tool") {
-    base_name = L"chrome_cleanup";
-  } else {
-    LOG(ERROR) << "Unknown file name " << file_name.data();
-    return;
-  }
-
-  base::FilePath log_path = log_dir.Append(base_name).AddExtension(L"log");
-
-  if (!base::PathExists(log_path)) {
-    LOG(ERROR) << "Child process log file doesn't exist";
-    return;
-  }
-
-  // Collect the child process log file, and dump the contents, to help
-  // debugging failures.
-  std::string log_file_contents;
-  if (!base::ReadFileToString(log_path, &log_file_contents)) {
-    LOG(ERROR) << "Failed to read child process log file";
-    return;
-  }
-
-  std::vector<base::StringPiece> lines =
-      base::SplitStringPiece(log_file_contents, "\n", base::TRIM_WHITESPACE,
-                             base::SPLIT_WANT_NONEMPTY);
-  LOG(ERROR) << "Dumping child process logs";
-  for (const auto& line : lines) {
-    LOG(ERROR) << "Child process: " << line;
-  }
-}
-
-}  // namespace
-
-class SecureDLLLoadingTest : public testing::TestWithParam<base::string16> {
+class SecureDLLLoadingTest : public testing::TestWithParam<std::wstring> {
  protected:
   void SetUp() override {
+    ASSERT_TRUE(child_process_logger_.Initialize());
     base::FilePath out_dir;
     ASSERT_TRUE(base::PathService::Get(base::DIR_EXE, &out_dir));
     exe_path_ = out_dir.Append(GetParam() + L".exe");
     empty_dll_path_ = out_dir.Append(chrome_cleaner::kEmptyDll);
+
+    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   }
 
   base::Process LaunchProcess(bool disable_secure_dll_loading) {
-    base::ScopedTempDir log_dir;
-    if (!log_dir.CreateUniqueTempDir()) {
-      ADD_FAILURE() << "Precondition failed: could not create log dir";
-      return base::Process();
-    }
-
     std::unique_ptr<base::WaitableEvent> init_done_notifier =
         chrome_cleaner::CreateInheritableEvent(
             base::WaitableEvent::ResetPolicy::AUTOMATIC,
@@ -101,11 +55,9 @@ class SecureDLLLoadingTest : public testing::TestWithParam<base::string16> {
     base::CommandLine command_line(exe_path_);
     command_line.AppendSwitchNative(
         chrome_cleaner::kInitDoneNotifierSwitch,
-        base::NumberToString16(
+        base::NumberToWString(
             base::win::HandleToUint32(init_done_notifier->handle())));
     command_line.AppendSwitch(chrome_cleaner::kLoadEmptyDLLSwitch);
-    command_line.AppendSwitchPath(chrome_cleaner::kTestLoggingPathSwitch,
-                                  log_dir.GetPath());
 
 #if !BUILDFLAG(IS_OFFICIAL_CHROME_CLEANER_BUILD)
     if (disable_secure_dll_loading)
@@ -119,9 +71,16 @@ class SecureDLLLoadingTest : public testing::TestWithParam<base::string16> {
         base::NumberToString(
             static_cast<int>(chrome_cleaner::ExecutionMode::kCleanup)));
 
+    chrome_cleaner::AppendTestSwitches(temp_dir_, &command_line);
+
     base::LaunchOptions options;
     options.handles_to_inherit.push_back(init_done_notifier->handle());
+    child_process_logger_.UpdateLaunchOptions(&options);
     base::Process process = base::LaunchProcess(command_line, options);
+    if (!process.IsValid()) {
+      child_process_logger_.DumpLogs();
+      return process;
+    }
 
     // Make sure the process has finished its initialization (including loading
     // DLLs). Also check the process handle in case it exits with an error.
@@ -136,7 +95,7 @@ class SecureDLLLoadingTest : public testing::TestWithParam<base::string16> {
       PLOG_IF(ERROR, !::GetExitCodeProcess(process.Handle(), &exit_code));
       ADD_FAILURE() << "Process exited with " << exit_code
                     << " before signalling init_done_notifier";
-      PrintChildProcessLogs(log_dir.GetPath(), GetParam());
+      child_process_logger_.DumpLogs();
     } else {
       EXPECT_EQ(wait_result, WAIT_OBJECT_0);
     }
@@ -145,7 +104,7 @@ class SecureDLLLoadingTest : public testing::TestWithParam<base::string16> {
   }
 
   bool EmptyDLLLoaded(const base::Process& process) {
-    std::set<base::string16> module_paths;
+    std::set<std::wstring> module_paths;
     chrome_cleaner::GetLoadedModuleFileNames(process.Handle(), &module_paths);
 
     for (const auto& module_path : module_paths) {
@@ -157,17 +116,21 @@ class SecureDLLLoadingTest : public testing::TestWithParam<base::string16> {
   }
 
  private:
+  chrome_cleaner::ChildProcessLogger child_process_logger_;
   base::FilePath exe_path_;
   base::FilePath empty_dll_path_;
+
+  // Temp directory for child process log files.
+  base::ScopedTempDir temp_dir_;
 };
 
-INSTANTIATE_TEST_CASE_P(SecureDLLLoading,
-                        SecureDLLLoadingTest,
-                        // The value names cannot include ".exe" because "."
-                        // is not a valid character in a test case name.
-                        ::testing::Values(L"software_reporter_tool",
-                                          L"chrome_cleanup_tool"),
-                        chrome_cleaner::GetParamNameForTest());
+INSTANTIATE_TEST_SUITE_P(SecureDLLLoading,
+                         SecureDLLLoadingTest,
+                         // The value names cannot include ".exe" because "."
+                         // is not a valid character in a test case name.
+                         ::testing::Values(L"software_reporter_tool",
+                                           L"chrome_cleanup_tool"),
+                         chrome_cleaner::GetParamNameForTest());
 
 #if !BUILDFLAG(IS_OFFICIAL_CHROME_CLEANER_BUILD)
 TEST_P(SecureDLLLoadingTest, Disabled) {

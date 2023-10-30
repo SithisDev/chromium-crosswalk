@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "content/public/test/browser_test.h"
 
 namespace {
 
@@ -17,14 +18,17 @@ class StatusBubbleMacInteractiveUITest : public InProcessBrowserTest {
   StatusBubbleMacInteractiveUITest() {}
 };
 
+// interactive_ui_tests brings browser window to front using
+// ui_test_utils::BringBrowserWindowToFront, which cause NSApp hide: and unhide:
+// do not work properly.
 IN_PROC_BROWSER_TEST_F(StatusBubbleMacInteractiveUITest,
-                       TestSettingStatusDoesNotUnhideApp) {
+                       DISABLED_TestSettingStatusDoesNotUnhideApp) {
   StatusBubble* status_bubble = browser()->window()->GetStatusBubble();
 
   EXPECT_FALSE(NSApp.hidden);
   [NSApp hide:nil];
   EXPECT_TRUE(NSApp.hidden);
-  status_bubble->SetStatus(base::UTF8ToUTF16("Testing"));
+  status_bubble->SetStatus(u"Testing");
   EXPECT_TRUE(NSApp.hidden);
   [NSApp unhide:nil];
   EXPECT_FALSE(NSApp.hidden);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <algorithm>
 
 #include "base/lazy_instance.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -26,7 +26,7 @@ class InternalAuthTest : public ::testing::Test {
 
   void TearDown() override {}
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::string long_string_;
 };
 
@@ -155,8 +155,8 @@ TEST_F(InternalAuthTest, ExpirationAndBruteForce) {
       ASSERT_FALSE(InternalAuthVerification::VerifyPassport(
           dummy2, "zapata", map));
     }
-    if (base::Time::Now() - timestamp > base::TimeDelta::FromSeconds(
-        kCustomVerificationWindow + 1)) {
+    if (base::Time::Now() - timestamp >
+        base::Seconds(kCustomVerificationWindow + 1)) {
       break;
     }
   }

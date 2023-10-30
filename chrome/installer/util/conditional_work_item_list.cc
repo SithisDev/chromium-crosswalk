@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,7 @@
 #include "base/logging.h"
 
 ConditionalWorkItemList::ConditionalWorkItemList(Condition* condition)
-    : condition_(condition) {
-}
+    : condition_(condition) {}
 
 ConditionalWorkItemList::~ConditionalWorkItemList() {}
 
@@ -19,8 +18,7 @@ bool ConditionalWorkItemList::DoImpl() {
     VLOG(1) << "Beginning conditional work item list";
     return WorkItemList::DoImpl();
   }
-  VLOG(1) << "No work to do in condition work item list "
-          << log_message_;
+  VLOG(1) << "No work to do in condition work item list " << log_message_;
   return true;
 }
 
@@ -36,11 +34,9 @@ bool ConditionRunIfFileExists::ShouldRun() const {
 }
 
 Not::Not(WorkItem::Condition* original_condition)
-    : original_condition_(original_condition) {
-}
+    : original_condition_(original_condition) {}
 
-Not::~Not() {
-}
+Not::~Not() {}
 
 bool Not::ShouldRun() const {
   return !original_condition_->ShouldRun();

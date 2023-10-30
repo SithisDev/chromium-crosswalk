@@ -1,26 +1,34 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/signin/login_ui_test_utils.h"
 
+#include "base/bind.h"
+#include "base/notreached.h"
 #include "base/run_loop.h"
-#include "base/scoped_observer.h"
-#include "base/test/bind_test_util.h"
+#include "base/scoped_observation.h"
+#include "base/strings/stringprintf.h"
+#include "base/test/bind.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_consistency_mode_manager.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/signin_modal_dialog.h"
 #include "chrome/browser/ui/signin_view_controller_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/signin/public/base/consent_level.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -49,9 +57,7 @@ class SignInObserver : public signin::IdentityManager::Observer {
   SignInObserver() : seen_(false), running_(false), signed_in_(false) {}
 
   // Returns whether a GoogleSigninSucceeded event has happened.
-  bool DidSignIn() {
-    return signed_in_;
-  }
+  bool DidSignIn() { return signed_in_; }
 
   // Blocks and waits until the user signs in. Wait() does not block if a
   // GoogleSigninSucceeded has already occurred.
@@ -59,15 +65,33 @@ class SignInObserver : public signin::IdentityManager::Observer {
     if (seen_)
       return;
 
+    base::OneShotTimer timer;
+    timer.Start(
+        FROM_HERE, base::Seconds(30),
+        base::BindOnce(&SignInObserver::OnTimeout, base::Unretained(this)));
     running_ = true;
     message_loop_runner_ = new MessageLoopRunner;
     message_loop_runner_->Run();
     EXPECT_TRUE(seen_);
   }
 
-  void OnPrimaryAccountSet(
-      const CoreAccountInfo& primary_account_info) override {
-    DVLOG(1) << "Google signin succeeded.";
+  void OnTimeout() {
+    seen_ = false;
+    if (!running_)
+      return;
+    message_loop_runner_->Quit();
+    running_ = false;
+    FAIL() << "Sign in observer timed out!";
+  }
+
+  void OnPrimaryAccountChanged(
+      const signin::PrimaryAccountChangeEvent& event) override {
+    if (event.GetEventTypeFor(signin::ConsentLevel::kSync) !=
+        signin::PrimaryAccountChangeEvent::Type::kSet) {
+      return;
+    }
+
+    DVLOG(1) << "Sign in finished: Sync primary account was set.";
     signed_in_ = true;
     QuitLoopRunner();
   }
@@ -94,6 +118,11 @@ class SignInObserver : public signin::IdentityManager::Observer {
 // Synchronously waits for the Sync confirmation to be closed.
 class SyncConfirmationClosedObserver : public LoginUIService::Observer {
  public:
+  explicit SyncConfirmationClosedObserver(Browser* browser) {
+    login_ui_service_observation_.Observe(
+        LoginUIServiceFactory::GetForProfile(browser->profile()));
+  }
+
   void WaitForConfirmationClosed() {
     if (sync_confirmation_closed_)
       return;
@@ -113,6 +142,8 @@ class SyncConfirmationClosedObserver : public LoginUIService::Observer {
 
   bool sync_confirmation_closed_ = false;
   base::OnceClosure quit_closure_;
+  base::ScopedObservation<LoginUIService, LoginUIService::Observer>
+      login_ui_service_observation_{this};
 };
 
 void RunLoopFor(base::TimeDelta duration) {
@@ -125,7 +156,7 @@ void RunLoopFor(base::TimeDelta duration) {
 // Returns the render frame host where Gaia credentials can be filled in.
 content::RenderFrameHost* GetSigninFrame(content::WebContents* web_contents) {
   // Dice displays the Gaia page directly in a tab.
-  return web_contents->GetMainFrame();
+  return web_contents->GetPrimaryMainFrame();
 }
 
 // Waits until the condition is met, by polling.
@@ -134,7 +165,7 @@ void WaitUntilCondition(const base::RepeatingCallback<bool()>& condition,
   for (int attempt = 0; attempt < 10; ++attempt) {
     if (condition.Run())
       return;
-    RunLoopFor(base::TimeDelta::FromMilliseconds(1000));
+    RunLoopFor(base::Milliseconds(1000));
   }
 
   FAIL() << error_message;
@@ -175,48 +206,210 @@ void WaitUntilAnyElementExistsInSigninFrame(
       "Could not find elements in the signin frame");
 }
 
+enum class SyncConfirmationDialogAction { kConfirm, kCancel };
+
+enum class ReauthDialogAction { kConfirm, kCancel };
+
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+std::string GetButtonIdForSyncConfirmationDialogAction(
+    SyncConfirmationDialogAction action) {
+  switch (action) {
+    case SyncConfirmationDialogAction::kConfirm:
+      return "confirmButton";
+    case SyncConfirmationDialogAction::kCancel:
+      return "cancelButton";
+  }
+}
+
+std::string GetRadioButtonIdForSigninEmailConfirmationDialogAction(
+    SigninEmailConfirmationDialog::Action action) {
+  switch (action) {
+    case SigninEmailConfirmationDialog::CREATE_NEW_USER:
+    case SigninEmailConfirmationDialog::CLOSE:
+      return "createNewUserRadioButton";
+    case SigninEmailConfirmationDialog::START_SYNC:
+      return "startSyncRadioButton";
+  }
+}
+
+std::string GetButtonIdForSigninEmailConfirmationDialogAction(
+    SigninEmailConfirmationDialog::Action action) {
+  switch (action) {
+    case SigninEmailConfirmationDialog::CREATE_NEW_USER:
+    case SigninEmailConfirmationDialog::START_SYNC:
+      return "confirmButton";
+    case SigninEmailConfirmationDialog::CLOSE:
+      return "closeButton";
+  }
+}
+
+std::string GetButtonIdForReauthConfirmationDialogAction(
+    ReauthDialogAction action) {
+  switch (action) {
+    case ReauthDialogAction::kConfirm:
+      return "confirmButton";
+    case ReauthDialogAction::kCancel:
+      return "cancelButton";
+  }
+}
+
+std::string GetButtonSelectorForApp(const std::string& app,
+                                    const std::string& button_id) {
+  return base::StringPrintf(
+      "(document.querySelector('%s') == null ? null :"
+      "document.querySelector('%s').shadowRoot.querySelector('#%s'))",
+      app.c_str(), app.c_str(), button_id.c_str());
+}
+
+bool IsElementReady(content::WebContents* web_contents,
+                    const std::string& element_selector) {
+  std::string message;
+  std::string find_element_js = base::StringPrintf(
+      "if (document.readyState != 'complete') {"
+      "  window.domAutomationController.send('DocumentNotReady');"
+      "} else if (%s == null) {"
+      "  window.domAutomationController.send('NotFound');"
+      "} else if (%s.hidden) {"
+      "  window.domAutomationController.send('Hidden');"
+      "} else {"
+      "  window.domAutomationController.send('Ok');"
+      "}",
+      element_selector.c_str(), element_selector.c_str());
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      web_contents, find_element_js, &message));
+  return message == "Ok";
+}
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
+
 }  // namespace
 
 namespace login_ui_test_utils {
 class SigninViewControllerTestUtil {
  public:
-  static bool TryDismissSyncConfirmationDialog(Browser* browser) {
-#if defined(OS_CHROMEOS)
+  static bool TryDismissSyncConfirmationDialog(
+      Browser* browser,
+      SyncConfirmationDialogAction action) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     NOTREACHED();
     return false;
 #else
     SigninViewController* signin_view_controller =
         browser->signin_view_controller();
-    DCHECK_NE(signin_view_controller, nullptr);
+    DCHECK(signin_view_controller);
     if (!signin_view_controller->ShowsModalDialog())
       return false;
     content::WebContents* dialog_web_contents =
         signin_view_controller->GetModalDialogWebContentsForTesting();
-    DCHECK_NE(dialog_web_contents, nullptr);
-    std::string confirm_button_selector =
-        "document.querySelector('sync-confirmation-app').shadowRoot."
-        "querySelector('#confirmButton')";
-    std::string message;
-    std::string find_button_js =
-        "if (document.readyState != 'complete') {"
-        "  window.domAutomationController.send('DocumentNotReady');"
-        "} else if (" +
-        confirm_button_selector +
-        " == null) {"
-        "  window.domAutomationController.send('NotFound');"
-        "} else {"
-        "  window.domAutomationController.send('Ok');"
-        "}";
-    EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-        dialog_web_contents, find_button_js, &message));
-    if (message != "Ok")
+    DCHECK(dialog_web_contents);
+    std::string button_selector = GetButtonSelectorForApp(
+        "sync-confirmation-app",
+        GetButtonIdForSyncConfirmationDialogAction(action));
+    if (!IsElementReady(dialog_web_contents, button_selector))
       return false;
 
     // This cannot be a synchronous call, because it closes the window as a side
     // effect, which may cause the javascript execution to never finish.
     content::ExecuteScriptAsync(dialog_web_contents,
-                                confirm_button_selector + ".click();");
+                                button_selector + ".click();");
     return true;
+#endif
+  }
+
+  static bool TryCompleteSigninEmailConfirmationDialog(
+      Browser* browser,
+      SigninEmailConfirmationDialog::Action action) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    NOTREACHED();
+    return false;
+#else
+    SigninViewController* signin_view_controller =
+        browser->signin_view_controller();
+    DCHECK(signin_view_controller);
+    if (!signin_view_controller->ShowsModalDialog())
+      return false;
+    content::WebContents* dialog_web_contents =
+        signin_view_controller->GetModalDialogWebContentsForTesting();
+    DCHECK(dialog_web_contents);
+    std::string radio_button_selector = GetButtonSelectorForApp(
+        "signin-email-confirmation-app",
+        GetRadioButtonIdForSigninEmailConfirmationDialogAction(action));
+    std::string button_selector = GetButtonSelectorForApp(
+        "signin-email-confirmation-app",
+        GetButtonIdForSigninEmailConfirmationDialogAction(action));
+    if (!IsElementReady(dialog_web_contents, button_selector))
+      return false;
+
+    // This cannot be a synchronous call, because it closes the window as a side
+    // effect, which may cause the javascript execution to never finish.
+    content::ExecuteScriptAsync(
+        dialog_web_contents, base::StringPrintf("%s.click(); %s.click();",
+                                                radio_button_selector.c_str(),
+                                                button_selector.c_str()));
+    return true;
+#endif
+  }
+
+  static bool TryCompleteReauthConfirmationDialog(Browser* browser,
+                                                  ReauthDialogAction action) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    NOTREACHED();
+    return false;
+#else
+    SigninViewController* signin_view_controller =
+        browser->signin_view_controller();
+    DCHECK(signin_view_controller);
+    if (!signin_view_controller->ShowsModalDialog())
+      return false;
+
+    content::WebContents* dialog_web_contents =
+        signin_view_controller->GetModalDialogWebContentsForTesting();
+    DCHECK(dialog_web_contents);
+    std::string button_selector = GetButtonSelectorForApp(
+        "signin-reauth-app",
+        GetButtonIdForReauthConfirmationDialogAction(action));
+    if (!IsElementReady(dialog_web_contents, button_selector))
+      return false;
+
+    // This cannot be a synchronous call, because it closes the window as a side
+    // effect, which may cause the javascript execution to never finish.
+    content::ExecuteScriptAsync(dialog_web_contents,
+                                button_selector + ".click();");
+    return true;
+#endif
+  }
+
+  static bool TryCompleteProfileCustomizationDialog(Browser* browser) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    NOTREACHED();
+    return false;
+#else
+    SigninViewController* signin_view_controller =
+        browser->signin_view_controller();
+    DCHECK(signin_view_controller);
+    if (!signin_view_controller->ShowsModalDialog())
+      return false;
+    content::WebContents* dialog_web_contents =
+        signin_view_controller->GetModalDialogWebContentsForTesting();
+    DCHECK(dialog_web_contents);
+    std::string button_selector =
+        GetButtonSelectorForApp("profile-customization-app", "doneButton");
+    if (!IsElementReady(dialog_web_contents, button_selector))
+      return false;
+
+    // content::ExecJs() might return false because this JavaScript execution
+    // terminates the renderer as a side effect.
+    std::ignore =
+        content::ExecJs(dialog_web_contents, button_selector + ".click();");
+    return true;
+#endif
+  }
+
+  static bool ShowsModalDialog(Browser* browser) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    NOTREACHED();
+    return false;
+#else
+    return browser->signin_view_controller()->ShowsModalDialog();
 #endif
   }
 };
@@ -225,15 +418,14 @@ void WaitUntilUIReady(Browser* browser) {
   std::string message;
   ASSERT_TRUE(content::ExecuteScriptAndExtractString(
       browser->tab_strip_model()->GetActiveWebContents(),
-      "if (!inline.login.getAuthExtHost())"
-      "  inline.login.initialize();"
       "var handler = function() {"
       "  window.domAutomationController.send('ready');"
       "};"
-      "if (inline.login.isAuthReady())"
+      "if (!document.querySelector('inline-login-app').loading_)"
       "  handler();"
       "else"
-      "  inline.login.getAuthExtHost().addEventListener('ready', handler);",
+      "  document.querySelector('inline-login-app').authExtHost_"
+      "     .addEventListener('ready', handler);",
       &message));
   ASSERT_EQ("ready", message);
 }
@@ -293,19 +485,20 @@ void ExecuteJsToSigninInSigninFrame(Browser* browser,
 bool SignInWithUI(Browser* browser,
                   const std::string& username,
                   const std::string& password) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS)
   NOTREACHED();
   return false;
 #else
   SignInObserver signin_observer;
-  ScopedObserver<signin::IdentityManager, SignInObserver>
-      scoped_signin_observer(&signin_observer);
-  scoped_signin_observer.Add(
+  base::ScopedObservation<signin::IdentityManager,
+                          signin::IdentityManager::Observer>
+      scoped_signin_observation(&signin_observer);
+  scoped_signin_observation.Observe(
       IdentityManagerFactory::GetForProfile(browser->profile()));
 
   signin_metrics::AccessPoint access_point =
       signin_metrics::AccessPoint::ACCESS_POINT_MENU;
-  chrome::ShowBrowserSignin(browser, access_point);
+  chrome::ShowBrowserSignin(browser, access_point, signin::ConsentLevel::kSync);
   content::WebContents* active_contents =
       browser->tab_strip_model()->GetActiveWebContents();
   DCHECK(active_contents);
@@ -319,23 +512,84 @@ bool SignInWithUI(Browser* browser,
 #endif
 }
 
-bool DismissSyncConfirmationDialog(Browser* browser, base::TimeDelta timeout) {
-  SyncConfirmationClosedObserver confirmation_closed_observer;
-  ScopedObserver<LoginUIService, LoginUIService::Observer>
-      scoped_confirmation_closed_observer(&confirmation_closed_observer);
-  scoped_confirmation_closed_observer.Add(
-      LoginUIServiceFactory::GetForProfile(browser->profile()));
+bool TryUntilSuccessWithTimeout(base::RepeatingCallback<bool()> try_callback,
+                                base::TimeDelta timeout) {
+  const base::Time expire_time = base::Time::Now() + timeout;
+  while (base::Time::Now() <= expire_time) {
+    if (try_callback.Run())
+      return true;
+    RunLoopFor(base::Seconds(1));
+  }
+  return false;
+}
+
+bool DismissSyncConfirmationDialog(Browser* browser,
+                                   base::TimeDelta timeout,
+                                   SyncConfirmationDialogAction action) {
+  SyncConfirmationClosedObserver confirmation_closed_observer(browser);
 
   const base::Time expire_time = base::Time::Now() + timeout;
   while (base::Time::Now() <= expire_time) {
     if (SigninViewControllerTestUtil::TryDismissSyncConfirmationDialog(
-            browser)) {
+            browser, action)) {
       confirmation_closed_observer.WaitForConfirmationClosed();
+      EXPECT_FALSE(SigninViewControllerTestUtil::ShowsModalDialog(browser));
       return true;
     }
-    RunLoopFor(base::TimeDelta::FromMilliseconds(1000));
+    RunLoopFor(base::Milliseconds(1000));
   }
   return false;
+}
+
+bool ConfirmSyncConfirmationDialog(Browser* browser, base::TimeDelta timeout) {
+  return DismissSyncConfirmationDialog(browser, timeout,
+                                       SyncConfirmationDialogAction::kConfirm);
+}
+
+bool CancelSyncConfirmationDialog(Browser* browser, base::TimeDelta timeout) {
+  return DismissSyncConfirmationDialog(browser, timeout,
+                                       SyncConfirmationDialogAction::kCancel);
+}
+
+bool CompleteSigninEmailConfirmationDialog(
+    Browser* browser,
+    base::TimeDelta timeout,
+    SigninEmailConfirmationDialog::Action action) {
+  return TryUntilSuccessWithTimeout(
+      base::BindRepeating(SigninViewControllerTestUtil::
+                              TryCompleteSigninEmailConfirmationDialog,
+                          browser, action),
+      timeout);
+}
+
+bool CompleteReauthConfirmationDialog(Browser* browser,
+                                      base::TimeDelta timeout,
+                                      ReauthDialogAction action) {
+  return TryUntilSuccessWithTimeout(
+      base::BindRepeating(
+          SigninViewControllerTestUtil::TryCompleteReauthConfirmationDialog,
+          browser, action),
+      timeout);
+}
+
+bool ConfirmReauthConfirmationDialog(Browser* browser,
+                                     base::TimeDelta timeout) {
+  return CompleteReauthConfirmationDialog(browser, timeout,
+                                          ReauthDialogAction::kConfirm);
+}
+
+bool CancelReauthConfirmationDialog(Browser* browser, base::TimeDelta timeout) {
+  return CompleteReauthConfirmationDialog(browser, timeout,
+                                          ReauthDialogAction::kCancel);
+}
+
+bool CompleteProfileCustomizationDialog(Browser* browser,
+                                        base::TimeDelta timeout) {
+  return TryUntilSuccessWithTimeout(
+      base::BindRepeating(
+          SigninViewControllerTestUtil::TryCompleteProfileCustomizationDialog,
+          browser),
+      timeout);
 }
 
 }  // namespace login_ui_test_utils

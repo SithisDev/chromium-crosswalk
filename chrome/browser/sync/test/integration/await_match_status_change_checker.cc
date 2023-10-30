@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,21 +8,13 @@
 #include "chrome/browser/sync/test/integration/sync_test.h"
 
 AwaitMatchStatusChangeChecker::AwaitMatchStatusChangeChecker(
-    const ExitConditionCallback& condition,
-    const std::string& debug_message)
+    const ExitConditionCallback& condition)
     : MultiClientStatusChangeChecker(
           sync_datatype_helper::test()->GetSyncServices()),
-      condition_(condition),
-      debug_message_(debug_message) {
-}
+      condition_(condition) {}
 
-AwaitMatchStatusChangeChecker::~AwaitMatchStatusChangeChecker() {
-}
+AwaitMatchStatusChangeChecker::~AwaitMatchStatusChangeChecker() = default;
 
-bool AwaitMatchStatusChangeChecker::IsExitConditionSatisfied() {
-  return condition_.Run();
-}
-
-std::string AwaitMatchStatusChangeChecker::GetDebugMessage() const {
-  return "Waiting for: " + debug_message_;
+bool AwaitMatchStatusChangeChecker::IsExitConditionSatisfied(std::ostream* os) {
+  return condition_.Run(os);
 }

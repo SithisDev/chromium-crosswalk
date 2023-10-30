@@ -1,16 +1,17 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/safe_browsing/settings_reset_prompt/default_settings_fetcher.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/logging.h"
-#include "base/task/post_task.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/net/system_network_context_manager.h"
@@ -25,9 +26,9 @@ namespace safe_browsing {
 
 namespace {
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 constexpr char kOmahaUrl[] = "https://tools.google.com/service/update2";
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 }  // namespace
 
@@ -61,18 +62,18 @@ DefaultSettingsFetcher::~DefaultSettingsFetcher() {}
 void DefaultSettingsFetcher::Start() {
   DCHECK(!config_fetcher_);
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   std::string brandcode;
   if (google_brand::GetBrand(&brandcode) && !brandcode.empty()) {
     config_fetcher_.reset(new BrandcodeConfigFetcher(
         g_browser_process->system_network_context_manager()
             ->GetURLLoaderFactory(),
-        base::Bind(&DefaultSettingsFetcher::OnSettingsFetched,
-                   base::Unretained(this)),
+        base::BindOnce(&DefaultSettingsFetcher::OnSettingsFetched,
+                       base::Unretained(this)),
         GURL(kOmahaUrl), brandcode));
     return;
   }
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   // For non Google Chrome builds and cases with an empty |brandcode|, we create
   // a default-constructed |BrandcodedDefaultSettings| object and post the
@@ -91,10 +92,10 @@ void DefaultSettingsFetcher::PostCallbackAndDeleteSelf(
     std::unique_ptr<BrandcodedDefaultSettings> default_settings) {
   // Use default settings if fetching of BrandcodedDefaultSettings failed.
   if (!default_settings)
-    default_settings.reset(new BrandcodedDefaultSettings());
+    default_settings = std::make_unique<BrandcodedDefaultSettings>();
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(std::move(callback_), std::move(default_settings)));
   delete this;
 }

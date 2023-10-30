@@ -1,9 +1,8 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 package org.chromium.chrome.browser.metrics;
 
-import android.annotation.TargetApi;
 import android.app.usage.StorageStats;
 import android.app.usage.StorageStatsManager;
 import android.content.Context;
@@ -14,10 +13,12 @@ import android.os.Process;
 import android.os.storage.StorageManager;
 import android.os.storage.StorageVolume;
 
+import androidx.annotation.RequiresApi;
+
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.metrics.RecordHistogram;
-import org.chromium.chrome.browser.util.ConversionUtils;
+import org.chromium.components.browser_ui.util.ConversionUtils;
 
 import java.io.IOException;
 import java.util.UUID;
@@ -34,7 +35,7 @@ public class PackageMetrics {
         public long cacheSize;
     }
 
-    @TargetApi(26)
+    @RequiresApi(26)
     private static PackageMetricsData getPackageStatsForAndroidO() {
         Context context = ContextUtils.getApplicationContext();
         StorageManager storageManager = context.getSystemService(StorageManager.class);
@@ -84,11 +85,11 @@ public class PackageMetrics {
         PackageMetricsData data = getPackageStatsForAndroidO();
         if (data != null) {
             RecordHistogram.recordCustomCountHistogram("Android.PackageStats.DataSize",
-                    Math.round(ConversionUtils.bytesToMegabytes(data.dataSize)), 1, 10000, 50);
+                    (int) ConversionUtils.bytesToMegabytes(data.dataSize), 1, 10000, 50);
             RecordHistogram.recordCustomCountHistogram("Android.PackageStats.CacheSize",
-                    Math.round(ConversionUtils.bytesToMegabytes(data.cacheSize)), 1, 10000, 50);
+                    (int) ConversionUtils.bytesToMegabytes(data.cacheSize), 1, 10000, 50);
             RecordHistogram.recordSparseHistogram("Android.PackageStats.CodeSize",
-                    Math.round(ConversionUtils.bytesToMegabytes(data.codeSize)));
+                    (int) ConversionUtils.bytesToMegabytes(data.codeSize));
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,18 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
-#include "chrome/browser/media/router/presentation/independent_otr_profile_manager.h"
-#include "chrome/browser/media/router/presentation/presentation_navigation_policy.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "chrome/browser/media/router/providers/wired_display/wired_display_presentation_receiver.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_observer.h"
 #include "chrome/browser/ui/media_router/presentation_receiver_window_delegate.h"
+#include "components/media_router/browser/presentation/presentation_navigation_policy.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 
 class GURL;
 class PresentationReceiverWindow;
-class Profile;
 
 namespace content {
 class WebContents;
@@ -38,7 +39,8 @@ class PresentationReceiverWindowController final
     : public PresentationReceiverWindowDelegate,
       public content::WebContentsObserver,
       public content::WebContentsDelegate,
-      public media_router::WiredDisplayPresentationReceiver {
+      public media_router::WiredDisplayPresentationReceiver,
+      public ProfileObserver {
  public:
   using TitleChangeCallback = base::RepeatingCallback<void(const std::string&)>;
 
@@ -47,6 +49,11 @@ class PresentationReceiverWindowController final
                             const gfx::Rect& bounds,
                             base::OnceClosure termination_callback,
                             TitleChangeCallback title_change_callback);
+
+  PresentationReceiverWindowController(
+      const PresentationReceiverWindowController&) = delete;
+  PresentationReceiverWindowController& operator=(
+      const PresentationReceiverWindowController&) = delete;
 
   ~PresentationReceiverWindowController() final;
 
@@ -68,7 +75,8 @@ class PresentationReceiverWindowController final
       base::OnceClosure termination_callback,
       TitleChangeCallback title_change_callback);
 
-  void OriginalProfileDestroyed(Profile* profile);
+  // ProfileObserver:
+  void OnProfileWillBeDestroyed(Profile* profile) override;
 
   // These methods are intended to be used by tests.
   void CloseWindowForTest();
@@ -93,29 +101,23 @@ class PresentationReceiverWindowController final
   void CanDownload(const GURL& url,
                    const std::string& request_method,
                    base::OnceCallback<void(bool)> callback) final;
-  bool ShouldCreateWebContents(
-      content::WebContents* web_contents,
-      content::RenderFrameHost* opener,
+  bool IsWebContentsCreationOverridden(
       content::SiteInstance* source_site_instance,
-      int32_t route_id,
-      int32_t main_frame_route_id,
-      int32_t main_frame_widget_route_id,
       content::mojom::WindowContainerType window_container_type,
       const GURL& opener_url,
       const std::string& frame_name,
-      const GURL& target_url,
-      const std::string& partition_id,
-      content::SessionStorageNamespace* session_storage_namespace) final;
+      const GURL& target_url) override;
 
   // The profile used for the presentation.
-  std::unique_ptr<IndependentOTRProfileManager::OTRProfileRegistration>
-      otr_profile_registration_;
+  raw_ptr<Profile> otr_profile_;
+  base::ScopedObservation<Profile, ProfileObserver> otr_profile_observation_{
+      this};
 
   // WebContents for rendering the receiver page.
   std::unique_ptr<content::WebContents> web_contents_;
 
   // The actual UI window for displaying the receiver page.
-  PresentationReceiverWindow* window_;
+  raw_ptr<PresentationReceiverWindow> window_;
 
   base::OnceClosure termination_callback_;
 
@@ -123,8 +125,6 @@ class PresentationReceiverWindowController final
   TitleChangeCallback title_change_callback_;
 
   media_router::PresentationNavigationPolicy navigation_policy_;
-
-  DISALLOW_COPY_AND_ASSIGN(PresentationReceiverWindowController);
 };
 
 #endif  // CHROME_BROWSER_UI_MEDIA_ROUTER_PRESENTATION_RECEIVER_WINDOW_CONTROLLER_H_

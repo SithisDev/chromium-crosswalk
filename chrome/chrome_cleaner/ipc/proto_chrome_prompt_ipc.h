@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 
 #include <windows.h>
 
-#include "base/sequenced_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/logging.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/chrome_cleaner/ipc/chrome_prompt_ipc.h"
 #include "components/chrome_cleaner/public/proto/chrome_prompt.pb.h"
@@ -19,14 +20,6 @@ class ProtoChromePromptIPC : public ChromePromptIPC {
  public:
   static constexpr uint32_t kMaxMessageLength = 1 * 1024 * 1024;  // 1M bytes
 
-  // Currently some mojom types are used to provide as drop-in replacement
-  // for the existing mojo based implementation. Since they are very simple
-  // they will stay essentially identical once the PromptAcceptance enum is
-  // replaced with a hand rolled one.
-  using PromptAcceptance = mojom::PromptAcceptance;
-  using PromptUserCallback = base::OnceCallback<void(PromptAcceptance)>;
-  using DisableExtensionsCallback = base::OnceCallback<void(bool)>;
-
   ProtoChromePromptIPC(base::win::ScopedHandle response_read_handle,
                        base::win::ScopedHandle request_write_handle);
   ~ProtoChromePromptIPC() override;
@@ -34,17 +27,9 @@ class ProtoChromePromptIPC : public ChromePromptIPC {
   void Initialize(ErrorHandler* error_handler) override;
 
   void PostPromptUserTask(const std::vector<base::FilePath>& files_to_delete,
-                          const std::vector<base::string16>& registry_keys,
-                          const std::vector<base::string16>& extension_ids,
+                          const std::vector<std::wstring>& registry_keys,
+                          const std::vector<std::wstring>& extension_ids,
                           PromptUserCallback callback) override;
-
-  void PostDisableExtensionsTask(
-      const std::vector<base::string16>& extension_ids,
-      DisableExtensionsCallback callback) override;
-
-  void TryDeleteExtensions(
-      base::OnceClosure delete_allowed_callback,
-      base::OnceClosure delete_not_allowed_callback) override;
 
  private:
   // Implements the initialization that needs to happen on the task_runner
@@ -52,8 +37,8 @@ class ProtoChromePromptIPC : public ChromePromptIPC {
   void InitializeImpl();
 
   void RunPromptUserTask(const std::vector<base::FilePath>& files_to_delete,
-                         const std::vector<base::string16>& registry_keys,
-                         const std::vector<base::string16>& extension_ids,
+                         const std::vector<std::wstring>& registry_keys,
+                         const std::vector<std::wstring>& extension_ids,
                          PromptUserCallback callback);
 
   // Invokes error_handler_->OnConnectionClosed() and updates state_. This
@@ -62,7 +47,7 @@ class ProtoChromePromptIPC : public ChromePromptIPC {
 
   void SendBuffer(const std::string& request_content);
 
-  PromptAcceptance WaitForPromptAcceptance();
+  PromptUserResponse::PromptAcceptance WaitForPromptAcceptance();
 
   template <typename T>
   void WriteByValue(T value) {
@@ -106,7 +91,7 @@ class ProtoChromePromptIPC : public ChromePromptIPC {
   base::win::ScopedHandle request_write_handle_;
 
   scoped_refptr<base::SequencedTaskRunner> task_runner_ =
-      base::CreateSequencedTaskRunner({base::ThreadPool(), base::MayBlock()});
+      base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()});
 };
 
 }  // namespace chrome_cleaner

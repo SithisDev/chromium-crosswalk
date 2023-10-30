@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,18 +37,18 @@ class StorageSchemaManifestHandlerTest : public testing::Test {
 
   scoped_refptr<Extension> CreateExtension(const std::string& schema) {
     std::string error;
-    scoped_refptr<Extension> extension =
-        Extension::Create(temp_dir_.GetPath(), Manifest::UNPACKED, manifest_,
-                          Extension::NO_FLAGS, "", &error);
+    scoped_refptr<Extension> extension = Extension::Create(
+        temp_dir_.GetPath(), mojom::ManifestLocation::kUnpacked, manifest_,
+        Extension::NO_FLAGS, "", &error);
     if (!extension.get())
-      return NULL;
+      return nullptr;
     base::FilePath schema_path = temp_dir_.GetPath().AppendASCII("schema.json");
     if (schema.empty()) {
-      base::DeleteFile(schema_path, false);
+      base::DeleteFile(schema_path);
     } else {
       if (base::WriteFile(schema_path, schema.data(), schema.size()) !=
           static_cast<int>(schema.size())) {
-        return NULL;
+        return nullptr;
       }
     }
     return extension;
@@ -87,7 +87,7 @@ TEST_F(StorageSchemaManifestHandlerTest, Parse) {
 
 TEST_F(StorageSchemaManifestHandlerTest, Validate) {
   base::ListValue permissions;
-  permissions.AppendString("storage");
+  permissions.Append("storage");
   manifest_.SetKey("permissions", permissions.Clone());
 
   // Absolute path.

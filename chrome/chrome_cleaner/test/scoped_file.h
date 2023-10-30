@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,12 @@
 #include <string>
 
 #include "base/files/file_path.h"
-#include "base/strings/string16.h"
 
 // Holds the path for a file that gets deleted on destruction.
 class ScopedFile {
  public:
   static std::unique_ptr<ScopedFile> Create(const base::FilePath& dir,
-                                            const base::string16& file_name,
+                                            const std::wstring& file_name,
                                             const std::string& contents);
 
   explicit ScopedFile(const base::FilePath& file_path);

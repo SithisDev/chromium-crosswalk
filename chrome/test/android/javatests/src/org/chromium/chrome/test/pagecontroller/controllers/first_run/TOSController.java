@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,12 @@ import org.chromium.chrome.test.pagecontroller.utils.Ui2Locators;
  * TOS Dialog (part of the First Run Experience) Page Controller.
  */
 public class TOSController extends PageController {
-    private static final IUi2Locator LOCATOR_TOS = Ui2Locators.withResEntries(R.id.tos_and_privacy);
+    private static final IUi2Locator LOCATOR_TOS =
+            Ui2Locators.withAnyResEntry(R.id.tos_and_privacy);
     private static final IUi2Locator LOCATOR_SEND_REPORT_CHECKBOX =
-            Ui2Locators.withResEntries(R.id.send_report_checkbox);
-    private static final IUi2Locator LOCATOR_ACCEPT = Ui2Locators.withResEntries(R.id.terms_accept);
+            Ui2Locators.withAnyResEntry(R.id.send_report_checkbox);
+    private static final IUi2Locator LOCATOR_ACCEPT =
+            Ui2Locators.withAnyResEntry(R.id.terms_accept);
 
     private static final TOSController sInstance = new TOSController();
     private TOSController() {}
@@ -25,8 +27,9 @@ public class TOSController extends PageController {
     }
 
     @Override
-    public boolean isCurrentPageThis() {
-        return mLocatorHelper.isOnScreen(LOCATOR_TOS);
+    public TOSController verifyActive() {
+        mLocatorHelper.verifyOnScreen(LOCATOR_TOS);
+        return this;
     }
 
     public boolean isSendingReports() {

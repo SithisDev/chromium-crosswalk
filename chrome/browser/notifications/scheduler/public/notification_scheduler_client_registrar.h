@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "chrome/browser/notifications/scheduler/public/notification_scheduler_types.h"
 
 namespace notifications {
@@ -21,6 +20,10 @@ class NotificationSchedulerClient;
 class NotificationSchedulerClientRegistrar {
  public:
   NotificationSchedulerClientRegistrar();
+  NotificationSchedulerClientRegistrar(
+      const NotificationSchedulerClientRegistrar&) = delete;
+  NotificationSchedulerClientRegistrar& operator=(
+      const NotificationSchedulerClientRegistrar&) = delete;
   ~NotificationSchedulerClientRegistrar();
 
   // Registers a client into notification scheduler system.
@@ -38,8 +41,6 @@ class NotificationSchedulerClientRegistrar {
   using ClientsMap = std::map<SchedulerClientType,
                               std::unique_ptr<NotificationSchedulerClient>>;
   ClientsMap clients_;
-
-  DISALLOW_COPY_AND_ASSIGN(NotificationSchedulerClientRegistrar);
 };
 
 }  // namespace notifications

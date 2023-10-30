@@ -1,17 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/chrome_cleaner/pup_data/test_uws.h"
 
 namespace chrome_cleaner {
-
-const char kGoogleTestAUwEID[] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const char kGoogleTestBUwEID[] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-// invalid because the characters must be between 'a' and 'p' (inclusive).
-const char kGoogleTestExtensionInvalid1[] =
-    "abcdefghijklmnopqrstuvwxyzabcdefghijk";
-const char kGoogleTestExtensionInvalid2[] = "";
 
 // The contents of the Google A and Google B test UwS files.
 // These files must be named with an extension recognized as

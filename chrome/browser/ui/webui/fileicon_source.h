@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/icon_manager.h"
 #include "content/public/browser/url_data_source.h"
@@ -22,48 +21,51 @@ class Image;
 class FileIconSource : public content::URLDataSource {
  public:
   FileIconSource();
+
+  FileIconSource(const FileIconSource&) = delete;
+  FileIconSource& operator=(const FileIconSource&) = delete;
+
   ~FileIconSource() override;
 
   // content::URLDataSource implementation.
   std::string GetSource() override;
   void StartDataRequest(
-      const std::string& path,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      const content::URLDataSource::GotDataCallback& callback) override;
-  std::string GetMimeType(const std::string&) override;
+      const GURL& url,
+      const content::WebContents::Getter& wc_getter,
+      content::URLDataSource::GotDataCallback callback) override;
+  std::string GetMimeType(const GURL&) override;
   bool AllowCaching() override;
 
  protected:
   // Once the |path| and |icon_size| has been determined from the request, this
   // function is called to perform the actual fetch. Declared as virtual for
   // testing.
-  virtual void FetchFileIcon(
-      const base::FilePath& path,
-      float scale_factor,
-      IconLoader::IconSize icon_size,
-      const content::URLDataSource::GotDataCallback& callback);
+  virtual void FetchFileIcon(const base::FilePath& path,
+                             float scale_factor,
+                             IconLoader::IconSize icon_size,
+                             content::URLDataSource::GotDataCallback callback);
 
  private:
   // Contains the necessary information for completing an icon fetch request.
   struct IconRequestDetails {
     IconRequestDetails();
-    IconRequestDetails(const IconRequestDetails& other);
+
+    IconRequestDetails(IconRequestDetails&& other);
+    IconRequestDetails& operator=(IconRequestDetails&& other);
+
     ~IconRequestDetails();
 
     // The callback to run with the response.
     content::URLDataSource::GotDataCallback callback;
 
     // The requested scale factor to respond with.
-    float scale_factor;
+    float scale_factor = 1;
   };
 
   // Called when favicon data is available from the history backend.
-  void OnFileIconDataAvailable(const IconRequestDetails& details,
-                               gfx::Image icon);
+  void OnFileIconDataAvailable(IconRequestDetails details, gfx::Image icon);
 
   // Tracks tasks requesting file icons.
   base::CancelableTaskTracker cancelable_task_tracker_;
-
-  DISALLOW_COPY_AND_ASSIGN(FileIconSource);
 };
 #endif  // CHROME_BROWSER_UI_WEBUI_FILEICON_SOURCE_H_

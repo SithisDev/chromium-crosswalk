@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -10,9 +10,8 @@
 #include <stdint.h>
 
 #include <ctime>
+#include <string>
 
-#include "base/stl_util.h"
-#include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "chrome/browser/media_galleries/win/mtp_device_object_entry.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -21,10 +20,10 @@ namespace {
 
 struct MTPDeviceObjectEntryData {
   // Friendly name of the object, e.g. "IMG_9911.jpeg".
-  base::string16 name;
+  std::u16string name;
 
   // The object identifier, e.g. "o299".
-  base::string16 object_id;
+  std::wstring object_id;
 
   // True if the current object is a directory/folder/album content type.
   bool is_directory;
@@ -37,13 +36,13 @@ struct MTPDeviceObjectEntryData {
 };
 
 const MTPDeviceObjectEntryData kTestCases[] = {
-  { L"File_1", L"o100", false, 10023, 1121 },
-  { L"Directory_1", L"o52", true, 99833, 2231 },
-  { L"File_2", L"o230", false, 8733, 7372 },
+    {u"File_1", L"o100", false, 10023, 1121},
+    {u"Directory_1", L"o52", true, 99833, 2231},
+    {u"File_2", L"o230", false, 8733, 7372},
 };
 
 void TestEnumeratorIsEmpty(MTPDeviceObjectEnumerator* enumerator) {
-  EXPECT_EQ(base::string16(), enumerator->GetObjectId());
+  EXPECT_EQ(std::wstring(), enumerator->GetObjectId());
   EXPECT_EQ(0, enumerator->Size());
   EXPECT_FALSE(enumerator->IsDirectory());
   EXPECT_TRUE(enumerator->LastModifiedTime().is_null());
@@ -66,7 +65,7 @@ TEST_F(MTPDeviceObjectEnumeratorWinTest, Empty) {
 
 TEST_F(MTPDeviceObjectEnumeratorWinTest, Traversal) {
   MTPDeviceObjectEntries entries;
-  for (size_t i = 0; i < base::size(kTestCases); ++i) {
+  for (size_t i = 0; i < std::size(kTestCases); ++i) {
     entries.push_back(MTPDeviceObjectEntry(
         kTestCases[i].object_id,
         kTestCases[i].name,
@@ -77,8 +76,8 @@ TEST_F(MTPDeviceObjectEnumeratorWinTest, Traversal) {
   MTPDeviceObjectEnumerator enumerator(entries);
   TestEnumeratorIsEmpty(&enumerator);
   TestEnumeratorIsEmpty(&enumerator);
-  for (size_t i = 0; i < base::size(kTestCases); ++i) {
-    EXPECT_EQ(kTestCases[i].name, enumerator.Next().value());
+  for (size_t i = 0; i < std::size(kTestCases); ++i) {
+    EXPECT_EQ(kTestCases[i].name, enumerator.Next().AsUTF16Unsafe());
     EXPECT_EQ(kTestCases[i].object_id, enumerator.GetObjectId());
     EXPECT_EQ(kTestCases[i].size, enumerator.Size());
     EXPECT_EQ(kTestCases[i].is_directory, enumerator.IsDirectory());

@@ -1,11 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_MAC_KEYSTONE_GLUE_H_
 #define CHROME_BROWSER_MAC_KEYSTONE_GLUE_H_
 
-#include "base/strings/string16.h"
+#include <string>
+
 
 #if defined(__OBJC__)
 
@@ -14,7 +15,6 @@
 
 #include "base/mac/scoped_authorizationref.h"
 #import "base/mac/scoped_nsobject.h"
-#include "chrome/common/mac/staging_watcher.h"
 
 // Possible outcomes of various operations.  A version may accompany some of
 // these, but beware: a version is never required.  For statuses that can be
@@ -70,40 +70,37 @@ extern NSString* const kAutoupdateStatusErrorMessages;
  @protected
 
   // Data for Keystone registration
-  base::scoped_nsobject<NSString> productID_;
-  base::scoped_nsobject<NSString> appPath_;
-  base::scoped_nsobject<NSString> url_;
-  base::scoped_nsobject<NSString> version_;
-  std::string channel_;  // Logically: dev, beta, or stable.
+  base::scoped_nsobject<NSString> _productID;
+  base::scoped_nsobject<NSString> _appPath;
+  base::scoped_nsobject<NSString> _url;
+  base::scoped_nsobject<NSString> _version;
+  std::string _channel;  // Logically: dev, beta, or stable.
   // Cached location of the brand file.
-  base::scoped_nsobject<NSString> brandFile_;
+  base::scoped_nsobject<NSString> _brandFile;
 
   // And the Keystone registration itself, with the active timer
-  base::scoped_nsobject<KSRegistration> registration_;
-  NSTimer* timer_;  // strong
-  BOOL registrationActive_;
-  Class ksUnsignedReportingAttributeClass_;
+  base::scoped_nsobject<KSRegistration> _registration;
+  NSTimer* _timer;  // strong
+  BOOL _registrationActive;
+  Class _ksUnsignedReportingAttributeClass;
 
   // The most recent kAutoupdateStatusNotification notification posted.
-  base::scoped_nsobject<NSNotification> recentNotification_;
+  base::scoped_nsobject<NSNotification> _recentNotification;
 
   // The authorization object, when it needs to persist because it's being
   // carried across threads.
-  base::mac::ScopedAuthorizationRef authorization_;
+  base::mac::ScopedAuthorizationRef _authorization;
 
   // YES if a synchronous promotion operation is in progress (promotion during
   // installation).
-  BOOL synchronousPromotion_;
+  BOOL _synchronousPromotion;
 
   // YES if an update was ever successfully installed by -installUpdate.
-  BOOL updateSuccessfullyInstalled_;
-
-  // The object to use to watch for the staging key.
-  base::scoped_nsobject<CrStagingKeyWatcher> stagingKeyWatcher_;
+  BOOL _updateSuccessfullyInstalled;
 }
 
 // Return the default Keystone Glue object.
-+ (id)defaultKeystoneGlue;
++ (KeystoneGlue*)defaultKeystoneGlue;
 
 // Load KeystoneRegistration.framework if present, call into it to register
 // with Keystone, and set up periodic activity pings.
@@ -214,7 +211,7 @@ std::string BrandCode();
 bool KeystoneEnabled();
 
 // The version of the application currently installed on disk.
-base::string16 CurrentlyInstalledVersion();
+std::u16string CurrentlyInstalledVersion();
 
 }  // namespace keystone_glue
 

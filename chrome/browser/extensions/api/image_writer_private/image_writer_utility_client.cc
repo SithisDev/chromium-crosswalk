@@ -1,30 +1,36 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/api/image_writer_private/image_writer_utility_client.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
-#include "base/optional.h"
+#include "base/memory/raw_ptr.h"
+#include "build/build_config.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/services/removable_storage_writer/public/mojom/constants.mojom.h"
+#include "chrome/services/removable_storage_writer/public/mojom/removable_storage_writer.mojom.h"
 #include "content/public/browser/browser_thread.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "content/public/browser/service_process_host.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace extensions {
 namespace image_writer {
 
 namespace {
+
 ImageWriterUtilityClient::ImageWriterUtilityClientFactory*
     g_factory_for_testing = nullptr;
 
-void DeleteInterfacePtr(chrome::mojom::RemovableStorageWriterPtr writer_ptr) {
-  // Just let the parameters go out of scope so they are deleted.
+void DeleteRemote(mojo::Remote<chrome::mojom::RemovableStorageWriter> writer) {
+  // Just let the parameter go out of scope so it's deleted.
 }
+
 }  // namespace
 
 class ImageWriterUtilityClient::RemovableStorageWriterClientImpl
@@ -32,13 +38,19 @@ class ImageWriterUtilityClient::RemovableStorageWriterClientImpl
  public:
   RemovableStorageWriterClientImpl(
       ImageWriterUtilityClient* owner,
-      chrome::mojom::RemovableStorageWriterClientPtr* interface_ptr)
-      : binding_(this, mojo::MakeRequest(interface_ptr)),
+      mojo::PendingReceiver<chrome::mojom::RemovableStorageWriterClient>
+          receiver)
+      : receiver_(this, std::move(receiver)),
         image_writer_utility_client_(owner) {
-    binding_.set_connection_error_handler(
+    receiver_.set_disconnect_handler(
         base::BindOnce(&ImageWriterUtilityClient::OnConnectionError,
                        image_writer_utility_client_));
   }
+
+  RemovableStorageWriterClientImpl(const RemovableStorageWriterClientImpl&) =
+      delete;
+  RemovableStorageWriterClientImpl& operator=(
+      const RemovableStorageWriterClientImpl&) = delete;
 
   ~RemovableStorageWriterClientImpl() override = default;
 
@@ -47,7 +59,7 @@ class ImageWriterUtilityClient::RemovableStorageWriterClientImpl
     image_writer_utility_client_->OperationProgress(progress);
   }
 
-  void Complete(const base::Optional<std::string>& error) override {
+  void Complete(const absl::optional<std::string>& error) override {
     if (error) {
       image_writer_utility_client_->OperationFailed(error.value());
     } else {
@@ -55,37 +67,30 @@ class ImageWriterUtilityClient::RemovableStorageWriterClientImpl
     }
   }
 
-  mojo::Binding<chrome::mojom::RemovableStorageWriterClient> binding_;
-  // |image_writer_utility_client_| owns |this|.
-  ImageWriterUtilityClient* const image_writer_utility_client_;
+  mojo::Receiver<chrome::mojom::RemovableStorageWriterClient> receiver_;
 
-  DISALLOW_COPY_AND_ASSIGN(RemovableStorageWriterClientImpl);
+  // |image_writer_utility_client_| owns |this|.
+  const raw_ptr<ImageWriterUtilityClient> image_writer_utility_client_;
 };
 
 ImageWriterUtilityClient::ImageWriterUtilityClient(
-    const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-    std::unique_ptr<service_manager::Connector> connector)
-    : task_runner_(task_runner), connector_(std::move(connector)) {}
+    const scoped_refptr<base::SequencedTaskRunner>& task_runner)
+    : task_runner_(task_runner) {}
 
 ImageWriterUtilityClient::~ImageWriterUtilityClient() {
   // We could be running on a different TaskRunner (typically, the UI thread).
   // Post to be safe.
-  task_runner_->DeleteSoon(FROM_HERE, std::move(connector_));
-  task_runner_->PostTask(FROM_HERE,
-                         base::BindOnce(&DeleteInterfacePtr,
-                                        std::move(removable_storage_writer_)));
+  task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&DeleteRemote, std::move(removable_storage_writer_)));
 }
 
 // static
 scoped_refptr<ImageWriterUtilityClient> ImageWriterUtilityClient::Create(
-    const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-    std::unique_ptr<service_manager::Connector> connector) {
-  // connector_ can be null in unit-tests.
-  DCHECK(!connector || !connector->IsBound());
+    const scoped_refptr<base::SequencedTaskRunner>& task_runner) {
   if (g_factory_for_testing)
     return g_factory_for_testing->Run();
-  return base::WrapRefCounted(
-      new ImageWriterUtilityClient(task_runner, std::move(connector)));
+  return base::WrapRefCounted(new ImageWriterUtilityClient(task_runner));
 }
 
 // static
@@ -94,54 +99,57 @@ void ImageWriterUtilityClient::SetFactoryForTesting(
   g_factory_for_testing = factory;
 }
 
-void ImageWriterUtilityClient::Write(const ProgressCallback& progress_callback,
-                                     const SuccessCallback& success_callback,
-                                     const ErrorCallback& error_callback,
+void ImageWriterUtilityClient::Write(ProgressCallback progress_callback,
+                                     SuccessCallback success_callback,
+                                     ErrorCallback error_callback,
                                      const base::FilePath& source,
                                      const base::FilePath& target) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!removable_storage_writer_client_);
 
-  progress_callback_ = progress_callback;
-  success_callback_ = success_callback;
-  error_callback_ = error_callback;
+  progress_callback_ = std::move(progress_callback);
+  success_callback_ = std::move(success_callback);
+  error_callback_ = std::move(error_callback);
 
   BindServiceIfNeeded();
 
-  chrome::mojom::RemovableStorageWriterClientPtr client;
+  mojo::PendingRemote<chrome::mojom::RemovableStorageWriterClient>
+      remote_client;
   removable_storage_writer_client_ =
-      std::make_unique<RemovableStorageWriterClientImpl>(this, &client);
-
-  removable_storage_writer_->Write(source, target, std::move(client));
+      std::make_unique<RemovableStorageWriterClientImpl>(
+          this, remote_client.InitWithNewPipeAndPassReceiver());
+  removable_storage_writer_->Write(source, target, std::move(remote_client));
 }
 
-void ImageWriterUtilityClient::Verify(const ProgressCallback& progress_callback,
-                                      const SuccessCallback& success_callback,
-                                      const ErrorCallback& error_callback,
+void ImageWriterUtilityClient::Verify(ProgressCallback progress_callback,
+                                      SuccessCallback success_callback,
+                                      ErrorCallback error_callback,
                                       const base::FilePath& source,
                                       const base::FilePath& target) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!removable_storage_writer_client_);
 
-  progress_callback_ = progress_callback;
-  success_callback_ = success_callback;
-  error_callback_ = error_callback;
+  progress_callback_ = std::move(progress_callback);
+  success_callback_ = std::move(success_callback);
+  error_callback_ = std::move(error_callback);
 
   BindServiceIfNeeded();
 
-  chrome::mojom::RemovableStorageWriterClientPtr client;
+  mojo::PendingRemote<chrome::mojom::RemovableStorageWriterClient>
+      remote_client;
   removable_storage_writer_client_ =
-      std::make_unique<RemovableStorageWriterClientImpl>(this, &client);
-
-  removable_storage_writer_->Verify(source, target, std::move(client));
+      std::make_unique<RemovableStorageWriterClientImpl>(
+          this, remote_client.InitWithNewPipeAndPassReceiver());
+  removable_storage_writer_->Verify(source, target, std::move(remote_client));
 }
 
-void ImageWriterUtilityClient::Cancel(const CancelCallback& cancel_callback) {
+void ImageWriterUtilityClient::Cancel(CancelCallback cancel_callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(cancel_callback);
 
   ResetRequest();
-  base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE, cancel_callback);
+  base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                   std::move(cancel_callback));
 }
 
 void ImageWriterUtilityClient::Shutdown() {
@@ -157,9 +165,12 @@ void ImageWriterUtilityClient::BindServiceIfNeeded() {
   if (removable_storage_writer_)
     return;
 
-  connector_->BindInterface(chrome::mojom::kRemovableStorageWriterServiceName,
-                            mojo::MakeRequest(&removable_storage_writer_));
-  removable_storage_writer_.set_connection_error_handler(
+  content::ServiceProcessHost::Launch(
+      removable_storage_writer_.BindNewPipeAndPassReceiver(),
+      content::ServiceProcessHost::Options()
+          .WithDisplayName(IDS_UTILITY_PROCESS_IMAGE_WRITER_NAME)
+          .Pass());
+  removable_storage_writer_.set_disconnect_handler(
       base::BindOnce(&ImageWriterUtilityClient::OnConnectionError, this));
 }
 
@@ -177,17 +188,17 @@ void ImageWriterUtilityClient::OperationProgress(int64_t progress) {
 }
 
 void ImageWriterUtilityClient::OperationSucceeded() {
-  SuccessCallback success_callback = success_callback_;
+  SuccessCallback success_callback = std::move(success_callback_);
   ResetRequest();
   if (success_callback)
-    success_callback.Run();
+    std::move(success_callback).Run();
 }
 
 void ImageWriterUtilityClient::OperationFailed(const std::string& error) {
-  ErrorCallback error_callback = error_callback_;
+  ErrorCallback error_callback = std::move(error_callback_);
   ResetRequest();
   if (error_callback)
-    error_callback.Run(error);
+    std::move(error_callback).Run(error);
 }
 
 void ImageWriterUtilityClient::ResetRequest() {

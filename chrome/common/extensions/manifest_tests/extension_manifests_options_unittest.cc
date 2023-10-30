@@ -1,8 +1,7 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/common/extensions/manifest_tests/chrome_manifest_test.h"
 #include "extensions/common/error_utils.h"
@@ -11,9 +10,8 @@
 #include "extensions/common/manifest_handlers/options_page_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using namespace extensions;
-
-namespace errors = extensions::manifest_errors;
+using extensions::FeatureSwitch;
+using extensions::OptionsPageInfo;
 
 namespace {
 
@@ -24,7 +22,7 @@ class OptionsPageManifestTest : public ChromeManifestTest {
   testing::AssertionResult TestOptionsUIChromeStyleAndOpenInTab() {
     // Explicitly specifying true in the manifest for options_ui.chrome_style
     // and options_ui.open_in_tab sets them both to true.
-    scoped_refptr<Extension> extension =
+    scoped_refptr<extensions::Extension> extension =
         LoadAndExpectSuccess("options_ui_flags_true.json");
     EXPECT_TRUE(OptionsPageInfo::ShouldUseChromeStyle(extension.get()));
     EXPECT_TRUE(OptionsPageInfo::ShouldOpenInTab(extension.get()));
@@ -55,7 +53,7 @@ class OptionsPageManifestTest : public ChromeManifestTest {
   // chromes-style behaviour.
   testing::AssertionResult TestOptionsPageChromeStyleAndOpenInTab(
       bool expect_open_in_tab) {
-    scoped_refptr<Extension> extension =
+    scoped_refptr<extensions::Extension> extension =
         LoadAndExpectSuccess("init_valid_options.json");
     EXPECT_FALSE(OptionsPageInfo::ShouldUseChromeStyle(extension.get()));
     if (expect_open_in_tab) {
@@ -69,7 +67,7 @@ class OptionsPageManifestTest : public ChromeManifestTest {
 
 TEST_F(OptionsPageManifestTest, OptionsPageInApps) {
   // Allow options page with absolute URL in hosted apps.
-  scoped_refptr<Extension> extension =
+  scoped_refptr<extensions::Extension> extension =
       LoadAndExpectSuccess("hosted_app_absolute_options.json");
   EXPECT_EQ("http://example.com/options.html",
             OptionsPageInfo::GetOptionsPage(extension.get()).spec());
@@ -78,19 +76,19 @@ TEST_F(OptionsPageManifestTest, OptionsPageInApps) {
   EXPECT_TRUE(!OptionsPageInfo::HasOptionsPage(extension.get()));
 
   Testcase testcases[] = {
-    // Forbid options page with relative URL in hosted apps.
-    Testcase("hosted_app_relative_options.json",
-             errors::kInvalidOptionsPageInHostedApp),
+      // Forbid options page with relative URL in hosted apps.
+      Testcase("hosted_app_relative_options.json",
+               extensions::manifest_errors::kInvalidOptionsPageInHostedApp),
 
-    // Forbid options page with non-(http|https) scheme in hosted app.
-    Testcase("hosted_app_file_options.json",
-             errors::kInvalidOptionsPageInHostedApp),
+      // Forbid options page with non-(http|https) scheme in hosted app.
+      Testcase("hosted_app_file_options.json",
+               extensions::manifest_errors::kInvalidOptionsPageInHostedApp),
 
-    // Forbid absolute URL for options page in packaged apps.
-    Testcase("packaged_app_absolute_options.json",
-             errors::kInvalidOptionsPageExpectUrlInPackage)
-  };
-  RunTestcases(testcases, base::size(testcases), EXPECT_TYPE_ERROR);
+      // Forbid absolute URL for options page in packaged apps.
+      Testcase(
+          "packaged_app_absolute_options.json",
+          extensions::manifest_errors::kInvalidOptionsPageExpectUrlInPackage)};
+  RunTestcases(testcases, std::size(testcases), EXPECT_TYPE_ERROR);
 }
 
 // Tests for the options_ui.page manifest field.
@@ -98,7 +96,7 @@ TEST_F(OptionsPageManifestTest, OptionsUIPage) {
   FeatureSwitch::ScopedOverride enable_flag(
       FeatureSwitch::embedded_extension_options(), true);
 
-  scoped_refptr<Extension> extension =
+  scoped_refptr<extensions::Extension> extension =
       LoadAndExpectSuccess("options_ui_page_basic.json");
   EXPECT_EQ(base::StringPrintf("chrome-extension://%s/options.html",
                                extension->id().c_str()),
@@ -111,7 +109,7 @@ TEST_F(OptionsPageManifestTest, OptionsUIPage) {
 
   Testcase testcases[] = {Testcase("options_ui_page_bad_url.json",
                                    "'page': expected page, got null")};
-  RunTestcases(testcases, base::size(testcases), EXPECT_TYPE_WARNING);
+  RunTestcases(testcases, std::size(testcases), EXPECT_TYPE_WARNING);
 }
 
 // Runs TestOptionsUIChromeStyleAndOpenInTab with and without the
@@ -137,6 +135,17 @@ TEST_F(OptionsPageManifestTest, OptionsPageChromeStyleAndOpenInTab) {
         FeatureSwitch::embedded_extension_options(), true);
     EXPECT_TRUE(TestOptionsPageChromeStyleAndOpenInTab(false));
   }
+}
+
+// Tests that the chrome_style flag is not supported in manifest v3 and will
+// trigger an error when specified.
+TEST_F(OptionsPageManifestTest, OptionsPageChromeStyleManifestV3) {
+  LoadAndExpectError(
+      "options_ui_chrome_style_manifest_v3_false.json",
+      extensions::manifest_errors::kChromeStyleInvalidForManifestV3);
+  LoadAndExpectError(
+      "options_ui_chrome_style_manifest_v3_true.json",
+      extensions::manifest_errors::kChromeStyleInvalidForManifestV3);
 }
 
 }  // namespace

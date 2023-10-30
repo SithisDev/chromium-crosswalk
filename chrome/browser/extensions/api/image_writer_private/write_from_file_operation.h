@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,6 @@
 
 #include "chrome/browser/extensions/api/image_writer_private/operation.h"
 
-namespace service_manager {
-class Connector;
-}
-
 namespace extensions {
 namespace image_writer {
 
@@ -18,7 +14,6 @@ namespace image_writer {
 class WriteFromFileOperation : public Operation {
  public:
   WriteFromFileOperation(base::WeakPtr<OperationManager> manager,
-                         std::unique_ptr<service_manager::Connector> connector,
                          const ExtensionId& extension_id,
                          const base::FilePath& user_file_path,
                          const std::string& storage_unit_id,

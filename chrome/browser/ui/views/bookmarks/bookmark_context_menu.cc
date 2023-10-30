@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
+#include "base/no_destructor.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -18,9 +19,13 @@
 #include "ui/views/widget/widget.h"
 
 using bookmarks::BookmarkNode;
-using content::PageNavigator;
 
 namespace {
+
+base::OnceClosure& PreRunCallback() {
+  static base::NoDestructor<base::OnceClosure> instance;
+  return *instance;
+}
 
 // Returns true if |command_id| corresponds to a command that causes one or more
 // bookmarks to be removed.
@@ -37,7 +42,6 @@ BookmarkContextMenu::BookmarkContextMenu(
     views::Widget* parent_widget,
     Browser* browser,
     Profile* profile,
-    PageNavigator* page_navigator,
     BookmarkLaunchLocation opened_from,
     const BookmarkNode* parent,
     const std::vector<const BookmarkNode*>& selection,
@@ -47,7 +51,6 @@ BookmarkContextMenu::BookmarkContextMenu(
           this,
           browser,
           profile,
-          page_navigator,
           opened_from,
           parent,
           selection)),
@@ -57,16 +60,20 @@ BookmarkContextMenu::BookmarkContextMenu(
                                          views::MenuRunner::HAS_MNEMONICS |
                                              views::MenuRunner::IS_NESTED |
                                              views::MenuRunner::CONTEXT_MENU)),
-      observer_(NULL),
+      observer_(nullptr),
       close_on_remove_(close_on_remove) {
   ui::SimpleMenuModel* menu_model = controller_->menu_model();
-  for (int i = 0; i < menu_model->GetItemCount(); ++i) {
+  for (size_t i = 0; i < menu_model->GetItemCount(); ++i) {
     views::MenuModelAdapter::AppendMenuItemFromModel(
         menu_model, i, menu_, menu_model->GetCommandIdAt(i));
   }
 }
 
-BookmarkContextMenu::~BookmarkContextMenu() {
+BookmarkContextMenu::~BookmarkContextMenu() {}
+
+void BookmarkContextMenu::InstallPreRunCallback(base::OnceClosure callback) {
+  DCHECK(PreRunCallback().is_null());
+  PreRunCallback() = std::move(callback);
 }
 
 void BookmarkContextMenu::RunMenuAt(const gfx::Point& point,
@@ -74,18 +81,13 @@ void BookmarkContextMenu::RunMenuAt(const gfx::Point& point,
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode))
     return;
 
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_BOOKMARK_CONTEXT_MENU_SHOWN,
-      content::Source<BookmarkContextMenu>(this),
-      content::NotificationService::NoDetails());
+  if (!PreRunCallback().is_null())
+    std::move(PreRunCallback()).Run();
+
   // width/height don't matter here.
   menu_runner_->RunMenuAt(parent_widget_, nullptr,
                           gfx::Rect(point.x(), point.y(), 0, 0),
                           views::MenuAnchorPosition::kTopLeft, source_type);
-}
-
-void BookmarkContextMenu::SetPageNavigator(PageNavigator* navigator) {
-  controller_->set_navigator(navigator);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -1,11 +1,12 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Generic utilities for all python scripts."""
 
 import atexit
-import httplib
+import base64
+import http.client
 import json
 import os
 import platform
@@ -17,8 +18,9 @@ import subprocess
 import sys
 import tempfile
 import time
-import urlparse
 import zipfile
+
+import requests
 
 import chrome_paths
 
@@ -87,7 +89,10 @@ def _DeleteDir(path):
   for root, dirs, files in os.walk(path, topdown=False):
     for name in files:
       filename = os.path.join(root, name)
-      os.chmod(filename, stat.S_IWRITE)
+      try:
+        os.chmod(filename, stat.S_IWRITE)
+      except OSError:
+        pass
       os.remove(filename)
     for name in dirs:
       os.rmdir(os.path.join(root, name))
@@ -163,10 +168,11 @@ def Kill(pid):
     os.kill(pid, signal.SIGTERM)
 
 
-def RunCommand(cmd, cwd=None):
+def RunCommand(cmd, cwd=None, fileName=None):
   """Runs the given command and returns the exit code.
 
   Args:
+    fileName: file name to redirect output
     cmd: list of command arguments.
     cwd: working directory to execute the command, or None if the current
          working directory should be used.
@@ -175,53 +181,33 @@ def RunCommand(cmd, cwd=None):
     The exit code of the command.
   """
   sys.stdout.flush()
-  process = subprocess.Popen(cmd, cwd=cwd)
+  if fileName is not None:
+    with open(fileName,"wb") as out:
+      process = subprocess.Popen(cmd, cwd=cwd,stdout=out,stderr=out)
+  else:
+    process = subprocess.Popen(cmd, cwd=cwd)
   process.wait()
   sys.stdout.flush()
   return process.returncode
 
 
-def DoesUrlExist(url):
-  """Determines whether a resource exists at the given URL.
-
-  Args:
-    url: URL to be verified.
-
-  Returns:
-    True if url exists, otherwise False.
-  """
-  parsed = urlparse.urlparse(url)
-  try:
-    conn = httplib.HTTPConnection(parsed.netloc)
-    conn.request('HEAD', parsed.path)
-    response = conn.getresponse()
-  except httplib.HTTPException:
-    return False
-  finally:
-    conn.close()
-  # Follow both permanent (301) and temporary (302) redirects.
-  if response.status == 302 or response.status == 301:
-    return DoesUrlExist(response.getheader('location'))
-  return response.status == 200
-
-
 def MarkBuildStepStart(name):
-  print '@@@BUILD_STEP %s@@@' % name
+  print('@@@BUILD_STEP %s@@@' % name)
   sys.stdout.flush()
 
 
 def MarkBuildStepError():
-  print '@@@STEP_FAILURE@@@'
+  print('@@@STEP_FAILURE@@@')
   sys.stdout.flush()
 
 
 def AddBuildStepText(text):
-  print '@@@STEP_TEXT@%s@@@' % text
+  print('@@@STEP_TEXT@%s@@@' % text)
   sys.stdout.flush()
 
 
 def PrintAndFlush(text):
-  print text
+  print(text)
   sys.stdout.flush()
 
 
@@ -232,7 +218,7 @@ def AddLink(label, url):
     label: A string with the name of the label.
     url: A string of the URL.
   """
-  print '@@@STEP_LINK@%s@%s@@@' % (label, url)
+  print('@@@STEP_LINK@%s@%s@@@' % (label, url))
 
 
 def FindProbableFreePorts():
@@ -244,7 +230,7 @@ def FindProbableFreePorts():
   if there is any alternative.
   """
   # This is the range of dynamic ports. See RFC6335 page 10.
-  dynamic_ports = range(49152, 65535)
+  dynamic_ports = list(range(49152, 65535))
   random.shuffle(dynamic_ports)
 
   for port in dynamic_ports:
@@ -257,17 +243,20 @@ def FindProbableFreePorts():
   raise RuntimeError('Cannot find open port')
 
 
-def WriteResultToJSONFile(tests, result, json_path):
-  """Write a unittest result object to a file as a JSON.
+def WriteResultToJSONFile(test_suites, results, json_path):
+  """Aggregate a list of unittest result object and write to a file as a JSON.
 
-  This takes a result object from a run of Python unittest tests and writes
-  it to a file in the correct format for the --isolated-script-test-output
-  argument passed to test isolates.
+  This takes a list of result object from one or more runs (for retry purpose)
+  of Python unittest tests; aggregates the list by appending each test result
+  from each run and writes to a file in the correct format
+  for the --isolated-script-test-output argument passed to test isolates.
 
   Args:
-    tests: unittest.TestSuite that was run to get the result object; iterated
-      to get all test cases that were run.
-    result: unittest.TextTestResult object returned from running unittest tests.
+    test_suites: a list of unittest.TestSuite that were run to get
+                 the list of result object; each test_suite contains
+                 the tests run and is iterated to get all test cases ran.
+    results: a list of unittest.TextTestResult object returned
+             from running unittest tests.
     json_path: desired path to JSON file of result.
   """
   output = {
@@ -279,20 +268,102 @@ def WriteResultToJSONFile(tests, result, json_path):
       'version': 3,
   }
 
-  for test in tests:
-    output['tests'][test.id()] = {
-        'expected': 'PASS',
-        'actual': 'PASS'
+  def initialize(test_suite):
+    for test_name in test_suite:
+      if test_name not in output['tests']:
+        output['tests'][test_name] = {
+            'expected': 'PASS',
+            'actual': []
+        }
+
+  for test_suite in test_suites:
+    initialize(test_suite)
+
+  def get_pass_fail(test_suite, result):
+    success = []
+    fail = []
+    for failure in result.failures + result.errors:
+      fail.append(failure[0].id())
+    for test_name in test_suite:
+      if test_name not in fail:
+        success.append(test_name)
+    return {
+        'success': success,
+        'fail': fail,
     }
 
-  for failure in result.failures + result.errors:
-    output['tests'][failure[0].id()]['actual'] = 'FAIL'
-    output['tests'][failure[0].id()]['is_unexpected'] = True
+  for test_suite, result in zip(test_suites, results):
+    pass_fail = get_pass_fail(test_suite, result)
+    for s in pass_fail['success']:
+      output['tests'][s]['actual'].append('PASS')
+    for f in pass_fail['fail']:
+      output['tests'][f]['actual'].append('FAIL')
 
-  num_fails = len(result.failures) + len(result.errors)
+  num_fails = 0
+  for test_result in output['tests'].values():
+    if test_result['actual'][-1] == 'FAIL':
+      num_fails += 1
+      test_result['is_unexpected'] = True
+    test_result['actual'] = ' '.join(test_result['actual'])
+
   output['num_failures_by_type']['FAIL'] = num_fails
   output['num_failures_by_type']['PASS'] = len(output['tests']) - num_fails
 
   with open(json_path, 'w') as script_out_file:
     json.dump(output, script_out_file)
     script_out_file.write('\n')
+
+
+def TryUploadingResultToResultSink(results):
+
+  def parse(result):
+    test_results = []
+    for test_case in result.successes:
+      test_results.append({
+          'testId': test_case.id(),
+          'expected': True,
+          'status': 'PASS',
+      })
+
+    for (test_case, stack_trace) in result.failures + result.errors:
+      test_results.append({
+          'testId': test_case.id(),
+          'expected': False,
+          'status': 'FAIL',
+          # Uses <text-artifact> tag to embed the artifact content
+          # in summaryHtml.
+          'summaryHtml': '<p><text-artifact artifact-id="stack_trace"></p>',
+          # A map of artifacts. The keys are artifact ids which uniquely
+          # identify an artifact within the test result.
+          'artifacts': {
+               'stack_trace': {
+                    'contents': base64.b64encode(stack_trace.encode()).decode(),
+               },
+          },
+      })
+    return test_results
+
+  def getResultSinkTestResults(results):
+    test_results = []
+    for r in results:
+        test_results.extend(parse(r))
+    return test_results
+
+  try:
+    with open(os.environ['LUCI_CONTEXT']) as f:
+      sink = json.load(f)['result_sink']
+  except KeyError:
+    return
+
+  test_results = getResultSinkTestResults(results)
+  # Uploads all test results at once.
+  res = requests.post(
+    url='http://%s/prpc/luci.resultsink.v1.Sink/ReportTestResults' % sink['address'],
+    headers={
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Authorization': 'ResultSink %s' % sink['auth_token'],
+    },
+    data=json.dumps({'testResults': test_results})
+  )
+  res.raise_for_status()

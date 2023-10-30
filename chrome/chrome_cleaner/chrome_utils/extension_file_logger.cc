@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,7 +38,7 @@ ExtensionFileLogger::ExtensionFileLogger(const base::FilePath& user_data_path)
 ExtensionFileLogger::~ExtensionFileLogger() = default;
 
 bool ExtensionFileLogger::GetExtensionFiles(
-    const base::string16& extension_id,
+    const std::wstring& extension_id,
     std::vector<internal::FileInformation>* files) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!initialized_)

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,41 +10,45 @@
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/memory/raw_ptr.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_app_update_service.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_mode_idle_app_name_notification.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_session_plugin_handler.h"
-#include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
-#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
+#include "chrome/browser/chromeos/app_mode/app_session_browser_window_handler.h"
+#include "chrome/browser/chromeos/app_mode/app_session_metrics_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_list_observer.h"
-#include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
-#include "chromeos/dbus/power/power_manager_client.h"
-#include "chromeos/network/network_state.h"
-#include "chromeos/network/network_state_handler.h"
+#include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
-#include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
-#include "content/public/browser/plugin_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/webplugininfo.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
+#include "ppapi/buildflags/buildflags.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chromeos/dbus/power/power_manager_client.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chrome/browser/lacros/app_mode/kiosk_session_service_lacros.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
+
+#if BUILDFLAG(ENABLE_PLUGINS)
+#include "chrome/browser/chromeos/app_mode/kiosk_session_plugin_handler.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_session_plugin_handler_delegate.h"
+#include "content/public/browser/plugin_service.h"
+#endif
 
 using extensions::AppWindow;
 using extensions::AppWindowRegistry;
@@ -53,22 +57,28 @@ namespace chromeos {
 
 namespace {
 
+#if BUILDFLAG(ENABLE_PLUGINS)
 bool IsPepperPlugin(const base::FilePath& plugin_path) {
   content::WebPluginInfo plugin_info;
   return content::PluginService::GetInstance()->GetPluginInfoByPath(
              plugin_path, &plugin_info) &&
          plugin_info.is_pepper_plugin();
 }
+#endif
 
 void RebootDevice() {
-  PowerManagerClient::Get()->RequestRestart(
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  chromeos::PowerManagerClient::Get()->RequestRestart(
       power_manager::REQUEST_RESTART_OTHER, "kiosk app session");
+#elif BUILDFLAG(IS_CHROMEOS_LACROS)
+  KioskSessionServiceLacros::Get()->RestartDevice("kiosk app session");
+#endif
 }
 
 // Sends a SIGFPE signal to plugin subprocesses that matches |child_ids|
 // to trigger a dump.
-void DumpPluginProcessOnIOThread(const std::set<int>& child_ids) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+void DumpPluginProcess(const std::set<int>& child_ids) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   bool dump_requested = false;
 
@@ -92,9 +102,9 @@ void DumpPluginProcessOnIOThread(const std::set<int>& child_ids) {
 
   // Wait a bit to let dump finish (if requested) before rebooting the device.
   const int kDumpWaitSeconds = 10;
-  base::PostDelayedTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI}, base::BindOnce(&RebootDevice),
-      base::TimeDelta::FromSeconds(dump_requested ? kDumpWaitSeconds : 0));
+  content::GetUIThreadTaskRunner({})->PostDelayedTask(
+      FROM_HERE, base::BindOnce(&RebootDevice),
+      base::Seconds(dump_requested ? kDumpWaitSeconds : 0));
 }
 
 }  // namespace
@@ -103,6 +113,8 @@ class AppSession::AppWindowHandler : public AppWindowRegistry::Observer {
  public:
   explicit AppWindowHandler(AppSession* app_session)
       : app_session_(app_session) {}
+  AppWindowHandler(const AppWindowHandler&) = delete;
+  AppWindowHandler& operator=(const AppWindowHandler&) = delete;
   ~AppWindowHandler() override {}
 
   void Init(Profile* profile, const std::string& app_id) {
@@ -129,149 +141,191 @@ class AppSession::AppWindowHandler : public AppWindowRegistry::Observer {
       return;
     }
 
-    if (DemoAppLauncher::IsDemoAppSession(user_manager::UserManager::Get()
-                                              ->GetActiveUser()
-                                              ->GetAccountId())) {
-      // If we were in demo mode, we disabled all our network technologies,
-      // re-enable them.
-      NetworkHandler::Get()->network_state_handler()->SetTechnologyEnabled(
-          NetworkTypePattern::Physical(), true,
-          chromeos::network_handler::ErrorCallback());
-    }
-
     app_session_->OnLastAppWindowClosed();
     window_registry_->RemoveObserver(this);
   }
 
-  AppSession* const app_session_;
-  AppWindowRegistry* window_registry_ = nullptr;
+  const raw_ptr<AppSession> app_session_;
+  raw_ptr<AppWindowRegistry> window_registry_ = nullptr;
   std::string app_id_;
   bool app_window_created_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(AppWindowHandler);
 };
 
-class AppSession::BrowserWindowHandler : public BrowserListObserver {
+#if BUILDFLAG(ENABLE_PLUGINS)
+class AppSession::PluginHandlerDelegateImpl
+    : public KioskSessionPluginHandlerDelegate {
  public:
-  BrowserWindowHandler() {
-    BrowserList::AddObserver(this);
+  explicit PluginHandlerDelegateImpl(AppSession* owner) : owner_(owner) {}
+  PluginHandlerDelegateImpl(const PluginHandlerDelegateImpl&) = delete;
+  PluginHandlerDelegateImpl& operator=(const PluginHandlerDelegateImpl&) =
+      delete;
+  ~PluginHandlerDelegateImpl() override = default;
+
+  // KioskSessionPluginHandlerDelegate:
+  bool ShouldHandlePlugin(const base::FilePath& plugin_path) const override {
+    // Note that BrowserChildProcessHostIterator in DumpPluginProcess also needs
+    // to be updated when adding more plugin types here.
+    return IsPepperPlugin(plugin_path);
   }
-  ~BrowserWindowHandler() override { BrowserList::RemoveObserver(this); }
+  void OnPluginCrashed(const base::FilePath& plugin_path) override {
+    if (owner_->is_shutting_down())
+      return;
+    owner_->metrics_service_->RecordKioskSessionPluginCrashed();
+    owner_->is_shutting_down_ = true;
+
+    LOG(ERROR) << "Reboot due to plugin crash, path=" << plugin_path.value();
+    RebootDevice();
+  }
+
+  void OnPluginHung(const std::set<int>& hung_plugins) override {
+    if (owner_->is_shutting_down())
+      return;
+    owner_->metrics_service_->RecordKioskSessionPluginHung();
+    owner_->is_shutting_down_ = true;
+
+    LOG(ERROR) << "Plugin hung detected. Dump and reboot.";
+    DumpPluginProcess(hung_plugins);
+  }
 
  private:
-  void HandleBrowser(Browser* browser) {
-    content::WebContents* active_tab =
-        browser->tab_strip_model()->GetActiveWebContents();
-    std::string url_string =
-        active_tab ? active_tab->GetURL().spec() : std::string();
-    LOG(WARNING) << "Browser opened in kiosk session"
-                 << ", url=" << url_string;
-
-    browser->window()->Close();
-  }
-
-  // BrowserListObserver overrides:
-  void OnBrowserAdded(Browser* browser) override {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::BindOnce(&BrowserWindowHandler::HandleBrowser,
-                       base::Unretained(this),  // LazyInstance, always valid
-                       browser));
-  }
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserWindowHandler);
+  AppSession* const owner_;
 };
+#endif
 
-AppSession::AppSession() {}
-AppSession::~AppSession() {}
+AppSession::AppSession()
+    : AppSession(base::BindOnce(chrome::AttemptUserExit),
+                 g_browser_process->local_state()) {}
+
+AppSession::AppSession(base::OnceClosure attempt_user_exit,
+                       PrefService* local_state)
+    : AppSession(std::move(attempt_user_exit),
+                 local_state,
+                 std::make_unique<AppSessionMetricsService>(local_state)) {}
+
+AppSession::~AppSession() {
+  if (!is_shutting_down())
+    metrics_service_->RecordKioskSessionStopped();
+}
+
+// static
+std::unique_ptr<AppSession> AppSession::CreateForTesting(
+    base::OnceClosure attempt_user_exit,
+    PrefService* local_state,
+    const std::vector<std::string>& crash_dirs) {
+  return base::WrapUnique(new AppSession(
+      std::move(attempt_user_exit), local_state,
+      AppSessionMetricsService::CreateForTesting(local_state, crash_dirs)));
+}
+
+void AppSession::RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
+  registry->RegisterDictionaryPref(prefs::kKioskMetrics);
+}
+
+void AppSession::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* registry) {
+  registry->RegisterBooleanPref(prefs::kNewWindowsInKioskAllowed, false);
+}
 
 void AppSession::Init(Profile* profile, const std::string& app_id) {
-  app_window_handler_.reset(new AppWindowHandler(this));
+  SetProfile(profile);
+  app_window_handler_ = std::make_unique<AppWindowHandler>(this);
   app_window_handler_->Init(profile, app_id);
+  CreateBrowserWindowHandler(nullptr);
+#if BUILDFLAG(ENABLE_PLUGINS)
+  plugin_handler_ = std::make_unique<KioskSessionPluginHandler>(
+      plugin_handler_delegate_.get());
+#endif
+  metrics_service_->RecordKioskSessionStarted();
+}
 
-  browser_window_handler_.reset(new BrowserWindowHandler);
+void AppSession::InitForWebKiosk(Browser* browser) {
+  SetProfile(browser->profile());
+  CreateBrowserWindowHandler(browser);
+  metrics_service_->RecordKioskSessionWebStarted();
+}
 
-  plugin_handler_.reset(new KioskSessionPluginHandler(this));
+void AppSession::SetAttemptUserExitForTesting(base::OnceClosure closure) {
+  attempt_user_exit_ = std::move(closure);
+}
 
-  // For a demo app, we don't need to either setup the update service or
-  // the idle app name notification.
-  if (DemoAppLauncher::IsDemoAppSession(
-          user_manager::UserManager::Get()->GetActiveUser()->GetAccountId()))
-    return;
+void AppSession::SetOnHandleBrowserCallbackForTesting(
+    base::RepeatingClosure closure) {
+  on_handle_browser_callback_ = std::move(closure);
+}
 
-  // Set the app_id for the current instance of KioskAppUpdateService.
-  KioskAppUpdateService* update_service =
-      KioskAppUpdateServiceFactory::GetForProfile(profile);
-  DCHECK(update_service);
-  if (update_service)
-    update_service->Init(app_id);
+KioskSessionPluginHandlerDelegate*
+AppSession::GetPluginHandlerDelegateForTesting() {
+  return plugin_handler_delegate_.get();
+}
 
-  // Start to monitor external update from usb stick.
-  KioskAppManager::Get()->MonitorKioskExternalUpdate();
+AppSession::AppSession(
+    base::OnceClosure attempt_user_exit,
+    PrefService* local_state,
+    std::unique_ptr<AppSessionMetricsService> metrics_service)
+    :
+#if BUILDFLAG(ENABLE_PLUGINS)
+      plugin_handler_delegate_(
+          std::make_unique<PluginHandlerDelegateImpl>(this)),
+#endif
+      attempt_user_exit_(std::move(attempt_user_exit)),
+      metrics_service_(std::move(metrics_service)) {
+}
 
-  // If the device is not enterprise managed, set prefs to reboot after update
-  // and create a user security message which shows the user the application
-  // name and author after some idle timeout.
-  policy::BrowserPolicyConnectorChromeOS* connector =
-      g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  if (!connector->IsEnterpriseManaged()) {
-    PrefService* local_state = g_browser_process->local_state();
-    local_state->SetBoolean(prefs::kRebootAfterUpdate, true);
-    KioskModeIdleAppNameNotification::Initialize();
-  }
+void AppSession::SetProfile(Profile* profile) {
+  profile_ = profile;
+}
+
+void AppSession::CreateBrowserWindowHandler(Browser* browser) {
+  browser_window_handler_ = std::make_unique<AppSessionBrowserWindowHandler>(
+      profile_, browser,
+      base::BindRepeating(&AppSession::OnHandledNewBrowserWindow,
+                          weak_ptr_factory_.GetWeakPtr()),
+      base::BindRepeating(&AppSession::OnLastAppWindowClosed,
+                          weak_ptr_factory_.GetWeakPtr()));
+}
+
+void AppSession::OnHandledNewBrowserWindow() {
+  if (on_handle_browser_callback_)
+    on_handle_browser_callback_.Run();
 }
 
 void AppSession::OnAppWindowAdded(AppWindow* app_window) {
-  if (is_shutting_down_)
+  if (is_shutting_down())
     return;
 
+#if BUILDFLAG(ENABLE_PLUGINS)
   plugin_handler_->Observe(app_window->web_contents());
+#endif
 }
 
 void AppSession::OnGuestAdded(content::WebContents* guest_web_contents) {
   // Bail if the session is shutting down.
-  if (is_shutting_down_)
+  if (is_shutting_down())
     return;
 
   // Bail if the guest is not a WebViewGuest.
   if (!extensions::WebViewGuest::FromWebContents(guest_web_contents))
     return;
 
+#if BUILDFLAG(ENABLE_PLUGINS)
   plugin_handler_->Observe(guest_web_contents);
+#endif
 }
 
 void AppSession::OnLastAppWindowClosed() {
-  if (is_shutting_down_)
+  if (is_shutting_down())
     return;
   is_shutting_down_ = true;
+  metrics_service_->RecordKioskSessionStopped();
 
-  chrome::AttemptUserExit();
+  std::move(attempt_user_exit_).Run();
 }
 
-bool AppSession::ShouldHandlePlugin(const base::FilePath& plugin_path) const {
-  // Note that BrowserChildProcessHostIterator in DumpPluginProcessOnIOThread
-  // also needs to be updated when adding more plugin types here.
-  return IsPepperPlugin(plugin_path);
-}
-
-void AppSession::OnPluginCrashed(const base::FilePath& plugin_path) {
-  if (is_shutting_down_)
-    return;
-  is_shutting_down_ = true;
-
-  LOG(ERROR) << "Reboot due to plugin crash, path=" << plugin_path.value();
-  RebootDevice();
-}
-
-void AppSession::OnPluginHung(const std::set<int>& hung_plugins) {
-  if (is_shutting_down_)
-    return;
-  is_shutting_down_ = true;
-
-  LOG(ERROR) << "Plugin hung detected. Dump and reboot.";
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::IO},
-      base::BindOnce(&DumpPluginProcessOnIOThread, hung_plugins));
+Browser* AppSession::GetSettingsBrowserForTesting() {
+  if (browser_window_handler_) {
+    return browser_window_handler_->GetSettingsBrowserForTesting();  // IN-TEST
+  }
+  return nullptr;
 }
 
 }  // namespace chromeos

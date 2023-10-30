@@ -1,11 +1,9 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_CREDENTIAL_PROVIDER_GAIACP_GCP_CRASH_REPORTING_UTILS_H_
 #define CHROME_CREDENTIAL_PROVIDER_GAIACP_GCP_CRASH_REPORTING_UTILS_H_
-
-#include "base/strings/string16.h"
 
 namespace base {
 class CommandLine;
@@ -40,14 +38,12 @@ void InitializeGcpwCrashReporting(GcpCrashReporterClient* crash_client);
 // database.
 base::FilePath GetFolderForCrashDumps();
 
-#if defined(GOOGLE_CHROME_BUILD)
-
+// No-op in Chromium builds.
 void SetCommonCrashKeys(const base::CommandLine& command_line);
 
 // Returns the system level registry keys for crash dump upload consent.
+// Always returns false in Chromium builds.
 bool GetGCPWCollectStatsConsent();
-
-#endif  // defined(GOOGLE_CHROME_BUILD)
 
 }  // namespace credential_provider
 

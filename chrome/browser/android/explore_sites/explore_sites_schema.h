@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@ namespace explore_sites {
 // upgrades from any and all previous database versions to the latest.
 class ExploreSitesSchema {
  public:
-  static constexpr int kCurrentVersion = 2;
+  static constexpr int kCurrentVersion = 3;
   static constexpr int kCompatibleVersion = 1;
 
   static const char kCurrentCatalogKey[];

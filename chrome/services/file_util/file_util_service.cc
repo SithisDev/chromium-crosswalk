@@ -1,66 +1,56 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/services/file_util/file_util_service.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/bind.h"
 #include "build/build_config.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "build/chromeos_buildflags.h"
+#include "chrome/services/file_util/buildflags.h"
+#include "components/safe_browsing/buildflags.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
 #include "chrome/services/file_util/safe_archive_analyzer.h"
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/services/file_util/zip_file_creator.h"
 #endif
 
-namespace {
-
-#if defined(FULL_SAFE_BROWSING)
-void OnSafeArchiveAnalyzerRequest(
-    service_manager::ServiceKeepalive* keepalive,
-    chrome::mojom::SafeArchiveAnalyzerRequest request) {
-  mojo::MakeStrongBinding(
-      std::make_unique<SafeArchiveAnalyzer>(keepalive->CreateRef()),
-      std::move(request));
-}
+#if BUILDFLAG(ENABLE_XZ_EXTRACTOR)
+#include "chrome/services/file_util/xz_file_extractor.h"
 #endif
 
-#if defined(OS_CHROMEOS)
-void OnZipFileCreatorRequest(service_manager::ServiceKeepalive* keepalive,
-                             chrome::mojom::ZipFileCreatorRequest request) {
-  mojo::MakeStrongBinding(
-      std::make_unique<chrome::ZipFileCreator>(keepalive->CreateRef()),
-      std::move(request));
-}
-#endif
-
-}  // namespace
-
-FileUtilService::FileUtilService(service_manager::mojom::ServiceRequest request)
-    : service_binding_(this, std::move(request)),
-      service_keepalive_(&service_binding_, base::TimeDelta()) {}
+FileUtilService::FileUtilService(
+    mojo::PendingReceiver<chrome::mojom::FileUtilService> receiver)
+    : receiver_(this, std::move(receiver)) {}
 
 FileUtilService::~FileUtilService() = default;
 
-void FileUtilService::OnStart() {
-#if defined(OS_CHROMEOS)
-  registry_.AddInterface(
-      base::BindRepeating(&OnZipFileCreatorRequest, &service_keepalive_));
-#endif
-#if defined(FULL_SAFE_BROWSING)
-  registry_.AddInterface(
-      base::BindRepeating(&OnSafeArchiveAnalyzerRequest, &service_keepalive_));
-#endif
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+void FileUtilService::BindZipFileCreator(
+    mojo::PendingReceiver<chrome::mojom::ZipFileCreator> receiver) {
+  new chrome::ZipFileCreator(std::move(receiver));  // self deleting
 }
+#endif
 
-void FileUtilService::OnBindInterface(
-    const service_manager::BindSourceInfo& source_info,
-    const std::string& interface_name,
-    mojo::ScopedMessagePipeHandle interface_pipe) {
-  registry_.BindInterface(interface_name, std::move(interface_pipe));
+#if BUILDFLAG(FULL_SAFE_BROWSING)
+void FileUtilService::BindSafeArchiveAnalyzer(
+    mojo::PendingReceiver<chrome::mojom::SafeArchiveAnalyzer> receiver) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<SafeArchiveAnalyzer>(),
+                              std::move(receiver));
 }
+#endif
+
+#if BUILDFLAG(ENABLE_XZ_EXTRACTOR)
+void FileUtilService::BindXzFileExtractor(
+    mojo::PendingReceiver<chrome::mojom::XzFileExtractor> receiver) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<XzFileExtractor>(),
+                              std::move(receiver));
+}
+#endif

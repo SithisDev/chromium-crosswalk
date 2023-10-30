@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,10 @@
 #define CHROME_BROWSER_PERFORMANCE_MANAGER_PERSISTENCE_SITE_DATA_SITE_DATA_CACHE_FACADE_H_
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
+#include "components/history/core/browser/history_service.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 
 namespace content {
@@ -20,20 +23,33 @@ namespace performance_manager {
 // BrowserContextKeyedServiceFactory to manage the lifetime of this cache.
 //
 // Instances of this class are expected to live on the UI thread.
-class SiteDataCacheFacade : public KeyedService {
+class SiteDataCacheFacade : public KeyedService,
+                            public history::HistoryServiceObserver {
  public:
   explicit SiteDataCacheFacade(content::BrowserContext* browser_context);
+
+  SiteDataCacheFacade(const SiteDataCacheFacade&) = delete;
+  SiteDataCacheFacade& operator=(const SiteDataCacheFacade&) = delete;
+
   ~SiteDataCacheFacade() override;
 
   void IsDataCacheRecordingForTesting(base::OnceCallback<void(bool)> cb);
 
   void WaitUntilCacheInitializedForTesting();
 
+  // history::HistoryServiceObserver:
+  void OnURLsDeleted(history::HistoryService* history_service,
+                     const history::DeletionInfo& deletion_info) override;
+  void HistoryServiceBeingDeleted(
+      history::HistoryService* history_service) override;
+
  private:
   // The browser context associated with this cache.
-  content::BrowserContext* browser_context_;
+  raw_ptr<content::BrowserContext> browser_context_;
 
-  DISALLOW_COPY_AND_ASSIGN(SiteDataCacheFacade);
+  base::ScopedObservation<history::HistoryService,
+                          history::HistoryServiceObserver>
+      history_observation_{this};
 };
 
 }  // namespace performance_manager

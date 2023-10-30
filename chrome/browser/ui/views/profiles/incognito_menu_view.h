@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "build/build_config.h"
 #include "chrome/browser/ui/views/profiles/profile_menu_view_base.h"
 
 namespace views {
@@ -24,24 +24,21 @@ class IncognitoMenuView : public ProfileMenuViewBase {
  public:
   IncognitoMenuView(views::Button* anchor_button,
                     Browser* browser);
+
+  IncognitoMenuView(const IncognitoMenuView&) = delete;
+  IncognitoMenuView& operator=(const IncognitoMenuView&) = delete;
+
   ~IncognitoMenuView() override;
+
+  // ProfileMenuViewBase:
+  void BuildMenu() override;
 
  private:
   // views::BubbleDialogDelegateView:
-  void Init() override;
-  base::string16 GetAccessibleWindowTitle() const override;
+  std::u16string GetAccessibleWindowTitle() const override;
 
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
-  void Reset();
-
-  // Adds the incognito window count view.
-  void AddIncognitoWindowCountView();
-
-  views::Button* exit_button_;
-
-  DISALLOW_COPY_AND_ASSIGN(IncognitoMenuView);
+  // Button actions.
+  void OnExitButtonClicked();
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_PROFILES_INCOGNITO_MENU_VIEW_H_

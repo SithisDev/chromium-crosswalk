@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,13 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/engagement/site_engagement_details.mojom.h"
-#include "chrome/browser/lookalikes/lookalike_url_interstitial_page.h"
+#include "chrome/browser/lookalikes/digital_asset_links_cross_validator.h"
+#include "chrome/browser/lookalikes/lookalike_url_blocking_page.h"
+#include "components/digital_asset_links/digital_asset_links_handler.h"
 #include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
@@ -22,92 +25,105 @@ class NavigationHandle;
 
 class Profile;
 
-namespace lookalikes {
-
 struct DomainInfo;
 
-// Returns true if the Levenshtein distance between |str1| and |str2| is at most
-// one. This has O(max(n,m)) complexity as opposed to O(n*m) of the usual edit
-// distance computation.
-bool IsEditDistanceAtMostOne(const base::string16& str1,
-                             const base::string16& str2);
+// Returns true if the redirect is deemed to be safe. These are generally
+// defensive registrations where the domain owner redirects the IDN to the ASCII
+// domain. See the unit tests for examples.
+// In short, |url| must redirect to the root of |safe_url_host| or one
+// of its subdomains.
+bool IsSafeRedirect(const std::string& safe_url_host,
+                    const std::vector<GURL>& redirect_chain);
 
 // Observes navigations and shows an interstitial if the navigated domain name
 // is visually similar to a top domain or a domain with a site engagement score.
+//
+// Remember to update //docs/idn.md with the appropriate information if you
+// modify the lookalike heuristics.
+//
+// This throttle assumes that two navigations never share the same throttle.
 class LookalikeUrlNavigationThrottle : public content::NavigationThrottle {
  public:
-  // Used for metrics. Multiple events can occur per navigation.
-  enum class NavigationSuggestionEvent {
-    kNone = 0,
-    // Interstitial results recorded using security_interstitials::MetricsHelper
-    // kInfobarShown = 1,
-    // kLinkClicked = 2,
-    kMatchTopSite = 3,
-    kMatchSiteEngagement = 4,
-    kMatchEditDistance = 5,
-    kMatchEditDistanceSiteEngagement = 6,
-
-    // Append new items to the end of the list above; do not modify or
-    // replace existing values. Comment out obsolete items.
-    kMaxValue = kMatchEditDistanceSiteEngagement,
-  };
-
-  static const char kHistogramName[];
-
   explicit LookalikeUrlNavigationThrottle(content::NavigationHandle* handle);
   ~LookalikeUrlNavigationThrottle() override;
 
   // content::NavigationThrottle:
+  ThrottleCheckResult WillStartRequest() override;
   ThrottleCheckResult WillProcessResponse() override;
-  ThrottleCheckResult WillRedirectRequest() override;
   const char* GetNameForLogging() override;
 
   static std::unique_ptr<LookalikeUrlNavigationThrottle>
   MaybeCreateNavigationThrottle(content::NavigationHandle* navigation_handle);
 
+  // The throttle normally ignores testing profiles and returns PROCEED. This
+  // function forces unit tests to not ignore them .
+  void SetUseTestProfileForTesting() { use_test_profile_ = true; }
+
  private:
-  FRIEND_TEST_ALL_PREFIXES(LookalikeUrlNavigationThrottleTest,
-                           IsEditDistanceAtMostOne);
-
-  ThrottleCheckResult HandleThrottleRequest(const GURL& url);
-
   // Performs synchronous top domain and engaged site checks on the navigated
-  // |url|. Uses |engaged_sites| for the engaged site checks.
+  // and redirected urls. Uses |engaged_sites| for the engaged site checks.
+  // This function can also defer the check and schedule a
+  // cancellation/resumption if additional checks need to be done such as
+  // validating Digital Asset Links manifests.
   ThrottleCheckResult PerformChecks(
-      const GURL& url,
-      const DomainInfo& navigated_domain,
       const std::vector<DomainInfo>& engaged_sites);
 
-  // A void-returning variant, only used with deferred throttle results.
-  void PerformChecksDeferred(const GURL& url,
-                             const DomainInfo& navigated_domain,
+  // A void-returning variant, only used with deferred throttle results (e.g.
+  // when we need to fetch engaged sites list or digital asset link manifests).
+  // |start| is the time at which the navigation was deferred, for metrics.
+  void PerformChecksDeferred(base::TimeTicks start,
                              const std::vector<DomainInfo>& engaged_sites);
 
-  bool ShouldDisplayInterstitial(
-      LookalikeUrlInterstitialPage::MatchType match_type) const;
+  // Returns whether |url| is a lookalike, setting |match_type| and
+  // |suggested_url| appropriately. Used in PerformChecks() on a per-URL basis.
+  // |get_domain_info_duration| should hold zero when IsLookalikeUrl() is
+  // invoked. After invocation, it will hold the duration spent in
+  // GetDomainInfo() if GetDomainInfo() was invoked.
+  bool IsLookalikeUrl(const GURL& url,
+                      const std::vector<DomainInfo>& engaged_sites,
+                      LookalikeUrlMatchType* match_type,
+                      GURL* suggested_url,
+                      base::TimeDelta* get_domain_info_duration);
 
-  // Returns true if a domain is visually similar to the hostname of |url|. The
-  // matching domain can be a top domain or an engaged site. Similarity check
-  // is made using both visual skeleton and edit distance comparison. If this
-  // returns true, match details will be written into |matched_domain| and
-  // |match_type|. They cannot be nullptr.
-  bool GetMatchingDomain(const DomainInfo& navigated_domain,
-                         const std::vector<DomainInfo>& engaged_sites,
-                         std::string* matched_domain,
-                         LookalikeUrlInterstitialPage::MatchType* match_type);
+  // Shows a full page interstitial. |safe_domain| is the domain suggested as
+  // safe by the interstitial. |lookalike_domain| is the domain that triggered
+  // the warning.
+  // This function can display two types of interstitials depending on the
+  // value of |safe_domain|:
+  // - If |safe_domain| is a valid URL, it displays a lookalike interstitial
+  // that suggests the user to go to |safe_domain| instead.
+  // - Otherwise, it displays the punycode interstitial which doesn't suggest a
+  // safe URL.
+  ThrottleCheckResult ShowInterstitial(const GURL& safe_domain,
+                                       const GURL& lookalike_domain,
+                                       ukm::SourceId source_id,
+                                       LookalikeUrlMatchType match_type,
+                                       bool triggered_by_initial_url);
 
-  ThrottleCheckResult ShowInterstitial(
+  // Checks if a full page intersitial can be shown. This function checks if
+  // manifest validation fails for digital asset links of |lookalike_domain|,
+  // |safe_domain| or if the navigation isn't in prerendering navigation.
+  ThrottleCheckResult CheckAndMaybeShowInterstitial(
       const GURL& safe_domain,
-      const GURL& url,
+      const GURL& lookalike_domain,
       ukm::SourceId source_id,
-      LookalikeUrlInterstitialPage::MatchType match_type);
+      LookalikeUrlMatchType match_type,
+      bool triggered_by_initial_url);
 
-  bool interstitials_enabled_;
+  // Callback for digital asset link manifest validations.
+  void OnManifestValidationResult(const GURL& safe_domain,
+                                  const GURL& lookalike_domain,
+                                  ukm::SourceId source_id,
+                                  LookalikeUrlMatchType match_type,
+                                  bool triggered_by_initial_url,
+                                  bool validation_success);
 
-  Profile* profile_;
+  raw_ptr<Profile> profile_;
+  bool use_test_profile_ = false;
+
+  std::unique_ptr<DigitalAssetLinkCrossValidator> digital_asset_link_validator_;
+
   base::WeakPtrFactory<LookalikeUrlNavigationThrottle> weak_factory_{this};
 };
-
-}  // namespace lookalikes
 
 #endif  // CHROME_BROWSER_LOOKALIKES_LOOKALIKE_URL_NAVIGATION_THROTTLE_H_

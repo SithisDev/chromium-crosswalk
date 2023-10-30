@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,11 @@
 using base::android::JavaParamRef;
 
 UrlFilterBridge::UrlFilterBridge(
-    const base::Callback<bool(const GURL&)>& url_filter)
+    const base::RepeatingCallback<bool(const GURL&)>& url_filter)
     : url_filter_(url_filter),
-      j_bridge_(Java_UrlFilterBridge_create(
-          base::android::AttachCurrentThread(),
-          reinterpret_cast<uintptr_t>(this))) {}
+      j_bridge_(
+          Java_UrlFilterBridge_create(base::android::AttachCurrentThread(),
+                                      reinterpret_cast<uintptr_t>(this))) {}
 
 UrlFilterBridge::~UrlFilterBridge() {}
 

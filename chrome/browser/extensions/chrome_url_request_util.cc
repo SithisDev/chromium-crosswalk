@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,28 +9,30 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/chrome_manifest_url_handlers.h"
-#include "content/public/browser/resource_request_info.h"
 #include "extensions/browser/component_extension_resource_manager.h"
 #include "extensions/browser/extension_protocols.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/url_request_util.h"
 #include "extensions/common/file_util.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
-#include "third_party/zlib/google/compression_utils.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/mojom/url_loader.mojom.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/template_expressions.h"
 
@@ -64,56 +66,45 @@ scoped_refptr<base::RefCountedMemory> GetResource(
                 ->GetTemplateReplacementsForExtension(extension_id)
           : nullptr;
 
-  bool is_gzipped = rb.IsGzipped(resource_id);
-  if (!bytes->size() || (!replacements && !is_gzipped)) {
+  if (replacements) {
+    base::StringPiece input(reinterpret_cast<const char*>(bytes->front()),
+                            bytes->size());
+    std::string temp_str = ui::ReplaceTemplateExpressions(input, *replacements);
+    DCHECK(!temp_str.empty());
+    return base::RefCountedString::TakeString(&temp_str);
+  } else {
     return bytes;
   }
-
-  base::StringPiece input(reinterpret_cast<const char*>(bytes->front()),
-                          bytes->size());
-
-  std::string temp_str;
-
-  base::StringPiece source = input;
-  if (is_gzipped) {
-    temp_str.resize(compression::GetUncompressedSize(input));
-    source = temp_str;
-    CHECK(compression::GzipUncompress(input, source));
-  }
-
-  if (replacements) {
-    temp_str = ui::ReplaceTemplateExpressions(source, *replacements);
-  }
-
-  DCHECK(!temp_str.empty());
-
-  return base::RefCountedString::TakeString(&temp_str);
 }
 
 // Loads an extension resource in a Chrome .pak file. These are used by
 // component extensions.
 class ResourceBundleFileLoader : public network::mojom::URLLoader {
  public:
-  static void CreateAndStart(const network::ResourceRequest& request,
-                             network::mojom::URLLoaderRequest loader,
-                             network::mojom::URLLoaderClientPtrInfo client_info,
-                             const base::FilePath& filename,
-                             int resource_id,
-                             const std::string& content_security_policy,
-                             bool send_cors_header) {
-    // Owns itself. Will live as long as its URLLoader and URLLoaderClientPtr
+  ResourceBundleFileLoader(const ResourceBundleFileLoader&) = delete;
+  ResourceBundleFileLoader& operator=(const ResourceBundleFileLoader&) = delete;
+
+  static void CreateAndStart(
+      const network::ResourceRequest& request,
+      mojo::PendingReceiver<network::mojom::URLLoader> loader,
+      mojo::PendingRemote<network::mojom::URLLoaderClient> client_info,
+      const base::FilePath& filename,
+      int resource_id,
+      scoped_refptr<net::HttpResponseHeaders> headers) {
+    // Owns itself. Will live as long as its URLLoader and URLLoaderClient
     // bindings are alive - essentially until either the client gives up or all
     // file data has been sent to it.
-    auto* bundle_loader =
-        new ResourceBundleFileLoader(content_security_policy, send_cors_header);
+    auto* bundle_loader = new ResourceBundleFileLoader(std::move(headers));
     bundle_loader->Start(request, std::move(loader), std::move(client_info),
                          filename, resource_id);
   }
 
   // mojom::URLLoader implementation:
-  void FollowRedirect(const std::vector<std::string>& removed_headers,
-                      const net::HttpRequestHeaders& modified_headers,
-                      const base::Optional<GURL>& new_url) override {
+  void FollowRedirect(
+      const std::vector<std::string>& removed_headers,
+      const net::HttpRequestHeaders& modified_headers,
+      const net::HttpRequestHeaders& modified_cors_exempt_headers,
+      const absl::optional<GURL>& new_url) override {
     NOTREACHED() << "No redirects for local file loads.";
   }
   // Current implementation reads all resource data at start of resource
@@ -122,32 +113,29 @@ class ResourceBundleFileLoader : public network::mojom::URLLoader {
                    int32_t intra_priority_value) override {}
   void PauseReadingBodyFromNet() override {}
   void ResumeReadingBodyFromNet() override {}
-  void ProceedWithResponse() override {}
 
  private:
-  ResourceBundleFileLoader(const std::string& content_security_policy,
-                           bool send_cors_header)
-      : binding_(this) {
-    response_headers_ = extensions::BuildHttpHeaders(
-        content_security_policy, send_cors_header, base::Time());
-  }
+  explicit ResourceBundleFileLoader(
+      scoped_refptr<net::HttpResponseHeaders> headers)
+      : response_headers_(std::move(headers)) {}
   ~ResourceBundleFileLoader() override = default;
 
-  void Start(const network::ResourceRequest& request,
-             network::mojom::URLLoaderRequest loader,
-             network::mojom::URLLoaderClientPtrInfo client_info,
-             const base::FilePath& filename,
-             int resource_id) {
-    client_.Bind(std::move(client_info));
-    binding_.Bind(std::move(loader));
-    binding_.set_connection_error_handler(base::BindOnce(
-        &ResourceBundleFileLoader::OnBindingError, base::Unretained(this)));
-    client_.set_connection_error_handler(base::BindOnce(
-        &ResourceBundleFileLoader::OnConnectionError, base::Unretained(this)));
+  void Start(
+      const network::ResourceRequest& request,
+      mojo::PendingReceiver<network::mojom::URLLoader> loader,
+      mojo::PendingRemote<network::mojom::URLLoaderClient> client_info_remote,
+      const base::FilePath& filename,
+      int resource_id) {
+    client_.Bind(std::move(client_info_remote));
+    receiver_.Bind(std::move(loader));
+    receiver_.set_disconnect_handler(base::BindOnce(
+        &ResourceBundleFileLoader::OnReceiverError, base::Unretained(this)));
+    client_.set_disconnect_handler(base::BindOnce(
+        &ResourceBundleFileLoader::OnMojoDisconnect, base::Unretained(this)));
     auto data = GetResource(resource_id, request.url.host());
 
     std::string* read_mime_type = new std::string;
-    base::PostTaskWithTraitsAndReplyWithResult(
+    base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE, {base::MayBlock()},
         base::BindOnce(&net::GetMimeTypeFromFile, filename,
                        base::Unretained(read_mime_type)),
@@ -159,49 +147,57 @@ class ResourceBundleFileLoader : public network::mojom::URLLoader {
   void OnMimeTypeRead(scoped_refptr<base::RefCountedMemory> data,
                       std::string* read_mime_type,
                       bool read_result) {
-    network::ResourceResponseHead head;
-    head.request_start = base::TimeTicks::Now();
-    head.response_start = base::TimeTicks::Now();
-    head.content_length = data->size();
-    head.mime_type = *read_mime_type;
-    DetermineCharset(head.mime_type, data.get(), &head.charset);
-    mojo::DataPipe pipe(data->size());
-    if (!pipe.consumer_handle.is_valid()) {
+    if (!client_) {
+      // At this point, it is possible for |client_| to have disconnected, but
+      // the |receiver_| disconnect either hasn't been received, or is pending
+      // in the task queue. If |client_| is disconnected, there's nothing to do
+      // so wait for the |receiver_| disconnect to destroy us.
+      return;
+    }
+
+    auto head = network::mojom::URLResponseHead::New();
+    head->request_start = base::TimeTicks::Now();
+    head->response_start = base::TimeTicks::Now();
+    head->content_length = data->size();
+    head->mime_type = *read_mime_type;
+    DetermineCharset(head->mime_type, data.get(), &head->charset);
+    mojo::ScopedDataPipeProducerHandle producer_handle;
+    mojo::ScopedDataPipeConsumerHandle consumer_handle;
+    if (mojo::CreateDataPipe(data->size(), producer_handle, consumer_handle) !=
+        MOJO_RESULT_OK) {
       client_->OnComplete(network::URLLoaderCompletionStatus(net::ERR_FAILED));
       client_.reset();
       MaybeDeleteSelf();
       return;
     }
-    head.headers = response_headers_;
-    head.headers->AddHeader(
-        base::StringPrintf("%s: %s", net::HttpRequestHeaders::kContentLength,
-                           base::NumberToString(head.content_length).c_str()));
-    if (!head.mime_type.empty()) {
-      head.headers->AddHeader(
-          base::StringPrintf("%s: %s", net::HttpRequestHeaders::kContentType,
-                             head.mime_type.c_str()));
+    head->headers = response_headers_;
+    head->headers->AddHeader(net::HttpRequestHeaders::kContentLength,
+                             base::NumberToString(head->content_length));
+    if (!head->mime_type.empty()) {
+      head->headers->AddHeader(net::HttpRequestHeaders::kContentType,
+                               head->mime_type.c_str());
     }
-    client_->OnReceiveResponse(head);
-    client_->OnStartLoadingResponseBody(std::move(pipe.consumer_handle));
+    client_->OnReceiveResponse(std::move(head), std::move(consumer_handle),
+                               absl::nullopt);
 
     uint32_t write_size = data->size();
-    MojoResult result = pipe.producer_handle->WriteData(
-        data->front(), &write_size, MOJO_WRITE_DATA_FLAG_NONE);
+    MojoResult result = producer_handle->WriteData(data->front(), &write_size,
+                                                   MOJO_WRITE_DATA_FLAG_NONE);
     OnFileWritten(result);
   }
 
-  void OnConnectionError() {
+  void OnMojoDisconnect() {
     client_.reset();
     MaybeDeleteSelf();
   }
 
-  void OnBindingError() {
-    binding_.Close();
+  void OnReceiverError() {
+    receiver_.reset();
     MaybeDeleteSelf();
   }
 
   void MaybeDeleteSelf() {
-    if (!binding_.is_bound() && !client_.is_bound())
+    if (!receiver_.is_bound() && !client_.is_bound())
       delete this;
   }
 
@@ -216,12 +212,10 @@ class ResourceBundleFileLoader : public network::mojom::URLLoader {
     MaybeDeleteSelf();
   }
 
-  mojo::Binding<network::mojom::URLLoader> binding_;
-  network::mojom::URLLoaderClientPtr client_;
+  mojo::Receiver<network::mojom::URLLoader> receiver_{this};
+  mojo::Remote<network::mojom::URLLoaderClient> client_;
   scoped_refptr<net::HttpResponseHeaders> response_headers_;
   base::WeakPtrFactory<ResourceBundleFileLoader> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ResourceBundleFileLoader);
 };
 
 }  // namespace
@@ -229,17 +223,18 @@ class ResourceBundleFileLoader : public network::mojom::URLLoader {
 namespace extensions {
 namespace chrome_url_request_util {
 
-bool AllowCrossRendererResourceLoad(const GURL& url,
-                                    content::ResourceType resource_type,
-                                    ui::PageTransition page_transition,
-                                    int child_id,
-                                    bool is_incognito,
-                                    const Extension* extension,
-                                    const ExtensionSet& extensions,
-                                    const ProcessMap& process_map,
-                                    bool* allowed) {
+bool AllowCrossRendererResourceLoad(
+    const network::ResourceRequest& request,
+    network::mojom::RequestDestination destination,
+    ui::PageTransition page_transition,
+    int child_id,
+    bool is_incognito,
+    const Extension* extension,
+    const ExtensionSet& extensions,
+    const ProcessMap& process_map,
+    bool* allowed) {
   if (url_request_util::AllowCrossRendererResourceLoad(
-          url, resource_type, page_transition, child_id, is_incognito,
+          request, destination, page_transition, child_id, is_incognito,
           extension, extensions, process_map, allowed)) {
     return true;
   }
@@ -290,17 +285,15 @@ base::FilePath GetBundleResourcePath(
 
 void LoadResourceFromResourceBundle(
     const network::ResourceRequest& request,
-    network::mojom::URLLoaderRequest loader,
+    mojo::PendingReceiver<network::mojom::URLLoader> loader,
     const base::FilePath& resource_relative_path,
     int resource_id,
-    const std::string& content_security_policy,
-    network::mojom::URLLoaderClientPtr client,
-    bool send_cors_header) {
+    scoped_refptr<net::HttpResponseHeaders> headers,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
   DCHECK(!resource_relative_path.empty());
   ResourceBundleFileLoader::CreateAndStart(
-      request, std::move(loader), client.PassInterface(),
-      resource_relative_path, resource_id, content_security_policy,
-      send_cors_header);
+      request, std::move(loader), std::move(client), resource_relative_path,
+      resource_id, std::move(headers));
 }
 
 }  // namespace chrome_url_request_util

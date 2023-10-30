@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/views/chrome_test_views_delegate.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/permissions/permission_message_test_util.h"
@@ -56,8 +56,8 @@ class AppInfoPermissionsPanelTest : public testing::Test {
   }
 
   // We need the UI thread in order to construct UI elements in the view.
-  content::TestBrowserThreadBundle thread_bundle_;
-  ChromeTestViewsDelegate views_delegate_;
+  content::BrowserTaskEnvironment task_environment_;
+  ChromeTestViewsDelegate<> views_delegate_;
   TestingProfile profile_;  // Needs BrowserThread::UI.
 };
 
@@ -168,13 +168,10 @@ TEST_F(AppInfoPermissionsPanelTest, RetainedFilePermissionsObtainedCorrectly) {
 
   // Since we have no guarantees on the order of retained files, make sure the
   // list is the expected length and all required entries are present.
-  const std::vector<base::string16> retained_file_paths =
+  const std::vector<std::u16string> retained_file_paths =
       panel.GetRetainedFilePaths();
   ASSERT_EQ(3U, retained_file_paths.size());
-  EXPECT_THAT(retained_file_paths,
-              Contains(Eq(base::UTF8ToUTF16("file_1.ext"))));
-  EXPECT_THAT(retained_file_paths,
-              Contains(Eq(base::UTF8ToUTF16("file_2.ext"))));
-  EXPECT_THAT(retained_file_paths,
-              Contains(Eq(base::UTF8ToUTF16("file_3.ext"))));
+  EXPECT_THAT(retained_file_paths, Contains(Eq(u"file_1.ext")));
+  EXPECT_THAT(retained_file_paths, Contains(Eq(u"file_2.ext")));
+  EXPECT_THAT(retained_file_paths, Contains(Eq(u"file_3.ext")));
 }

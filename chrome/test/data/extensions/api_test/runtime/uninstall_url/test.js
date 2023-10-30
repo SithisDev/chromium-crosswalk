@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,9 @@ chrome.test.runTests([
           chrome.test.runWithUserGesture(pass(function() {
             chrome.management.uninstall(results[i].id, pass(function() {
               chrome.tabs.query({'url': uninstall_url}, pass(function(tabs) {
-                chrome.test.assertEq(tabs.length, 1);
-                chrome.test.assertEq(tabs[0].url, uninstall_url);
+                chrome.test.assertEq(1, tabs.length);
+                chrome.test.assertEq(uninstall_url,
+                                     tabs[0].pendingUrl || tabs[0].url);
               }));
             }));
           }));

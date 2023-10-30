@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <string>
 #include <utility>
 
-#include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
+#include "components/page_load_metrics/browser/page_load_metrics_observer.h"
 #include "net/base/ip_address.h"
 
 namespace internal {
@@ -63,18 +63,28 @@ class LocalNetworkRequestsPageLoadMetricsObserver
 
  public:
   LocalNetworkRequestsPageLoadMetricsObserver();
+
+  LocalNetworkRequestsPageLoadMetricsObserver(
+      const LocalNetworkRequestsPageLoadMetricsObserver&) = delete;
+  LocalNetworkRequestsPageLoadMetricsObserver& operator=(
+      const LocalNetworkRequestsPageLoadMetricsObserver&) = delete;
+
   ~LocalNetworkRequestsPageLoadMetricsObserver() override;
 
   // page_load_metrics::PageLoadMetricsObserver
-  ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
-                         ukm::SourceId source_id) override;
+  const char* GetObserverName() const override;
+  ObservePolicy OnFencedFramesStart(
+      content::NavigationHandle* navigation_handle,
+      const GURL& currently_committed_url) override;
+  ObservePolicy OnPrerenderStart(content::NavigationHandle* navigation_handle,
+                                 const GURL& currently_committed_url) override;
+  ObservePolicy OnCommit(content::NavigationHandle* navigation_handle) override;
   ObservePolicy FlushMetricsOnAppEnterBackground(
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
   void OnLoadedResource(const page_load_metrics::ExtraRequestCompleteInfo&
                             extra_request_info) override;
-  void OnComplete(const page_load_metrics::mojom::PageLoadTiming& timing,
-                  const page_load_metrics::PageLoadExtraInfo& info) override;
+  void OnComplete(
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
 
  private:
   // Clears all local resource request counts. Only used if we decide to log
@@ -117,8 +127,6 @@ class LocalNetworkRequestsPageLoadMetricsObserver
   // the page could belong to. Used to distinguish between same subnet and
   // different subnet private network queries.
   size_t page_ip_prefix_length_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(LocalNetworkRequestsPageLoadMetricsObserver);
 };
 
 #endif  // CHROME_BROWSER_PAGE_LOAD_METRICS_OBSERVERS_LOCAL_NETWORK_REQUESTS_PAGE_LOAD_METRICS_OBSERVER_H_

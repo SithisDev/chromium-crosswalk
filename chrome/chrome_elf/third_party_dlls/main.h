@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,6 @@
 #include "chrome/chrome_elf/third_party_dlls/status_codes.h"
 
 namespace third_party_dlls {
-
-// Third-party DLL control is enabled and initialized in this process.
-bool IsThirdPartyInitialized();
 
 // Init Third-Party
 // ----------------

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/common/extensions/api/tabs.h"
 #include "chrome/common/extensions/api/windows.h"
 
@@ -56,6 +55,8 @@ class WindowController {
       const base::ListValue* types);
 
   WindowController(ui::BaseWindow* window, Profile* profile);
+  WindowController(const WindowController&) = delete;
+  WindowController& operator=(const WindowController&) = delete;
   virtual ~WindowController();
 
   ui::BaseWindow* window() const { return window_; }
@@ -89,11 +90,12 @@ class WindowController {
   // Returns true if the window type of the controller matches the |filter|.
   bool MatchesFilter(TypeFilter filter) const;
 
- private:
-  ui::BaseWindow* window_;
-  Profile* profile_;
+  // Notifies that a window's bounds are changed.
+  void NotifyWindowBoundsChanged();
 
-  DISALLOW_COPY_AND_ASSIGN(WindowController);
+ private:
+  raw_ptr<ui::BaseWindow> window_;
+  raw_ptr<Profile> profile_;
 };
 
 }  // namespace extensions

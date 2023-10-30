@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,16 @@
 #include "chrome/browser/ui/confirm_bubble.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
+#include "content/public/test/browser_test.h"
 
 class AskGoogleForSuggestionsDialogTest : public DialogBrowserTest {
  public:
   AskGoogleForSuggestionsDialogTest() {}
+
+  AskGoogleForSuggestionsDialogTest(const AskGoogleForSuggestionsDialogTest&) =
+      delete;
+  AskGoogleForSuggestionsDialogTest& operator=(
+      const AskGoogleForSuggestionsDialogTest&) = delete;
 
   // DialogBrowserTest:
   void ShowUi(const std::string& name) override {
@@ -27,9 +33,6 @@ class AskGoogleForSuggestionsDialogTest : public DialogBrowserTest {
     chrome::ShowConfirmBubble(browser()->window()->GetNativeWindow(), nullptr,
                               gfx::Point(), std::move(model));
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AskGoogleForSuggestionsDialogTest);
 };
 
 // Test that calls ShowUi("default").

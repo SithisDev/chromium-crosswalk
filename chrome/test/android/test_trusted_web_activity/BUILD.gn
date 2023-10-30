@@ -1,4 +1,4 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,12 +8,13 @@ import("//build/config/android/rules.gni")
 android_library("test_trusted_web_activity_java") {
   chromium_code = true
 
-  java_files = [
+  sources = [
     "src/org/chromium/chrome/browser/browserservices/ActivityWithDeepLink.java",
     "src/org/chromium/chrome/browser/browserservices/MessengerService.java",
     "src/org/chromium/chrome/browser/browserservices/TestTrustedWebActivityService.java",
   ]
   deps = [
-    "//third_party/custom_tabs_client:custom_tabs_support_java",
+    "//third_party/androidx:androidx_annotation_annotation_java",
+    "//third_party/androidx:androidx_browser_browser_java",
   ]
 }

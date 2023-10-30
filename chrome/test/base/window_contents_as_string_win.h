@@ -1,11 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_BASE_WINDOW_CONTENTS_AS_STRING_WIN_H_
 #define CHROME_TEST_BASE_WINDOW_CONTENTS_AS_STRING_WIN_H_
 
-#include "base/strings/string16.h"
+#include <string>
+
 #include "base/win/windows_types.h"
 
 // Returns a string representation of the contents of |window| on the basis of
@@ -24,6 +25,6 @@
 //             type: list, name:
 //               [invokable] type: link, name: More apps
 //         [invokable] type: button, name: OK
-base::string16 WindowContentsAsString(HWND window_handle);
+std::wstring WindowContentsAsString(HWND window_handle);
 
 #endif  // CHROME_TEST_BASE_WINDOW_CONTENTS_AS_STRING_WIN_H_

@@ -1,56 +1,88 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/sync/bubble_sync_promo_view.h"
 
-#include <stddef.h>
+#include <utility>
 
-#include "base/strings/string16.h"
-#include "chrome/browser/ui/sync/bubble_sync_promo_delegate.h"
+#include "base/bind.h"
+#include "base/check.h"
+#include "base/notreached.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_avatar_icon_util.h"
+#include "chrome/browser/signin/account_consistency_mode_manager.h"
+#include "chrome/browser/signin/signin_ui_util.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
-#include "components/signin/public/identity_manager/account_info.h"
-#include "third_party/skia/include/core/SkColor.h"
+#include "chrome/browser/ui/views/sync/bubble_sync_promo_signin_button_view.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/font.h"
-#include "ui/views/controls/styled_label.h"
-#include "ui/views/layout/fill_layout.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/layout/box_layout.h"
 
 BubbleSyncPromoView::BubbleSyncPromoView(
+    Profile* profile,
     BubbleSyncPromoDelegate* delegate,
     signin_metrics::AccessPoint access_point,
-    int link_text_resource_id,
-    int message_text_resource_id)
-    : StyledLabel(base::string16(), this), delegate_(delegate) {
-  size_t offset = 0;
-  base::string16 link_text = l10n_util::GetStringUTF16(link_text_resource_id);
-  base::string16 promo_text =
-      l10n_util::GetStringFUTF16(message_text_resource_id, link_text, &offset);
-  SetText(promo_text);
+    int accounts_promo_message_resource_id,
+    bool signin_button_prominent,
+    int text_style)
+    : delegate_(delegate) {
+  DCHECK(!profile->IsGuestSession());
+  AccountInfo account;
+  // Signin promos can be shown in incognito, they use an empty account list.
+  if (!profile->IsOffTheRecord())
+    account = signin_ui_util::GetSingleAccountForPromos(profile);
 
-  AddStyleRange(gfx::Range(offset, offset + link_text.length()),
-                views::StyledLabel::RangeStyleInfo::CreateForLink());
+  // Always show the accounts promo message for now.
+  const int title_resource_id = accounts_promo_message_resource_id;
 
-  views::StyledLabel::RangeStyleInfo promo_style;
-  promo_style.text_style = STYLE_SECONDARY;
-  gfx::Range before_link_range(0, offset);
-  if (!before_link_range.is_empty())
-    AddStyleRange(before_link_range, promo_style);
-  gfx::Range after_link_range(offset + link_text.length(), promo_text.length());
-  if (!after_link_range.is_empty())
-    AddStyleRange(after_link_range, promo_style);
+  std::unique_ptr<views::BoxLayout> layout = std::make_unique<views::BoxLayout>(
+      views::BoxLayout::Orientation::kVertical, gfx::Insets(),
+      ChromeLayoutProvider::Get()
+          ->GetDialogInsetsForContentType(views::DialogContentType::kText,
+                                          views::DialogContentType::kText)
+          .bottom());
+  SetLayoutManager(std::move(layout));
 
+  if (title_resource_id) {
+    std::u16string title_text = l10n_util::GetStringUTF16(title_resource_id);
+    views::Label* title = new views::Label(
+        title_text, views::style::CONTEXT_DIALOG_BODY_TEXT, text_style);
+    title->SetHorizontalAlignment(gfx::HorizontalAlignment::ALIGN_LEFT);
+    title->SetMultiLine(true);
+    AddChildView(title);
+  }
+
+  views::Button::PressedCallback callback = base::BindRepeating(
+      &BubbleSyncPromoView::EnableSync, base::Unretained(this));
+
+  if (account.IsEmpty()) {
+    signin_button_view_ =
+        AddChildView(std::make_unique<BubbleSyncPromoSigninButtonView>(
+            std::move(callback), signin_button_prominent));
+  } else {
+    gfx::Image account_icon = account.account_image;
+    if (account_icon.IsEmpty()) {
+      account_icon = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+          profiles::GetPlaceholderAvatarIconResourceID());
+    }
+    signin_button_view_ =
+        AddChildView(std::make_unique<BubbleSyncPromoSigninButtonView>(
+            account, account_icon, std::move(callback),
+            /*use_account_name_as_title=*/true));
+  }
   signin_metrics::RecordSigninImpressionUserActionForAccessPoint(access_point);
 }
 
-BubbleSyncPromoView::~BubbleSyncPromoView() {}
+BubbleSyncPromoView::~BubbleSyncPromoView() = default;
 
-const char* BubbleSyncPromoView::GetClassName() const {
-  return "BubbleSyncPromoView";
+void BubbleSyncPromoView::EnableSync() {
+  absl::optional<AccountInfo> account = signin_button_view_->account();
+  delegate_->OnEnableSync(account.value_or(AccountInfo()));
 }
 
-void BubbleSyncPromoView::StyledLabelLinkClicked(views::StyledLabel* label,
-                                                 const gfx::Range& range,
-                                                 int event_flags) {
-  delegate_->OnEnableSync(AccountInfo(), false /* is_default_promo_account */);
-}
+BEGIN_METADATA(BubbleSyncPromoView, views::View)
+END_METADATA

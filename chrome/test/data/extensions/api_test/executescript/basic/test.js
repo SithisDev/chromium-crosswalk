@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -92,8 +92,9 @@ chrome.test.getConfig(function(config) {
             chrome.test.listenForever(chrome.tabs.onUpdated, onUpdated);
         chrome.tabs.update(tabId, {url: testFailureUrl});
 
-        function onUpdated(updatedTabId, changeInfo) {
-          if (updatedTabId !== tabId || changeInfo.url === testFailureUrl)
+        function onUpdated(updatedTabId, changeInfo, tab) {
+          if (updatedTabId !== tabId || tab.status != 'complete' ||
+             tab.url != testFailureUrl)
             return;
           var script_file = {};
           script_file.code = "document.title = 'executeScript';";
@@ -126,4 +127,3 @@ chrome.test.getConfig(function(config) {
 
   chrome.tabs.create({ url: testUrl });
 });
-

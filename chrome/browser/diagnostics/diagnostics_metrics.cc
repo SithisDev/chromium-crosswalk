@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@
 
 #include <string>
 
+#include "base/check.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
+#include "base/notreached.h"
 #include "chrome/browser/diagnostics/diagnostics_test.h"
 
 namespace diagnostics {
@@ -55,7 +56,7 @@ const TestNameInfo kTestNameInfo[] = {
     // Add new entries in the same order as DiagnosticsTestId.
 };
 
-static_assert(base::size(kTestNameInfo) == DIAGNOSTICS_TEST_ID_COUNT,
+static_assert(std::size(kTestNameInfo) == DIAGNOSTICS_TEST_ID_COUNT,
               "diagnostics test info mismatch");
 
 const TestNameInfo* FindTestInfo(DiagnosticsTestId id) {

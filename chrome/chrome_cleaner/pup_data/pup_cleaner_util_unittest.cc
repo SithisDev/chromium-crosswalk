@@ -1,8 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/chrome_cleaner/pup_data/pup_cleaner_util.h"
+
+#include <string>
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -35,14 +37,14 @@ class PUPCleanerUtilTest : public testing::Test {
         temp_dir_.GetPath(), L"subfolder", &subfolder_path_));
   }
 
-  base::FilePath CreateFileInTopDir(const base::string16& basename,
+  base::FilePath CreateFileInTopDir(const std::wstring& basename,
                                     const char* content) {
     base::FilePath file_path = temp_dir_.GetPath().Append(basename);
     CreateFileWithContent(file_path, content, strlen(content));
     return file_path;
   }
 
-  base::FilePath CreateFileInSubfolder(const base::string16& basename,
+  base::FilePath CreateFileInSubfolder(const std::wstring& basename,
                                        const char* content) {
     base::FilePath file_path = subfolder_path_.Append(basename);
     CreateFileWithContent(file_path, content, strlen(content));

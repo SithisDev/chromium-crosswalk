@@ -1,15 +1,14 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/external_registry_loader_win.h"
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/values.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/common/value_builder.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -23,6 +22,10 @@ const char kDummyRegistryKey[] = "dummyId";
 class TestExternalRegistryLoader : public ExternalRegistryLoader {
  public:
   TestExternalRegistryLoader() {}
+
+  TestExternalRegistryLoader(const TestExternalRegistryLoader&) = delete;
+  TestExternalRegistryLoader& operator=(const TestExternalRegistryLoader&) =
+      delete;
 
   using ExternalRegistryLoader::StartLoading;
 
@@ -58,8 +61,6 @@ class TestExternalRegistryLoader : public ExternalRegistryLoader {
   int load_finished_count_ = 0;
   int id_ = 0;
   std::vector<int> prefs_test_ids_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestExternalRegistryLoader);
 };
 
 }  // namespace
@@ -67,15 +68,19 @@ class TestExternalRegistryLoader : public ExternalRegistryLoader {
 class ExternalRegistryLoaderUnittest : public testing::Test {
  public:
   ExternalRegistryLoaderUnittest() {}
+
+  ExternalRegistryLoaderUnittest(const ExternalRegistryLoaderUnittest&) =
+      delete;
+  ExternalRegistryLoaderUnittest& operator=(
+      const ExternalRegistryLoaderUnittest&) = delete;
+
   ~ExternalRegistryLoaderUnittest() override {}
 
  protected:
-  void RunUntilIdle() { thread_bundle_.RunUntilIdle(); }
+  void RunUntilIdle() { task_environment_.RunUntilIdle(); }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExternalRegistryLoaderUnittest);
+  content::BrowserTaskEnvironment task_environment_;
 };
 
 // Tests that calling StartLoading() more than once doesn't fail DCHECK.

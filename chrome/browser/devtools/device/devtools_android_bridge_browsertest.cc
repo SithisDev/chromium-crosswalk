@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include <algorithm>
@@ -15,6 +15,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/test/browser_test.h"
 
 class DevToolsAndroidBridgeTest : public InProcessBrowserTest {
 };
@@ -55,7 +56,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsAndroidBridgeTest, DiscoveryListChanges) {
   scoped_refptr<TCPDeviceProvider> provider;
   int called = 0;
   bridge->set_tcp_provider_callback_for_test(
-      base::Bind(assign_from_callback, &provider, &called));
+      base::BindRepeating(assign_from_callback, &provider, &called));
 
   EXPECT_LT(0, called);
   EXPECT_NE(nullptr, provider);
@@ -65,7 +66,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsAndroidBridgeTest, DiscoveryListChanges) {
 
   int invocations = called;
   base::ListValue list;
-  list.AppendString("somehost:2000");
+  list.Append("somehost:2000");
 
   service->Set(prefs::kDevToolsTCPDiscoveryConfig, list);
 
@@ -74,18 +75,18 @@ IN_PROC_BROWSER_TEST_F(DevToolsAndroidBridgeTest, DiscoveryListChanges) {
   EXPECT_STREQ("somehost:2000", AllTargetsString(provider).c_str());
 
   invocations = called;
-  list.Clear();
+  list.ClearList();
   service->Set(prefs::kDevToolsTCPDiscoveryConfig, list);
 
   EXPECT_LT(invocations, called);
   EXPECT_EQ(nullptr, provider);
   invocations = called;
 
-  list.AppendString("b:1");
-  list.AppendString("c:2");
-  list.AppendString("<not really a good address.");
-  list.AppendString("d:3");
-  list.AppendString("c:2");
+  list.Append("b:1");
+  list.Append("c:2");
+  list.Append("<not really a good address.");
+  list.Append("d:3");
+  list.Append("c:2");
   service->Set(prefs::kDevToolsTCPDiscoveryConfig, list);
 
   EXPECT_LT(invocations, called);
@@ -101,15 +102,15 @@ IN_PROC_BROWSER_TEST_F(DevToolsAndroidBridgeTest, DefaultValues) {
   service->ClearPref(prefs::kDevToolsDiscoverTCPTargetsEnabled);
   service->ClearPref(prefs::kDevToolsTCPDiscoveryConfig);
 
-  const base::ListValue* targets =
-    service->GetList(prefs::kDevToolsTCPDiscoveryConfig);
-  EXPECT_NE(nullptr, targets);
-  EXPECT_EQ(2ul, targets->GetSize());
+  const base::Value::List& targets =
+      service->GetList(prefs::kDevToolsTCPDiscoveryConfig);
+  EXPECT_EQ(2ul, targets.size());
 
   std::set<std::string> actual;
-  for (size_t i = 0; i < targets->GetSize(); i++) {
+  for (const base::Value& item : targets) {
     std::string value;
-    targets->GetString(i, &value);
+    if (item.is_string())
+      value = item.GetString();
     actual.insert(value);
   }
   EXPECT_STREQ("localhost:9222, localhost:9229", SetToString(actual).c_str());
@@ -129,7 +130,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsAndroidBridgeTest, TCPEnableChange) {
   scoped_refptr<TCPDeviceProvider> provider;
   int called = 0;
   bridge->set_tcp_provider_callback_for_test(
-      base::Bind(assign_from_callback, &provider, &called));
+      base::BindRepeating(assign_from_callback, &provider, &called));
 
   EXPECT_NE(nullptr, provider);
 

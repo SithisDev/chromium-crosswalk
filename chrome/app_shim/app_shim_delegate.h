@@ -1,14 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_APP_SHIM_APP_SHIM_DELEGATE_H_
 #define CHROME_APP_SHIM_APP_SHIM_DELEGATE_H_
 
-#import <Cocoa/Cocoa.h>
-#include <vector>
+#include "base/memory/raw_ptr.h"
 
-#include "base/files/file_path.h"
+#import <Cocoa/Cocoa.h>
 
 class AppShimController;
 
@@ -17,23 +16,9 @@ class AppShimController;
 @interface AppShimDelegate
     : NSObject<NSApplicationDelegate, NSUserInterfaceValidations> {
  @private
-  AppShimController* appShimController_;  // Weak, initially NULL.
-  std::vector<base::FilePath> filesToOpenAtStartup_;
+  raw_ptr<AppShimController> _appShimController;  // Weak, owns |this|
 }
-
-// The controller is initially NULL. Setting it indicates to the delegate that
-// the controller has finished initialization.
-- (void)setController:(AppShimController*)controller;
-
-// Gets files that were queued because the controller was not ready.
-// Returns whether any FilePaths were added to |out|.
-- (BOOL)getFilesToOpenAtStartup:(std::vector<base::FilePath>*)out;
-
-// If the controller is ready, this sends a FocusApp with the files to open.
-// Otherwise, this adds the files to |filesToOpenAtStartup_|.
-// Takes an array of NSString*.
-- (void)openFiles:(NSArray*)filename;
-
+- (instancetype)initWithController:(AppShimController*)controller;
 @end
 
 #endif  // CHROME_APP_SHIM_APP_SHIM_DELEGATE_H_

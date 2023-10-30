@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/offline_pages/core/archive_manager.h"
@@ -29,11 +29,8 @@ class OfflinePageArchivePublisherImplTest
  public:
   OfflinePageArchivePublisherImplTest()
       : task_runner_(new base::TestSimpleTaskRunner),
-        task_runner_handle_(task_runner_),
-        weak_ptr_factory_(this) {}
+        task_runner_handle_(task_runner_) {}
   ~OfflinePageArchivePublisherImplTest() override {}
-
-  SavePageCallback save_page_callback;
 
   void SetUp() override;
   void PumpLoop();
@@ -59,8 +56,7 @@ class OfflinePageArchivePublisherImplTest
     return weak_ptr_factory_.GetWeakPtr();
   }
 
-  void PublishArchiveDone(SavePageCallback save_page_callback,
-                          const OfflinePageItem& offline_page,
+  void PublishArchiveDone(const OfflinePageItem& offline_page,
                           PublishArchiveResult archive_result);
 
  private:
@@ -71,7 +67,8 @@ class OfflinePageArchivePublisherImplTest
   PublishArchiveResult publish_archive_result_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
   base::ThreadTaskRunnerHandle task_runner_handle_;
-  base::WeakPtrFactory<OfflinePageArchivePublisherImplTest> weak_ptr_factory_;
+  base::WeakPtrFactory<OfflinePageArchivePublisherImplTest> weak_ptr_factory_{
+      this};
 };
 
 void OfflinePageArchivePublisherImplTest::SetUp() {
@@ -109,7 +106,6 @@ class TestArchivePublisherDelegate
 };
 
 void OfflinePageArchivePublisherImplTest::PublishArchiveDone(
-    SavePageCallback save_page_callback,
     const OfflinePageItem& offline_page,
     PublishArchiveResult archive_result) {
   publish_archive_result_ = archive_result;
@@ -138,14 +134,15 @@ TEST_F(OfflinePageArchivePublisherImplTest, PublishArchive) {
   publisher.PublishArchive(
       offline_page, base::ThreadTaskRunnerHandle::Get(),
       base::BindOnce(&OfflinePageArchivePublisherImplTest::PublishArchiveDone,
-                     get_weak_ptr(), std::move(save_page_callback)));
+                     get_weak_ptr()));
   PumpLoop();
 
   EXPECT_EQ(SavePageResult::SUCCESS, publish_archive_result().move_result);
   EXPECT_EQ(kDownloadId, publish_archive_result().id.download_id);
 
   // The file move should not happen on Android Q and later.
-  if (!base::android::BuildInfo::GetInstance()->is_at_least_q()) {
+  if (base::android::BuildInfo::GetInstance()->sdk_int() <
+      base::android::SDK_VERSION_Q) {
     // Check there is a file in the new location.
     EXPECT_TRUE(public_archive_dir_path().IsParent(
         publish_archive_result().id.new_file_path));

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,14 @@
 #include <memory>
 #include <set>
 
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/sync/sessions/sync_sessions_web_contents_router.h"
 #include "chrome/browser/sync/sessions/sync_sessions_web_contents_router_factory.h"
 #include "chrome/browser/ui/sync/browser_synced_tab_delegate.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_navigation_handle.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -28,9 +29,6 @@ class FakeLocalSessionEventHandler : public LocalSessionEventHandler {
     was_notified_ = true;
   }
 
-  void OnFaviconsChanged(const std::set<GURL>& page_urls,
-                         const GURL& icon_url) override {}
-
   bool was_notified_since_last_call() {
     bool was_notified = was_notified_;
     was_notified_ = false;
@@ -43,8 +41,8 @@ class FakeLocalSessionEventHandler : public LocalSessionEventHandler {
 
 class SyncSessionsRouterTabHelperTest : public ChromeRenderViewHostTestHarness {
  public:
-  SyncSessionsRouterTabHelperTest() : ChromeRenderViewHostTestHarness() {}
-  ~SyncSessionsRouterTabHelperTest() override {}
+  SyncSessionsRouterTabHelperTest() = default;
+  ~SyncSessionsRouterTabHelperTest() override = default;
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
@@ -64,7 +62,7 @@ class SyncSessionsRouterTabHelperTest : public ChromeRenderViewHostTestHarness {
   FakeLocalSessionEventHandler* handler() { return &handler_; }
 
  private:
-  SyncSessionsWebContentsRouter* router_;
+  raw_ptr<SyncSessionsWebContentsRouter> router_;
   FakeLocalSessionEventHandler handler_;
 };
 

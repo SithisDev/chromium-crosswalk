@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include <stddef.h>
 
 #include "base/files/file_util.h"
-#include "base/macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -16,8 +15,8 @@
 #include "chrome/common/importer/imported_bookmark_entry.h"
 #include "chrome/common/importer/importer_autofill_form_data_entry.h"
 #include "components/autofill/core/browser/webdata/autofill_entry.h"
-#include "components/autofill/core/common/password_form.h"
 #include "components/favicon_base/favicon_usage_data.h"
+#include "components/password_manager/core/browser/password_form.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_parser.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
@@ -59,38 +58,39 @@ history::VisitSource ConvertImporterVisitSourceToHistoryVisitSource(
   return history::SOURCE_SYNCED;
 }
 
-}  // namespace
-
-namespace {
-
-// FirefoxURLParameterFilter is used to remove parameter mentioning Firefox from
-// the search URL when importing search engines.
-class FirefoxURLParameterFilter : public TemplateURLParser::ParameterFilter {
- public:
-  FirefoxURLParameterFilter() {}
-  ~FirefoxURLParameterFilter() override {}
-
-  // TemplateURLParser::ParameterFilter method.
-  bool KeepParameter(const std::string& key,
-                     const std::string& value) override {
-    std::string low_value = base::ToLowerASCII(value);
-    if (low_value.find("mozilla") != std::string::npos ||
-        low_value.find("firefox") != std::string::npos ||
-        low_value.find("moz:") != std::string::npos) {
-      return false;
-    }
-    return true;
+password_manager::PasswordForm::Scheme ConvertToPasswordFormScheme(
+    importer::ImportedPasswordForm::Scheme scheme) {
+  switch (scheme) {
+    case importer::ImportedPasswordForm::Scheme::kHtml:
+      return password_manager::PasswordForm::Scheme::kHtml;
+    case importer::ImportedPasswordForm::Scheme::kBasic:
+      return password_manager::PasswordForm::Scheme::kBasic;
   }
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(FirefoxURLParameterFilter);
-};
+  NOTREACHED();
+  return password_manager::PasswordForm::Scheme::kHtml;
+}
+
+password_manager::PasswordForm ConvertImportedPasswordForm(
+    const importer::ImportedPasswordForm& form) {
+  password_manager::PasswordForm result;
+  result.scheme = ConvertToPasswordFormScheme(form.scheme);
+  result.signon_realm = form.signon_realm;
+  result.url = form.url;
+  result.action = form.action;
+  result.username_element = form.username_element;
+  result.username_value = form.username_value;
+  result.password_element = form.password_element;
+  result.password_value = form.password_value;
+  result.blocked_by_user = form.blocked_by_user;
+  return result;
+}
 
 // Attempts to create a TemplateURL from the provided data. |title| is optional.
 // If TemplateURL creation fails, returns null.
-std::unique_ptr<TemplateURL> CreateTemplateURL(const base::string16& url,
-                                               const base::string16& keyword,
-                                               const base::string16& title) {
+std::unique_ptr<TemplateURL> CreateTemplateURL(const std::u16string& url,
+                                               const std::u16string& keyword,
+                                               const std::u16string& title) {
   if (url.empty() || keyword.empty())
     return nullptr;
   TemplateURLData data;
@@ -100,53 +100,6 @@ std::unique_ptr<TemplateURL> CreateTemplateURL(const base::string16& url,
   data.SetShortName(title.empty() ? keyword : title);
   data.SetURL(TemplateURLRef::DisplayURLToURLRef(url));
   return std::make_unique<TemplateURL>(data);
-}
-
-// Parses the OpenSearch XML files in |xml_files| and populates |search_engines|
-// with the resulting TemplateURLs.
-void ParseSearchEnginesFromFirefoxXMLData(
-    const std::vector<std::string>& xml_data,
-    TemplateURLService::OwnedTemplateURLVector* search_engines) {
-  DCHECK(search_engines);
-
-  std::map<std::string, std::unique_ptr<TemplateURL>> search_engine_for_url;
-  FirefoxURLParameterFilter param_filter;
-  // The first XML file represents the default search engine in Firefox 3, so we
-  // need to keep it on top of the list.
-  auto default_turl = search_engine_for_url.end();
-  for (auto xml_iter = xml_data.begin(); xml_iter != xml_data.end();
-       ++xml_iter) {
-    std::unique_ptr<TemplateURL> template_url = TemplateURLParser::Parse(
-        UIThreadSearchTermsData(nullptr), xml_iter->data(), xml_iter->length(),
-        &param_filter);
-    if (template_url) {
-      auto iter = search_engine_for_url.find(template_url->url());
-      if (iter == search_engine_for_url.end()) {
-        iter = search_engine_for_url
-                   .insert(std::make_pair(template_url->url(),
-                                          std::move(template_url)))
-                   .first;
-      } else {
-        // We have already found a search engine with the same URL.  We give
-        // priority to the latest one found, as GetSearchEnginesXMLFiles()
-        // returns a vector with first Firefox default search engines and then
-        // the user's ones.  We want to give priority to the user ones.
-        iter->second = std::move(template_url);
-      }
-      if (default_turl == search_engine_for_url.end())
-        default_turl = iter;
-    }
-  }
-
-  // Put the results in the |search_engines| vector.
-  for (auto t_iter = search_engine_for_url.begin();
-       t_iter != search_engine_for_url.end(); ++t_iter) {
-    if (t_iter == default_turl)
-      search_engines->insert(search_engines->begin(),
-                             std::move(default_turl->second));
-    else
-      search_engines->push_back(std::move(t_iter->second));
-  }
 }
 
 }  // namespace
@@ -159,7 +112,7 @@ InProcessImporterBridge::InProcessImporterBridge(
 
 void InProcessImporterBridge::AddBookmarks(
     const std::vector<ImportedBookmarkEntry>& bookmarks,
-    const base::string16& first_folder_name) {
+    const std::u16string& first_folder_name) {
   writer_->AddBookmarks(bookmarks, first_folder_name);
 }
 
@@ -195,17 +148,9 @@ void InProcessImporterBridge::SetKeywords(
   writer_->AddKeywords(std::move(owned_template_urls), unique_on_host_and_path);
 }
 
-void InProcessImporterBridge::SetFirefoxSearchEnginesXMLData(
-    const std::vector<std::string>& search_engine_data) {
-  TemplateURLService::OwnedTemplateURLVector search_engines;
-  ParseSearchEnginesFromFirefoxXMLData(search_engine_data, &search_engines);
-
-  writer_->AddKeywords(std::move(search_engines), true);
-}
-
 void InProcessImporterBridge::SetPasswordForm(
-    const autofill::PasswordForm& form) {
-  writer_->AddPasswordForm(form);
+    const importer::ImportedPasswordForm& form) {
+  writer_->AddPasswordForm(ConvertImportedPasswordForm(form));
 }
 
 void InProcessImporterBridge::SetAutofillFormData(
@@ -214,8 +159,8 @@ void InProcessImporterBridge::SetAutofillFormData(
   for (size_t i = 0; i < entries.size(); ++i) {
     // Using method c_str() in order to avoid data which contains null
     // terminating symbols.
-    const base::string16 name = entries[i].name.c_str();
-    const base::string16 value = entries[i].value.c_str();
+    const std::u16string name = entries[i].name.c_str();
+    const std::u16string value = entries[i].value.c_str();
     if (name.empty() || value.empty())
       continue;
     autofill_entries.push_back(
@@ -242,7 +187,7 @@ void InProcessImporterBridge::NotifyEnded() {
   host_->NotifyImportEnded();
 }
 
-base::string16 InProcessImporterBridge::GetLocalizedString(int message_id) {
+std::u16string InProcessImporterBridge::GetLocalizedString(int message_id) {
   return l10n_util::GetStringUTF16(message_id);
 }
 

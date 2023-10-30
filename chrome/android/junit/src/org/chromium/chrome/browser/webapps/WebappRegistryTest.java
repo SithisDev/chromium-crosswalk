@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
-import android.content.Intent;
 import android.content.SharedPreferences;
 import android.text.TextUtils;
 
@@ -20,6 +19,7 @@ import org.junit.runner.RunWith;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
+import org.robolectric.annotation.LooperMode;
 import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.ContextUtils;
@@ -27,8 +27,9 @@ import org.chromium.base.task.test.BackgroundShadowAsyncTask;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.ShortcutHelper;
+import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.browsing_data.UrlFilters;
-import org.chromium.webapk.lib.common.WebApkConstants;
+import org.chromium.chrome.test.util.browser.webapps.WebApkIntentDataProviderBuilder;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -43,6 +44,7 @@ import java.util.Set;
  */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE, shadows = {BackgroundShadowAsyncTask.class})
+@LooperMode(LooperMode.Mode.LEGACY)
 public class WebappRegistryTest {
     // These were copied from WebappRegistry for backward compatibility checking.
     private static final String REGISTRY_FILE_NAME = "webapp_registry";
@@ -58,18 +60,19 @@ public class WebappRegistryTest {
 
     private static class FetchStorageCallback
             implements WebappRegistry.FetchWebappDataStorageCallback {
-        Intent mShortcutIntent;
+        BrowserServicesIntentDataProvider mIntentDataProvider;
         boolean mCallbackCalled;
 
-        FetchStorageCallback(Intent shortcutIntent) {
-            mCallbackCalled = false;
-            mShortcutIntent = shortcutIntent;
+        FetchStorageCallback(BrowserServicesIntentDataProvider intentDataProvider) {
+            mIntentDataProvider = intentDataProvider;
         }
 
         @Override
         public void onWebappDataStorageRetrieved(WebappDataStorage storage) {
             mCallbackCalled = true;
-            storage.updateFromShortcutIntent(mShortcutIntent);
+            if (mIntentDataProvider != null) {
+                storage.updateFromWebappIntentDataProvider(mIntentDataProvider);
+            }
         }
 
         boolean getCallbackCalled() {
@@ -78,7 +81,7 @@ public class WebappRegistryTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         WebappRegistry.refreshSharedPrefsForTesting();
         mSharedPreferences = ContextUtils.getApplicationContext().getSharedPreferences(
                 REGISTRY_FILE_NAME, Context.MODE_PRIVATE);
@@ -87,14 +90,21 @@ public class WebappRegistryTest {
         mCallbackCalled = false;
     }
 
-    private void registerWebapp(String webappId,
-            WebappRegistry.FetchWebappDataStorageCallback callback) throws Exception {
+    private void registerWebapp(BrowserServicesIntentDataProvider intentDataProvider)
+            throws Exception {
+        registerWebappWithId(intentDataProvider.getWebappExtras().id, intentDataProvider);
+    }
+
+    private void registerWebappWithId(String webappId,
+            BrowserServicesIntentDataProvider intentDataProvider) throws Exception {
+        FetchStorageCallback callback = new FetchStorageCallback(intentDataProvider);
         WebappRegistry.getInstance().register(webappId, callback);
 
         // Run background tasks to make sure the data is committed. Run UI thread tasks to make sure
         // the last used time is updated.
         BackgroundShadowAsyncTask.runBackgroundTasks();
         ShadowLooper.runUiThreadTasks();
+        assertTrue(callback.getCallbackCalled());
     }
 
     @Test
@@ -108,7 +118,7 @@ public class WebappRegistryTest {
     @Test
     @Feature({"Webapp"})
     public void testWebappRegistrationAddsToSharedPrefs() throws Exception {
-        registerWebapp("test", null);
+        registerWebappWithId("test", null);
         Set<String> actual = getRegisteredWebapps();
         assertEquals(1, actual.size());
         assertTrue(actual.contains("test"));
@@ -117,7 +127,7 @@ public class WebappRegistryTest {
     @Test
     @Feature({"Webapp"})
     public void testWebappRegistrationUpdatesLastUsed() throws Exception {
-        registerWebapp("test", null);
+        registerWebappWithId("test", null);
 
         long after = System.currentTimeMillis();
         SharedPreferences webAppPrefs = ContextUtils.getApplicationContext().getSharedPreferences(
@@ -129,7 +139,7 @@ public class WebappRegistryTest {
 
     @Test
     @Feature({"Webapp"})
-    public void testWebappIdsRetrieval() throws Exception {
+    public void testWebappIdsRetrieval() {
         final Set<String> expected = addWebappsToRegistry("first", "second");
         assertEquals(expected, WebappRegistry.getRegisteredWebappIdsForTesting());
     }
@@ -142,13 +152,36 @@ public class WebappRegistryTest {
 
         // Force a re-read of the preferences from disk. Add a new web app via the registry.
         WebappRegistry.refreshSharedPrefsForTesting();
-        registerWebapp("second", null);
+        registerWebappWithId("second", null);
 
         // A copy of the expected set needs to be made as the SharedPreferences is using the copy
         // that was passed to it.
         final Set<String> secondExpected = new HashSet<>(expected);
         secondExpected.add("second");
         assertEquals(secondExpected, WebappRegistry.getRegisteredWebappIdsForTesting());
+    }
+
+    /**
+     * Test behaviour when there is a webapp with a null id registered. See crbug.com/1055566
+     * for details of the bug which caused this to occur.
+     */
+    @Test
+    @Feature({"Webapp"})
+    public void testWebappNullId() throws Exception {
+        addWebappsToRegistry(new String[] {null});
+        registerWebappWithId(null, createShortcutIntentDataProvider("https://www.google.ca"));
+        assertEquals(1, WebappRegistry.getRegisteredWebappIdsForTesting().size());
+
+        WebappRegistry.refreshSharedPrefsForTesting();
+
+        // Does not crash.
+        assertEquals(null,
+                WebappRegistry.getInstance().getWebappDataStorageForUrl("https://www.google.ca/"));
+
+        long currentTime = System.currentTimeMillis();
+        WebappRegistry.getInstance().unregisterOldWebapps(
+                currentTime + WebappRegistry.FULL_CLEANUP_DURATION);
+        assertTrue(WebappRegistry.getRegisteredWebappIdsForTesting().isEmpty());
     }
 
     @Test
@@ -160,8 +193,7 @@ public class WebappRegistryTest {
         apps.put("webapp3", "https://www.chrome.com");
 
         for (Map.Entry<String, String> app : apps.entrySet()) {
-            registerWebapp(
-                    app.getKey(), new FetchStorageCallback(createShortcutIntent(app.getValue())));
+            registerWebappWithId(app.getKey(), createShortcutIntentDataProvider(app.getValue()));
         }
 
         // Partial deletion.
@@ -189,8 +221,7 @@ public class WebappRegistryTest {
         apps.put("webapp3", "https://www.chrome.com");
 
         for (Map.Entry<String, String> app : apps.entrySet()) {
-            registerWebapp(
-                    app.getKey(), new FetchStorageCallback(createShortcutIntent(app.getValue())));
+            registerWebappWithId(app.getKey(), createShortcutIntentDataProvider(app.getValue()));
         }
 
         for (String appName : apps.keySet()) {
@@ -226,7 +257,7 @@ public class WebappRegistryTest {
 
     @Test
     @Feature({"Webapp"})
-      public void testCleanupDoesNotRunTooOften() throws Exception {
+    public void testCleanupDoesNotRunTooOften() {
         // Put the current time to just before the task should run.
         long currentTime = INITIAL_TIME + WebappRegistry.FULL_CLEANUP_DURATION - 1;
 
@@ -253,7 +284,7 @@ public class WebappRegistryTest {
 
     @Test
     @Feature({"Webapp"})
-    public void testCleanupDoesNotRemoveRecentApps() throws Exception {
+    public void testCleanupDoesNotRemoveRecentApps() {
         // Put the current time such that the task runs.
         long currentTime = INITIAL_TIME + WebappRegistry.FULL_CLEANUP_DURATION;
 
@@ -285,7 +316,7 @@ public class WebappRegistryTest {
 
     @Test
     @Feature({"Webapp"})
-    public void testCleanupRemovesOldApps() throws Exception {
+    public void testCleanupRemovesOldApps() {
         // Put the current time such that the task runs.
         long currentTime = INITIAL_TIME + WebappRegistry.FULL_CLEANUP_DURATION;
 
@@ -317,26 +348,21 @@ public class WebappRegistryTest {
     @Test
     @Feature({"WebApk"})
     public void testCleanupRemovesUninstalledWebApks() throws Exception {
-        String webappId1 = WebApkConstants.WEBAPK_ID_PREFIX + "uninstalledWebApk1";
         String webApkPackage1 = "uninstalledWebApk1";
-        String webappId2 = WebApkConstants.WEBAPK_ID_PREFIX + "uninstalledWebApk2";
         String webApkPackage2 = "uninstalledWebApk2";
 
-        FetchStorageCallback storageCallback1 =
-                new FetchStorageCallback(createWebApkIntent(webappId1, START_URL, webApkPackage1));
-        registerWebapp(webappId1, storageCallback1);
-        assertTrue(storageCallback1.getCallbackCalled());
+        BrowserServicesIntentDataProvider intentDataProvider1 =
+                new WebApkIntentDataProviderBuilder(webApkPackage1, START_URL).build();
+        registerWebapp(intentDataProvider1);
 
-        FetchStorageCallback storageCallback2 =
-                new FetchStorageCallback(createWebApkIntent(webappId1, START_URL, webApkPackage2));
-        registerWebapp(webappId2, storageCallback2);
-        assertTrue(storageCallback2.getCallbackCalled());
+        BrowserServicesIntentDataProvider intentDataProvider2 =
+                new WebApkIntentDataProviderBuilder(webApkPackage2, START_URL).build();
+        registerWebapp(intentDataProvider2);
 
         // Verify that both WebAPKs are registered.
-        Set<String> actual = getRegisteredWebapps();
-        assertEquals(2, actual.size());
-        assertTrue(actual.contains(webappId1));
-        assertTrue(actual.contains(webappId2));
+        assertEquals(2, getRegisteredWebapps().size());
+        assertTrue(isRegisteredWebapp(intentDataProvider1));
+        assertTrue(isRegisteredWebapp(intentDataProvider2));
 
         // Set the current time such that the task runs.
         long currentTime = System.currentTimeMillis() + WebappRegistry.FULL_CLEANUP_DURATION;
@@ -355,26 +381,21 @@ public class WebappRegistryTest {
     @Test
     @Feature({"WebApk"})
     public void testCleanupDoesNotRemoveInstalledWebApks() throws Exception {
-        String webappId = WebApkConstants.WEBAPK_ID_PREFIX + "installedWebApk";
         String webApkPackage = "installedWebApk";
-        String uninstalledWebappId = WebApkConstants.WEBAPK_ID_PREFIX + "uninstalledWebApk";
         String uninstalledWebApkPackage = "uninstalledWebApk";
 
-        FetchStorageCallback storageCallback =
-                new FetchStorageCallback(createWebApkIntent(webappId, START_URL, webApkPackage));
-        registerWebapp(webappId, storageCallback);
-        assertTrue(storageCallback.getCallbackCalled());
+        BrowserServicesIntentDataProvider webApkIntentDataProvider =
+                new WebApkIntentDataProviderBuilder(webApkPackage, START_URL).build();
+        registerWebapp(webApkIntentDataProvider);
 
-        FetchStorageCallback storageCallback2 = new FetchStorageCallback(
-                createWebApkIntent(uninstalledWebappId, START_URL, uninstalledWebApkPackage));
-        registerWebapp(uninstalledWebappId, storageCallback2);
-        assertTrue(storageCallback2.getCallbackCalled());
+        BrowserServicesIntentDataProvider uninstalledWebApkIntentDataProvider =
+                new WebApkIntentDataProviderBuilder(uninstalledWebApkPackage, START_URL).build();
+        registerWebapp(uninstalledWebApkIntentDataProvider);
 
         // Verify that both WebAPKs are registered.
-        Set<String> actual = getRegisteredWebapps();
-        assertEquals(2, actual.size());
-        assertTrue(actual.contains(webappId));
-        assertTrue(actual.contains(uninstalledWebappId));
+        assertEquals(2, getRegisteredWebapps().size());
+        assertTrue(isRegisteredWebapp(webApkIntentDataProvider));
+        assertTrue(isRegisteredWebapp(uninstalledWebApkIntentDataProvider));
 
         Shadows.shadowOf(RuntimeEnvironment.application.getPackageManager())
                 .addPackage(webApkPackage);
@@ -386,9 +407,8 @@ public class WebappRegistryTest {
         // current time.
         WebappRegistry.getInstance().unregisterOldWebapps(currentTime);
 
-        actual = getRegisteredWebapps();
-        assertEquals(1, actual.size());
-        assertTrue(actual.contains(webappId));
+        assertEquals(1, getRegisteredWebapps().size());
+        assertTrue(isRegisteredWebapp(webApkIntentDataProvider));
 
         long lastCleanup = mSharedPreferences.getLong(
                 WebappRegistry.KEY_LAST_CLEANUP, -1);
@@ -398,25 +418,21 @@ public class WebappRegistryTest {
     @Test
     @Feature({"WebApk"})
     public void testCleanupDoesRemoveOldInstalledWebApks() throws Exception {
-        String deprecatedWebappId = "webapk:installedWebApk";
+        String deprecatedWebApkIdPrefix = "webapk:";
         String webApkPackage = "installedWebApk";
-        String installedWebappId = WebApkConstants.WEBAPK_ID_PREFIX + "installedWebApk";
+        BrowserServicesIntentDataProvider webApkIntentDataProvider =
+                new WebApkIntentDataProviderBuilder(webApkPackage, START_URL).build();
+        String deprecatedWebApkId = deprecatedWebApkIdPrefix
+                + webApkIntentDataProvider.getWebApkExtras().webApkPackageName;
 
-        FetchStorageCallback storageCallback = new FetchStorageCallback(
-                createWebApkIntent(deprecatedWebappId, START_URL, webApkPackage));
-        registerWebapp(deprecatedWebappId, storageCallback);
-        assertTrue(storageCallback.getCallbackCalled());
-
-        FetchStorageCallback storageCallback2 = new FetchStorageCallback(
-                createWebApkIntent(installedWebappId, START_URL, webApkPackage));
-        registerWebapp(installedWebappId, storageCallback2);
-        assertTrue(storageCallback2.getCallbackCalled());
+        registerWebappWithId(deprecatedWebApkId, webApkIntentDataProvider);
+        registerWebapp(webApkIntentDataProvider);
 
         // Verify that both WebAPKs are registered.
         Set<String> actual = getRegisteredWebapps();
         assertEquals(2, actual.size());
-        assertTrue(actual.contains(deprecatedWebappId));
-        assertTrue(actual.contains(installedWebappId));
+        assertTrue(actual.contains(deprecatedWebApkId));
+        assertTrue(actual.contains(webApkIntentDataProvider.getWebappExtras().id));
 
         Shadows.shadowOf(RuntimeEnvironment.application.getPackageManager())
                 .addPackage(webApkPackage);
@@ -430,7 +446,7 @@ public class WebappRegistryTest {
 
         actual = getRegisteredWebapps();
         assertEquals(1, actual.size());
-        assertTrue(actual.contains(installedWebappId));
+        assertTrue(actual.contains(webApkIntentDataProvider.getWebappExtras().id));
 
         long lastCleanup = mSharedPreferences.getLong(WebappRegistry.KEY_LAST_CLEANUP, -1);
         assertEquals(currentTime, lastCleanup);
@@ -441,16 +457,13 @@ public class WebappRegistryTest {
     public void testClearWebappHistory() throws Exception {
         final String webapp1Url = "https://www.google.com";
         final String webapp2Url = "https://drive.google.com";
-        Intent shortcutIntent1 = createShortcutIntent(webapp1Url);
-        Intent shortcutIntent2 = createShortcutIntent(webapp2Url);
+        BrowserServicesIntentDataProvider webappIntentDataProvider1 =
+                createShortcutIntentDataProvider(webapp1Url);
+        BrowserServicesIntentDataProvider webappIntentDataProvider2 =
+                createShortcutIntentDataProvider(webapp2Url);
 
-        FetchStorageCallback storageCallback1 = new FetchStorageCallback(shortcutIntent1);
-        registerWebapp("webapp1", storageCallback1);
-        assertTrue(storageCallback1.getCallbackCalled());
-
-        FetchStorageCallback storageCallback2 = new FetchStorageCallback(shortcutIntent2);
-        registerWebapp("webapp2", storageCallback2);
-        assertTrue(storageCallback2.getCallbackCalled());
+        registerWebappWithId("webapp1", webappIntentDataProvider1);
+        registerWebappWithId("webapp2", webappIntentDataProvider2);
 
         SharedPreferences webapp1Prefs = ContextUtils.getApplicationContext().getSharedPreferences(
                 WebappDataStorage.SHARED_PREFS_FILE_PREFIX + "webapp1", Context.MODE_PRIVATE);
@@ -526,7 +539,7 @@ public class WebappRegistryTest {
     @Test
     @Feature({"Webapp"})
     public void testGetAfterClearWebappHistory() throws Exception {
-        registerWebapp("webapp", null);
+        registerWebappWithId("webapp", null);
 
         SharedPreferences webappPrefs = ContextUtils.getApplicationContext().getSharedPreferences(
                 WebappDataStorage.SHARED_PREFS_FILE_PREFIX + "webapp", Context.MODE_PRIVATE);
@@ -546,8 +559,9 @@ public class WebappRegistryTest {
     public void testUpdateAfterClearWebappHistory() throws Exception {
         final String webappUrl = "http://www.google.com";
         final String webappScope = "http://www.google.com/";
-        final Intent shortcutIntent = createShortcutIntent(webappUrl);
-        registerWebapp("webapp", new FetchStorageCallback(shortcutIntent));
+        final BrowserServicesIntentDataProvider webappIntentDataProvider =
+                createShortcutIntentDataProvider(webappUrl);
+        registerWebappWithId("webapp", webappIntentDataProvider);
 
         SharedPreferences webappPrefs = ContextUtils.getApplicationContext().getSharedPreferences(
                 WebappDataStorage.SHARED_PREFS_FILE_PREFIX + "webapp", Context.MODE_PRIVATE);
@@ -564,7 +578,7 @@ public class WebappRegistryTest {
 
         // Update the webapp from the intent again.
         WebappDataStorage storage = WebappRegistry.getInstance().getWebappDataStorage("webapp");
-        storage.updateFromShortcutIntent(shortcutIntent);
+        storage.updateFromWebappIntentDataProvider(webappIntentDataProvider);
 
         // Verify that the URL and scope match the original in the intent.
         actualUrl = webappPrefs.getString(WebappDataStorage.KEY_URL, WebappDataStorage.URL_INVALID);
@@ -594,16 +608,20 @@ public class WebappRegistryTest {
         final String test5Url = "https://drive.google.com/docs/recent/trash";
         final String test6Url = "https://maps.google.com/";
 
-        Intent shortcutIntent1 = createShortcutIntent(webapp1Url);
-        Intent shortcutIntent2 = createShortcutIntent(webapp2Url);
-        Intent shortcutIntent3 = createShortcutIntent(webapp3Url);
-        Intent shortcutIntent4 = createShortcutIntent(webapp4Url);
+        BrowserServicesIntentDataProvider intentDataProvider1 =
+                createShortcutIntentDataProvider(webapp1Url);
+        BrowserServicesIntentDataProvider intentDataProvider2 =
+                createShortcutIntentDataProvider(webapp2Url);
+        BrowserServicesIntentDataProvider intentDataProvider3 =
+                createShortcutIntentDataProvider(webapp3Url);
+        BrowserServicesIntentDataProvider intentDataProvider4 =
+                createShortcutIntentDataProvider(webapp4Url);
 
         // Register the four web apps.
-        registerWebapp("webapp1", new FetchStorageCallback(shortcutIntent1));
-        registerWebapp("webapp2", new FetchStorageCallback(shortcutIntent2));
-        registerWebapp("webapp3", new FetchStorageCallback(shortcutIntent3));
-        registerWebapp("webapp4", new FetchStorageCallback(shortcutIntent4));
+        registerWebappWithId("webapp1", intentDataProvider1);
+        registerWebappWithId("webapp2", intentDataProvider2);
+        registerWebappWithId("webapp3", intentDataProvider3);
+        registerWebappWithId("webapp4", intentDataProvider4);
 
         // test1Url should return webapp1.
         WebappDataStorage storage1 =
@@ -647,10 +665,9 @@ public class WebappRegistryTest {
         final String startUrl = START_URL;
         final String testUrl = START_URL + "/index.html";
 
-        String webApkId = WebApkConstants.WEBAPK_ID_PREFIX + "WebApk";
-        registerWebapp(webApkId,
-                new FetchStorageCallback(
-                        createWebApkIntent(webApkId, startUrl, "org.chromium.webapk")));
+        BrowserServicesIntentDataProvider webApkIntentDataProvider =
+                new WebApkIntentDataProviderBuilder("org.chromium.webapk", startUrl).build();
+        registerWebapp(webApkIntentDataProvider);
 
         // testUrl should return null.
         WebappDataStorage storage1 =
@@ -658,7 +675,7 @@ public class WebappRegistryTest {
         assertNull(storage1);
 
         String webappId = "webapp";
-        registerWebapp(webappId, new FetchStorageCallback(createShortcutIntent(startUrl)));
+        registerWebappWithId(webappId, createShortcutIntentDataProvider(startUrl));
 
         // testUrl should return the webapp.
         WebappDataStorage storage2 =
@@ -668,21 +685,20 @@ public class WebappRegistryTest {
 
     @Test
     @Feature({"WebApk"})
-    public void testHasWebApkForUrl() throws Exception {
-        final String startUrl = START_URL;
-        final String testUrl = START_URL + "/index.html";
+    public void testHasWebApkForOrigin() throws Exception {
+        final String startUrl = START_URL + "/test_page.html";
+        final String testOrigin = START_URL;
 
-        assertFalse(WebappRegistry.getInstance().hasWebApkForUrl(testUrl));
+        assertFalse(WebappRegistry.getInstance().hasAtLeastOneWebApkForOrigin(testOrigin));
 
         String webappId = "webapp";
-        registerWebapp(webappId, new FetchStorageCallback(createShortcutIntent(startUrl)));
-        assertFalse(WebappRegistry.getInstance().hasWebApkForUrl(testUrl));
+        registerWebappWithId(webappId, createShortcutIntentDataProvider(startUrl));
+        assertFalse(WebappRegistry.getInstance().hasAtLeastOneWebApkForOrigin(testOrigin));
 
-        String webApkId = WebApkConstants.WEBAPK_ID_PREFIX + "WebApk";
-        registerWebapp(webApkId,
-                new FetchStorageCallback(
-                        createWebApkIntent(webApkId, startUrl, "org.chromium.webapk")));
-        assertTrue(WebappRegistry.getInstance().hasWebApkForUrl(testUrl));
+        BrowserServicesIntentDataProvider webApkIntentDataProvider =
+                new WebApkIntentDataProviderBuilder("org.chromium.webapk", startUrl).build();
+        registerWebapp(webApkIntentDataProvider);
+        assertTrue(WebappRegistry.getInstance().hasAtLeastOneWebApkForOrigin(testOrigin));
     }
 
     private Set<String> addWebappsToRegistry(String... webapps) {
@@ -691,20 +707,18 @@ public class WebappRegistryTest {
         return expected;
     }
 
+    private boolean isRegisteredWebapp(BrowserServicesIntentDataProvider webappIntentDataProvider) {
+        String id = webappIntentDataProvider.getWebappExtras().id;
+        return getRegisteredWebapps().contains(id);
+    }
+
     private Set<String> getRegisteredWebapps() {
         return mSharedPreferences.getStringSet(
                 WebappRegistry.KEY_WEBAPP_SET, Collections.<String>emptySet());
     }
 
-    private Intent createShortcutIntent(final String url) {
-        return ShortcutHelper.createWebappShortcutIntentForTesting("id", url);
-    }
-
-    private Intent createWebApkIntent(String webappId, String url, String webApkPackage) {
-        Intent intent = new Intent();
-        intent.putExtra(ShortcutHelper.EXTRA_ID, webappId)
-                .putExtra(ShortcutHelper.EXTRA_URL, url)
-                .putExtra(WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME, webApkPackage);
-        return intent;
+    private BrowserServicesIntentDataProvider createShortcutIntentDataProvider(final String url) {
+        return WebappIntentDataProviderFactory.create(
+                ShortcutHelper.createWebappShortcutIntentForTesting("id", url));
     }
 }

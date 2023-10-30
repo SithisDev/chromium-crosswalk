@@ -1,20 +1,20 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/api/image_writer_private/write_from_url_operation.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/task/post_task.h"
-#include "chrome/browser/extensions/api/image_writer_private/error_messages.h"
+#include "chrome/browser/extensions/api/image_writer_private/error_constants.h"
 #include "chrome/browser/extensions/api/image_writer_private/test_utils.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/test/url_loader_interceptor.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace extensions {
 namespace image_writer {
@@ -39,14 +39,13 @@ class WriteFromUrlOperationForTest : public WriteFromUrlOperation {
   WriteFromUrlOperationForTest(
       base::WeakPtr<OperationManager> manager,
       const ExtensionId& extension_id,
-      network::mojom::URLLoaderFactoryPtrInfo factory_info,
+      mojo::PendingRemote<network::mojom::URLLoaderFactory> factory_remote,
       GURL url,
       const std::string& hash,
       const std::string& storage_unit_id)
       : WriteFromUrlOperation(manager,
-                              /*connector=*/nullptr,
                               extension_id,
-                              std::move(factory_info),
+                              std::move(factory_remote),
                               url,
                               hash,
                               storage_unit_id,
@@ -60,19 +59,19 @@ class WriteFromUrlOperationForTest : public WriteFromUrlOperation {
   void Start() {
     PostTask(base::BindOnce(&WriteFromUrlOperation::Start, this));
   }
-  void GetDownloadTarget(const base::Closure& continuation) {
+  void GetDownloadTarget(base::OnceClosure continuation) {
     PostTask(base::BindOnce(&WriteFromUrlOperation::GetDownloadTarget, this,
-                            continuation));
+                            std::move(continuation)));
   }
 
-  void Download(const base::Closure& continuation) {
-    PostTask(
-        base::BindOnce(&WriteFromUrlOperation::Download, this, continuation));
+  void Download(base::OnceClosure continuation) {
+    PostTask(base::BindOnce(&WriteFromUrlOperation::Download, this,
+                            std::move(continuation)));
   }
 
-  void VerifyDownload(const base::Closure& continuation) {
+  void VerifyDownload(base::OnceClosure continuation) {
     PostTask(base::BindOnce(&WriteFromUrlOperation::VerifyDownload, this,
-                            continuation));
+                            std::move(continuation)));
   }
 
   void Cancel() {
@@ -87,7 +86,7 @@ class WriteFromUrlOperationForTest : public WriteFromUrlOperation {
   base::FilePath GetImagePath() { return image_path_; }
 
  private:
-  ~WriteFromUrlOperationForTest() override {}
+  ~WriteFromUrlOperationForTest() override = default;
 };
 
 class ImageWriterWriteFromUrlOperationTest : public ImageWriterUnitTestBase {
@@ -117,15 +116,16 @@ class ImageWriterWriteFromUrlOperationTest : public ImageWriterUnitTestBase {
   scoped_refptr<WriteFromUrlOperationForTest> CreateOperation(
       const GURL& url,
       const std::string& hash) {
-    network::mojom::URLLoaderFactoryPtrInfo url_loader_factory_ptr_info;
-    content::BrowserContext::GetDefaultStoragePartition(&test_profile_)
+    mojo::PendingRemote<network::mojom::URLLoaderFactory>
+        url_loader_factory_remote;
+    test_profile_.GetDefaultStoragePartition()
         ->GetURLLoaderFactoryForBrowserProcess()
-        ->Clone(mojo::MakeRequest(&url_loader_factory_ptr_info));
+        ->Clone(url_loader_factory_remote.InitWithNewPipeAndPassReceiver());
 
     scoped_refptr<WriteFromUrlOperationForTest> operation(
         new WriteFromUrlOperationForTest(
             manager_.AsWeakPtr(), kDummyExtensionId,
-            std::move(url_loader_factory_ptr_info), url, hash,
+            std::move(url_loader_factory_remote), url, hash,
             test_utils_.GetDevicePath().AsUTF8Unsafe()));
     operation->Start();
     return operation;
@@ -138,15 +138,7 @@ class ImageWriterWriteFromUrlOperationTest : public ImageWriterUnitTestBase {
   MockOperationManager manager_;
 };
 
-// Crashes on Tsan.  http://crbug.com/859317
-#if defined(THREAD_SANITIZER)
-#define MAYBE_SelectTargetWithoutExtension DISABLED_SelectTargetWithoutExtension
-#define MAYBE_SelectTargetWithExtension DISABLED_SelectTargetWithExtension
-#else
-#define MAYBE_SelectTargetWithoutExtension SelectTargetWithoutExtension
-#define MAYBE_SelectTargetWithExtension SelectTargetWithExtension
-#endif
-TEST_F(ImageWriterWriteFromUrlOperationTest, MAYBE_SelectTargetWithoutExtension) {
+TEST_F(ImageWriterWriteFromUrlOperationTest, SelectTargetWithoutExtension) {
   scoped_refptr<WriteFromUrlOperationForTest> operation =
       CreateOperation(GURL("http://localhost/foo/bar"), "");
 
@@ -161,7 +153,7 @@ TEST_F(ImageWriterWriteFromUrlOperationTest, MAYBE_SelectTargetWithoutExtension)
   content::RunAllTasksUntilIdle();
 }
 
-TEST_F(ImageWriterWriteFromUrlOperationTest, MAYBE_SelectTargetWithExtension) {
+TEST_F(ImageWriterWriteFromUrlOperationTest, SelectTargetWithExtension) {
   scoped_refptr<WriteFromUrlOperationForTest> operation =
       CreateOperation(GURL("http://localhost/foo/bar.zip"), "");
 
@@ -174,9 +166,6 @@ TEST_F(ImageWriterWriteFromUrlOperationTest, MAYBE_SelectTargetWithExtension) {
 
   operation->Cancel();
 }
-#undef MAYBE_SelectTargetWithoutExtension
-#undef MAYBE_SelectTargetWithExtension
-
 
 TEST_F(ImageWriterWriteFromUrlOperationTest, DownloadFile) {
   // This test actually triggers the URL fetch code, which will drain the
@@ -241,12 +230,10 @@ TEST_F(ImageWriterWriteFromUrlOperationTest, VerifyFile) {
     // The OnProgress tasks are posted with priority USER_VISIBLE priority so
     // post the quit closure with the same priority to ensure it doesn't run too
     // soon.
-    operation->VerifyDownload(base::Bind(
+    operation->VerifyDownload(base::BindOnce(
         [](base::OnceClosure quit_closure) {
-          base::PostTaskWithTraits(
-              FROM_HERE,
-              {content::BrowserThread::UI, base::TaskPriority::USER_VISIBLE},
-              std::move(quit_closure));
+          content::GetUIThreadTaskRunner({base::TaskPriority::USER_VISIBLE})
+              ->PostTask(FROM_HERE, std::move(quit_closure));
         },
         run_loop.QuitClosure()));
 

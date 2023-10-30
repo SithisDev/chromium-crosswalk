@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,14 @@
 #include <memory>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/views/test/view_event_test_base.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/views/controls/button/menu_button_listener.h"
+#include "ui/views/accessibility/ax_event_observer.h"
 #include "ui/views/controls/menu/menu_delegate.h"
 
 namespace views {
-class Button;
 class MenuItemView;
 class MenuRunner;
 }
@@ -35,11 +35,18 @@ class MenuRunner;
 // MenuItemView prevents repeated activation of a menu by clicks too
 // close in time.
 class MenuTestBase : public ViewEventTestBase,
-                     public views::MenuButtonListener,
+                     public views::AXEventObserver,
                      public views::MenuDelegate {
  public:
   MenuTestBase();
+
+  MenuTestBase(const MenuTestBase&) = delete;
+  MenuTestBase& operator=(const MenuTestBase&) = delete;
+
   ~MenuTestBase() override;
+
+  // AXEventObserver overrides.
+  void OnViewEvent(views::View*, ax::mojom::Event event_type) override;
 
   // Generate a mouse click and run |next| once the event has been processed.
   virtual void Click(views::View* view, base::OnceClosure next);
@@ -71,27 +78,29 @@ class MenuTestBase : public ViewEventTestBase,
   // ViewEventTestBase implementation.
   void SetUp() override;
   void TearDown() override;
-  views::View* CreateContentsView() override;
+  std::unique_ptr<views::View> CreateContentsView() override;
   void DoTestOnMessageLoop() override;
   gfx::Size GetPreferredSizeForContents() const override;
-
-  // views::MenuButtonListener implementation
-  void OnMenuButtonClicked(views::Button* source,
-                           const gfx::Point& point,
-                           const ui::Event* event) override;
 
   // views::MenuDelegate implementation
   void ExecuteCommand(int id) override;
 
+  int GetAXEventCount(ax::mojom::Event event_type) const;
+
  private:
-  views::MenuButton* button_;
-  views::MenuItemView* menu_;
+  void ButtonPressed();
+
+  raw_ptr<views::MenuButton> button_ = nullptr;
+  raw_ptr<views::MenuItemView> menu_ = nullptr;
   std::unique_ptr<views::MenuRunner> menu_runner_;
 
   // The command id of the last pressed menu item since the menu was opened.
   int last_command_;
 
-  DISALLOW_COPY_AND_ASSIGN(MenuTestBase);
+  // The number of AX events fired by type.
+  static constexpr int kNumEvents =
+      static_cast<size_t>(ax::mojom::Event::kMaxValue) + 1;
+  std::array<int, kNumEvents> ax_event_counts_;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_MENU_TEST_BASE_H_

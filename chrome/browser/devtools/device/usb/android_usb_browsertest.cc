@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,15 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/containers/queue.h"
+#include "base/containers/span.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/devtools/device/adb/mock_adb_server.h"
 #include "chrome/browser/devtools/device/devtools_android_bridge.h"
@@ -26,7 +28,11 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/device/public/cpp/test/fake_usb_device.h"
 #include "services/device/public/cpp/test/fake_usb_device_info.h"
 #include "services/device/public/cpp/test/fake_usb_device_manager.h"
@@ -133,16 +139,12 @@ UsbConfigurationInfoPtr ConstructAndroidConfig(uint8_t class_code,
 class FakeAndroidUsbDeviceInfo : public FakeUsbDeviceInfo {
  public:
   explicit FakeAndroidUsbDeviceInfo(bool is_broken)
-      : FakeUsbDeviceInfo(0x0200,  // usb_version
-                          0,       // device_class
-                          0,       // device_subclass
-                          0,       // device_protocol
-                          0,       // vendor_id
-                          0,       // product_id
-                          0x0100,  // device_version
+      : FakeUsbDeviceInfo(/*vendor_id=*/0,
+                          /*product_id=*/0,
                           kDeviceManufacturer,
                           kDeviceModel,
-                          kDeviceSerial),
+                          kDeviceSerial,
+                          std::vector<UsbConfigurationInfoPtr>()),
         broken_traits_(is_broken) {}
 
   bool broken_traits() const { return broken_traits_; }
@@ -204,21 +206,25 @@ class MockLocalSocket : public MockAndroidConnection::Delegate {
 
 class FakeAndroidUsbDevice : public FakeUsbDevice {
  public:
-  static void Create(scoped_refptr<FakeUsbDeviceInfo> device_info,
-                     device::mojom::UsbDeviceRequest request,
-                     device::mojom::UsbDeviceClientPtr client) {
+  static void Create(
+      scoped_refptr<FakeUsbDeviceInfo> device_info,
+      mojo::PendingReceiver<device::mojom::UsbDevice> receiver,
+      mojo::PendingRemote<device::mojom::UsbDeviceClient> client) {
     auto* device_object =
         new FakeAndroidUsbDevice(device_info, std::move(client));
-    device_object->binding_ = mojo::MakeStrongBinding(
-        base::WrapUnique(device_object), std::move(request));
+    device_object->receiver_ = mojo::MakeSelfOwnedReceiver(
+        base::WrapUnique(device_object), std::move(receiver));
   }
 
   ~FakeAndroidUsbDevice() override = default;
 
  protected:
-  FakeAndroidUsbDevice(scoped_refptr<FakeUsbDeviceInfo> device,
-                       device::mojom::UsbDeviceClientPtr client)
-      : FakeUsbDevice(device, std::move(client)) {
+  FakeAndroidUsbDevice(
+      scoped_refptr<FakeUsbDeviceInfo> device,
+      mojo::PendingRemote<device::mojom::UsbDeviceClient> client)
+      : FakeUsbDevice(device,
+                      /*blocked_interface_classes=*/{},
+                      std::move(client)) {
     broken_traits_ =
         static_cast<FakeAndroidUsbDeviceInfo*>(device.get())->broken_traits();
   }
@@ -233,7 +239,7 @@ class FakeAndroidUsbDevice : public FakeUsbDevice {
   }
 
   void GenericTransferOut(uint8_t endpoint_number,
-                          const std::vector<uint8_t>& buffer,
+                          base::span<const uint8_t> buffer,
                           uint32_t timeout,
                           GenericTransferOutCallback callback) override {
     if (remaining_body_length_ == 0) {
@@ -420,11 +426,14 @@ class FakeAndroidUsbManager : public FakeUsbDeviceManager {
   FakeAndroidUsbManager() = default;
   ~FakeAndroidUsbManager() override = default;
 
-  void GetDevice(const std::string& guid,
-                 device::mojom::UsbDeviceRequest device_request,
-                 device::mojom::UsbDeviceClientPtr device_client) override {
+  void GetDevice(
+      const std::string& guid,
+      const std::vector<uint8_t>& blocked_interface_classes,
+      mojo::PendingReceiver<device::mojom::UsbDevice> device_receiver,
+      mojo::PendingRemote<device::mojom::UsbDeviceClient> device_client)
+      override {
     DCHECK(base::Contains(devices(), guid));
-    FakeAndroidUsbDevice::Create(devices()[guid], std::move(device_request),
+    FakeAndroidUsbDevice::Create(devices()[guid], std::move(device_receiver),
                                  std::move(device_client));
   }
 };
@@ -472,18 +481,18 @@ class FakeUsbManagerForCheckingTraits : public FakeAndroidUsbManager {
 class DevToolsAndroidBridgeWarmUp
     : public DevToolsAndroidBridge::DeviceCountListener {
  public:
-  DevToolsAndroidBridgeWarmUp(base::Closure closure,
+  DevToolsAndroidBridgeWarmUp(base::OnceClosure closure,
                               DevToolsAndroidBridge* adb_bridge)
-      : closure_(closure), adb_bridge_(adb_bridge) {}
+      : closure_(std::move(closure)), adb_bridge_(adb_bridge) {}
   ~DevToolsAndroidBridgeWarmUp() override = default;
 
   void DeviceCountChanged(int count) override {
     adb_bridge_->RemoveDeviceCountListener(this);
-    closure_.Run();
+    std::move(closure_).Run();
   }
 
  private:
-  base::Closure closure_;
+  base::OnceClosure closure_;
   DevToolsAndroidBridge* adb_bridge_;
 };
 
@@ -496,10 +505,9 @@ class AndroidUsbDiscoveryTest : public InProcessBrowserTest {
     adb_bridge_ =
         DevToolsAndroidBridge::Factory::GetForProfile(browser()->profile());
     DCHECK(adb_bridge_);
-    adb_bridge_->set_task_scheduler_for_test(base::Bind(
+    adb_bridge_->set_task_scheduler_for_test(base::BindRepeating(
         &AndroidUsbDiscoveryTest::ScheduleDeviceCountRequest,
         base::Unretained(this)));
-
 
     AndroidDeviceManager::DeviceProviders providers;
     providers.push_back(
@@ -510,15 +518,15 @@ class AndroidUsbDiscoveryTest : public InProcessBrowserTest {
     // Set a fake USB device manager for AndroidUsbDevice.
     usb_manager_ = CreateFakeUsbManager();
     DCHECK(usb_manager_);
-    device::mojom::UsbDeviceManagerPtrInfo manager_ptr_info;
-    usb_manager_->AddBinding(mojo::MakeRequest(&manager_ptr_info));
-    adb_bridge_->set_usb_device_manager_for_test(std::move(manager_ptr_info));
+    mojo::PendingRemote<device::mojom::UsbDeviceManager> manager;
+    usb_manager_->AddReceiver(manager.InitWithNewPipeAndPassReceiver());
+    adb_bridge_->set_usb_device_manager_for_test(std::move(manager));
   }
 
-  void ScheduleDeviceCountRequest(const base::Closure& request) {
+  void ScheduleDeviceCountRequest(base::OnceClosure request) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     scheduler_invoked_++;
-    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI}, request);
+    content::GetUIThreadTaskRunner({})->PostTask(FROM_HERE, std::move(request));
   }
 
   virtual std::unique_ptr<FakeUsbDeviceManager> CreateFakeUsbManager() {
@@ -585,10 +593,8 @@ class AndroidNoConfigUsbTest : public AndroidUsbDiscoveryTest {
 class MockListListener : public DevToolsAndroidBridge::DeviceListListener {
  public:
   MockListListener(DevToolsAndroidBridge* adb_bridge,
-                   const base::Closure& callback)
-      : adb_bridge_(adb_bridge),
-        callback_(callback) {
-  }
+                   base::OnceClosure callback)
+      : adb_bridge_(adb_bridge), callback_(std::move(callback)) {}
   ~MockListListener() override = default;
 
   void DeviceListChanged(
@@ -598,14 +604,14 @@ class MockListListener : public DevToolsAndroidBridge::DeviceListListener {
         ASSERT_EQ(kDeviceModel, device->model());
         ASSERT_EQ(kDeviceSerial, device->serial());
         adb_bridge_->RemoveDeviceListListener(this);
-        callback_.Run();
+        std::move(callback_).Run();
         break;
       }
     }
   }
 
   DevToolsAndroidBridge* adb_bridge_;
-  base::Closure callback_;
+  base::OnceClosure callback_;
 };
 
 class MockCountListener : public DevToolsAndroidBridge::DeviceCountListener {

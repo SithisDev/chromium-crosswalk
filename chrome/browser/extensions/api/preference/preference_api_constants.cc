@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,5 +26,8 @@ const char kPermissionErrorMessage[] =
     "You do not have permission to access the preference '*'. "
     "Be sure to declare in your manifest what permissions you need.";
 
-}  // preference_api_constants
-}  // extensions
+const char kPrimaryProfileOnlyErrorMessage[] =
+    "You may only access the preference '*' in the primary profile.";
+
+}  // namespace preference_api_constants
+}  // namespace extensions

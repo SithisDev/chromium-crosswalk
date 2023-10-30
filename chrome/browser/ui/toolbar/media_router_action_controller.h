@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,14 @@
 
 #include <vector>
 
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/media/router/issues_observer.h"
-#include "chrome/browser/media/router/media_routes_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/toolbar/media_router_contextual_menu.h"
+#include "components/media_router/browser/issues_observer.h"
+#include "components/media_router/browser/media_routes_observer.h"
 #include "components/prefs/pref_change_registrar.h"
 
 // Controller for the Cast toolbar icon that determines when to show and hide
@@ -44,6 +46,11 @@ class MediaRouterActionController : public media_router::IssuesObserver,
   // Constructor for injecting dependencies in tests.
   MediaRouterActionController(Profile* profile,
                               media_router::MediaRouter* router);
+
+  MediaRouterActionController(const MediaRouterActionController&) = delete;
+  MediaRouterActionController& operator=(const MediaRouterActionController&) =
+      delete;
+
   ~MediaRouterActionController() override;
 
   // Whether the media router action is shown by an administrator policy.
@@ -59,9 +66,8 @@ class MediaRouterActionController : public media_router::IssuesObserver,
   void OnIssuesCleared() override;
 
   // media_router::MediaRoutesObserver:
-  void OnRoutesUpdated(const std::vector<media_router::MediaRoute>& routes,
-                       const std::vector<media_router::MediaRoute::Id>&
-                           joinable_route_ids) override;
+  void OnRoutesUpdated(
+      const std::vector<media_router::MediaRoute>& routes) override;
 
   // Called when a Media Router dialog is shown or hidden, and updates the
   // visibility of the action icon. Overridden in tests.
@@ -72,12 +78,12 @@ class MediaRouterActionController : public media_router::IssuesObserver,
   void OnContextMenuShown() override;
   void OnContextMenuHidden() override;
 
-  // On Windows, when the user right-clicks on the toolbar icon, the context
-  // menu appears on mouse release. Since the dialog, if shown, disappears on
-  // mouse press, we need to make sure that the icon does not get hidden between
-  // mouse press and mouse release. These methods ensure that.
-  void KeepIconOnRightMousePressed();
-  void MaybeHideIconOnRightMouseReleased();
+  // On Windows (with a right click) and Chrome OS (with touch), pressing the
+  // toolbar icon makes the dialog disappear, but the context menu does not
+  // appear until mouse/touch release. These methods ensure that the icon is
+  // still shown at mouse/touch release so that the context menu can be shown.
+  void KeepIconShownOnPressed();
+  void MaybeHideIconOnReleased();
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -89,7 +95,7 @@ class MediaRouterActionController : public media_router::IssuesObserver,
  private:
   friend class MediaRouterActionControllerUnitTest;
   FRIEND_TEST_ALL_PREFIXES(MediaRouterActionControllerUnitTest,
-                           EphemeralIconForRoutesAndIssues);
+                           EphemeralIconForIssues);
   FRIEND_TEST_ALL_PREFIXES(MediaRouterActionControllerUnitTest,
                            EphemeralIconForDialog);
 
@@ -99,7 +105,7 @@ class MediaRouterActionController : public media_router::IssuesObserver,
 
   // The profile |this| is associated with. There should be one instance of this
   // class per profile.
-  Profile* const profile_;
+  const raw_ptr<Profile> profile_;
 
   bool has_issue_ = false;
   bool has_local_display_route_ = false;
@@ -114,20 +120,18 @@ class MediaRouterActionController : public media_router::IssuesObserver,
   // should not be hidden while a context menu is shown.
   bool context_menu_shown_ = false;
 
-  // Whether the right mouse button is pressed on the toolbar icon. On Windows,
-  // when the user right clicks on the toolbar icon, the dialog gets hidden on
-  // mouse press, and the context menu gets shown on mouse release. If the icon
-  // is ephemeral, it gets hidden on mouse press and can't show the context
-  // menu. So we must keep the icon shown while right mouse button is pressed.
-  bool keep_visible_for_right_mouse_button_ = false;
+  // On Windows (with the right mouse button) and on Chrome OS (with touch),
+  // when the user presses the toolbar icon, the dialog gets hidden, but the
+  // context menu is not shown until mouse/touch release. If the icon is
+  // ephemeral, it gets hidden on press and can't show the context menu. So we
+  // must keep the icon shown while the right click or touch is held.
+  bool keep_visible_for_right_click_or_hold_ = false;
 
   PrefChangeRegistrar pref_change_registrar_;
 
   base::ObserverList<Observer>::Unchecked observers_;
 
   base::WeakPtrFactory<MediaRouterActionController> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MediaRouterActionController);
 };
 
 #endif  // CHROME_BROWSER_UI_TOOLBAR_MEDIA_ROUTER_ACTION_CONTROLLER_H_

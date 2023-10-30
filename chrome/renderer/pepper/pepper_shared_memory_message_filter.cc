@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "content/public/renderer/pepper_plugin_instance.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
-#include "mojo/public/cpp/base/shared_memory_utils.h"
 #include "ppapi/host/ppapi_host.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/var_tracker.h"
@@ -46,7 +45,7 @@ void PepperSharedMemoryMessageFilter::OnHostMsgCreateSharedMemory(
   plugin_handle->set_null_shmem_region();
   *host_handle_id = -1;
   base::UnsafeSharedMemoryRegion shm =
-      mojo::CreateUnsafeSharedMemoryRegion(size);
+      base::UnsafeSharedMemoryRegion::Create(size);
   if (!shm.IsValid())
     return;
 

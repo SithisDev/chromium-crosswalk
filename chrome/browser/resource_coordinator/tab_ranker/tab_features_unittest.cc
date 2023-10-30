@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "chrome/browser/resource_coordinator/tab_ranker/tab_features.h"
@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/metrics/metrics_hashes.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/resource_coordinator/tab_ranker/tab_features_test_helper.h"
 #include "components/assist_ranker/proto/ranker_example.pb.h"
 #include "components/ukm/test_ukm_recorder.h"
@@ -99,7 +99,7 @@ TEST(TabFeaturesTest, PopulateTabFeaturesToRankerExample) {
 // correctly.
 TEST(TabFeaturesTest, PopulateTabFeaturesToUkmEntry) {
   // Sets up the task scheduling/task-runner environment for each test.
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::TaskEnvironment task_environment;
   // Sets itself as the global UkmRecorder on construction.
   ukm::TestAutoSetUkmRecorder test_ukm_recorder;
 

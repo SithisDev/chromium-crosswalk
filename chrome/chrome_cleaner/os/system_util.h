@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,44 +7,18 @@
 
 #include <windows.h>
 
+#include <string>
 #include <vector>
 
-#include "base/strings/string16.h"
-#include "base/win/scoped_handle.h"
-#include "base/win/wincrypt_shim.h"
 #include "chrome/chrome_cleaner/os/scoped_service_handle.h"
 
 namespace chrome_cleaner {
 
-// Enumerate the contexts of the given certificate store.
-class CertificateEnumerator {
- public:
-  explicit CertificateEnumerator(HCERTSTORE store_handle) {
-    store_handle_ = store_handle;
-  }
-
-  ~CertificateEnumerator() {
-    if (context_)
-      ::CertFreeCertificateContext(context_);
-  }
-
-  bool Next() {
-    context_ = ::CertEnumCertificatesInStore(store_handle_, context_);
-    return context_ != nullptr;
-  }
-
-  PCCERT_CONTEXT context() const { return context_; }
-
- private:
-  HCERTSTORE store_handle_;
-  PCCERT_CONTEXT context_ = nullptr;
-};
-
 // Based on ENUM_SERVICE_STATUS_PROCESSW from
 // https://docs.microsoft.com/en-us/windows/desktop/api/winsvc/ns-winsvc-_enum_service_status_processw
 struct ServiceStatus {
-  base::string16 service_name;
-  base::string16 display_name;
+  std::wstring service_name;
+  std::wstring display_name;
   SERVICE_STATUS_PROCESS service_status_process;
 };
 

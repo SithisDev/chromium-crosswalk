@@ -1,27 +1,20 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//third_party/closure_compiler/compile_js.gni")
+import("//chrome/browser/resources/tools/build_webui.gni")
+import("//chrome/common/features.gni")
 
-js_type_check("closure_compile") {
-  deps = [
-    ":management_browser_proxy",
-    ":management_ui",
-  ]
-}
+assert(!is_android, "!is_android check failed")
 
-js_library("management_ui") {
-  deps = [
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js:i18n_behavior",
-    "//ui/webui/resources/js:load_time_data",
-    "//ui/webui/resources/js:web_ui_listener_behavior",
-  ]
-}
-
-js_library("management_browser_proxy") {
-  deps = [
-    "//ui/webui/resources/js:cr",
+build_webui("build") {
+  grd_prefix = "management"
+  static_files = [ "management.html" ]
+  web_component_files = [ "management_ui.ts" ]
+  non_web_component_files = [ "management_browser_proxy.ts" ]
+  icons_html_files = [ "icons.html" ]
+  ts_deps = [
+    "//third_party/polymer/v3_0:library",
+    "//ui/webui/resources:library",
   ]
 }

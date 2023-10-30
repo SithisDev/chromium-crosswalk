@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/media_galleries/chromeos/snapshot_file_details.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -29,7 +29,7 @@ namespace {
 uint32_t WriteDataChunkIntoSnapshotFileOnFileThread(
     const base::FilePath& snapshot_file_path,
     const std::string& data) {
-  return base::AppendToFile(snapshot_file_path, data.c_str(), data.size())
+  return base::AppendToFile(snapshot_file_path, data)
              ? base::checked_cast<uint32_t>(data.size())
              : 0;
 }
@@ -37,8 +37,7 @@ uint32_t WriteDataChunkIntoSnapshotFileOnFileThread(
 }  // namespace
 
 MTPReadFileWorker::MTPReadFileWorker(const std::string& device_handle)
-    : device_handle_(device_handle),
-      weak_ptr_factory_(this) {
+    : device_handle_(device_handle) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(!device_handle_.empty());
 }
@@ -47,11 +46,11 @@ MTPReadFileWorker::~MTPReadFileWorker() {
 }
 
 void MTPReadFileWorker::WriteDataIntoSnapshotFile(
-    const SnapshotRequestInfo& request_info,
+    SnapshotRequestInfo request_info,
     const base::File::Info& snapshot_file_info) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  ReadDataChunkFromDeviceFile(
-      std::make_unique<SnapshotFileDetails>(request_info, snapshot_file_info));
+  ReadDataChunkFromDeviceFile(std::make_unique<SnapshotFileDetails>(
+      std::move(request_info), snapshot_file_info));
 }
 
 void MTPReadFileWorker::ReadDataChunkFromDeviceFile(
@@ -66,13 +65,12 @@ void MTPReadFileWorker::ReadDataChunkFromDeviceFile(
   auto* mtp_device_manager =
       StorageMonitor::GetInstance()->media_transfer_protocol_manager();
   mtp_device_manager->ReadFileChunk(
-      device_handle_,
-      snapshot_file_details_ptr->file_id(),
+      device_handle_, snapshot_file_details_ptr->file_id(),
       snapshot_file_details_ptr->bytes_written(),
       snapshot_file_details_ptr->BytesToRead(),
-      base::Bind(&MTPReadFileWorker::OnDidReadDataChunkFromDeviceFile,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(&snapshot_file_details)));
+      base::BindOnce(&MTPReadFileWorker::OnDidReadDataChunkFromDeviceFile,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     std::move(snapshot_file_details)));
 }
 
 void MTPReadFileWorker::OnDidReadDataChunkFromDeviceFile(
@@ -91,13 +89,13 @@ void MTPReadFileWorker::OnDidReadDataChunkFromDeviceFile(
   // To avoid calling |snapshot_file_details| methods and passing ownership of
   // |snapshot_file_details| in the same_line.
   SnapshotFileDetails* snapshot_file_details_ptr = snapshot_file_details.get();
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-      base::Bind(&WriteDataChunkIntoSnapshotFileOnFileThread,
-                 snapshot_file_details_ptr->snapshot_file_path(), data),
-      base::Bind(&MTPReadFileWorker::OnDidWriteDataChunkIntoSnapshotFile,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(&snapshot_file_details)));
+      base::BindOnce(&WriteDataChunkIntoSnapshotFileOnFileThread,
+                     snapshot_file_details_ptr->snapshot_file_path(), data),
+      base::BindOnce(&MTPReadFileWorker::OnDidWriteDataChunkIntoSnapshotFile,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     std::move(snapshot_file_details)));
 }
 
 void MTPReadFileWorker::OnDidWriteDataChunkIntoSnapshotFile(
@@ -122,15 +120,13 @@ void MTPReadFileWorker::OnDidWriteIntoSnapshotFile(
   DCHECK(snapshot_file_details.get());
 
   if (snapshot_file_details->error_occurred()) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::IO},
-        base::BindOnce(snapshot_file_details->error_callback(),
-                       base::File::FILE_ERROR_FAILED));
+    content::GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(snapshot_file_details->error_callback(),
+                                  base::File::FILE_ERROR_FAILED));
     return;
   }
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::IO},
-      base::BindOnce(snapshot_file_details->success_callback(),
-                     snapshot_file_details->file_info(),
-                     snapshot_file_details->snapshot_file_path()));
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(snapshot_file_details->success_callback(),
+                                snapshot_file_details->file_info(),
+                                snapshot_file_details->snapshot_file_path()));
 }

@@ -1,27 +1,37 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/raw_ptr.h"
+#include "chrome/browser/favicon/favicon_utils.h"
 #include "chrome/browser/ui/bookmarks/bookmark_drag_drop.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop_current.h"
+#include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
+#include "base/scoped_observation.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/current_thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/color/chrome_color_id.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/grit/platform_locale_settings.h"
 #include "components/bookmarks/browser/base_bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node_data.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom-shared.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/color/color_id.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/font.h"
@@ -53,17 +63,13 @@ class BookmarkDragImageSource : public gfx::CanvasImageSource {
   static constexpr int kContainerWidth = 172;
   static constexpr int kContainerHeight = 40;
   static constexpr int kContainerRadius = kContainerHeight / 2;
-  static constexpr SkColor kContainerColor = gfx::kGoogleBlue500;
 
   static constexpr int kIconContainerRadius = 12;
   static constexpr int kIconSize = 16;
-  static constexpr SkColor kIconContainerColor = SK_ColorWHITE;
-
   static constexpr int kTitlePadding = 12;
 
   static constexpr int kCountPadding = 5;
   static constexpr int kCountContainerRadius = 12;
-  static constexpr SkColor kCountContainerColor = gfx::kGoogleRed500;
 
   static constexpr gfx::Size kBookmarkDragImageSize =
       gfx::Size(kContainerWidth, kContainerHeight + kCountContainerRadius);
@@ -71,10 +77,12 @@ class BookmarkDragImageSource : public gfx::CanvasImageSource {
   static constexpr int kDragImageOffsetX = kContainerWidth / 2;
   static constexpr int kDragImageOffsetY = 0.9 * kContainerHeight;
 
-  BookmarkDragImageSource(const base::string16& title,
+  BookmarkDragImageSource(const ui::ColorProvider& color_provider,
+                          const std::u16string& title,
                           const gfx::ImageSkia& icon,
                           size_t count)
       : gfx::CanvasImageSource(kBookmarkDragImageSize),
+        color_provider_(color_provider),
         title_(title),
         icon_(icon),
         count_(count) {}
@@ -88,11 +96,13 @@ class BookmarkDragImageSource : public gfx::CanvasImageSource {
     // Draw background.
     gfx::RectF container_rect(0, kCountContainerRadius, kContainerWidth,
                               kContainerHeight);
-    paint_flags.setColor(kContainerColor);
+    paint_flags.setColor(
+        color_provider_.GetColor(kColorBookmarkDragImageBackground));
     canvas->DrawRoundRect(container_rect, kContainerRadius, paint_flags);
 
     // Draw icon container.
-    paint_flags.setColor(kIconContainerColor);
+    paint_flags.setColor(
+        color_provider_.GetColor(kColorBookmarkDragImageIconBackground));
     canvas->DrawCircle(
         gfx::PointF(kContainerRadius, kContainerRadius + kCountContainerRadius),
         kIconContainerRadius, paint_flags);
@@ -106,21 +116,26 @@ class BookmarkDragImageSource : public gfx::CanvasImageSource {
     gfx::FontList font_list = views::style::GetFont(
         views::style::CONTEXT_LABEL, views::style::STYLE_PRIMARY);
     gfx::Rect text_rect(kBookmarkDragImageSize);
-    text_rect.Inset(kContainerRadius + kIconContainerRadius + kTitlePadding,
-                    kCountContainerRadius,
-                    kContainerRadius - kIconContainerRadius, 0);
-    canvas->DrawStringRectWithFlags(title_, font_list, SK_ColorWHITE, text_rect,
-                                    gfx::Canvas::TEXT_ALIGN_LEFT);
+    text_rect.Inset(gfx::Insets::TLBR(
+        kCountContainerRadius,
+        kContainerRadius + kIconContainerRadius + kTitlePadding, 0,
+        kContainerRadius - kIconContainerRadius));
+    canvas->DrawStringRectWithFlags(
+        title_, font_list,
+        color_provider_.GetColor(kColorBookmarkDragImageForeground), text_rect,
+        gfx::Canvas::TEXT_ALIGN_LEFT);
 
     if (count_ <= 1)
       return;
 
     // Draw bookmark count if more than 1 bookmark is dragged.
-    base::string16 count = base::NumberToString16(count_);
-    auto render_text = gfx::RenderText::CreateFor(gfx::Typesetter::BROWSER);
+    std::u16string count = base::NumberToString16(count_);
+    std::unique_ptr<gfx::RenderText> render_text =
+        gfx::RenderText::CreateRenderText();
     render_text->SetFontList(font_list);
     render_text->SetCursorEnabled(false);
-    render_text->SetColor(SK_ColorWHITE);
+    render_text->SetColor(
+        color_provider_.GetColor(kColorBookmarkDragImageCountForeground));
     render_text->SetText(count);
     render_text->SetHorizontalAlignment(gfx::ALIGN_CENTER);
 
@@ -134,7 +149,8 @@ class BookmarkDragImageSource : public gfx::CanvasImageSource {
     gfx::Rect count_container_rect(
         container_rect.right() - count_container_width, 0,
         count_container_width, kCountContainerRadius * 2);
-    paint_flags.setColor(kCountContainerColor);
+    paint_flags.setColor(
+        color_provider_.GetColor(kColorBookmarkDragImageCountBackground));
     canvas->DrawRoundRect(gfx::RectF(count_container_rect),
                           kCountContainerRadius, paint_flags);
 
@@ -143,7 +159,8 @@ class BookmarkDragImageSource : public gfx::CanvasImageSource {
     render_text->Draw(canvas);
   }
 
-  const base::string16 title_;
+  const ui::ColorProvider& color_provider_;
+  const std::u16string title_;
   const gfx::ImageSkia icon_;
   const int count_;
 };
@@ -155,6 +172,9 @@ constexpr gfx::Size BookmarkDragImageSource::kBookmarkDragImageSize;
 // Owns itself.
 class BookmarkDragHelper : public bookmarks::BaseBookmarkModelObserver {
  public:
+  BookmarkDragHelper(const BookmarkDragHelper&) = delete;
+  BookmarkDragHelper& operator=(const BookmarkDragHelper&) = delete;
+
   static base::WeakPtr<BookmarkDragHelper> Create(
       Profile* profile,
       const BookmarkDragParams& params,
@@ -162,6 +182,7 @@ class BookmarkDragHelper : public bookmarks::BaseBookmarkModelObserver {
     base::WeakPtr<BookmarkDragHelper> ptr =
         (new BookmarkDragHelper(profile, params, std::move(do_drag_callback)))
             ->GetWeakPtr();
+
     ptr->Start(params.nodes.at(params.drag_node_index));
     return ptr;
   }
@@ -172,13 +193,12 @@ class BookmarkDragHelper : public bookmarks::BaseBookmarkModelObserver {
                      DoBookmarkDragCallback do_drag_callback)
       : model_(BookmarkModelFactory::GetForBrowserContext(profile)),
         count_(params.nodes.size()),
-        native_view_(params.view),
+        web_contents_(params.web_contents->GetWeakPtr()),
         source_(params.source),
         start_point_(params.start_point),
         do_drag_callback_(std::move(do_drag_callback)),
-        drag_data_(std::make_unique<ui::OSExchangeData>()),
-        observer_(this) {
-    observer_.Add(model_);
+        drag_data_(std::make_unique<ui::OSExchangeData>()) {
+    observation_.Observe(model_.get());
 
     // Set up our OLE machinery.
     bookmarks::BookmarkNodeData bookmark_drag_data(params.nodes);
@@ -192,7 +212,7 @@ class BookmarkDragHelper : public bookmarks::BaseBookmarkModelObserver {
   void Start(const BookmarkNode* drag_node) {
     drag_node_id_ = drag_node->id();
 
-    gfx::ImageSkia icon;
+    ui::ImageModel icon;
     if (drag_node->is_url()) {
       const gfx::Image& image = model_->GetFavicon(drag_node);
       // If favicon is not loaded, the above call will initiate loading, and
@@ -203,37 +223,42 @@ class BookmarkDragHelper : public bookmarks::BaseBookmarkModelObserver {
       if (!drag_node->is_favicon_loaded())
         return;
 
-      icon = image.AsImageSkia();
+      icon = ui::ImageModel::FromImage(image);
     } else {
-      icon = GetBookmarkFolderIcon(
-          ui::NativeTheme::GetInstanceForNativeUi()->GetSystemColor(
-              ui::NativeTheme::kColorId_LabelEnabledColor));
+      icon = GetBookmarkFolderIcon(chrome::BookmarkFolderIconType::kNormal,
+                                   ui::kColorMenuIcon);
     }
 
     OnBookmarkIconLoaded(drag_node, icon);
   }
 
   void OnBookmarkIconLoaded(const BookmarkNode* drag_node,
-                            const gfx::ImageSkia& icon) {
-    gfx::ImageSkia drag_image(
-        std::make_unique<BookmarkDragImageSource>(
-            drag_node->GetTitle(),
-            icon.isNull()
-                ? *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-                      IDR_DEFAULT_FAVICON)
-                : icon,
-            count_),
-        BookmarkDragImageSource::kBookmarkDragImageSize);
+                            const ui::ImageModel& icon) {
+    auto weak_this = GetWeakPtr();
+    if (web_contents_) {
+      const auto& color_provider = web_contents_->GetColorProvider();
+      gfx::ImageSkia drag_image(
+          std::make_unique<BookmarkDragImageSource>(
+              color_provider, drag_node->GetTitle(),
+              icon.IsEmpty() ? favicon::GetDefaultFavicon().AsImageSkia()
+                             : icon.Rasterize(&color_provider),
+              count_),
+          BookmarkDragImageSource::kBookmarkDragImageSize);
 
-    drag_data_->provider().SetDragImage(
-        drag_image, gfx::Vector2d(BookmarkDragImageSource::kDragImageOffsetX,
-                                  BookmarkDragImageSource::kDragImageOffsetY));
+      drag_data_->provider().SetDragImage(
+          drag_image,
+          gfx::Vector2d(BookmarkDragImageSource::kDragImageOffsetX,
+                        BookmarkDragImageSource::kDragImageOffsetY));
 
-    std::move(do_drag_callback_)
-        .Run(std::move(drag_data_), native_view_, source_, start_point_,
-             operation_);
+      std::move(do_drag_callback_)
+          .Run(std::move(drag_data_), web_contents_->GetNativeView(), source_,
+               start_point_, operation_);
+    }
 
-    delete this;
+    // The Run() call above could have spun a nested message loop resulting in
+    // our deletion.  Be sure to avoid double-free.
+    if (weak_this)
+      delete this;
   }
 
   base::WeakPtr<BookmarkDragHelper> GetWeakPtr() {
@@ -250,18 +275,19 @@ class BookmarkDragHelper : public bookmarks::BaseBookmarkModelObserver {
     if (node->id() != drag_node_id_)
       return;
 
-    const gfx::Image& image = model_->GetFavicon(node);
+    const ui::ImageModel& image =
+        ui::ImageModel::FromImage(model_->GetFavicon(node));
     DCHECK(node->is_favicon_loaded());
 
-    OnBookmarkIconLoaded(node, image.AsImageSkia());
+    OnBookmarkIconLoaded(node, image);
   }
 
-  BookmarkModel* model_;
+  raw_ptr<BookmarkModel> model_;
 
   int64_t drag_node_id_ = -1;
   int count_;
-  gfx::NativeView native_view_;
-  ui::DragDropTypes::DragEventSource source_;
+  base::WeakPtr<content::WebContents> web_contents_;
+  ui::mojom::DragEventSource source_;
   const gfx::Point start_point_;
   int operation_;
 
@@ -269,21 +295,20 @@ class BookmarkDragHelper : public bookmarks::BaseBookmarkModelObserver {
 
   std::unique_ptr<ui::OSExchangeData> drag_data_;
 
-  ScopedObserver<bookmarks::BookmarkModel, bookmarks::BookmarkModelObserver>
-      observer_;
+  base::ScopedObservation<bookmarks::BookmarkModel,
+                          bookmarks::BookmarkModelObserver>
+      observation_{this};
 
   base::WeakPtrFactory<BookmarkDragHelper> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BookmarkDragHelper);
 };
 
 void DoDragImpl(std::unique_ptr<ui::OSExchangeData> drag_data,
                 gfx::NativeView native_view,
-                ui::DragDropTypes::DragEventSource source,
+                ui::mojom::DragEventSource source,
                 gfx::Point point,
                 int operation) {
   // Allow nested run loop so we get DnD events as we drag this around.
-  base::MessageLoopCurrent::ScopedNestableTaskAllower nestable_task_allower;
+  base::CurrentThread::ScopedNestableTaskAllower nestable_task_allower;
 
   views::Widget* widget = views::Widget::GetWidgetForNativeView(native_view);
   if (widget) {

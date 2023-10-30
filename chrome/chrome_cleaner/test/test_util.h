@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 
 #include "base/files/scoped_temp_dir.h"
 #include "base/process/process.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
@@ -43,6 +42,12 @@ bool SetupTestConfigs();
 // Sets up all test configs, as SetupTestConfigs, using the given list of
 // |catalogs| instead of TestUwSCatalog.
 bool SetupTestConfigsWithCatalogs(const PUPData::UwSCatalogs& catalogs);
+
+// Launch Chrome Cleaner unit tests in the given test suite and given list of
+// UwSCatalogs. Returns the exit code.
+int RunChromeCleanerTestSuite(int argc,
+                              char** argv,
+                              const PUPData::UwSCatalogs& catalogs);
 
 // While this class is in scope, Rebooter::IsPostReboot will return true.
 class ScopedIsPostReboot {
@@ -86,7 +91,7 @@ class LoggingOverride {
 
 // Validate that the run once on restart registry value contains the given
 // |sub_string|.
-bool RunOnceCommandLineContains(const base::string16& product_shortname,
+bool RunOnceCommandLineContains(const std::wstring& product_shortname,
                                 const wchar_t* sub_string);
 
 // Validate that the run once on restart switch-containing registry value
@@ -103,7 +108,8 @@ bool RegisterTestTask(TaskScheduler* task_scheduler,
 // Append switches to the command line that is used to run cleaner or reporter
 // in tests. Switches will disable logs upload, profile reset and other side
 // effects.
-void AppendTestSwitches(base::CommandLine* command_line);
+void AppendTestSwitches(const base::ScopedTempDir& temp_dir,
+                        base::CommandLine* command_line);
 
 // Expect the |expected_path| to be found in expanded disk footprint of |pup|.
 void ExpectDiskFootprint(const PUPData::PUP& pup,
@@ -113,7 +119,7 @@ void ExpectDiskFootprint(const PUPData::PUP& pup,
 void ExpectScheduledTaskFootprint(const PUPData::PUP& pup,
                                   const wchar_t* task_name);
 
-// This function is the 8 bits version of String16ContainsCaseInsensitive in
+// This function is the 8 bits version of WStringContainsCaseInsensitive in
 // chrome_cleaner/string_util. Since it's only used in tests, we decided not to
 // move it to the main lib.
 bool StringContainsCaseInsensitive(const std::string& value,
@@ -146,12 +152,12 @@ class ScopedTempDirNoWow64 : protected base::ScopedTempDir {
 
   // Creates a unique subdirectory under system32, bypassing Wow64 redirection,
   // and takes ownership of it.
-  bool CreateUniqueSystem32TempDir() WARN_UNUSED_RESULT;
+  [[nodiscard]] bool CreateUniqueSystem32TempDir();
 
   // Convenience function to call CreateUniqueSystem32TempDir and create an
   // empty file with the given |file_name| in the resulting directory.
-  bool CreateEmptyFileInUniqueSystem32TempDir(const base::string16& file_name)
-      WARN_UNUSED_RESULT;
+  [[nodiscard]] bool CreateEmptyFileInUniqueSystem32TempDir(
+      const std::wstring& file_name);
 
   using base::ScopedTempDir::Delete;
   using base::ScopedTempDir::GetPath;
@@ -168,6 +174,13 @@ class ScopedTempDirNoWow64 : protected base::ScopedTempDir {
 // This function drops unneeded privileges if possible, but won't try to raise
 // privileges. Returns false if the privileges could not be made correct.
 bool CheckTestPrivileges();
+
+// On Windows, sometimes the copied files don't have correct ACLs.
+// So we reset ACL before running the test.
+// For debug, it will reset ucrtbased.dll. For release, it will reset
+// ucrtbase.dll.
+// See crbug.com/956016.
+bool ResetAclForUcrtbase();
 
 // Accepts PUPData::PUP parameters with id equals to |expected_id|.
 MATCHER_P(PupHasId, expected_id, "") {

@@ -1,23 +1,25 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/supervised_user/supervised_user_google_auth_navigation_throttle.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/supervised_user/child_accounts/child_account_service.h"
 #include "chrome/browser/supervised_user/child_accounts/child_account_service_factory.h"
 #include "components/google/core/common/google_util.h"
+#include "components/signin/public/base/consent_level.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/supervised_user/child_accounts/child_account_service_android.h"
 #endif
 
@@ -40,7 +42,7 @@ SupervisedUserGoogleAuthNavigationThrottle::
         content::NavigationHandle* navigation_handle)
     : content::NavigationThrottle(navigation_handle),
       child_account_service_(ChildAccountServiceFactory::GetForProfile(profile))
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
       ,
       has_shown_reauth_(false)
 #endif
@@ -66,6 +68,11 @@ const char* SupervisedUserGoogleAuthNavigationThrottle::GetNameForLogging() {
 
 content::NavigationThrottle::ThrottleCheckResult
 SupervisedUserGoogleAuthNavigationThrottle::WillStartOrRedirectRequest() {
+  // We do not yet support prerendering for supervised users.
+  if (navigation_handle()->IsInPrerenderedMainFrame()) {
+    return content::NavigationThrottle::CANCEL;
+  }
+
   const GURL& url = navigation_handle()->GetURL();
   if (!google_util::IsGoogleSearchUrl(url) &&
       !google_util::IsGoogleHomePageUrl(url) &&
@@ -79,9 +86,9 @@ SupervisedUserGoogleAuthNavigationThrottle::WillStartOrRedirectRequest() {
   if (result.action() == content::NavigationThrottle::DEFER) {
     google_auth_state_subscription_ =
         child_account_service_->ObserveGoogleAuthState(
-            base::Bind(&SupervisedUserGoogleAuthNavigationThrottle::
-                           OnGoogleAuthStateChanged,
-                       base::Unretained(this)));
+            base::BindRepeating(&SupervisedUserGoogleAuthNavigationThrottle::
+                                    OnGoogleAuthStateChanged,
+                                base::Unretained(this)));
   }
 
   return result;
@@ -92,7 +99,7 @@ void SupervisedUserGoogleAuthNavigationThrottle::OnGoogleAuthStateChanged() {
 
   switch (result.action()) {
     case content::NavigationThrottle::PROCEED: {
-      google_auth_state_subscription_.reset();
+      google_auth_state_subscription_ = {};
       Resume();
       break;
     }
@@ -122,12 +129,12 @@ SupervisedUserGoogleAuthNavigationThrottle::ShouldProceed() {
   if (authStatus == ChildAccountService::AuthState::PENDING)
     return content::NavigationThrottle::DEFER;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // A credentials re-mint is already underway when we reach here (Mirror
   // account reconciliation). Nothing to do here except block the navigation
   // while re-minting is underway.
   return content::NavigationThrottle::DEFER;
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
   if (!has_shown_reauth_) {
     has_shown_reauth_ = true;
 
@@ -135,12 +142,19 @@ SupervisedUserGoogleAuthNavigationThrottle::ShouldProceed() {
     Profile* profile =
         Profile::FromBrowserContext(web_contents->GetBrowserContext());
     auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
-    CoreAccountInfo account_info = identity_manager->GetPrimaryAccountInfo();
+    // This class doesn't care about browser sync consent.
+    CoreAccountInfo account_info =
+        identity_manager->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin);
+    if (account_info.IsEmpty()) {
+      // No primary account (can happen when it was removed from the device).
+      return content::NavigationThrottle::DEFER;
+    }
+
     ReauthenticateChildAccount(
         web_contents, account_info.email,
-        base::Bind(&SupervisedUserGoogleAuthNavigationThrottle::
-                       OnReauthenticationResult,
-                   weak_ptr_factory_.GetWeakPtr()));
+        base::BindRepeating(&SupervisedUserGoogleAuthNavigationThrottle::
+                                OnReauthenticationFailed,
+                            weak_ptr_factory_.GetWeakPtr()));
   }
   return content::NavigationThrottle::DEFER;
 #else
@@ -152,14 +166,7 @@ SupervisedUserGoogleAuthNavigationThrottle::ShouldProceed() {
 #endif
 }
 
-void SupervisedUserGoogleAuthNavigationThrottle::OnReauthenticationResult(
-    bool reauth_successful) {
-  if (reauth_successful) {
-    // If reauthentication was not successful, wait until the cookies are
-    // refreshed, which will call us back separately.
-    return;
-  }
-
-  // Otherwise cancel immediately.
+void SupervisedUserGoogleAuthNavigationThrottle::OnReauthenticationFailed() {
+  // Cancel the navifation if reauthentication failed.
   CancelDeferredNavigation(content::NavigationThrottle::CANCEL_AND_IGNORE);
 }

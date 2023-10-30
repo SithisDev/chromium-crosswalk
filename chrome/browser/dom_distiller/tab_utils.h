@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@ class WebContents;
 void DistillCurrentPageAndView(content::WebContents* old_web_contents);
 
 // Starts distillation in the |source_web_contents|. The viewer needs to be
-// created separatly.
+// created separately.
 void DistillCurrentPage(content::WebContents* source_web_contents);
 
 // Starts distillation in the |source_web_contents| while navigating the

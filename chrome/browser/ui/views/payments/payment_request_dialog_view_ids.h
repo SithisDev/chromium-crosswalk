@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,8 @@ namespace payments {
 
 enum class DialogViewID : int {
   VIEW_ID_NONE = autofill::MAX_VALID_FIELD_TYPE,
-  CONTENT_VIEW,  // The main content view filled by each sheet
+  CONTENT_VIEW,        // The main content view filled by each sheet
+  SECURITY_ICON_VIEW,  // The view indicates security state of the page
 
   // The following are views::Button (clickable).
   PAYMENT_SHEET_CONTACT_INFO_SECTION,

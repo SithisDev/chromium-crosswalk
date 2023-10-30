@@ -1,16 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/files/file_util.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
-#include "base/scoped_observer.h"
-#include "base/single_thread_task_runner.h"
+#include "base/run_loop.h"
+#include "base/scoped_observation.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "build/buildflag.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/background/background_contents_service_observer.h"
@@ -25,10 +30,11 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
+#include "components/embedder_support/switches.h"
 #include "components/nacl/common/buildflags.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/process_manager.h"
@@ -44,7 +50,7 @@
 #include "components/nacl/browser/nacl_process_host.h"
 #endif
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 
@@ -56,8 +62,14 @@ class BackgroundContentsCreationObserver
     : public BackgroundContentsServiceObserver {
  public:
   explicit BackgroundContentsCreationObserver(Profile* profile) {
-    observer_.Add(BackgroundContentsServiceFactory::GetForProfile(profile));
+    observation_.Observe(
+        BackgroundContentsServiceFactory::GetForProfile(profile));
   }
+
+  BackgroundContentsCreationObserver(
+      const BackgroundContentsCreationObserver&) = delete;
+  BackgroundContentsCreationObserver& operator=(
+      const BackgroundContentsCreationObserver&) = delete;
 
   ~BackgroundContentsCreationObserver() override = default;
 
@@ -72,10 +84,37 @@ class BackgroundContentsCreationObserver
   // The number of background contents that have been opened since creation.
   int opens_ = 0;
 
-  ScopedObserver<BackgroundContentsService, BackgroundContentsServiceObserver>
-      observer_{this};
+  base::ScopedObservation<BackgroundContentsService,
+                          BackgroundContentsServiceObserver>
+      observation_{this};
+};
 
-  DISALLOW_COPY_AND_ASSIGN(BackgroundContentsCreationObserver);
+class BackgroundContentsClosedObserver
+    : protected BackgroundContentsServiceObserver {
+ public:
+  explicit BackgroundContentsClosedObserver(Profile* profile) {
+    observation_.Observe(
+        BackgroundContentsServiceFactory::GetForProfile(profile));
+  }
+
+  BackgroundContentsClosedObserver(const BackgroundContentsClosedObserver&) =
+      delete;
+  BackgroundContentsClosedObserver& operator=(
+      const BackgroundContentsClosedObserver&) = delete;
+
+  ~BackgroundContentsClosedObserver() override = default;
+
+  void Wait() { run_loop_.Run(); }
+
+ protected:
+  void OnBackgroundContentsClosed() override { run_loop_.Quit(); }
+
+ private:
+  base::RunLoop run_loop_;
+
+  base::ScopedObservation<BackgroundContentsService,
+                          BackgroundContentsServiceObserver>
+      observation_{this};
 };
 
 }  // namespace
@@ -84,7 +123,7 @@ class AppBackgroundPageApiTest : public extensions::ExtensionApiTest {
  public:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     extensions::ExtensionApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kDisablePopupBlocking);
+    command_line->AppendSwitch(embedder_support::kDisablePopupBlocking);
     command_line->AppendSwitch(extensions::switches::kAllowHTTPBackgroundPage);
   }
 
@@ -144,8 +183,7 @@ namespace {
 // Native Client embeds.
 class AppBackgroundPageNaClTest : public AppBackgroundPageApiTest {
  public:
-  AppBackgroundPageNaClTest()
-      : extension_(NULL) {}
+  AppBackgroundPageNaClTest() : extension_(nullptr) {}
   ~AppBackgroundPageNaClTest() override {}
 
   void SetUpOnMainThread() override {
@@ -168,19 +206,14 @@ class AppBackgroundPageNaClTest : public AppBackgroundPageApiTest {
   }
 
  private:
-  const Extension* extension_;
+  raw_ptr<const Extension> extension_;
 };
 
 }  // namespace
 
-// Disable on Mac only.  http://crbug.com/95139
-#if defined(OS_MACOSX)
-#define MAYBE_Basic DISABLED_Basic
-#else
-#define MAYBE_Basic Basic
-#endif
-
-IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, MAYBE_Basic) {
+// This test is meaningless if background mode is not enabled.
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
+IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, Basic) {
   std::string app_manifest = base::StringPrintf(
       "{"
       "  \"name\": \"App\","
@@ -199,6 +232,7 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, MAYBE_Basic) {
       embedded_test_server()->port());
 
   base::FilePath app_dir;
+  BackgroundContentsClosedObserver closed_observer(browser()->profile());
   ASSERT_TRUE(CreateApp(app_manifest, &app_dir));
   ASSERT_TRUE(LoadExtension(app_dir));
   // Background mode should not be active until a background page is created.
@@ -206,11 +240,12 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, MAYBE_Basic) {
   ASSERT_TRUE(RunExtensionTest("app_background_page/basic")) << message_;
   // The test closes the background contents, so we should fall back to no
   // background mode at the end.
-  ASSERT_TRUE(VerifyBackgroundMode(false));
+  closed_observer.Wait();
+  EXPECT_TRUE(VerifyBackgroundMode(false));
 }
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
 
-// Crashy, http://crbug.com/69215.
-IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, DISABLED_LacksPermission) {
+IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, LacksPermission) {
   std::string app_manifest = base::StringPrintf(
       "{"
       "  \"name\": \"App\","
@@ -464,8 +499,7 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, OpenTwoPagesWithManifest) {
   UnloadExtension(extension->id());
 }
 
-// Times out occasionally -- see crbug.com/108493
-IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, DISABLED_OpenPopupFromBGPage) {
+IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, OpenPopupFromBGPage) {
   std::string app_manifest = base::StringPrintf(
       "{"
       "  \"name\": \"App\","
@@ -607,7 +641,8 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, UnloadExtensionWhileHidden) {
 IN_PROC_BROWSER_TEST_F(AppBackgroundPageNaClTest, BackgroundKeepaliveActive) {
   extensions::ProcessManager* manager =
       extensions::ProcessManager::Get(browser()->profile());
-  ExtensionTestMessageListener ready_listener("ready", true);
+  ExtensionTestMessageListener ready_listener("ready",
+                                              ReplyBehavior::kWillReply);
   LaunchTestingApp();
   EXPECT_TRUE(ready_listener.WaitUntilSatisfied());
 
@@ -625,7 +660,8 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageNaClTest, BackgroundKeepaliveActive) {
       manager->GetLazyKeepaliveActivities(extension());
   EXPECT_THAT(activities, testing::UnorderedElementsAre(api_activity));
 
-  ExtensionTestMessageListener created1_listener("created_module:1", true);
+  ExtensionTestMessageListener created1_listener("created_module:1",
+                                                 ReplyBehavior::kWillReply);
   ready_listener.Reply("create_module");
   EXPECT_TRUE(created1_listener.WaitUntilSatisfied());
 
@@ -636,7 +672,8 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageNaClTest, BackgroundKeepaliveActive) {
   EXPECT_THAT(activities,
               testing::UnorderedElementsAre(api_activity, pepper_api_activity));
 
-  ExtensionTestMessageListener created2_listener("created_module:2", true);
+  ExtensionTestMessageListener created2_listener("created_module:2",
+                                                 ReplyBehavior::kWillReply);
   created1_listener.Reply("create_module");
   EXPECT_TRUE(created2_listener.WaitUntilSatisfied());
 
@@ -649,10 +686,11 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageNaClTest, BackgroundKeepaliveActive) {
                                             pepper_api_activity));
 
   // Tear-down both modules.
-  ExtensionTestMessageListener destroyed1_listener("destroyed_module", true);
+  ExtensionTestMessageListener destroyed1_listener("destroyed_module",
+                                                   ReplyBehavior::kWillReply);
   created2_listener.Reply("destroy_module");
   EXPECT_TRUE(destroyed1_listener.WaitUntilSatisfied());
-  ExtensionTestMessageListener destroyed2_listener("destroyed_module", false);
+  ExtensionTestMessageListener destroyed2_listener("destroyed_module");
   destroyed1_listener.Reply("destroy_module");
   EXPECT_TRUE(destroyed2_listener.WaitUntilSatisfied());
 
@@ -661,20 +699,6 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageNaClTest, BackgroundKeepaliveActive) {
   EXPECT_EQ(0, manager->GetLazyKeepaliveCount(extension()));
   activities = manager->GetLazyKeepaliveActivities(extension());
   EXPECT_TRUE(activities.empty());
-}
-
-// Verify that we can create a NaCl module by adding the <embed> to the
-// background page, without having to e.g. touch emebed.lastError to
-// trigger the module to load.
-// Disabled due to http://crbug.com/371059.
-IN_PROC_BROWSER_TEST_F(AppBackgroundPageNaClTest, DISABLED_CreateNaClModule) {
-  ExtensionTestMessageListener ready_listener("ready", true);
-  LaunchTestingApp();
-  EXPECT_TRUE(ready_listener.WaitUntilSatisfied());
-
-  ExtensionTestMessageListener created_listener("created_module:1", false);
-  ready_listener.Reply("create_module_without_hack");
-  EXPECT_TRUE(created_listener.WaitUntilSatisfied());
 }
 
 #endif  //  BUILDFLAG(ENABLE_NACL)

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,6 +49,16 @@ TEST(CpuIdentityTest, DefaultCommandsBasedOnUarch_GoldmontPlus) {
   EXPECT_EQ("GoldmontPlus", GetCpuUarch(cpuid));
 }
 
+TEST(CpuIdentityTest, DefaultCommandsBasedOnUarch_Tigerlake) {
+  CPUIdentity cpuid;
+  cpuid.arch = "x86_64";
+  cpuid.vendor = "GenuineIntel";
+  cpuid.family = 0x06;
+  cpuid.model = 0x8c;  // Tiger Lake
+  cpuid.model_name = "";
+  EXPECT_EQ("Tigerlake", GetCpuUarch(cpuid));
+}
+
 TEST(CpuIdentityTest, DefaultCommandsBasedOnUarch_Excavator) {
   CPUIdentity cpuid;
   cpuid.arch = "x86_64";
@@ -75,6 +85,16 @@ TEST(CpuIdentityTest, DefaultCommandsBasedOnArch_Unknown) {
   cpuid.vendor = "NotIntelOrAmd";
   cpuid.family = 0;
   cpuid.model = 0;
+  cpuid.model_name = "";
+  EXPECT_EQ("", GetCpuUarch(cpuid));
+}
+
+TEST(CpuIdentityTest, DefaultCommandsBasedOnArch_UnknownUpperBound) {
+  CPUIdentity cpuid;
+  cpuid.arch = "x86_64";
+  cpuid.vendor = "GenuineIntel";
+  cpuid.family = 0xff;
+  cpuid.model = 0xff;
   cpuid.model_name = "";
   EXPECT_EQ("", GetCpuUarch(cpuid));
 }

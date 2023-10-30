@@ -1,9 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_COCOA_WINDOW_SIZE_AUTOSAVER_H_
 #define CHROME_BROWSER_UI_COCOA_WINDOW_SIZE_AUTOSAVER_H_
+
+#include "base/memory/raw_ptr.h"
 
 class PrefService;
 @class NSWindow;
@@ -21,14 +23,14 @@ class PrefService;
 // Note: Your xib file should have "Visible at launch" UNCHECKED, so that the
 // initial repositioning is not visible.
 @interface WindowSizeAutosaver : NSObject {
-  NSWindow* window_;  // weak
-  PrefService* prefService_;  // weak
-  const char* path_;
+  NSWindow* _window;  // weak
+  raw_ptr<PrefService> _prefService;  // weak
+  const char* _path;
 }
 
-- (id)initWithWindow:(NSWindow*)window
-         prefService:(PrefService*)prefs
-                path:(const char*)path;
+- (instancetype)initWithWindow:(NSWindow*)window
+                   prefService:(PrefService*)prefs
+                          path:(const char*)path;
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_WINDOW_SIZE_AUTOSAVER_H_

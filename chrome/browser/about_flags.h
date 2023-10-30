@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,15 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/containers/span.h"
 #include "base/metrics/histogram_base.h"
-#include "base/strings/string16.h"
+#include "base/values.h"
+#include "build/build_config.h"
 #include "components/flags_ui/feature_entry.h"
 #include "components/flags_ui/flags_state.h"
 
 namespace base {
 class FeatureList;
-class ListValue;
 }
 
 namespace flags_ui {
@@ -29,6 +30,10 @@ class FlagsStorage;
 }
 
 namespace about_flags {
+
+// Returns true if the FeatureEntry should not be shown.
+bool ShouldSkipConditionalFeatureEntry(const flags_ui::FlagsStorage* storage,
+                                       const flags_ui::FeatureEntry& entry);
 
 // Reads the state from |flags_storage| and adds the command line flags
 // belonging to the active feature entries to |command_line|.
@@ -46,22 +51,25 @@ std::vector<std::string> RegisterAllFeatureVariationParameters(
     flags_ui::FlagsStorage* flags_storage,
     base::FeatureList* feature_list);
 
-// Compares a set of switches of the two provided command line objects and
-// returns true if they are the same and false otherwise.
-// If |out_difference| is not NULL, it's filled with set_symmetric_difference
-// between sets.
-bool AreSwitchesIdenticalToCurrentCommandLine(
-    const base::CommandLine& new_cmdline,
-    const base::CommandLine& active_cmdline,
-    std::set<base::CommandLine::StringType>* out_difference);
-
 // Gets the list of feature entries. Entries that are available for the current
 // platform are appended to |supported_entries|; all other entries are appended
 // to |unsupported_entries|.
 void GetFlagFeatureEntries(flags_ui::FlagsStorage* flags_storage,
                            flags_ui::FlagAccess access,
-                           base::ListValue* supported_entries,
-                           base::ListValue* unsupported_entries);
+                           base::Value::List& supported_entries,
+                           base::Value::List& unsupported_entries);
+
+// Gets the list of feature entries for the deprecated flags page. Entries that
+// are available for the current platform are appended to |supported_entries|;
+// all other entries are appended to |unsupported_entries|.
+void GetFlagFeatureEntriesForDeprecatedPage(
+    flags_ui::FlagsStorage* flags_storage,
+    flags_ui::FlagAccess access,
+    base::Value::List& supported_entries,
+    base::Value::List& unsupported_entries);
+
+// Gets the FlagsState used in about_flags.
+flags_ui::FlagsState* GetCurrentFlagsState();
 
 // Returns true if one of the feature entry flags has been flipped since
 // startup.
@@ -90,28 +98,29 @@ void RemoveFlagsSwitches(base::CommandLine::SwitchMap* switch_list);
 // Reset all flags to the default state by clearing all flags.
 void ResetAllFlags(flags_ui::FlagsStorage* flags_storage);
 
+#if BUILDFLAG(IS_CHROMEOS)
+// Show flags of the other browser (Lacros/Ash).
+void CrosUrlFlagsRedirect();
+#endif
+
 // Sends UMA stats about experimental flag usage. This should be called once per
 // startup.
-void RecordUMAStatistics(flags_ui::FlagsStorage* flags_storage);
-
-// Returns the UMA id for the specified switch name.
-base::HistogramBase::Sample GetSwitchUMAId(const std::string& switch_name);
-
-// Sends stats (as UMA histogram) about a set of command line |flags| in
-// a histogram, with an enum value for each flag in |switches| and |features|,
-// based on the hash of the flag name.
-void ReportAboutFlagsHistogram(const std::string& uma_histogram_name,
-                               const std::set<std::string>& switches,
-                               const std::set<std::string>& features);
+void RecordUMAStatistics(flags_ui::FlagsStorage* flags_storage,
+                         const std::string& histogram_name);
 
 namespace testing {
 
-// Returns the global set of feature entries.
-const flags_ui::FeatureEntry* GetFeatureEntries(size_t* count);
+// This class sets the testing feature entries to the feature entries passed in
+// to Init. It clears the testing feature entries on destruction, so
+// the feature entries return to their non test values.
+class ScopedFeatureEntries final {
+ public:
+  explicit ScopedFeatureEntries(
+      const std::vector<flags_ui::FeatureEntry>& entries);
+  ~ScopedFeatureEntries();
+};
 
-// This value is reported as switch histogram ID if switch name has unknown
-// format.
-extern const base::HistogramBase::Sample kBadSwitchFormatHistogramId;
+base::span<const flags_ui::FeatureEntry> GetFeatureEntries();
 
 }  // namespace testing
 

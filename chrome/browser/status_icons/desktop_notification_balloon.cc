@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,9 +30,9 @@ DesktopNotificationBalloon::DesktopNotificationBalloon() {}
 DesktopNotificationBalloon::~DesktopNotificationBalloon() {}
 
 void DesktopNotificationBalloon::DisplayBalloon(
-    const gfx::ImageSkia& icon,
-    const base::string16& title,
-    const base::string16& contents,
+    const ui::ImageModel& icon,
+    const std::u16string& title,
+    const std::u16string& contents,
     const message_center::NotifierId& notifier_id) {
   // Allowing IO access is required here to cover the corner case where
   // there is no last used profile and the default one is loaded.
@@ -47,7 +47,7 @@ void DesktopNotificationBalloon::DisplayBalloon(
       kDesktopNotificationPrefix + base::NumberToString(id_count_++);
   message_center::Notification notification(
       message_center::NOTIFICATION_TYPE_SIMPLE, notification_id, title,
-      contents, gfx::Image(icon), base::string16(), GURL(), notifier_id, {},
+      contents, icon, std::u16string(), GURL(), notifier_id, {},
       new message_center::NotificationDelegate());
 
   NotificationDisplayService::GetForProfile(profile)->Display(

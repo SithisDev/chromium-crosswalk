@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,13 @@
 
 #include <vector>
 
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
-
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#include "ui/views/linux_ui/linux_ui.h"
-#endif
+#include "build/chromeos_buildflags.h"
+#include "chrome/browser/download/download_prefs.h"
+#include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
+#include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
+#include "chrome/browser/profiles/profile.h"
 
 namespace {
 
@@ -31,7 +30,7 @@ namespace {
 class WasInProgressData : public base::SupportsUserData::Data {
  public:
   static bool Get(download::DownloadItem* item) {
-    return item->GetUserData(kKey) != NULL;
+    return item->GetUserData(kKey) != nullptr;
   }
 
   static void Clear(download::DownloadItem* item) {
@@ -42,9 +41,11 @@ class WasInProgressData : public base::SupportsUserData::Data {
     item->SetUserData(kKey, base::WrapUnique(this));
   }
 
+  WasInProgressData(const WasInProgressData&) = delete;
+  WasInProgressData& operator=(const WasInProgressData&) = delete;
+
  private:
   static const char kKey[];
-  DISALLOW_COPY_AND_ASSIGN(WasInProgressData);
 };
 
 const char WasInProgressData::kKey[] =
@@ -104,7 +105,8 @@ void DownloadStatusUpdater::OnDownloadCreated(content::DownloadManager* manager,
   // Ignore downloads loaded from history, which are in a terminal state.
   // TODO(benjhayden): Use the Observer interface to distinguish between
   // historical and started downloads.
-  if (item->GetState() == download::DownloadItem::IN_PROGRESS) {
+  if (item->GetState() == download::DownloadItem::IN_PROGRESS &&
+      !item->IsTransient()) {
     UpdateAppIconDownloadProgress(item);
     new WasInProgressData(item);
   }
@@ -114,7 +116,9 @@ void DownloadStatusUpdater::OnDownloadCreated(content::DownloadManager* manager,
 
 void DownloadStatusUpdater::OnDownloadUpdated(content::DownloadManager* manager,
                                               download::DownloadItem* item) {
-  if (item->GetState() == download::DownloadItem::IN_PROGRESS) {
+  UpdatePrefsOnDownloadUpdated(manager, item);
+  if (item->GetState() == download::DownloadItem::IN_PROGRESS &&
+      !item->IsTransient()) {
     // If the item was interrupted/cancelled and then resumed/restarted, then
     // set WasInProgress so that UpdateAppIconDownloadProgress() will be called
     // when it completes.
@@ -131,21 +135,70 @@ void DownloadStatusUpdater::OnDownloadUpdated(content::DownloadManager* manager,
     WasInProgressData::Clear(item);
   }
   UpdateAppIconDownloadProgress(item);
+  UpdateProfileKeepAlive(manager);
 }
 
-#if defined(OS_ANDROID) || (defined(USE_AURA) && !defined(OS_WIN))
+void DownloadStatusUpdater::OnManagerGoingDown(
+    content::DownloadManager* manager) {
+  Profile* profile = Profile::FromBrowserContext(manager->GetBrowserContext());
+  profile_keep_alives_.erase(profile);
+}
+
+void DownloadStatusUpdater::UpdateProfileKeepAlive(
+    content::DownloadManager* manager) {
+  if (!manager) {
+    // Can be null in tests.
+    return;
+  }
+
+  Profile* profile = Profile::FromBrowserContext(manager->GetBrowserContext());
+  DCHECK(profile);
+  if (profile->IsOffTheRecord())
+    return;
+
+  // Are we already holding a keepalive?
+  bool already_has_keep_alive =
+      (profile_keep_alives_.find(profile) != profile_keep_alives_.end());
+
+  // Do we still need to hold a keepalive?
+  content::DownloadManager::DownloadVector items;
+  manager->GetAllDownloads(&items);
+  auto items_it = base::ranges::find(items, download::DownloadItem::IN_PROGRESS,
+                                     &download::DownloadItem::GetState);
+  bool should_keep_alive = (items_it != items.end());
+
+  if (should_keep_alive == already_has_keep_alive) {
+    // The current state is already correct for this Profile. No changes needed.
+    return;
+  }
+
+  // The current state is incorrect. Acquire/release a keepalive.
+  if (should_keep_alive) {
+    profile_keep_alives_[profile] = std::make_unique<ScopedProfileKeepAlive>(
+        profile, ProfileKeepAliveOrigin::kDownloadInProgress);
+  } else {
+    profile_keep_alives_.erase(profile);
+  }
+}
+
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS_ASH)
 void DownloadStatusUpdater::UpdateAppIconDownloadProgress(
     download::DownloadItem* download) {
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-  const views::LinuxUI* linux_ui = views::LinuxUI::instance();
-  if (linux_ui) {
-    float progress = 0;
-    int download_count = 0;
-    GetProgress(&progress, &download_count);
-    linux_ui->SetDownloadCount(download_count);
-    linux_ui->SetProgressFraction(progress);
-  }
-#endif
   // TODO(avi): Implement for Android?
 }
 #endif
+
+void DownloadStatusUpdater::UpdatePrefsOnDownloadUpdated(
+    content::DownloadManager* manager,
+    download::DownloadItem* download) {
+  if (!manager) {
+    // Can be null in tests.
+    return;
+  }
+
+  if (download->GetState() == download::DownloadItem::COMPLETE &&
+      !download->IsTransient()) {
+    DownloadPrefs::FromDownloadManager(manager)->SetLastCompleteTime(
+        base::Time::Now());
+  }
+}

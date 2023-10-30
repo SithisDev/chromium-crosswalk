@@ -1,13 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/installer/mini_installer/configuration.h"
 
-#include <windows.h>
 #include <shellapi.h>  // NOLINT
 #include <stddef.h>
+#include <stdlib.h>
+#include <windows.h>
 
+#include "build/branding_buildflags.h"
 #include "chrome/installer/mini_installer/appid.h"
 #include "chrome/installer/mini_installer/mini_installer_constants.h"
 #include "chrome/installer/mini_installer/mini_installer_resource.h"
@@ -29,7 +31,7 @@ bool GetGoogleUpdateIsMachineEnvVar() {
 
 }  // namespace
 
-Configuration::Configuration() : args_(NULL) {
+Configuration::Configuration() : args_(nullptr) {
   Clear();
 }
 
@@ -40,26 +42,26 @@ Configuration::~Configuration() {
 bool Configuration::Initialize(HMODULE module) {
   Clear();
   ReadResources(module);
+  ReadRegistry();
   return ParseCommandLine(::GetCommandLine());
 }
 
 const wchar_t* Configuration::program() const {
-  return args_ == NULL || argument_count_ < 1 ? NULL : args_[0];
+  return args_ == nullptr || argument_count_ < 1 ? nullptr : args_[0];
 }
 
 void Configuration::Clear() {
-  if (args_ != NULL) {
+  if (args_ != nullptr) {
     ::LocalFree(args_);
-    args_ = NULL;
+    args_ = nullptr;
   }
   chrome_app_guid_ = google_update::kAppGuid;
-  command_line_ = NULL;
-  operation_ = INSTALL_PRODUCT;
+  command_line_ = nullptr;
   argument_count_ = 0;
   is_system_level_ = false;
-  is_updating_multi_chrome_ = false;
   has_invalid_switch_ = false;
-  previous_version_ = NULL;
+  should_delete_extracted_files_ = true;
+  previous_version_ = nullptr;
 }
 
 // |command_line| is shared with this instance in the sense that this
@@ -74,7 +76,7 @@ bool Configuration::ParseCommandLine(const wchar_t* command_line) {
   for (int i = 1; i < argument_count_; ++i) {
     if (0 == ::lstrcmpi(args_[i], L"--system-level"))
       is_system_level_ = true;
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
     else if (0 == ::lstrcmpi(args_[i], L"--chrome-beta"))
       chrome_app_guid_ = google_update::kBetaAppGuid;
     else if (0 == ::lstrcmpi(args_[i], L"--chrome-dev"))
@@ -83,15 +85,13 @@ bool Configuration::ParseCommandLine(const wchar_t* command_line) {
       chrome_app_guid_ = google_update::kSxSAppGuid;
 #endif
     else if (0 == ::lstrcmpi(args_[i], L"--cleanup"))
-      operation_ = CLEANUP;
+      has_invalid_switch_ = true;
     else if (0 == ::lstrcmpi(args_[i], L"--chrome-frame"))
       has_invalid_switch_ = true;
   }
 
   if (!is_system_level_)
     is_system_level_ = GetGoogleUpdateIsMachineEnvVar();
-
-  is_updating_multi_chrome_ = IsUpdatingMultiChrome();
 
   return true;
 }
@@ -125,29 +125,15 @@ void Configuration::ReadResources(HMODULE module) {
   previous_version_ = version_string;
 }
 
-bool Configuration::IsUpdatingMultiChrome() const {
-#if defined(GOOGLE_CHROME_BUILD)
-  // Only primary Chrome installs supported multi-install (not canary/SxS).
-  if (chrome_app_guid_ != google_update::kAppGuid)
-    return false;
-
-  // Is Chrome already installed as multi-install?
-  const HKEY root = is_system_level_ ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-  StackString<128> value;
-  RegKey key;
-  return (OpenClientsKey(root, chrome_app_guid_, KEY_QUERY_VALUE, &key) ==
-              ERROR_SUCCESS &&
-          key.ReadSZValue(kPvRegistryValue, value.get(), value.capacity()) ==
-              ERROR_SUCCESS &&
-          value.length() != 0 &&
-          OpenClientStateKey(root, chrome_app_guid_, KEY_QUERY_VALUE, &key) ==
-              ERROR_SUCCESS &&
-          key.ReadSZValue(kUninstallArgumentsRegistryValue, value.get(),
-                          value.capacity()) == ERROR_SUCCESS &&
-          value.findi(L"--multi-install") != nullptr);
-#else
-  return false;
-#endif
+void Configuration::ReadRegistry() {
+  // Extracted files should not be deleted iff the user has manually created a
+  // ChromeInstallerCleanup string value in the registry under
+  // HKCU\Software\[Google|Chromium] and set its value to "0".
+  wchar_t value[2] = {};
+  should_delete_extracted_files_ =
+      !RegKey::ReadSZValue(HKEY_CURRENT_USER, kCleanupRegistryKey,
+                           kCleanupRegistryValue, value, _countof(value)) ||
+      value[0] != L'0';
 }
 
 }  // namespace mini_installer

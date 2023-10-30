@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,11 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/task/post_task.h"
 #include "base/test/multiprocess_test.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
-#include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -30,9 +28,10 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/chrome_cleaner/public/constants/constants.h"
+#include "components/chrome_cleaner/public/proto/chrome_prompt.pb.h"
 #include "components/chrome_cleaner/test/test_name_helper.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -52,13 +51,9 @@ using ::testing::UnorderedElementsAreArray;
 using ::testing::Values;
 using ::testing::ValuesIn;
 using CrashPoint = MockChromeCleanerProcess::CrashPoint;
-using ExtensionCleaningFeatureStatus =
-    MockChromeCleanerProcess::ExtensionCleaningFeatureStatus;
-using ProtobufIPCFeatureStatus =
-    MockChromeCleanerProcess::ProtobufIPCFeatureStatus;
 using IdleReason = ChromeCleanerController::IdleReason;
 using ItemsReporting = MockChromeCleanerProcess::ItemsReporting;
-using PromptAcceptance = ChromePromptActions::PromptAcceptance;
+using PromptUserResponse = chrome_cleaner::PromptUserResponse;
 using State = ChromeCleanerController::State;
 using UserResponse = ChromeCleanerController::UserResponse;
 using UwsFoundStatus = MockChromeCleanerProcess::UwsFoundStatus;
@@ -66,19 +61,20 @@ using UwsFoundStatus = MockChromeCleanerProcess::UwsFoundStatus;
 // Returns the PromptAcceptance value that ChromeCleanerController is supposed
 // to send to the Chrome Cleaner process when ReplyWithUserResponse() is
 // called with |user_response|.
-PromptAcceptance UserResponseToPromptAcceptance(UserResponse user_response) {
+PromptUserResponse::PromptAcceptance UserResponseToPromptAcceptance(
+    UserResponse user_response) {
   switch (user_response) {
     case UserResponse::kAcceptedWithLogs:
-      return PromptAcceptance::ACCEPTED_WITH_LOGS;
+      return PromptUserResponse::ACCEPTED_WITH_LOGS;
     case UserResponse::kAcceptedWithoutLogs:
-      return PromptAcceptance::ACCEPTED_WITHOUT_LOGS;
+      return PromptUserResponse::ACCEPTED_WITHOUT_LOGS;
     case UserResponse::kDenied:  // Fallthrough
     case UserResponse::kDismissed:
-      return PromptAcceptance::DENIED;
+      return PromptUserResponse::DENIED;
   }
 
   NOTREACHED();
-  return PromptAcceptance::UNSPECIFIED;
+  return PromptUserResponse::UNSPECIFIED;
 }
 
 class MockChromeCleanerControllerObserver
@@ -174,7 +170,7 @@ class ChromeCleanerControllerSimpleTest
   // We need this because we need UI and IO threads during tests. The thread
   // bundle should be the first member of the class so that it will be destroyed
   // last.
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   bool metrics_enabled_;
   base::CommandLine command_line_;
@@ -231,9 +227,6 @@ enum class CleanerProcessStatus {
 typedef std::tuple<CleanerProcessStatus,
                    CrashPoint,
                    UwsFoundStatus,
-                   ExtensionCleaningFeatureStatus,
-                   ProtobufIPCFeatureStatus,
-                   ItemsReporting,
                    ItemsReporting,
                    UserResponse>
     ChromeCleanerControllerTestParams;
@@ -241,46 +234,26 @@ typedef std::tuple<CleanerProcessStatus,
 // Test fixture that runs a mock Chrome Cleaner process in various
 // configurations and mocks the user's response.
 class ChromeCleanerControllerTest
-    : public testing::WithParamInterface<ChromeCleanerControllerTestParams>,
+    : public ::testing::TestWithParam<ChromeCleanerControllerTestParams>,
       public ChromeCleanerRunnerTestDelegate,
-      public ChromeCleanerControllerDelegate,
-      public extensions::ExtensionServiceTestBase {
+      public ChromeCleanerControllerDelegate {
  public:
   ChromeCleanerControllerTest() = default;
   ~ChromeCleanerControllerTest() override {}
 
   void SetUp() override {
     std::tie(process_status_, crash_point_, uws_found_status_,
-             extension_cleaning_feature_status_, protobuf_ipc_feature_status_,
-             registry_keys_reporting_, extensions_reporting_, user_response_) =
-        GetParam();
-
-    std::vector<base::Feature> enabled_features;
-    std::vector<base::Feature> disabled_features;
-    if (extension_cleaning_feature_status_ ==
-        ExtensionCleaningFeatureStatus::kEnabled) {
-      enabled_features.push_back(kChromeCleanupExtensionsFeature);
-    } else {
-      disabled_features.push_back(kChromeCleanupExtensionsFeature);
-    }
-    if (protobuf_ipc_feature_status_ == ProtobufIPCFeatureStatus::kEnabled) {
-      enabled_features.push_back(kChromeCleanupProtobufIPCFeature);
-    } else {
-      disabled_features.push_back(kChromeCleanupProtobufIPCFeature);
-    }
-    features_.InitWithFeatures(enabled_features, disabled_features);
-
-    InitializeEmptyExtensionService();
+             registry_keys_reporting_, user_response_) = GetParam();
 
     cleaner_process_options_.SetReportedResults(
         uws_found_status_ != UwsFoundStatus::kNoUwsFound,
-        registry_keys_reporting_, extensions_reporting_);
+        registry_keys_reporting_);
     cleaner_process_options_.set_reboot_required(
         uws_found_status_ == UwsFoundStatus::kUwsFoundRebootRequired);
     cleaner_process_options_.set_crash_point(crash_point_);
     cleaner_process_options_.set_expected_user_response(
         uws_found_status_ == UwsFoundStatus::kNoUwsFound
-            ? PromptAcceptance::DENIED
+            ? PromptUserResponse::DENIED
             : UserResponseToPromptAcceptance(user_response_));
 
     ChromeCleanerControllerImpl::ResetInstanceForTesting();
@@ -397,17 +370,6 @@ class ChromeCleanerControllerTest
            registry_keys_reporting_ == ItemsReporting::kReported;
   }
 
-  bool ExpectedExtensionsReported() {
-    if (extension_cleaning_feature_status_ ==
-        ExtensionCleaningFeatureStatus::kDisabled) {
-      // Extensions should not be shown to the user even if the cleaner process
-      // reports them, because they cannot be cleaned.
-      return false;
-    }
-    return ExpectedOnInfectedCalled() &&
-           extensions_reporting_ == ItemsReporting::kReported;
-  }
-
   bool ExpectedPromptAccepted() {
     return user_response_ == UserResponse::kAcceptedWithLogs ||
            user_response_ == UserResponse::kAcceptedWithoutLogs;
@@ -467,27 +429,24 @@ class ChromeCleanerControllerTest
   }
 
  protected:
+  content::BrowserTaskEnvironment task_environment_;
+
   CleanerProcessStatus process_status_;
   MockChromeCleanerProcess::CrashPoint crash_point_;
   UwsFoundStatus uws_found_status_;
-  ExtensionCleaningFeatureStatus extension_cleaning_feature_status_;
-  ProtobufIPCFeatureStatus protobuf_ipc_feature_status_;
   ItemsReporting registry_keys_reporting_;
-  ItemsReporting extensions_reporting_;
   ChromeCleanerController::UserResponse user_response_;
 
   MockChromeCleanerProcess::Options cleaner_process_options_;
 
   StrictMock<MockChromeCleanerControllerObserver> mock_observer_;
-  ChromeCleanerControllerImpl* controller_;
+  raw_ptr<ChromeCleanerControllerImpl> controller_;
   ChromeCleanerRunner::ProcessStatus cleaner_process_status_;
 
   std::vector<Profile*> profiles_tagged_;
   std::vector<Profile*> profiles_to_reset_if_tagged_;
 
   bool reboot_flow_started_ = false;
-
-  base::test::ScopedFeatureList features_;
 };
 
 MULTIPROCESS_TEST_MAIN(MockChromeCleanerProcessMain) {
@@ -500,8 +459,7 @@ MULTIPROCESS_TEST_MAIN(MockChromeCleanerProcessMain) {
 }
 
 TEST_P(ChromeCleanerControllerTest, WithMockCleanerProcess) {
-  TestingProfileManager profile_manager(TestingBrowserProcess::GetGlobal(),
-                                        &testing_local_state_);
+  TestingProfileManager profile_manager(TestingBrowserProcess::GetGlobal());
   ASSERT_TRUE(profile_manager.SetUp());
 
   constexpr char kTestProfileName1[] = "Test 1";
@@ -511,8 +469,6 @@ TEST_P(ChromeCleanerControllerTest, WithMockCleanerProcess) {
   ASSERT_TRUE(profile1);
   Profile* profile2 = profile_manager.CreateTestingProfile(kTestProfileName2);
   ASSERT_TRUE(profile2);
-
-  MockChromeCleanerProcess::AddMockExtensionsToProfile(profile1);
 
   const int num_profiles =
       profile_manager.profile_manager()->GetNumberOfProfiles();
@@ -543,8 +499,8 @@ TEST_P(ChromeCleanerControllerTest, WithMockCleanerProcess) {
     EXPECT_CALL(mock_observer_, OnInfected(_, _))
         .WillOnce(DoAll(SaveArg<1>(&scanner_results_on_infected),
                         InvokeWithoutArgs([this, profile1]() {
-                          controller_->ReplyWithUserResponse(
-                              profile1, service(), user_response_);
+                          controller_->ReplyWithUserResponse(profile1,
+                                                             user_response_);
                         })));
   } else {
     EXPECT_CALL(mock_observer_, OnInfected(_, _)).Times(0);
@@ -597,15 +553,6 @@ TEST_P(ChromeCleanerControllerTest, WithMockCleanerProcess) {
         scanner_results_on_cleaning.registry_keys(),
         UnorderedElementsAreArray(scanner_results_on_infected.registry_keys()));
   }
-  EXPECT_EQ(!scanner_results_on_infected.extension_ids().empty(),
-            ExpectedExtensionsReported());
-  EXPECT_EQ(!scanner_results_on_cleaning.extension_ids().empty(),
-            ExpectedExtensionsReported() && ExpectedOnCleaningCalled());
-  if (!scanner_results_on_cleaning.extension_ids().empty()) {
-    EXPECT_THAT(
-        scanner_results_on_cleaning.extension_ids(),
-        UnorderedElementsAreArray(scanner_results_on_infected.extension_ids()));
-  }
 
   EXPECT_EQ(ExpectedRebootFlowStarted(), reboot_flow_started_);
 
@@ -648,13 +595,6 @@ INSTANTIATE_TEST_SUITE_P(
             ValuesIn(kCrashPointsAfterStartup),
             Values(UwsFoundStatus::kUwsFoundRebootRequired,
                    UwsFoundStatus::kUwsFoundNoRebootRequired),
-            Values(ExtensionCleaningFeatureStatus::kEnabled,
-                   ExtensionCleaningFeatureStatus::kDisabled),
-            Values(ProtobufIPCFeatureStatus::kEnabled,
-                   ProtobufIPCFeatureStatus::kDisabled),
-            Values(ItemsReporting::kUnsupported,
-                   ItemsReporting::kNotReported,
-                   ItemsReporting::kReported),
             Values(ItemsReporting::kUnsupported,
                    ItemsReporting::kNotReported,
                    ItemsReporting::kReported),
@@ -670,10 +610,6 @@ INSTANTIATE_TEST_SUITE_P(
     Combine(Values(CleanerProcessStatus::kFetchSuccessValidProcess),
             ValuesIn(kCrashPointsAfterStartup),
             Values(UwsFoundStatus::kUwsFoundRebootRequired),
-            Values(ExtensionCleaningFeatureStatus::kEnabled),
-            Values(ProtobufIPCFeatureStatus::kEnabled,
-                   ProtobufIPCFeatureStatus::kDisabled),
-            Values(ItemsReporting::kReported),
             Values(ItemsReporting::kReported),
             Values(UserResponse::kDenied, UserResponse::kDismissed)),
     chrome_cleaner::GetParamNameForTest());
@@ -688,10 +624,6 @@ INSTANTIATE_TEST_SUITE_P(
     Combine(Values(CleanerProcessStatus::kFetchSuccessValidProcess),
             ValuesIn(kCrashPointsAfterStartup),
             Values(UwsFoundStatus::kNoUwsFound),
-            Values(ExtensionCleaningFeatureStatus::kDisabled),
-            Values(ProtobufIPCFeatureStatus::kEnabled,
-                   ProtobufIPCFeatureStatus::kDisabled),
-            Values(ItemsReporting::kNotReported),
             Values(ItemsReporting::kNotReported),
             Values(UserResponse::kDismissed)),
     chrome_cleaner::GetParamNameForTest());
@@ -705,9 +637,6 @@ INSTANTIATE_TEST_SUITE_P(
     Combine(Values(CleanerProcessStatus::kFetchFailure),
             Values(CrashPoint::kNone),
             Values(UwsFoundStatus::kNoUwsFound),
-            Values(ExtensionCleaningFeatureStatus::kDisabled),
-            Values(ProtobufIPCFeatureStatus::kDisabled),
-            Values(ItemsReporting::kUnsupported),
             Values(ItemsReporting::kUnsupported),
             Values(UserResponse::kAcceptedWithLogs)),
     chrome_cleaner::GetParamNameForTest());
@@ -725,10 +654,6 @@ INSTANTIATE_TEST_SUITE_P(
             // doesn't matter.
             Values(CrashPoint::kOnStartup),
             Values(UwsFoundStatus::kNoUwsFound),
-            Values(ExtensionCleaningFeatureStatus::kDisabled),
-            Values(ProtobufIPCFeatureStatus::kEnabled,
-                   ProtobufIPCFeatureStatus::kDisabled),
-            Values(ItemsReporting::kUnsupported),
             Values(ItemsReporting::kUnsupported),
             Values(UserResponse::kAcceptedWithLogs)),
     chrome_cleaner::GetParamNameForTest());
@@ -787,11 +712,11 @@ class ChromeCleanerControllerReporterInteractionTest
   // We need this because we need UI and IO threads during tests. The thread
   // bundle should be the first member of the class so that it will be destroyed
   // last.
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   ChromeCleanerController::State initial_state_;
 
-  ChromeCleanerControllerImpl* controller_ = nullptr;
+  raw_ptr<ChromeCleanerControllerImpl> controller_ = nullptr;
   StrictMock<MockChromeCleanerControllerObserver> mock_observer_;
 };
 

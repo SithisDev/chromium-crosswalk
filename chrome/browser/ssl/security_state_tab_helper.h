@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,11 @@
 
 #include <memory>
 
+#include "base/callback.h"
 #include "components/security_state/core/security_state.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
-#include "third_party/blink/public/platform/web_security_style.h"
+#include "third_party/blink/public/common/security/security_style.h"
 
 namespace content {
 class NavigationHandle;
@@ -23,19 +24,26 @@ class SecurityStateTabHelper
     : public content::WebContentsObserver,
       public content::WebContentsUserData<SecurityStateTabHelper> {
  public:
+  SecurityStateTabHelper(const SecurityStateTabHelper&) = delete;
+  SecurityStateTabHelper& operator=(const SecurityStateTabHelper&) = delete;
+
   ~SecurityStateTabHelper() override;
 
   // See security_state::GetSecurityLevel.
-  security_state::SecurityLevel GetSecurityLevel() const;
+  security_state::SecurityLevel GetSecurityLevel();
   std::unique_ptr<security_state::VisibleSecurityState>
-  GetVisibleSecurityState() const;
+  GetVisibleSecurityState();
 
   // content::WebContentsObserver:
   void DidStartNavigation(
       content::NavigationHandle* navigation_handle) override;
-  void DidFinishNavigation(
-      content::NavigationHandle* navigation_handle) override;
-  void DidChangeVisibleSecurityState() override;
+  void PrimaryPageChanged(content::Page& page) override;
+
+  // Used by tests to specify a callback to be called when
+  // GetVisibleSecurityState() is called.
+  void set_get_security_level_callback_for_tests_(base::OnceClosure closure) {
+    get_security_level_callback_for_tests_ = std::move(closure);
+  }
 
  private:
   explicit SecurityStateTabHelper(content::WebContents* web_contents);
@@ -44,9 +52,9 @@ class SecurityStateTabHelper
   bool UsedPolicyInstalledCertificate() const;
   security_state::MaliciousContentStatus GetMaliciousContentStatus() const;
 
-  WEB_CONTENTS_USER_DATA_KEY_DECL();
+  base::OnceClosure get_security_level_callback_for_tests_;
 
-  DISALLOW_COPY_AND_ASSIGN(SecurityStateTabHelper);
+  WEB_CONTENTS_USER_DATA_KEY_DECL();
 };
 
 #endif  // CHROME_BROWSER_SSL_SECURITY_STATE_TAB_HELPER_H_

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,18 +11,18 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/strings/string_piece.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
 #include "components/encrypted_messages/encrypted_message.pb.h"
 #include "components/encrypted_messages/message_encrypter.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "services/network/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -46,17 +46,19 @@ class ErrorReporterTest : public ::testing::Test {
     X25519_public_from_private(server_public_key_, server_private_key_);
   }
 
+  ErrorReporterTest(const ErrorReporterTest&) = delete;
+  ErrorReporterTest& operator=(const ErrorReporterTest&) = delete;
+
   ~ErrorReporterTest() override {}
 
  protected:
-  base::MessageLoopForIO loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
   uint8_t server_public_key_[32];
   uint8_t server_private_key_[32];
 
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ErrorReporterTest);
 };
 
 // Test that ErrorReporter::SendExtendedReportingReport sends
@@ -124,7 +126,7 @@ TEST_F(ErrorReporterTest, ErroredRequestCallsCallback) {
   const GURL report_uri("http://foo.com/bar");
 
   test_url_loader_factory_.AddResponse(
-      report_uri, network::ResourceResponseHead(), std::string(),
+      report_uri, network::mojom::URLResponseHead::New(), std::string(),
       network::URLLoaderCompletionStatus(net::ERR_CONNECTION_FAILED));
 
   CertificateErrorReporter reporter(test_shared_loader_factory_, report_uri);

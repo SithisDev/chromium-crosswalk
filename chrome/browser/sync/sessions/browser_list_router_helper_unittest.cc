@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <memory>
 #include <vector>
 
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/resource_coordinator/tab_manager.h"
 #include "chrome/browser/sync/sessions/sync_sessions_web_contents_router.h"
@@ -31,9 +31,6 @@ class MockLocalSessionEventHandler : public LocalSessionEventHandler {
     seen_ids_.push_back(modified_tab->GetSessionId());
   }
 
-  void OnFaviconsChanged(const std::set<GURL>& page_urls,
-                         const GURL& icon_url) override {}
-
   std::vector<GURL>* seen_urls() { return &seen_urls_; }
   std::vector<SessionID>* seen_ids() { return &seen_ids_; }
 
@@ -44,7 +41,7 @@ class MockLocalSessionEventHandler : public LocalSessionEventHandler {
 
 class BrowserListRouterHelperTest : public BrowserWithTestWindowTest {
  protected:
-  ~BrowserListRouterHelperTest() override {}
+  ~BrowserListRouterHelperTest() override = default;
 
   MockLocalSessionEventHandler handler_1;
   MockLocalSessionEventHandler handler_2;

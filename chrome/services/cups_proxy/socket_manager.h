@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/optional.h"
 
 #include "chrome/services/cups_proxy/cups_proxy_service_delegate.h"
 
@@ -20,7 +19,7 @@ class UnixDomainClientSocket;
 namespace cups_proxy {
 
 using SocketManagerCallback =
-    base::OnceCallback<void(base::Optional<std::vector<uint8_t>>)>;
+    base::OnceCallback<void(std::unique_ptr<std::vector<uint8_t>>)>;
 
 // This manager proxies IPP requests to the CUPS daemon and asynchronously
 // responds with the IPP response. This class must be created and accessed
@@ -29,12 +28,12 @@ class SocketManager {
  public:
   // Factory function.
   static std::unique_ptr<SocketManager> Create(
-      base::WeakPtr<chromeos::printing::CupsProxyServiceDelegate> delegate);
+      CupsProxyServiceDelegate* const delegate);
 
   // Factory function that allows injected dependencies, for testing.
   static std::unique_ptr<SocketManager> CreateForTesting(
       std::unique_ptr<net::UnixDomainClientSocket> socket,
-      base::WeakPtr<chromeos::printing::CupsProxyServiceDelegate> delegate);
+      CupsProxyServiceDelegate* const delegate);
 
   virtual ~SocketManager() = default;
 

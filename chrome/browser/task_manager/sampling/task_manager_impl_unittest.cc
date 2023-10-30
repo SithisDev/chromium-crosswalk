@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,12 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/task_manager/providers/task.h"
 #include "chrome/browser/task_manager/sampling/task_manager_impl.h"
 #include "chrome/browser/task_manager/task_manager_observer.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace task_manager {
@@ -27,7 +27,6 @@ class FakeTask : public Task {
            const std::string& title,
            SessionID tab_id)
       : Task(base::ASCIIToUTF16(title),
-             "FakeTask",
              nullptr,
              base::kNullProcessHandle,
              process_id),
@@ -36,6 +35,9 @@ class FakeTask : public Task {
         tab_id_(tab_id) {
     TaskManagerImpl::GetInstance()->TaskAdded(this);
   }
+
+  FakeTask(const FakeTask&) = delete;
+  FakeTask& operator=(const FakeTask&) = delete;
 
   ~FakeTask() override { TaskManagerImpl::GetInstance()->TaskRemoved(this); }
 
@@ -51,10 +53,8 @@ class FakeTask : public Task {
 
  private:
   Type type_;
-  Task* parent_;
+  raw_ptr<Task> parent_;
   SessionID tab_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeTask);
 };
 
 }  // namespace
@@ -62,10 +62,11 @@ class FakeTask : public Task {
 class TaskManagerImplTest : public testing::Test, public TaskManagerObserver {
  public:
   TaskManagerImplTest()
-      : TaskManagerObserver(base::TimeDelta::FromSeconds(1),
-                            REFRESH_TYPE_NONE) {
+      : TaskManagerObserver(base::Seconds(1), REFRESH_TYPE_NONE) {
     TaskManagerImpl::GetInstance()->AddObserver(this);
   }
+  TaskManagerImplTest(const TaskManagerImplTest&) = delete;
+  TaskManagerImplTest& operator=(const TaskManagerImplTest&) = delete;
   ~TaskManagerImplTest() override {
     tasks_.clear();
     observed_task_manager()->RemoveObserver(this);
@@ -92,9 +93,8 @@ class TaskManagerImplTest : public testing::Test, public TaskManagerObserver {
   }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::vector<std::unique_ptr<FakeTask>> tasks_;
-  DISALLOW_COPY_AND_ASSIGN(TaskManagerImplTest);
 };
 
 TEST_F(TaskManagerImplTest, SortingTypes) {
@@ -123,7 +123,12 @@ TEST_F(TaskManagerImplTest, SortingTypes) {
   AddTask(700, Task::UTILITY, "Utility Two",
           /*tab_id=*/SessionID::InvalidValue());
   AddTask(1000, Task::GUEST, "Guest", kTabId2);
-  AddTask(900, Task::WORKER, "Worker", /*tab_id=*/SessionID::InvalidValue());
+  AddTask(900, Task::SERVICE_WORKER, "Service worker",
+          /*tab_id=*/SessionID::InvalidValue());
+  AddTask(900, Task::SHARED_WORKER, "Shared worker",
+          /*tab_id=*/SessionID::InvalidValue());
+  AddTask(900, Task::DEDICATED_WORKER, "Dedicated worker",
+          /*tab_id=*/SessionID::InvalidValue());
   AddTask(500, Task::ZYGOTE, "Zygote", /*tab_id=*/SessionID::InvalidValue());
 
   AddTask(300, Task::RENDERER, "Subframe: Tab One (2)", kTabId1)
@@ -151,7 +156,9 @@ TEST_F(TaskManagerImplTest, SortingTypes) {
       "Extension Subframe: Tab Two\n"
       "Subframe: Tab Two\n"
       "Guest\n"
-      "Worker\n",
+      "Dedicated worker\n"
+      "Shared worker\n"
+      "Service worker\n",
       DumpSortedTasks());
 }
 

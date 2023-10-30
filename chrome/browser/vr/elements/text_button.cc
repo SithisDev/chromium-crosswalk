@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/vr/elements/text_button.h"
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "chrome/browser/vr/elements/rect.h"
 
 namespace vr {
@@ -38,7 +38,7 @@ TextButton::TextButton(float text_size, AudioDelegate* audio_delegate)
 
 TextButton::~TextButton() = default;
 
-void TextButton::SetText(const base::string16& text) {
+void TextButton::SetText(const std::u16string& text) {
   text_->SetText(text);
 }
 

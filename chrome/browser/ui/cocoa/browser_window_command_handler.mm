@@ -1,11 +1,12 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/browser_window_command_handler.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #import "base/mac/foundation_util.h"
+#include "base/notreached.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/app_controller_mac.h"
@@ -122,15 +123,16 @@ remote_cocoa::NativeWidgetNSWindowBridge* FindBridgeForSender(
   NSInteger command = [sender tag];
   NSUInteger modifierFlags = [[NSApp currentEvent] modifierFlags];
   if ((command == IDC_RELOAD) &&
-      (modifierFlags & (NSShiftKeyMask | NSControlKeyMask))) {
+      (modifierFlags &
+       (NSEventModifierFlagShift | NSEventModifierFlagControl))) {
     command = IDC_RELOAD_BYPASSING_CACHE;
     // Mask off Shift and Control so they don't affect the disposition below.
-    modifierFlags &= ~(NSShiftKeyMask | NSControlKeyMask);
+    modifierFlags &= ~(NSEventModifierFlagShift | NSEventModifierFlagControl);
   }
   if (![[sender window] isMainWindow]) {
     // Remove the command key from the flags, it means "keep the window in
     // the background" in this case.
-    modifierFlags &= ~NSCommandKeyMask;
+    modifierFlags &= ~NSEventModifierFlagCommand;
   }
 
   bool was_executed = false;

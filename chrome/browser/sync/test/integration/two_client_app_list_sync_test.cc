@@ -1,44 +1,53 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 
-#include "base/macros.h"
+#include "ash/constants/ash_features.h"
+#include "base/one_shot_event.h"
+#include "base/run_loop.h"
 #include "build/build_config.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/apps_helper.h"
 #include "chrome/browser/sync/test/integration/extensions_helper.h"
-#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_app_list_helper.h"
+#include "chrome/browser/sync/test/integration/sync_service_impl_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/updated_progress_marker_checker.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/test/test_utils.h"
+#include "components/prefs/pref_service.h"
+#include "components/sync/base/pref_names.h"
+#include "components/sync/base/user_selectable_type.h"
+#include "components/sync/driver/sync_user_settings.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 
 using apps_helper::DisableApp;
 using apps_helper::EnableApp;
-using apps_helper::HasSameApps;
 using apps_helper::IncognitoDisableApp;
 using apps_helper::IncognitoEnableApp;
-using apps_helper::InstallApp;
 using apps_helper::InstallAppsPendingForSync;
+using apps_helper::InstallHostedApp;
 using apps_helper::IsAppEnabled;
 using apps_helper::IsIncognitoEnabled;
 using apps_helper::UninstallApp;
+using apps_helper::WaitForAppService;
+using syncer::SyncUserSettings;
+using syncer::UserSelectableOsType;
+using syncer::UserSelectableOsTypeSet;
+using syncer::UserSelectableType;
+using syncer::UserSelectableTypeSet;
 
 namespace {
 
 const size_t kNumDefaultApps = 2;
 
-bool AllProfilesHaveSameAppList() {
-  return SyncAppListHelper::GetInstance()->AllProfilesHaveSameAppList();
+bool AllProfilesHaveSameAppList(size_t* size_out = nullptr) {
+  return SyncAppListHelper::GetInstance()->AllProfilesHaveSameAppList(size_out);
 }
 
 const app_list::AppListSyncableService::SyncItem* GetSyncItem(
@@ -53,25 +62,18 @@ const app_list::AppListSyncableService::SyncItem* GetSyncItem(
 
 class TwoClientAppListSyncTest : public SyncTest {
  public:
-  TwoClientAppListSyncTest() : SyncTest(TWO_CLIENT) { DisableVerifier(); }
-
-  ~TwoClientAppListSyncTest() override {}
+  TwoClientAppListSyncTest() : SyncTest(TWO_CLIENT) {}
+  ~TwoClientAppListSyncTest() override = default;
 
   // SyncTest
   bool SetupClients() override {
-    if (!SyncTest::SetupClients())
+    if (!SyncTest::SetupClients()) {
       return false;
+    }
 
     // Init SyncAppListHelper to ensure that the extension system is initialized
     // for each Profile.
     SyncAppListHelper::GetInstance();
-    return true;
-  }
-
-  bool SetupSync() override {
-    if (!SyncTest::SetupSync())
-      return false;
-    WaitForExtensionServicesToLoad();
     return true;
   }
 
@@ -81,28 +83,38 @@ class TwoClientAppListSyncTest : public SyncTest {
     InstallAppsPendingForSync(GetProfile(1));
   }
 
- private:
   void WaitForExtensionServicesToLoad() {
-    for (int i = 0; i < num_clients(); ++i)
+    for (int i = 0; i < num_clients(); ++i) {
       WaitForExtensionsServiceToLoadForProfile(GetProfile(i));
+    }
   }
 
+ private:
   void WaitForExtensionsServiceToLoadForProfile(Profile* profile) {
-    extensions::ExtensionService* extension_service =
-        extensions::ExtensionSystem::Get(profile)->extension_service();
-    if (extension_service && extension_service->is_ready())
-      return;
-    content::WindowedNotificationObserver extensions_loaded_observer(
-        extensions::NOTIFICATION_EXTENSIONS_READY_DEPRECATED,
-        content::NotificationService::AllSources());
-    extensions_loaded_observer.Wait();
+    extensions::ExtensionSystem* extension_system =
+        extensions::ExtensionSystem::Get(profile);
+    base::RunLoop run_loop;
+    extension_system->ready().Post(FROM_HERE, run_loop.QuitClosure());
+    run_loop.Run();
   }
+};
 
-  DISALLOW_COPY_AND_ASSIGN(TwoClientAppListSyncTest);
+class RemoveDefaultAppSyncTest : public testing::WithParamInterface<bool>,
+                                 public TwoClientAppListSyncTest {
+ public:
+  RemoveDefaultAppSyncTest() = default;
+
+  RemoveDefaultAppSyncTest(const RemoveDefaultAppSyncTest&) = delete;
+  RemoveDefaultAppSyncTest& operator=(const RemoveDefaultAppSyncTest&) = delete;
+
+  ~RemoveDefaultAppSyncTest() override = default;
+
+  bool MarkAppAsDefaultApp() { return GetParam(); }
 };
 
 IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, StartWithNoApps) {
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
 
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 }
@@ -112,11 +124,12 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, StartWithSameApps) {
 
   const int kNumApps = 5;
   for (int i = 0; i < kNumApps; ++i) {
-    InstallApp(GetProfile(0), i);
-    InstallApp(GetProfile(1), i);
+    InstallHostedApp(GetProfile(0), i);
+    InstallHostedApp(GetProfile(1), i);
   }
 
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
 
   ASSERT_TRUE(AwaitQuiescence());
 
@@ -133,21 +146,22 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, StartWithDifferentApps) {
 
   const int kNumCommonApps = 5;
   for (int j = 0; j < kNumCommonApps; ++i, ++j) {
-    InstallApp(GetProfile(0), i);
-    InstallApp(GetProfile(1), i);
+    InstallHostedApp(GetProfile(0), i);
+    InstallHostedApp(GetProfile(1), i);
   }
 
   const int kNumProfile0Apps = 10;
   for (int j = 0; j < kNumProfile0Apps; ++i, ++j) {
-    std::string id = InstallApp(GetProfile(0), i);
+    std::string id = InstallHostedApp(GetProfile(0), i);
   }
 
   const int kNumProfile1Apps = 10;
   for (int j = 0; j < kNumProfile1Apps; ++i, ++j) {
-    std::string id = InstallApp(GetProfile(1), i);
+    std::string id = InstallHostedApp(GetProfile(1), i);
   }
 
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
 
   AwaitQuiescenceAndInstallAppsPendingForSync();
 
@@ -166,22 +180,23 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, InstallDifferentApps) {
 
   const int kNumCommonApps = 5;
   for (int j = 0; j < kNumCommonApps; ++i, ++j) {
-    InstallApp(GetProfile(0), i);
-    InstallApp(GetProfile(1), i);
+    InstallHostedApp(GetProfile(0), i);
+    InstallHostedApp(GetProfile(1), i);
   }
 
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
 
   ASSERT_TRUE(AwaitQuiescence());
 
   const int kNumProfile0Apps = 10;
   for (int j = 0; j < kNumProfile0Apps; ++i, ++j) {
-    std::string id = InstallApp(GetProfile(0), i);
+    std::string id = InstallHostedApp(GetProfile(0), i);
   }
 
   const int kNumProfile1Apps = 10;
   for (int j = 0; j < kNumProfile1Apps; ++i, ++j) {
-    std::string id = InstallApp(GetProfile(1), i);
+    std::string id = InstallHostedApp(GetProfile(1), i);
   }
 
   AwaitQuiescenceAndInstallAppsPendingForSync();
@@ -193,9 +208,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, InstallDifferentApps) {
 
 IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, Install) {
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
-  InstallApp(GetProfile(0), 0);
+  InstallHostedApp(GetProfile(0), 0);
   AwaitQuiescenceAndInstallAppsPendingForSync();
 
   ASSERT_TRUE(AllProfilesHaveSameAppList());
@@ -203,9 +219,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, Install) {
 
 IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, Uninstall) {
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
-  InstallApp(GetProfile(0), 0);
+  InstallHostedApp(GetProfile(0), 0);
   AwaitQuiescenceAndInstallAppsPendingForSync();
 
   ASSERT_TRUE(AllProfilesHaveSameAppList());
@@ -221,9 +238,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, Uninstall) {
 // ordinals.
 IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, UninstallThenInstall) {
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
-  InstallApp(GetProfile(0), 0);
+  InstallHostedApp(GetProfile(0), 0);
   AwaitQuiescenceAndInstallAppsPendingForSync();
 
   ASSERT_TRUE(AllProfilesHaveSameAppList());
@@ -232,7 +250,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, UninstallThenInstall) {
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
-  InstallApp(GetProfile(0), 1);
+  InstallHostedApp(GetProfile(0), 1);
   AwaitQuiescenceAndInstallAppsPendingForSync();
 
   ASSERT_TRUE(AllProfilesHaveSameAppList());
@@ -240,19 +258,20 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, UninstallThenInstall) {
 
 IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, Merge) {
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
-  InstallApp(GetProfile(0), 0);
-  InstallApp(GetProfile(1), 0);
+  InstallHostedApp(GetProfile(0), 0);
+  InstallHostedApp(GetProfile(1), 0);
   ASSERT_TRUE(AwaitQuiescence());
 
   UninstallApp(GetProfile(0), 0);
-  InstallApp(GetProfile(0), 1);
+  InstallHostedApp(GetProfile(0), 1);
 
-  InstallApp(GetProfile(0), 2);
-  InstallApp(GetProfile(1), 2);
+  InstallHostedApp(GetProfile(0), 2);
+  InstallHostedApp(GetProfile(1), 2);
 
-  InstallApp(GetProfile(1), 3);
+  InstallHostedApp(GetProfile(1), 3);
   AwaitQuiescenceAndInstallAppsPendingForSync();
 
   ASSERT_TRUE(AllProfilesHaveSameAppList());
@@ -260,10 +279,11 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, Merge) {
 
 IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, UpdateEnableDisableApp) {
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
-  InstallApp(GetProfile(0), 0);
-  InstallApp(GetProfile(1), 0);
+  InstallHostedApp(GetProfile(0), 0);
+  InstallHostedApp(GetProfile(1), 0);
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
@@ -286,10 +306,11 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, UpdateEnableDisableApp) {
 
 IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, UpdateIncognitoEnableDisable) {
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
-  InstallApp(GetProfile(0), 0);
-  InstallApp(GetProfile(1), 0);
+  InstallHostedApp(GetProfile(0), 0);
+  InstallHostedApp(GetProfile(1), 0);
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
@@ -312,18 +333,34 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, UpdateIncognitoEnableDisable) {
 
 IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, DisableApps) {
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
-  // Disable APP_LIST by disabling kApps since APP_LIST is in kApps groups.
-  ASSERT_TRUE(
-      GetClient(1)->DisableSyncForType(syncer::UserSelectableType::kApps));
-  InstallApp(GetProfile(0), 0);
+  // Disable APP_LIST by disabling apps sync.
+  SyncUserSettings* settings = GetClient(1)->service()->GetUserSettings();
+  if (chromeos::features::IsSyncSettingsCategorizationEnabled()) {
+    UserSelectableOsTypeSet types = settings->GetSelectedOsTypes();
+    types.Remove(UserSelectableOsType::kOsApps);
+    settings->SetSelectedOsTypes(/*sync_all_os_types=*/false, types);
+  } else {
+    UserSelectableTypeSet types = settings->GetSelectedTypes();
+    types.Remove(UserSelectableType::kApps);
+    settings->SetSelectedTypes(/*sync_everything=*/false, types);
+  }
+  InstallHostedApp(GetProfile(0), 0);
   ASSERT_TRUE(UpdatedProgressMarkerChecker(GetSyncService(0)).Wait());
   ASSERT_FALSE(AllProfilesHaveSameAppList());
 
-  // Enable APP_LIST by enabling kApps since APP_LIST is in kApps groups.
-  ASSERT_TRUE(
-      GetClient(1)->EnableSyncForType(syncer::UserSelectableType::kApps));
+  // Enable APP_LIST by enabling apps sync.
+  if (chromeos::features::IsSyncSettingsCategorizationEnabled()) {
+    UserSelectableOsTypeSet types = settings->GetSelectedOsTypes();
+    types.Put(UserSelectableOsType::kOsApps);
+    settings->SetSelectedOsTypes(/*sync_all_os_types=*/false, types);
+  } else {
+    UserSelectableTypeSet types = settings->GetSelectedTypes();
+    types.Put(UserSelectableType::kApps);
+    settings->SetSelectedTypes(/*sync_everything=*/false, types);
+  }
   AwaitQuiescenceAndInstallAppsPendingForSync();
 
   ASSERT_TRUE(AllProfilesHaveSameAppList());
@@ -334,14 +371,15 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, DisableApps) {
 // same app with identical app and page ordinals.
 IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, DisableSync) {
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
   ASSERT_TRUE(GetClient(1)->DisableSyncForAllDatatypes());
-  InstallApp(GetProfile(0), 0);
+  InstallHostedApp(GetProfile(0), 0);
   ASSERT_TRUE(UpdatedProgressMarkerChecker(GetSyncService(0)).Wait());
   ASSERT_FALSE(AllProfilesHaveSameAppList());
 
-  ASSERT_TRUE(GetClient(1)->EnableSyncForAllDatatypes());
+  ASSERT_TRUE(GetClient(1)->EnableSyncForRegisteredDatatypes());
   AwaitQuiescenceAndInstallAppsPendingForSync();
 
   ASSERT_TRUE(AllProfilesHaveSameAppList());
@@ -351,11 +389,13 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, DisableSync) {
 // and sync. Both clients should have the updated position for the app.
 IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, Move) {
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
   const int kNumApps = 5;
-  for (int i = 0; i < kNumApps; ++i)
-    InstallApp(GetProfile(1), i);
+  for (int i = 0; i < kNumApps; ++i) {
+    InstallHostedApp(GetProfile(1), i);
+  }
 
   AwaitQuiescenceAndInstallAppsPendingForSync();
 
@@ -364,69 +404,131 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, Move) {
 
 // Install a Default App on both clients, then sync. Remove the app on one
 // client and sync. Ensure that the app is removed on the other client and
-// that a REMOVE_DEFAULT_APP entry exists.
-IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, RemoveDefault) {
+// that a TYPE_REMOVE_DEFAULT_APP entry exists.
+//
+// This test largely checks mechanism (the How), not policy (the What or Why).
+// "How" is user-invisible implementation detail, such as whether or not a
+// SyncItem exists and what its code is (e.g. TYPE_REMOVE_DEFAULT_APP). "What"
+// is user-visible effects, such as whether or not an app is (still) installed.
+//
+// To be clear, "policy" in this comment means something different than the
+// "policy" in "enterprise administrative policy can install apps". Similarly,
+// "default apps" means hardware-specific apps from OEMs, such as an "HP
+// [Hewlett Packard]" app installed by default on a HP laptop. "Default apps"
+// doesn't refer to built-in apps like the Camera or Files apps.
+//
+// This test is run twice, with MarkAppAsDefaultApp() returning either false or
+// true. Either way, the What (what's user visible, i.e. whether or not apps
+// are installed or uninstalled after synchronizing) is unaffected by whether
+// or not we mark an app as default-installed in Profile1 before we sync the
+// two profiles. It's unclear whether this non-difference is deliberate.
+//
+// This isn't ideal, but probably still better than nothing. Obviously, it
+// would be better to confirm some user-visible effect happens for
+// default-installed apps and does not happen otherwise, but it's not certain
+// what such an effect would be, or at least how to easily test it. There is
+// some discussion at https://crrev.com/c/1732092 and
+// https://crrev.com/c/1720229/1/chrome/browser/sync/test/integration/two_client_app_list_sync_test.cc#402
+// although the desired What is possibly lost to the mists of time.
+IN_PROC_BROWSER_TEST_P(RemoveDefaultAppSyncTest, Remove) {
   ASSERT_TRUE(SetupClients());
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
 
-  // Install a non-default app.
-  InstallApp(GetProfile(0), 0);
-  InstallApp(GetProfile(1), 0);
+  // Install a non-default app in two synchronized Profiles. We should end up
+  // with a certain number of apps, lets say N.
+  InstallHostedApp(GetProfile(0), 0);
+  InstallHostedApp(GetProfile(1), 0);
+  WaitForAppService(GetProfile(0));
+  WaitForAppService(GetProfile(1));
+  size_t number_of_apps = 0;
+  ASSERT_TRUE(AllProfilesHaveSameAppList(&number_of_apps));
+  const size_t initial_number_of_apps = number_of_apps;
 
-  // Install a default app in Profile 0 only.
+  // Install an app in Profile 0 only. At a later point, we'll mark it as
+  // default-installed, but for now, it's just a regular app.
+  //
+  // After sync'ing, we should have N+1 apps in both Profiles.
   const int default_app_index = 1;
-  std::string default_app_id = InstallApp(GetProfile(0), default_app_index);
+  std::string default_app_id =
+      InstallHostedApp(GetProfile(0), default_app_index);
   AwaitQuiescenceAndInstallAppsPendingForSync();
+  ASSERT_TRUE(AllProfilesHaveSameAppList(&number_of_apps));
+  EXPECT_EQ(number_of_apps, initial_number_of_apps + 1);
 
-  ASSERT_TRUE(AllProfilesHaveSameAppList());
-
-  // Flag Default app in Profile 1.
+  // Mark that app as a default app, in Profile 1 only.
   using ALSS = app_list::AppListSyncableService;
   EXPECT_FALSE(ALSS::AppIsDefaultForTest(GetProfile(1), default_app_id));
-  ALSS::SetAppIsDefaultForTest(GetProfile(1), default_app_id);
-  EXPECT_TRUE(ALSS::AppIsDefaultForTest(GetProfile(1), default_app_id));
+  if (MarkAppAsDefaultApp()) {
+    ALSS::SetAppIsDefaultForTest(GetProfile(1), default_app_id);
+    EXPECT_TRUE(ALSS::AppIsDefaultForTest(GetProfile(1), default_app_id));
+  }
 
-  // Remove the default app in Profile 0 and verifier, ensure it was removed
-  // in Profile 1.
+  // Remove that app in Profile 0. After sync'ing, it should also be removed
+  // from Profile 1: we should go back to having N apps in both Profiles.
   UninstallApp(GetProfile(0), default_app_index);
   ASSERT_TRUE(AwaitQuiescence());
-  ASSERT_TRUE(AllProfilesHaveSameAppList());
+  ASSERT_TRUE(AllProfilesHaveSameAppList(&number_of_apps));
+  EXPECT_EQ(number_of_apps, initial_number_of_apps);
 
-  // Ensure that a REMOVE_DEFAULT_APP SyncItem entry exists in Profile 1.
-  const ALSS::SyncItem* sync_item = GetSyncItem(GetProfile(1), default_app_id);
-  ASSERT_TRUE(sync_item);
-  ASSERT_EQ(sync_pb::AppListSpecifics::TYPE_REMOVE_DEFAULT_APP,
-            sync_item->item_type);
+  // Ensure that a TYPE_REMOVE_DEFAULT_APP SyncItem exists in both Profiles, if
+  // it was marked as a default app in Profile 1. This tests the How, not the
+  // What, but it's better than nothing.
+  for (int i = 0; i < 2; i++) {
+    const ALSS::SyncItem* sync_item =
+        GetSyncItem(GetProfile(i), default_app_id);
+    if (MarkAppAsDefaultApp()) {
+      ASSERT_TRUE(sync_item);
+      EXPECT_EQ(sync_pb::AppListSpecifics::TYPE_REMOVE_DEFAULT_APP,
+                sync_item->item_type);
+    } else {
+      ASSERT_FALSE(sync_item);
+    }
+  }
 
   // Re-Install the same app in Profile 0.
-  std::string app_id2 = InstallApp(GetProfile(0), default_app_index);
+  std::string app_id2 = InstallHostedApp(GetProfile(0), default_app_index);
   EXPECT_EQ(default_app_id, app_id2);
-  sync_item = GetSyncItem(GetProfile(0), app_id2);
-  EXPECT_EQ(sync_pb::AppListSpecifics::TYPE_APP, sync_item->item_type);
+  WaitForAppService(GetProfile(0));
+
+  // Ensure that the TYPE_REMOVE_DEFAULT_APP SyncItem (if present) was replaced
+  // with an TYPE_APP entry, for at least Profile 0. Whether or not Profile 1
+  // has synchronized this change might depend on what side effects (such as
+  // pumping the event loop) calling WaitForAppService has.
+  {
+    const ALSS::SyncItem* sync_item = GetSyncItem(GetProfile(0), app_id2);
+    ASSERT_TRUE(sync_item);
+    EXPECT_EQ(sync_pb::AppListSpecifics::TYPE_APP, sync_item->item_type);
+  }
+
+  // After sync'ing, we should have N+1 apps in both Profiles.
   AwaitQuiescenceAndInstallAppsPendingForSync();
+  ASSERT_TRUE(AllProfilesHaveSameAppList(&number_of_apps));
+  EXPECT_EQ(number_of_apps, initial_number_of_apps + 1);
 
-  ASSERT_TRUE(AllProfilesHaveSameAppList());
-
-  // Ensure that the REMOVE_DEFAULT_APP SyncItem entry in Profile 1 is replaced
-  // with an APP entry after an install.
-  sync_item = GetSyncItem(GetProfile(1), app_id2);
-  ASSERT_TRUE(sync_item);
-  EXPECT_EQ(sync_pb::AppListSpecifics::TYPE_APP, sync_item->item_type);
+  // Ensure that the TYPE_REMOVE_DEFAULT_APP SyncItem was replaced with an
+  // TYPE_APP entry, for both Profiles.
+  for (int i = 0; i < 2; i++) {
+    const ALSS::SyncItem* sync_item = GetSyncItem(GetProfile(i), app_id2);
+    ASSERT_TRUE(sync_item);
+    EXPECT_EQ(sync_pb::AppListSpecifics::TYPE_APP, sync_item->item_type);
+  }
 }
 
-#if !defined(OS_MACOSX)
+INSTANTIATE_TEST_SUITE_P(All, RemoveDefaultAppSyncTest, ::testing::Bool());
 
 // Install some apps on both clients, then sync. Move an app on one client
 // to a folder and sync. The app lists, including folders, should match.
 IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, MoveToFolder) {
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
   const int kNumApps = 5;
   std::vector<std::string> app_ids;
   for (int i = 0; i < kNumApps; ++i) {
-    app_ids.push_back(InstallApp(GetProfile(0), i));
-    InstallApp(GetProfile(1), i);
+    app_ids.push_back(InstallHostedApp(GetProfile(0), i));
+    InstallHostedApp(GetProfile(1), i);
   }
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllProfilesHaveSameAppList());
@@ -442,13 +544,14 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, MoveToFolder) {
 
 IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, FolderAddRemove) {
   ASSERT_TRUE(SetupSync());
+  WaitForExtensionServicesToLoad();
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 
   const int kNumApps = 10;
   std::vector<std::string> app_ids;
   for (int i = 0; i < kNumApps; ++i) {
-    app_ids.push_back(InstallApp(GetProfile(0), i));
-    InstallApp(GetProfile(1), i);
+    app_ids.push_back(InstallHostedApp(GetProfile(0), i));
+    InstallHostedApp(GetProfile(1), i);
   }
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllProfilesHaveSameAppList());
@@ -495,5 +598,3 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppListSyncTest, FolderAddRemove) {
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllProfilesHaveSameAppList());
 }
-
-#endif  // !defined(OS_MACOSX)

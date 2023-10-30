@@ -1,25 +1,25 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <utility>
 
 #include "base/bind.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "chrome/browser/battery/battery_metrics.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/metrics/subprocess_metrics_provider.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "content/public/common/service_manager_connection.h"
+#include "components/metrics/content/subprocess_metrics_provider.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "services/device/public/mojom/battery_monitor.mojom.h"
 #include "services/device/public/mojom/battery_status.mojom.h"
-#include "services/device/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/service_binding.h"
 
 namespace {
 
@@ -41,7 +41,7 @@ void RetryForHistogramBucketUntilCountReached(
     if (total_count >= count)
       return;
     content::FetchHistogramsFromChildProcesses();
-    SubprocessMetricsProvider::MergeHistogramDeltasForTesting();
+    metrics::SubprocessMetricsProvider::MergeHistogramDeltasForTesting();
     base::RunLoop().RunUntilIdle();
   }
 }
@@ -49,12 +49,16 @@ void RetryForHistogramBucketUntilCountReached(
 // Replaces the platform specific implementation of BatteryMonitor.
 class MockBatteryMonitor : public device::mojom::BatteryMonitor {
  public:
-  MockBatteryMonitor() : binding_(this) {}
+  MockBatteryMonitor() = default;
+
+  MockBatteryMonitor(const MockBatteryMonitor&) = delete;
+  MockBatteryMonitor& operator=(const MockBatteryMonitor&) = delete;
+
   ~MockBatteryMonitor() override = default;
 
-  void Bind(device::mojom::BatteryMonitorRequest request) {
-    DCHECK(!binding_.is_bound());
-    binding_.Bind(std::move(request));
+  void Bind(mojo::PendingReceiver<device::mojom::BatteryMonitor> receiver) {
+    DCHECK(!receiver_.is_bound());
+    receiver_.Bind(std::move(receiver));
   }
 
   void DidChange(const device::mojom::BatteryStatus& battery_status) {
@@ -65,13 +69,13 @@ class MockBatteryMonitor : public device::mojom::BatteryMonitor {
       ReportStatus();
   }
 
-  void CloseBinding() { binding_.Close(); }
+  void CloseReceiver() { receiver_.reset(); }
 
  private:
   // mojom::BatteryMonitor methods:
   void QueryNextStatus(QueryNextStatusCallback callback) override {
     if (!callback_.is_null()) {
-      binding_.Close();
+      receiver_.reset();
       return;
     }
     callback_ = std::move(callback);
@@ -88,15 +92,18 @@ class MockBatteryMonitor : public device::mojom::BatteryMonitor {
   QueryNextStatusCallback callback_;
   device::mojom::BatteryStatus status_;
   bool status_to_report_ = false;
-  mojo::Binding<device::mojom::BatteryMonitor> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockBatteryMonitor);
+  mojo::Receiver<device::mojom::BatteryMonitor> receiver_{this};
 };
 
 // Test that the metricss around battery usage are recorded correctly.
 class BatteryMetricsBrowserTest : public InProcessBrowserTest {
  public:
   BatteryMetricsBrowserTest() = default;
+
+  BatteryMetricsBrowserTest(const BatteryMetricsBrowserTest&) = delete;
+  BatteryMetricsBrowserTest& operator=(const BatteryMetricsBrowserTest&) =
+      delete;
+
   ~BatteryMetricsBrowserTest() override = default;
 
  protected:
@@ -107,32 +114,22 @@ class BatteryMetricsBrowserTest : public InProcessBrowserTest {
  private:
   void SetUpOnMainThread() override {
     mock_battery_monitor_ = std::make_unique<MockBatteryMonitor>();
-    service_manager::ServiceBinding::OverrideInterfaceBinderForTesting(
-        device::mojom::kServiceName,
+    BatteryMetrics::OverrideBatteryMonitorBinderForTesting(
         base::BindRepeating(&MockBatteryMonitor::Bind,
                             base::Unretained(mock_battery_monitor_.get())));
   }
 
   void TearDownOnMainThread() override {
-    service_manager::ServiceBinding::ClearInterfaceBinderOverrideForTesting<
-        device::mojom::BatteryMonitor>(device::mojom::kServiceName);
+    BatteryMetrics::OverrideBatteryMonitorBinderForTesting(
+        base::NullCallback());
 
     InProcessBrowserTest::TearDownOnMainThread();
   }
 
   std::unique_ptr<MockBatteryMonitor> mock_battery_monitor_;
-
-  DISALLOW_COPY_AND_ASSIGN(BatteryMetricsBrowserTest);
 };
 
-#if defined(OS_WIN)
-#define DISABLED_ON_WIN(name) DISABLED##name
-#else
-#define DISABLED_ON_WIN(name) name
-#endif
-
-IN_PROC_BROWSER_TEST_F(BatteryMetricsBrowserTest,
-                       DISABLED_ON_WIN(BatteryDropUMA)) {
+IN_PROC_BROWSER_TEST_F(BatteryMetricsBrowserTest, BatteryDropUMA) {
   // Verify that drops in battery level are recorded, and drops by less than 1%
   // are aggregated together until there is a full percentage drop.
   device::mojom::BatteryStatus status;

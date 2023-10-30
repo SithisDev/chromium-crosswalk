@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,12 @@
 
 #include "ash/public/cpp/multi_user_window_manager.h"
 #include "ash/test/ash_test_helper.h"
+#include "base/check_op.h"
 #include "base/compiler_specific.h"
 #include "base/format_macros.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
-#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
+#include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_profile_support.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_context_menu.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_helper.h"
@@ -28,8 +27,13 @@ namespace ash {
 class MultiUserContextMenuChromeOSTest : public ChromeAshTestBase {
  public:
   MultiUserContextMenuChromeOSTest()
-      : fake_user_manager_(new chromeos::FakeChromeUserManager),
+      : fake_user_manager_(new FakeChromeUserManager),
         user_manager_enabler_(base::WrapUnique(fake_user_manager_)) {}
+
+  MultiUserContextMenuChromeOSTest(const MultiUserContextMenuChromeOSTest&) =
+      delete;
+  MultiUserContextMenuChromeOSTest& operator=(
+      const MultiUserContextMenuChromeOSTest&) = delete;
 
   void SetUp() override;
   void TearDown() override;
@@ -57,10 +61,8 @@ class MultiUserContextMenuChromeOSTest : public ChromeAshTestBase {
   aura::Window* window_;
 
   // Owned by |user_manager_enabler_|.
-  chromeos::FakeChromeUserManager* fake_user_manager_ = nullptr;
+  FakeChromeUserManager* fake_user_manager_ = nullptr;
   user_manager::ScopedUserManager user_manager_enabler_;
-
-  DISALLOW_COPY_AND_ASSIGN(MultiUserContextMenuChromeOSTest);
 };
 
 void MultiUserContextMenuChromeOSTest::SetUp() {
@@ -102,13 +104,13 @@ TEST_F(MultiUserContextMenuChromeOSTest, OwnedWindow) {
     SetLoggedInUsers(2);
     std::unique_ptr<ui::MenuModel> menu = CreateMultiUserContextMenu(window());
     ASSERT_TRUE(menu.get());
-    EXPECT_EQ(1, menu.get()->GetItemCount());
+    EXPECT_EQ(1u, menu.get()->GetItemCount());
   }
   {
     SetLoggedInUsers(3);
     std::unique_ptr<ui::MenuModel> menu = CreateMultiUserContextMenu(window());
     ASSERT_TRUE(menu.get());
-    EXPECT_EQ(2, menu.get()->GetItemCount());
+    EXPECT_EQ(2u, menu.get()->GetItemCount());
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,24 +22,24 @@ DumpDatabaseHandler::~DumpDatabaseHandler() {}
 void DumpDatabaseHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "getDatabaseDump",
-      base::BindRepeating(&DumpDatabaseHandler::GetDatabaseDump,
-                          base::Unretained(this)));
+      base::BindRepeating(&DumpDatabaseHandler::HandleGetDatabaseDump,
+                          weak_factory_.GetWeakPtr()));
 }
 
-void DumpDatabaseHandler::GetDatabaseDump(const base::ListValue*) {
-  std::unique_ptr<base::ListValue> list;
+void DumpDatabaseHandler::HandleGetDatabaseDump(const base::Value::List& args) {
+  AllowJavascript();
   sync_file_system::SyncFileSystemService* sync_service =
       SyncFileSystemServiceFactory::GetForProfile(profile_);
   if (sync_service) {
-    sync_service->DumpDatabase(
-        base::Bind(&DumpDatabaseHandler::DidGetDatabaseDump,
-                   base::Unretained(this)));
+    sync_service->DumpDatabase(base::BindOnce(
+        &DumpDatabaseHandler::DidGetDatabaseDump, weak_factory_.GetWeakPtr(),
+        args[0].GetString() /* callback_id */));
   }
 }
 
-void DumpDatabaseHandler::DidGetDatabaseDump(const base::ListValue& list) {
-  web_ui()->CallJavascriptFunctionUnsafe("DumpDatabase.onGetDatabaseDump",
-                                         list);
+void DumpDatabaseHandler::DidGetDatabaseDump(std::string callback_id,
+                                             const base::ListValue& list) {
+  ResolveJavascriptCallback(base::Value(callback_id), list);
 }
 
 }  // namespace syncfs_internals

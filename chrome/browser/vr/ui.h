@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/version.h"
 #include "chrome/browser/vr/assets_load_status.h"
@@ -65,6 +65,9 @@ class VR_UI_EXPORT Ui : public UiInterface,
      std::unique_ptr<AudioDelegate> audio_delegate,
      const UiInitialState& ui_initial_state);
 
+  Ui(const Ui&) = delete;
+  Ui& operator=(const Ui&) = delete;
+
   ~Ui() override;
 
   void OnUiRequestedNavigation();
@@ -101,7 +104,7 @@ class VR_UI_EXPORT Ui : public UiInterface,
       const CapturingStateModel& potential_capturing) override;
   void ShowExitVrPrompt(UiUnsupportedMode reason) override;
   void SetSpeechRecognitionEnabled(bool enabled) override;
-  void SetRecognitionResult(const base::string16& result) override;
+  void SetRecognitionResult(const std::u16string& result) override;
   void SetHasOrCanRequestRecordAudioPermission(
       bool has_or_can_request_record_audio) override;
   void OnSpeechRecognitionStateChanged(int new_state) override;
@@ -142,7 +145,7 @@ class VR_UI_EXPORT Ui : public UiInterface,
                                            float height_percentage) override;
   void SetDialogLocation(float x, float y) override;
   void SetDialogFloating(bool floating) override;
-  void ShowPlatformToast(const base::string16& text) override;
+  void ShowPlatformToast(const std::u16string& text) override;
   void CancelPlatformToast() override;
 
   void OnPause() override;
@@ -207,7 +210,7 @@ class VR_UI_EXPORT Ui : public UiInterface,
   void OnMenuButtonClicked();
   void OnSpeechRecognitionEnded();
   void InitializeModel(const UiInitialState& ui_initial_state);
-  UiBrowserInterface* browser_;
+  raw_ptr<UiBrowserInterface> browser_;
   ContentElement* GetContentElement();
   FovRectangle GetMinimalFov(const gfx::Transform& view_matrix,
                              const std::vector<const UiElement*>& elements,
@@ -226,7 +229,7 @@ class VR_UI_EXPORT Ui : public UiInterface,
 
   // Cache the content element so we don't have to get it multiple times per
   // frame.
-  ContentElement* content_element_ = nullptr;
+  raw_ptr<ContentElement> content_element_ = nullptr;
 
   std::unique_ptr<KeyboardDelegate> keyboard_delegate_;
   std::unique_ptr<KeyboardDelegate> keyboard_delegate_for_testing_;
@@ -235,8 +238,6 @@ class VR_UI_EXPORT Ui : public UiInterface,
   std::unique_ptr<AudioDelegate> audio_delegate_;
 
   base::WeakPtrFactory<Ui> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(Ui);
 };
 
 }  // namespace vr

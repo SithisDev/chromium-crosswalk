@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,40 +7,43 @@
 
 #include <vector>
 
-#include "base/macros.h"
-#include "base/optional.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_registry_observer.h"
+#include "extensions/browser/uninstall_reason.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/link_listener.h"
+#include "ui/views/controls/button/checkbox.h"
+#include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/view.h"
 
 class Profile;
-
-namespace content {
-class PageNavigator;
-}
-
-namespace views {
-class Link;
-}
 
 // Modal dialog that shows when the user attempts to install an extension. Also
 // shown if the extension is already installed but needs additional permissions.
 // Not a normal "bubble" despite being a subclass of BubbleDialogDelegateView.
 class ExtensionInstallDialogView : public views::BubbleDialogDelegateView,
-                                   public views::LinkListener {
+                                   public extensions::ExtensionRegistryObserver,
+                                   public views::TextfieldController {
  public:
+  METADATA_HEADER(ExtensionInstallDialogView);
+
   // The views::View::id of the ratings section in the dialog.
   static const int kRatingsViewId = 1;
 
   ExtensionInstallDialogView(
-      Profile* profile,
-      content::PageNavigator* navigator,
-      const ExtensionInstallPrompt::DoneCallback& done_callback,
+      std::unique_ptr<ExtensionInstallPromptShowParams> show_params,
+      ExtensionInstallPrompt::DoneCallback done_callback,
       std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt);
+  ExtensionInstallDialogView(const ExtensionInstallDialogView&) = delete;
+  ExtensionInstallDialogView& operator=(const ExtensionInstallDialogView&) =
+      delete;
   ~ExtensionInstallDialogView() override;
 
   // Returns the interior ScrollView of the dialog. This allows us to inspect
@@ -52,60 +55,68 @@ class ExtensionInstallDialogView : public views::BubbleDialogDelegateView,
   // Changes the widget size to accommodate the contents' preferred size.
   void ResizeWidget();
 
- private:
-  // views::BubbleDialogDelegate:
-  gfx::Size CalculatePreferredSize() const override;
+  // views::BubbleDialogDelegateView:
   void VisibilityChanged(views::View* starting_from, bool is_visible) override;
   void AddedToWidget() override;
-  std::unique_ptr<views::View> CreateExtraView() override;
-  bool Cancel() override;
-  bool Accept() override;
-  bool IsDialogDraggable() const override;
-  int GetDialogButtons() const override;
-  int GetDefaultDialogButton() const override;
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   bool IsDialogButtonEnabled(ui::DialogButton button) const override;
-  bool ShouldShowCloseButton() const override;
+  std::u16string GetAccessibleWindowTitle() const override;
 
-  // views::WidgetDelegate:
-  ax::mojom::Role GetAccessibleWindowRole() override;
-  base::string16 GetAccessibleWindowTitle() const override;
-  ui::ModalType GetModalType() const override;
+  ExtensionInstallPromptShowParams* GetShowParamsForTesting();
+  void ClickLinkForTesting();
+  bool IsJustificationFieldVisibleForTesting();
+  void SetJustificationTextForTesting(const std::u16string& new_text);
 
-  // views::LinkListener:
-  void LinkClicked(views::Link* source, int event_flags) override;
+ private:
+  // Forward-declaration.
+  class ExtensionJustificationView;
+
+  void CloseDialog();
+
+  // extensions::ExtensionRegistryObserver:
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const extensions::Extension* extension,
+                              extensions::UninstallReason reason) override;
+  void OnShutdown(extensions::ExtensionRegistry* registry) override;
+
+  void LinkClicked();
+  void OnDialogCanceled();
+  void OnDialogAccepted();
 
   // Creates the contents area that contains permissions and other extension
   // info.
   void CreateContents();
 
+  // views::TextfieldController:
+  void ContentsChanged(views::Textfield* sender,
+                       const std::u16string& new_contents) override;
+
   // Enables the install button and updates the dialog buttons.
   void EnableInstallButton();
-
-  bool is_external_install() const {
-    return prompt_->type() == ExtensionInstallPrompt::EXTERNAL_INSTALL_PROMPT;
-  }
 
   // Updates the histogram that holds installation accepted/aborted data.
   void UpdateInstallResultHistogram(bool accepted) const;
 
-  Profile* profile_;
-  content::PageNavigator* navigator_;
+  // Updates the histogram that holds cloud extension request accepted/aborted
+  // decision made by user on the specific prompt dialog.
+  void UpdateEnterpriseCloudExtensionRequestDialogActionHistogram(
+      bool accepted) const;
+
+  raw_ptr<Profile> profile_;
+  std::unique_ptr<ExtensionInstallPromptShowParams> show_params_;
   ExtensionInstallPrompt::DoneCallback done_callback_;
   std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt_;
-  base::string16 title_;
+  std::u16string title_;
+  base::ScopedObservation<extensions::ExtensionRegistry,
+                          extensions::ExtensionRegistryObserver>
+      extension_registry_observation_{this};
 
   // The scroll view containing all the details for the dialog (including all
   // collapsible/expandable sections).
-  views::ScrollView* scroll_view_;
-
-  // Set to true once the user's selection has been received and the callback
-  // has been run.
-  bool handled_result_;
+  raw_ptr<views::ScrollView> scroll_view_;
 
   // Used to record time between dialog creation and acceptance, cancellation,
   // or dismissal.
-  base::Optional<base::ElapsedTimer> install_result_timer_;
+  absl::optional<base::ElapsedTimer> install_result_timer_;
 
   // Used to delay the activation of the install button.
   base::OneShotTimer enable_install_timer_;
@@ -113,56 +124,18 @@ class ExtensionInstallDialogView : public views::BubbleDialogDelegateView,
   // Used to determine whether the install button should be enabled.
   bool install_button_enabled_;
 
-  DISALLOW_COPY_AND_ASSIGN(ExtensionInstallDialogView);
-};
+  // Along with install_button_enabled_, used to determine whether the extension
+  // request button should be enabled. Its value is initialized to |true| so
+  // that it has no effect unless the justification field is present and the
+  // entered text length is larger than the defined limit.
+  bool request_button_enabled_ = true;
 
-// A view that displays a list of details, along with a link that expands and
-// collapses those details.
-class ExpandableContainerView : public views::View, public views::LinkListener {
- public:
-  ExpandableContainerView(const std::vector<base::string16>& details,
-                          int available_width);
-  ~ExpandableContainerView() override;
+  // Checkbox used to indicate if permissions should be withheld on install.
+  raw_ptr<views::Checkbox> withhold_permissions_checkbox_;
 
-  // views::View:
-  void ChildPreferredSizeChanged(views::View* child) override;
-
-  // views::LinkListener:
-  void LinkClicked(views::Link* source, int event_flags) override;
-
- private:
-  // Helper class representing the list of details, that can hide itself.
-  class DetailsView : public views::View {
-   public:
-    explicit DetailsView(const std::vector<base::string16>& details);
-    ~DetailsView() override {}
-
-    // views::View:
-    gfx::Size CalculatePreferredSize() const override;
-
-    // Expands or collapses this view.
-    void ToggleExpanded();
-
-    bool expanded() { return expanded_; }
-
-   private:
-    // Whether this details section is expanded.
-    bool expanded_ = false;
-
-    DISALLOW_COPY_AND_ASSIGN(DetailsView);
-  };
-
-  // Expands or collapses |details_view_|.
-  void ToggleDetailLevel();
-
-  // The view that expands or collapses when |details_link_| is clicked.
-  DetailsView* details_view_;
-
-  // The 'Show Details' link, which changes to 'Hide Details' when the details
-  // section is expanded.
-  views::Link* details_link_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExpandableContainerView);
+  // The justification text field view where users enter their justification for
+  // requesting an extension.
+  raw_ptr<ExtensionJustificationView> justification_view_ = nullptr;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSION_INSTALL_DIALOG_VIEW_H_

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "components/grit/components_resources.h"
 #include "components/security_interstitials/content/security_interstitial_controller_client.h"
+#include "components/security_interstitials/content/settings_page_helper.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/jstemplate_builder.h"
 #include "ui/base/webui/web_ui_util.h"
@@ -20,15 +21,17 @@ TestSafeBrowsingBlockingPageQuiet::TestSafeBrowsingBlockingPageQuiet(
     const UnsafeResourceList& unsafe_resources,
     const BaseSafeBrowsingErrorUI::SBErrorDisplayOptions& display_options,
     bool is_giant_webview)
-    : BaseBlockingPage(ui_manager,
-                       web_contents,
-                       main_frame_url,
-                       unsafe_resources,
-                       CreateControllerClient(web_contents,
-                                              unsafe_resources,
-                                              ui_manager,
-                                              nullptr),
-                       display_options),
+    : BaseBlockingPage(
+          ui_manager,
+          web_contents,
+          main_frame_url,
+          unsafe_resources,
+          CreateControllerClient(web_contents,
+                                 unsafe_resources,
+                                 ui_manager,
+                                 nullptr,
+                                 /* settings_page_helper */ nullptr),
+          display_options),
       sb_error_ui_(unsafe_resources[0].url,
                    main_frame_url,
                    GetInterstitialReason(unsafe_resources),
@@ -57,15 +60,15 @@ TestSafeBrowsingBlockingPageQuiet::CreateBlockingPage(
 }
 
 std::string TestSafeBrowsingBlockingPageQuiet::GetHTML() {
-  base::DictionaryValue load_time_data;
-  sb_error_ui_.PopulateStringsForHtml(&load_time_data);
+  base::Value::Dict load_time_data;
+  sb_error_ui_.PopulateStringsForHtml(load_time_data);
   webui::SetLoadTimeDataDefaults(controller()->GetApplicationLocale(),
                                  &load_time_data);
   std::string html =
-      ui::ResourceBundle::GetSharedInstance().DecompressDataResource(
+      ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
           IDR_SECURITY_INTERSTITIAL_QUIET_HTML);
   webui::AppendWebUiCssTextDefaults(&html);
-  html = webui::GetI18nTemplateHtml(html, &load_time_data);
+  html = webui::GetI18nTemplateHtml(html, load_time_data);
   return html;
 }
 

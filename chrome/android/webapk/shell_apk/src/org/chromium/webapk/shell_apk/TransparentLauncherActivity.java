@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,8 @@ public class TransparentLauncherActivity extends Activity {
                         HostBrowserLauncherParams params =
                                 HostBrowserLauncherParams.createForIntent(
                                         TransparentLauncherActivity.this, getIntent(),
-                                        hostBrowserPackageName, dialogShown, activityStartTimeMs);
+                                        hostBrowserPackageName, dialogShown, activityStartTimeMs,
+                                        -1 /* splashShownTimeMs */);
 
                         onHostBrowserSelected(params);
                         finish();
@@ -40,7 +41,7 @@ public class TransparentLauncherActivity extends Activity {
     protected void onHostBrowserSelected(HostBrowserLauncherParams params) {
         if (params != null) {
             WebApkUtils.grantUriPermissionToHostBrowserIfShare(getApplicationContext(), params);
-            HostBrowserLauncher.launch(getApplicationContext(), params);
+            HostBrowserLauncher.launch(this, params);
         }
     }
 }

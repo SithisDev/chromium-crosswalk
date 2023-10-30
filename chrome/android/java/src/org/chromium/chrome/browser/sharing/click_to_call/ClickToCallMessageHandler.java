@@ -1,34 +1,29 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.sharing.click_to_call;
 
-import android.app.Notification;
 import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.res.Resources;
 import android.net.Uri;
-import android.support.v4.app.NotificationCompat;
+import android.os.Build;
 import android.text.TextUtils;
 
-import org.chromium.base.ApiCompatibilityUtils;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContextUtils;
+import org.chromium.base.IntentUtils;
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.metrics.CachedMetrics;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.notifications.ChromeNotification;
-import org.chromium.chrome.browser.notifications.ChromeNotificationBuilder;
-import org.chromium.chrome.browser.notifications.NotificationBuilderFactory;
+import org.chromium.chrome.browser.device.DeviceConditions;
 import org.chromium.chrome.browser.notifications.NotificationConstants;
-import org.chromium.chrome.browser.notifications.NotificationManagerProxyImpl;
-import org.chromium.chrome.browser.notifications.NotificationMetadata;
 import org.chromium.chrome.browser.notifications.NotificationUmaTracker;
-import org.chromium.chrome.browser.notifications.PendingIntentProvider;
-import org.chromium.chrome.browser.notifications.channels.ChannelDefinitions;
+import org.chromium.chrome.browser.sharing.SharingNotificationUtil;
+import org.chromium.components.browser_ui.notifications.PendingIntentProvider;
 
 /**
  * Manages ClickToCall related notifications for Android.
@@ -37,69 +32,159 @@ public class ClickToCallMessageHandler {
     private static final String EXTRA_PHONE_NUMBER = "ClickToCallMessageHandler.EXTRA_PHONE_NUMBER";
 
     /**
+     * Opens the dialer with the |phoneNumber| already prefilled.
+     *
+     * @param phoneNumber The phone number to show in the dialer.
+     */
+    private static void openDialer(String phoneNumber) {
+        try {
+            ContextUtils.getApplicationContext().startActivity(getDialIntent(phoneNumber));
+            ClickToCallUma.recordDialerPresent(true);
+        } catch (ActivityNotFoundException activityNotFound) {
+            // Notify the user that no dialer app was available.
+            ClickToCallUma.recordDialerPresent(false);
+            displayDialerNotFoundNotification();
+        }
+    }
+
+    /**
+     * Shows an error notification suggesting the user to enable a dialer app to
+     * use click to call.
+     */
+    public static void displayDialerNotFoundNotification() {
+        Context context = ContextUtils.getApplicationContext();
+
+        SharingNotificationUtil.showNotification(
+                NotificationUmaTracker.SystemNotificationType.CLICK_TO_CALL,
+                NotificationConstants.GROUP_CLICK_TO_CALL,
+                NotificationConstants.NOTIFICATION_ID_CLICK_TO_CALL_ERROR, /*contentIntent=*/null,
+                /*deleteIntent=*/null, /*confirmIntent=*/null, /*cancelIntent=*/null,
+                context.getResources().getString(
+                        R.string.click_to_call_dialer_absent_notification_title),
+                context.getResources().getString(
+                        R.string.click_to_call_dialer_absent_notification_text),
+                R.drawable.ic_error_outline_red_24dp, R.drawable.ic_dialer_not_found_red_40dp,
+                R.color.google_red_600, /*startsActivity=*/false);
+    }
+
+    /**
      * Handles the tapping of a notification by opening the dialer with the
      * phone number specified in the notification.
      */
     public static final class TapReceiver extends BroadcastReceiver {
         @Override
         public void onReceive(Context context, Intent intent) {
-            String phoneNumber = intent.getStringExtra(EXTRA_PHONE_NUMBER);
-            final Intent dialIntent;
-            if (!TextUtils.isEmpty(phoneNumber)) {
-                dialIntent = new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phoneNumber));
-            } else {
-                dialIntent = new Intent(Intent.ACTION_DIAL);
-            }
-            dialIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            try {
-                ContextUtils.getApplicationContext().startActivity(dialIntent);
-                new CachedMetrics.BooleanHistogramSample("Sharing.ClickToCallDialIntent")
-                        .record(TextUtils.isEmpty(phoneNumber));
-            } catch (ActivityNotFoundException activityNotFound) {
-                // TODO(crbug.com/996644): Add error dialog when no dialer app is available.
+            openDialer(IntentUtils.safeGetStringExtra(intent, EXTRA_PHONE_NUMBER));
+        }
+    }
+
+    /**
+     * Handles the device unlock event to remove notification and just show dialer.
+     */
+    public static final class PhoneUnlockedReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            // We only try to remove the notifications if we have opened the dialer.
+            if (intent != null && Intent.ACTION_USER_PRESENT.equals(intent.getAction())
+                    && shouldOpenDialer()) {
+                SharingNotificationUtil.dismissNotification(
+                        NotificationConstants.GROUP_CLICK_TO_CALL,
+                        NotificationConstants.NOTIFICATION_ID_CLICK_TO_CALL);
             }
         }
     }
 
     /**
-     * Displays a notification that starts a phone call when clicked.
+     * Displays a notification that opens the dialer when clicked.
      *
-     * @param phoneNumber The phone number to call when the user taps on the notification.
+     * @param phoneNumber The phone number to show in the dialer when the user taps the
+     *                    notification.
      */
-    @CalledByNative
-    private static void showNotification(String phoneNumber) {
+    private static void displayNotification(String phoneNumber) {
         Context context = ContextUtils.getApplicationContext();
-        PendingIntentProvider contentIntent = PendingIntentProvider.getBroadcast(context,
+        String contentTitle = Uri.decode(phoneNumber);
+        SharingNotificationUtil.showNotification(
+                NotificationUmaTracker.SystemNotificationType.CLICK_TO_CALL,
+                NotificationConstants.GROUP_CLICK_TO_CALL,
+                NotificationConstants.NOTIFICATION_ID_CLICK_TO_CALL,
+                getContentIntentProvider(phoneNumber), /*deleteIntent=*/null,
+                /*confirmIntent=*/null, /*cancelIntent=*/null, contentTitle,
+                context.getResources().getString(R.string.click_to_call_notification_text),
+                R.drawable.ic_devices_16dp, R.drawable.ic_dialer_icon_blue_40dp,
+                R.color.default_icon_color_accent1_baseline, /*startsActivity=*/true);
+    }
+
+    private static Intent getDialIntent(String phoneNumber) {
+        Intent dialIntent = TextUtils.isEmpty(phoneNumber)
+                ? new Intent(Intent.ACTION_DIAL)
+                : new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phoneNumber));
+        dialIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return dialIntent;
+    }
+
+    private static PendingIntentProvider getContentIntentProvider(String phoneNumber) {
+        Context context = ContextUtils.getApplicationContext();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // We can't use the TapReceiver broadcast to start the dialer Activity starting in
+            // Android S. Use the dial intent directly instead.
+            return PendingIntentProvider.getActivity(context, /*requestCode=*/0,
+                    getDialIntent(phoneNumber), PendingIntent.FLAG_UPDATE_CURRENT);
+        }
+
+        return PendingIntentProvider.getBroadcast(context,
                 /*requestCode=*/0,
                 new Intent(context, TapReceiver.class).putExtra(EXTRA_PHONE_NUMBER, phoneNumber),
                 PendingIntent.FLAG_UPDATE_CURRENT);
-        Resources resources = context.getResources();
-        String text = resources.getString(R.string.click_to_call_notification_text);
-        ChromeNotificationBuilder builder =
-                NotificationBuilderFactory
-                        .createChromeNotificationBuilder(/*preferCompat=*/true,
-                                ChannelDefinitions.ChannelId.SHARING,
-                                /*remoteAppPackageName=*/null,
-                                new NotificationMetadata(
-                                        NotificationUmaTracker.SystemNotificationType.CLICK_TO_CALL,
-                                        NotificationConstants.GROUP_CLICK_TO_CALL,
-                                        NotificationConstants.NOTIFICATION_ID_CLICK_TO_CALL))
-                        .setContentIntent(contentIntent)
-                        .setContentTitle(phoneNumber)
-                        .setContentText(text)
-                        .setColor(ApiCompatibilityUtils.getColor(
-                                context.getResources(), R.color.default_icon_color_blue))
-                        .setGroup(NotificationConstants.GROUP_CLICK_TO_CALL)
-                        .setPriorityBeforeO(NotificationCompat.PRIORITY_HIGH)
-                        .setVibrate(new long[0])
-                        .setSmallIcon(R.drawable.ic_phone_googblue_36dp)
-                        .setAutoCancel(true)
-                        .setDefaults(Notification.DEFAULT_ALL);
-        ChromeNotification notification = builder.buildChromeNotification();
+    }
 
-        new NotificationManagerProxyImpl(context).notify(notification);
-        NotificationUmaTracker.getInstance().onNotificationShown(
-                NotificationUmaTracker.SystemNotificationType.CLICK_TO_CALL,
-                notification.getNotification());
+    /**
+     * Returns true if we should open the dialer straight away.
+     */
+    private static boolean shouldOpenDialer() {
+        // On Android Q and above, we never open the dialer directly.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return false;
+        }
+
+        // On Android N and below, we always open the dialer. If device is locked, we also show a
+        // notification. We can listen to ACTION_USER_PRESENT and remove this notification when
+        // device is unlocked.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return true;
+        }
+
+        // On Android O and P, we open dialer only when device is unlocked since we cannot listen to
+        // ACTION_USER_PRESENT.
+        return DeviceConditions.isCurrentlyScreenOnAndUnlocked(
+                ContextUtils.getApplicationContext());
+    }
+
+    /**
+     * Returns true if we should show notification to the user.
+     */
+    private static boolean shouldShowNotification() {
+        // Always show the notification for Android Q and above. For pre-Q, only show notification
+        // if device is locked.
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                || !DeviceConditions.isCurrentlyScreenOnAndUnlocked(
+                        ContextUtils.getApplicationContext());
+    }
+
+    /**
+     * Handles a phone number sent from another device.
+     *
+     * @param phoneNumber The phone number to call.
+     */
+    @CalledByNative
+    @VisibleForTesting
+    static void handleMessage(String phoneNumber) {
+        if (shouldOpenDialer()) {
+            openDialer(phoneNumber);
+        }
+
+        if (shouldShowNotification()) {
+            displayNotification(phoneNumber);
+        }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,9 @@
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/strings/string16.h"
 #include "base/values.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/common/buildflags.h"
 
 namespace content {
@@ -23,7 +24,7 @@ class Profile;
 
 namespace printing {
 
-class StickySettings;
+class PrintPreviewStickySettings;
 
 // Wrapper around PrinterProviderAPI to be used by print preview.
 // It makes request lifetime management easier, and hides details of more
@@ -34,25 +35,26 @@ class PrinterHandler {
   using DefaultPrinterCallback =
       base::OnceCallback<void(const std::string& printer_name)>;
   using AddedPrintersCallback =
-      base::RepeatingCallback<void(const base::ListValue& printers)>;
+      base::RepeatingCallback<void(base::Value::List printers)>;
   using GetPrintersDoneCallback = base::OnceClosure;
-  // |capability| should contain a CDD with key |kSettingCapabilities|.
+  // `capability` should contain a CDD with key `kSettingCapabilities`.
   // It may also contain other information about the printer in a dictionary
-  // with key |kPrinter|.
-  // If |capability| is null, empty, or does not contain a dictionary with key
-  // |kSettingCapabilities|, this indicates a failure to retrieve capabilities.
-  // If the dictionary with key |kSettingCapabilities| is
-  // empty, this indicates capabilities were retrieved but the printer does
-  // not support any of the capability fields in a CDD.
+  // with key `kPrinter`.
+  // If `capability` does not contain a `kSettingCapabilities` key, this
+  // indicates a failure to retrieve capabilities. If the dictionary with key
+  // `kSettingCapabilities` is empty, this indicates capabilities were retrieved
+  // but the printer does not support any of the capability fields in a CDD.
   using GetCapabilityCallback =
-      base::OnceCallback<void(base::Value capability)>;
+      base::OnceCallback<void(base::Value::Dict capability)>;
   using PrintCallback = base::OnceCallback<void(const base::Value& error)>;
   using GetPrinterInfoCallback =
       base::OnceCallback<void(const base::DictionaryValue& printer_info)>;
-
-  // Creates an instance of a PrinterHandler for cloud printers.
-  // Note: Implementation currently empty, see https://crbug.com/829414
-  static std::unique_ptr<PrinterHandler> CreateForCloudPrinters();
+#if BUILDFLAG(IS_CHROMEOS)
+  using GetEulaUrlCallback =
+      base::OnceCallback<void(const std::string& license)>;
+  using PrinterStatusRequestCallback = base::OnceCallback<void(
+      absl::optional<base::Value::Dict> cups_printer_status)>;
+#endif
 
   // Creates an instance of a PrinterHandler for extension printers.
   static std::unique_ptr<PrinterHandler> CreateForExtensionPrinters(
@@ -62,19 +64,13 @@ class PrinterHandler {
   static std::unique_ptr<PrinterHandler> CreateForPdfPrinter(
       Profile* profile,
       content::WebContents* preview_web_contents,
-      StickySettings* sticky_settings);
+      PrintPreviewStickySettings* sticky_settings);
 
   static std::unique_ptr<PrinterHandler> CreateForLocalPrinters(
       content::WebContents* preview_web_contents,
       Profile* profile);
 
-#if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
-  // Creates an instance of a PrinterHandler for privet printers.
-  static std::unique_ptr<PrinterHandler> CreateForPrivetPrinters(
-      Profile* profile);
-#endif
-
-  virtual ~PrinterHandler() {}
+  virtual ~PrinterHandler() = default;
 
   // Cancels all pending requests.
   virtual void Reset() = 0;
@@ -93,7 +89,7 @@ class PrinterHandler {
 
   // Starts getting printing capability of the printer with the provided
   // destination ID.
-  // |callback| should be called in the response to the request.
+  // |callback| should be called in response to the request.
   virtual void StartGetCapability(const std::string& destination_id,
                                   GetCapabilityCallback callback) = 0;
 
@@ -110,10 +106,24 @@ class PrinterHandler {
   // |settings|: The print job settings.
   // |print_data|: The document bytes to print.
   // |callback| should be called in the response to the request.
-  virtual void StartPrint(const base::string16& job_title,
-                          base::Value settings,
+  virtual void StartPrint(const std::u16string& job_title,
+                          base::Value::Dict settings,
                           scoped_refptr<base::RefCountedMemory> print_data,
                           PrintCallback callback) = 0;
+
+#if BUILDFLAG(IS_CHROMEOS)
+  // Starts getting the printer's PPD EULA URL with the provided destination ID.
+  // |destination_id|: The ID of the printer.
+  // |callback| should be called in response to the request.
+  virtual void StartGetEulaUrl(const std::string& destination_id,
+                               GetEulaUrlCallback callback);
+
+  // Initiates a status request for specified printer.
+  // |printer_id|: Printer id.
+  // |callback|: should be called in response to the request.
+  virtual void StartPrinterStatusRequest(const std::string& printer_id,
+                                         PrinterStatusRequestCallback callback);
+#endif
 };
 
 }  // namespace printing

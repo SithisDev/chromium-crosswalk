@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,46 +9,40 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/command_line.h"
-#include "base/files/file_path.h"
-#include "base/files/file_util.h"
+#include "base/callback_helpers.h"
+#include "base/containers/unique_ptr_adapters.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task/post_task.h"
+#include "base/types/expected.h"
 #include "base/values.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/net/net_export_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/url_constants.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/net_internals_resources.h"
-#include "components/onc/onc_constants.h"
+#include "chrome/grit/net_internals_resources_map.h"
 #include "components/prefs/pref_member.h"
-#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/browsing_data_remover.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "net/log/net_log_util.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "net/base/address_list.h"
+#include "net/base/host_port_pair.h"
+#include "net/base/ip_endpoint.h"
+#include "net/base/net_errors.h"
+#include "net/base/network_isolation_key.h"
+#include "net/dns/public/host_resolver_results.h"
+#include "net/dns/public/resolve_error_info.h"
 #include "services/network/expect_ct_reporter.h"
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/file_manager/filesystem_api_util.h"
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/system_logs/debug_log_writer.h"
-#include "chrome/browser/net/nss_context.h"
-#include "chrome/browser/policy/policy_conversions.h"
-#include "chrome/common/logging_chrome.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/debug_daemon_client.h"
-#include "chromeos/network/onc/onc_certificate_importer_impl.h"
-#include "chromeos/network/onc/onc_parsed_certificates.h"
-#include "chromeos/network/onc/onc_utils.h"
-#endif
+#include "services/network/public/mojom/content_security_policy.mojom.h"
+#include "services/network/public/mojom/host_resolver.mojom.h"
+#include "services/network/public/mojom/network_context.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/resources/grit/webui_generated_resources.h"
+#include "url/scheme_host_port.h"
 
 using content::BrowserThread;
 
@@ -57,89 +51,188 @@ namespace {
 content::WebUIDataSource* CreateNetInternalsHTMLSource() {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUINetInternalsHost);
-  source->OverrideContentSecurityPolicyScriptSrc(
-      "script-src chrome://resources 'self' 'unsafe-eval';");
-
+  source->UseStringsJs();
+  source->AddBoolean("expectCTEnabled",
+                     base::FeatureList::IsEnabled(
+                         net::TransportSecurityState::kDynamicExpectCTFeature));
+  source->AddResourcePaths(
+      base::make_span(kNetInternalsResources, kNetInternalsResourcesSize));
   source->SetDefaultResource(IDR_NET_INTERNALS_INDEX_HTML);
-  source->AddResourcePath("index.js", IDR_NET_INTERNALS_INDEX_JS);
-  source->SetJsonPath("strings.js");
+  source->OverrideContentSecurityPolicy(
+      network::mojom::CSPDirectiveName::ScriptSrc,
+      "script-src chrome://resources chrome://test chrome://webui-test "
+      "'self';");
+  source->AddResourcePath("test_loader_util.js",
+                          IDR_WEBUI_JS_TEST_LOADER_UTIL_JS);
+  source->DisableTrustedTypesCSP();
   return source;
 }
 
 void IgnoreBoolCallback(bool result) {}
 
+// This function converts std::vector<net::IPEndPoint> to base::Value::List.
+base::Value::List IPEndpointsToBaseList(
+    const std::vector<net::IPEndPoint>& resolved_addresses) {
+  base::Value::List resolved_addresses_list;
+  for (const net::IPEndPoint& resolved_address : resolved_addresses) {
+    resolved_addresses_list.Append(resolved_address.ToStringWithoutPort());
+  }
+  return resolved_addresses_list;
+}
+
+// This function converts net::ConnectionEndpointMetadata to base::Value::Dict.
+base::Value::Dict ConnectionEndpointMetadataToBaseDict(
+    const net::ConnectionEndpointMetadata& metadata) {
+  base::Value::Dict connection_endpoint_metadata;
+
+  base::Value::List supported_protocol_alpns;
+  base::Value::List ech_config_list;
+  for (const std::string& supported_protocol_alpn :
+       metadata.supported_protocol_alpns) {
+    supported_protocol_alpns.Append(supported_protocol_alpn);
+  }
+
+  for (uint8_t ech_config : metadata.ech_config_list) {
+    ech_config_list.Append(ech_config);
+  }
+
+  connection_endpoint_metadata.Set("supported_protocol_alpns",
+                                   std::move(supported_protocol_alpns));
+  connection_endpoint_metadata.Set("ech_config_list",
+                                   std::move(ech_config_list));
+  connection_endpoint_metadata.Set("target_name", metadata.target_name);
+
+  return connection_endpoint_metadata;
+}
+
+// This function converts
+// absl::optional<net::HostResolverEndpointResults> to
+// base::Value::List.
+base::Value::List HostResolverEndpointResultsToBaseList(
+    const absl::optional<net::HostResolverEndpointResults>& endpoint_results) {
+  base::Value::List endpoint_results_list;
+
+  if (!endpoint_results) {
+    return endpoint_results_list;
+  }
+
+  for (const auto& endpoint_result : *endpoint_results) {
+    base::Value::Dict endpoint_results_dict;
+    endpoint_results_dict.Set(
+        "ip_endpoints", IPEndpointsToBaseList(endpoint_result.ip_endpoints));
+    endpoint_results_dict.Set("metadata", ConnectionEndpointMetadataToBaseDict(
+                                              endpoint_result.metadata));
+    endpoint_results_list.Append(std::move(endpoint_results_dict));
+  }
+  return endpoint_results_list;
+}
+
+using ResolveHostResult = base::expected<base::Value, std::string>;
+
+// This class implements network::mojom::ResolveHostClient.
+class NetInternalsResolveHostClient : public network::mojom::ResolveHostClient {
+ public:
+  using Callback = base::OnceCallback<void(
+      const net::ResolveErrorInfo&,
+      const absl::optional<net::AddressList>&,
+      const absl::optional<net::HostResolverEndpointResults>&,
+      NetInternalsResolveHostClient*)>;
+
+  NetInternalsResolveHostClient(
+      mojo::PendingReceiver<network::mojom::ResolveHostClient> receiver,
+      Callback callback)
+      : receiver_(this, std::move(receiver)), callback_(std::move(callback)) {
+    receiver_.set_disconnect_handler(base::BindOnce(
+        &NetInternalsResolveHostClient::OnComplete, base::Unretained(this),
+        net::ERR_FAILED, net::ResolveErrorInfo(net::ERR_FAILED),
+        /*resolved_addresses=*/absl::nullopt,
+        /*endpoint_results_with_metadata=*/absl::nullopt));
+  }
+  ~NetInternalsResolveHostClient() override = default;
+
+  NetInternalsResolveHostClient(const NetInternalsResolveHostClient&) = delete;
+  NetInternalsResolveHostClient& operator=(
+      const NetInternalsResolveHostClient&) = delete;
+
+ private:
+  // network::mojom::ResolveHostClient:
+  void OnComplete(int32_t error,
+                  const net::ResolveErrorInfo& resolve_error_info,
+                  const absl::optional<net::AddressList>& resolved_addresses,
+                  const absl::optional<net::HostResolverEndpointResults>&
+                      endpoint_results_with_metadata) override {
+    std::move(callback_).Run(resolve_error_info, resolved_addresses,
+                             endpoint_results_with_metadata, this);
+  }
+  void OnTextResults(const std::vector<std::string>& text_results) override {
+    NOTREACHED();
+  }
+  void OnHostnameResults(const std::vector<net::HostPortPair>& hosts) override {
+    NOTREACHED();
+  }
+
+ private:
+  mojo::Receiver<network::mojom::ResolveHostClient> receiver_;
+  Callback callback_;
+};
+
 // This class receives javascript messages from the renderer.
 // Note that the WebUI infrastructure runs on the UI thread, therefore all of
 // this class's methods are expected to run on the UI thread.
-class NetInternalsMessageHandler
-    : public content::WebUIMessageHandler,
-      public base::SupportsWeakPtr<NetInternalsMessageHandler> {
+class NetInternalsMessageHandler : public content::WebUIMessageHandler {
  public:
   explicit NetInternalsMessageHandler(content::WebUI* web_ui);
+
+  NetInternalsMessageHandler(const NetInternalsMessageHandler&) = delete;
+  NetInternalsMessageHandler& operator=(const NetInternalsMessageHandler&) =
+      delete;
+
   ~NetInternalsMessageHandler() override = default;
 
  protected:
   // WebUIMessageHandler implementation:
   void RegisterMessages() override;
+  void OnJavascriptDisallowed() override;
 
  private:
   network::mojom::NetworkContext* GetNetworkContext();
 
-  // Calls g_browser.receive in the renderer, passing in |command| and |arg|.
+  // Resolve JS |callback_id| with |result|.
   // If the renderer is displaying a log file, the message will be ignored.
-  void SendJavascriptCommand(const std::string& command, base::Value arg);
+  void ResolveCallbackWithResult(const std::string& callback_id,
+                                 base::Value::Dict result);
 
-#if defined(OS_CHROMEOS)
-  // Callback to |GetNSSCertDatabaseForProfile| used to retrieve the database
-  // to which user's ONC defined certificates should be imported.
-  // It parses and imports |onc_blob|.
-  void ImportONCFileToNSSDB(const std::string& onc_blob,
-                            const std::string& passcode,
-                            net::NSSCertDatabase* nssdb);
-
-  // Called back by the CertificateImporter when a certificate import finished.
-  // |previous_error| contains earlier errors during this import.
-  void OnCertificatesImported(const std::string& previous_error,
-                              bool cert_import_success);
-#endif
-
-  void OnExpectCTTestReportCallback(bool success);
+  void OnExpectCTTestReportCallback(const std::string& callback_id,
+                                    bool success);
 
   //--------------------------------
   // Javascript message handlers:
   //--------------------------------
 
-  void OnReloadProxySettings(const base::ListValue* list);
-  void OnClearBadProxies(const base::ListValue* list);
-  void OnClearHostResolverCache(const base::ListValue* list);
-  void OnDomainSecurityPolicyDelete(const base::ListValue* list);
-  void OnHSTSQuery(const base::ListValue* list);
-  void OnHSTSAdd(const base::ListValue* list);
-  void OnExpectCTQuery(const base::ListValue* list);
-  void OnExpectCTAdd(const base::ListValue* list);
-  void OnExpectCTTestReport(const base::ListValue* list);
-  void OnCloseIdleSockets(const base::ListValue* list);
-  void OnFlushSocketPools(const base::ListValue* list);
-#if defined(OS_CHROMEOS)
-  void OnDumpPolicyLogsCompleted(const base::FilePath& path,
-                                 bool should_compress,
-                                 bool combined,
-                                 const char* received_event);
-  void OnImportONCFile(const base::ListValue* list);
-  void OnStoreDebugLogs(bool combined,
-                        const char* received_event,
-                        const base::ListValue* list);
-  void OnStoreDebugLogsCompleted(const char* received_event,
-                                 const base::FilePath& log_path,
-                                 bool succeeded);
-  void OnSetNetworkDebugMode(const base::ListValue* list);
-  void OnSetNetworkDebugModeCompleted(const std::string& subsystem,
-                                      bool succeeded);
-#endif
+  void OnReloadProxySettings(const base::Value::List& list);
+  void OnClearBadProxies(const base::Value::List& list);
+  void OnResolveHost(const base::Value::List& list);
+  void OnClearHostResolverCache(const base::Value::List& list);
+  void OnDomainSecurityPolicyDelete(const base::Value::List& list);
+  void OnHSTSQuery(const base::Value::List& list);
+  void OnHSTSAdd(const base::Value::List& list);
+  void OnExpectCTQuery(const base::Value::List& list);
+  void OnExpectCTAdd(const base::Value::List& list);
+  void OnExpectCTTestReport(const base::Value::List& list);
+  void OnCloseIdleSockets(const base::Value::List& list);
+  void OnFlushSocketPools(const base::Value::List& list);
+  void OnResolveHostDone(
+      const std::string& callback_id,
+      const net::ResolveErrorInfo&,
+      const absl::optional<net::AddressList>&,
+      const absl::optional<net::HostResolverEndpointResults>&,
+      NetInternalsResolveHostClient* dns_lookup_client);
 
-  content::WebUI* web_ui_;
-
-  DISALLOW_COPY_AND_ASSIGN(NetInternalsMessageHandler);
+  raw_ptr<content::WebUI> web_ui_;
+  std::set<std::unique_ptr<NetInternalsResolveHostClient>,
+           base::UniquePtrComparator>
+      dns_lookup_clients_;
+  base::WeakPtrFactory<NetInternalsMessageHandler> weak_factory_{this};
 };
 
 NetInternalsMessageHandler::NetInternalsMessageHandler(content::WebUI* web_ui)
@@ -155,6 +248,10 @@ void NetInternalsMessageHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "clearBadProxies",
       base::BindRepeating(&NetInternalsMessageHandler::OnClearBadProxies,
+                          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "resolveHost",
+      base::BindRepeating(&NetInternalsMessageHandler::OnResolveHost,
                           base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "clearHostResolverCache",
@@ -191,322 +288,221 @@ void NetInternalsMessageHandler::RegisterMessages() {
       "flushSocketPools",
       base::BindRepeating(&NetInternalsMessageHandler::OnFlushSocketPools,
                           base::Unretained(this)));
-#if defined(OS_CHROMEOS)
-  web_ui()->RegisterMessageCallback(
-      "importONCFile",
-      base::BindRepeating(&NetInternalsMessageHandler::OnImportONCFile,
-                          base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(
-      "storeDebugLogs",
-      base::BindRepeating(&NetInternalsMessageHandler::OnStoreDebugLogs,
-                          base::Unretained(this), false /* combined */,
-                          "receivedStoreDebugLogs"));
-  web_ui()->RegisterMessageCallback(
-      "storeCombinedDebugLogs",
-      base::BindRepeating(&NetInternalsMessageHandler::OnStoreDebugLogs,
-                          base::Unretained(this), true /* combined */,
-                          "receivedStoreCombinedDebugLogs"));
-  web_ui()->RegisterMessageCallback(
-      "setNetworkDebugMode",
-      base::BindRepeating(&NetInternalsMessageHandler::OnSetNetworkDebugMode,
-                          base::Unretained(this)));
-#endif
 }
 
-void NetInternalsMessageHandler::SendJavascriptCommand(
-    const std::string& command,
-    base::Value arg) {
-  std::unique_ptr<base::Value> command_value(new base::Value(command));
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  web_ui()->CallJavascriptFunctionUnsafe("g_browser.receive",
-                                         *command_value.get(), arg);
+void NetInternalsMessageHandler::OnJavascriptDisallowed() {
+  weak_factory_.InvalidateWeakPtrs();
 }
 
 void NetInternalsMessageHandler::OnReloadProxySettings(
-    const base::ListValue* list) {
+    const base::Value::List& list) {
   GetNetworkContext()->ForceReloadProxyConfig(base::NullCallback());
 }
 
 void NetInternalsMessageHandler::OnClearBadProxies(
-    const base::ListValue* list) {
+    const base::Value::List& list) {
   GetNetworkContext()->ClearBadProxiesCache(base::NullCallback());
 }
 
+void NetInternalsMessageHandler::OnResolveHost(const base::Value::List& list) {
+  const std::string* callback_id = list[0].GetIfString();
+  const std::string* hostname = list[1].GetIfString();
+  DCHECK(callback_id);
+  DCHECK(hostname);
+
+  // Intentionally using https scheme to trigger a HTTPS DNS resource record
+  // query.
+  auto scheme_host_port = url::SchemeHostPort("https", *hostname, 443);
+  const url::Origin origin = url::Origin::Create(GURL("https://" + *hostname));
+  AllowJavascript();
+
+  // When ResolveHost() in network process completes, OnResolveHostDone() method
+  // is called.
+  mojo::PendingReceiver<network::mojom::ResolveHostClient> receiver;
+  GetNetworkContext()->ResolveHost(
+      network::mojom::HostResolverHost::NewSchemeHostPort(scheme_host_port),
+      net::NetworkAnonymizationKey(),
+      /*optional_parameters=*/nullptr, receiver.InitWithNewPipeAndPassRemote());
+
+  auto callback = base::BindOnce(&NetInternalsMessageHandler::OnResolveHostDone,
+                                 weak_factory_.GetWeakPtr(), *callback_id);
+  auto dns_lookup_client = std::make_unique<NetInternalsResolveHostClient>(
+      std::move(receiver), std::move(callback));
+  dns_lookup_clients_.insert(std::move(dns_lookup_client));
+}
+
 void NetInternalsMessageHandler::OnClearHostResolverCache(
-    const base::ListValue* list) {
+    const base::Value::List& list) {
   GetNetworkContext()->ClearHostCache(/*filter=*/nullptr, base::NullCallback());
 }
 
 void NetInternalsMessageHandler::OnDomainSecurityPolicyDelete(
-    const base::ListValue* list) {
+    const base::Value::List& list) {
   // |list| should be: [<domain to query>].
-  std::string domain;
-  bool result = list->GetString(0, &domain);
-  DCHECK(result);
-  if (!base::IsStringASCII(domain)) {
+  const std::string* domain = list[0].GetIfString();
+  DCHECK(domain);
+  if (!base::IsStringASCII(*domain)) {
     // There cannot be a unicode entry in the HSTS set.
     return;
   }
   GetNetworkContext()->DeleteDynamicDataForHost(
-      domain, base::BindOnce(&IgnoreBoolCallback));
+      *domain, base::BindOnce(&IgnoreBoolCallback));
 }
 
-void NetInternalsMessageHandler::OnHSTSQuery(const base::ListValue* list) {
-  // |list| should be: [<domain to query>].
-  std::string domain;
-  bool get_domain_result = list->GetString(0, &domain);
-  DCHECK(get_domain_result);
+void NetInternalsMessageHandler::OnHSTSQuery(const base::Value::List& list) {
+  const std::string* callback_id = list[0].GetIfString();
+  const std::string* domain = list[1].GetIfString();
+  DCHECK(callback_id && domain);
 
+  AllowJavascript();
   GetNetworkContext()->GetHSTSState(
-      domain, base::BindOnce(&NetInternalsMessageHandler::SendJavascriptCommand,
-                             this->AsWeakPtr(), "receivedHSTSResult"));
+      *domain,
+      base::BindOnce(&NetInternalsMessageHandler::ResolveCallbackWithResult,
+                     weak_factory_.GetWeakPtr(), *callback_id));
 }
 
-void NetInternalsMessageHandler::OnHSTSAdd(const base::ListValue* list) {
+void NetInternalsMessageHandler::ResolveCallbackWithResult(
+    const std::string& callback_id,
+    base::Value::Dict result) {
+  ResolveJavascriptCallback(base::Value(callback_id), result);
+}
+
+void NetInternalsMessageHandler::OnHSTSAdd(const base::Value::List& list) {
+  DCHECK_GE(2u, list.size());
+
   // |list| should be: [<domain to query>, <STS include subdomains>]
-  std::string domain;
-  bool result = list->GetString(0, &domain);
-  DCHECK(result);
-  if (!base::IsStringASCII(domain)) {
+  const std::string* domain = list[0].GetIfString();
+  DCHECK(domain);
+  if (!base::IsStringASCII(*domain)) {
     // Silently fail. The user will get a helpful error if they query for the
     // name.
     return;
   }
-  bool sts_include_subdomains;
-  result = list->GetBoolean(1, &sts_include_subdomains);
-  DCHECK(result);
+  const bool sts_include_subdomains = list[1].GetBool();
 
-  base::Time expiry = base::Time::Now() + base::TimeDelta::FromDays(1000);
-  GetNetworkContext()->AddHSTS(domain, expiry, sts_include_subdomains,
+  base::Time expiry = base::Time::Now() + base::Days(1000);
+  GetNetworkContext()->AddHSTS(*domain, expiry, sts_include_subdomains,
                                base::DoNothing());
 }
 
-void NetInternalsMessageHandler::OnExpectCTQuery(const base::ListValue* list) {
-  // |list| should be: [<domain to query>].
-  std::string domain;
-  bool domain_result = list->GetString(0, &domain);
-  DCHECK(domain_result);
+void NetInternalsMessageHandler::OnExpectCTQuery(
+    const base::Value::List& list) {
+  const std::string* callback_id = list[0].GetIfString();
+  const std::string* domain = list[1].GetIfString();
+  DCHECK(callback_id && domain);
+
+  net::SchemefulSite site = net::SchemefulSite(GURL("https://" + *domain));
+
+  AllowJavascript();
 
   GetNetworkContext()->GetExpectCTState(
-      domain, base::BindOnce(&NetInternalsMessageHandler::SendJavascriptCommand,
-                             this->AsWeakPtr(), "receivedExpectCTResult"));
+      *domain, net::NetworkAnonymizationKey(site, site),
+      base::BindOnce(&NetInternalsMessageHandler::ResolveCallbackWithResult,
+                     weak_factory_.GetWeakPtr(), *callback_id));
 }
 
-void NetInternalsMessageHandler::OnExpectCTAdd(const base::ListValue* list) {
+void NetInternalsMessageHandler::OnExpectCTAdd(const base::Value::List& list) {
   // |list| should be: [<domain to add>, <report URI>, <enforce>].
-  std::string domain;
-  bool result = list->GetString(0, &domain);
-  DCHECK(result);
-  if (!base::IsStringASCII(domain)) {
+  const std::string* domain = list[0].GetIfString();
+  DCHECK(domain);
+  if (!base::IsStringASCII(*domain)) {
     // Silently fail. The user will get a helpful error if they query for the
     // name.
     return;
   }
-  std::string report_uri_str;
-  result = list->GetString(1, &report_uri_str);
-  DCHECK(result);
-  bool enforce;
-  result = list->GetBoolean(2, &enforce);
-  DCHECK(result);
 
-  base::Time expiry = base::Time::Now() + base::TimeDelta::FromDays(1000);
-  GetNetworkContext()->AddExpectCT(domain, expiry, enforce,
-                                   GURL(report_uri_str), base::DoNothing());
+  const std::string* report_uri_str = list[1].GetIfString();
+  absl::optional<bool> enforce = list[2].GetIfBool();
+  DCHECK(report_uri_str && enforce);
+
+  net::SchemefulSite site = net::SchemefulSite(GURL("https://" + *domain));
+
+  base::Time expiry = base::Time::Now() + base::Days(1000);
+  GetNetworkContext()->AddExpectCT(
+      *domain, expiry, *enforce, GURL(*report_uri_str),
+      net::NetworkAnonymizationKey(site, site), base::DoNothing());
 }
 
 void NetInternalsMessageHandler::OnExpectCTTestReport(
-    const base::ListValue* list) {
-  // |list| should be: [<report URI>].
-  std::string report_uri_str;
-  bool result = list->GetString(0, &report_uri_str);
-  DCHECK(result);
-  GURL report_uri(report_uri_str);
-  if (!report_uri.is_valid())
+    const base::Value::List& list) {
+  const std::string* callback_id = list[0].GetIfString();
+  const std::string* report_uri_str = list[1].GetIfString();
+  DCHECK(callback_id && report_uri_str);
+  GURL report_uri(*report_uri_str);
+  AllowJavascript();
+  if (!report_uri.is_valid()) {
+    ResolveJavascriptCallback(base::Value(*callback_id),
+                              base::Value("invalid"));
     return;
+  }
 
   GetNetworkContext()->SetExpectCTTestReport(
       report_uri,
       base::BindOnce(&NetInternalsMessageHandler::OnExpectCTTestReportCallback,
-                     this->AsWeakPtr()));
+                     weak_factory_.GetWeakPtr(), *callback_id));
 }
 
-void NetInternalsMessageHandler::OnExpectCTTestReportCallback(bool success) {
-  SendJavascriptCommand(
-      "receivedExpectCTTestReportResult",
+void NetInternalsMessageHandler::OnExpectCTTestReportCallback(
+    const std::string& callback_id,
+    bool success) {
+  ResolveJavascriptCallback(
+      base::Value(callback_id),
       success ? base::Value("success") : base::Value("failure"));
 }
 
 void NetInternalsMessageHandler::OnFlushSocketPools(
-    const base::ListValue* list) {
+    const base::Value::List& list) {
   GetNetworkContext()->CloseAllConnections(base::NullCallback());
 }
 
 void NetInternalsMessageHandler::OnCloseIdleSockets(
-    const base::ListValue* list) {
+    const base::Value::List& list) {
   GetNetworkContext()->CloseIdleConnections(base::NullCallback());
 }
 
-#if defined(OS_CHROMEOS)
-void NetInternalsMessageHandler::ImportONCFileToNSSDB(
-    const std::string& onc_blob,
-    const std::string& passcode,
-    net::NSSCertDatabase* nssdb) {
-  const user_manager::User* user =
-      chromeos::ProfileHelper::Get()->GetUserByProfile(
-          Profile::FromWebUI(web_ui()));
+void NetInternalsMessageHandler::OnResolveHostDone(
+    const std::string& callback_id,
+    const net::ResolveErrorInfo& resolve_error_info,
+    const absl::optional<net::AddressList>& resolved_addresses,
+    const absl::optional<net::HostResolverEndpointResults>&
+        endpoint_results_with_metadata,
+    NetInternalsResolveHostClient* dns_lookup_client) {
+  DCHECK_EQ(dns_lookup_clients_.count(dns_lookup_client), 1u);
+  auto it = dns_lookup_clients_.find(dns_lookup_client);
+  dns_lookup_clients_.erase(it);
 
-  if (!user) {
-    std::string error = "User not found.";
-    SendJavascriptCommand("receivedONCFileParse", base::Value(error));
+  if (!resolved_addresses) {
+    RejectJavascriptCallback(
+        base::Value(callback_id),
+        base::Value(net::ErrorToString(resolve_error_info.error)));
     return;
   }
 
-  std::string error;
-  onc::ONCSource onc_source = onc::ONC_SOURCE_USER_IMPORT;
-  base::ListValue network_configs;
-  base::DictionaryValue global_network_config;
-  base::ListValue certificates;
-  if (!chromeos::onc::ParseAndValidateOncForImport(onc_blob,
-                                                   onc_source,
-                                                   passcode,
-                                                   &network_configs,
-                                                   &global_network_config,
-                                                   &certificates)) {
-    error = "Errors occurred during the ONC parsing. ";
-  }
+  base::Value::Dict result;
 
-  std::string network_error;
-  chromeos::onc::ImportNetworksForUser(user, network_configs, &network_error);
-  if (!network_error.empty())
-    error += network_error;
+  base::Value::List resolved_addresses_list =
+      IPEndpointsToBaseList(resolved_addresses->endpoints());
+  result.Set("resolved_addresses", std::move(resolved_addresses_list));
 
-  chromeos::onc::CertificateImporterImpl cert_importer(
-      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}), nssdb);
-  auto certs =
-      std::make_unique<chromeos::onc::OncParsedCertificates>(certificates);
-  if (certs->has_error())
-    error += "Some certificates couldn't be parsed. ";
-  cert_importer.ImportAllCertificatesUserInitiated(
-      certs->server_or_authority_certificates(), certs->client_certificates(),
-      base::Bind(&NetInternalsMessageHandler::OnCertificatesImported,
-                 AsWeakPtr(), error /* previous_error */));
+  base::Value::List endpoint_result_with_metadata =
+      HostResolverEndpointResultsToBaseList(endpoint_results_with_metadata);
+  result.Set("endpoint_results_with_metadata",
+             std::move(endpoint_result_with_metadata));
+
+  ResolveJavascriptCallback(base::Value(callback_id), std::move(result));
 }
 
-void NetInternalsMessageHandler::OnCertificatesImported(
-    const std::string& previous_error,
-    bool cert_import_success) {
-  std::string error = previous_error;
-  if (!cert_import_success)
-    error += "Some certificates couldn't be imported. ";
-
-  SendJavascriptCommand("receivedONCFileParse", base::Value(error));
-}
-
-void NetInternalsMessageHandler::OnImportONCFile(
-    const base::ListValue* list) {
-  std::string onc_blob;
-  std::string passcode;
-  if (list->GetSize() != 2 ||
-      !list->GetString(0, &onc_blob) ||
-      !list->GetString(1, &passcode)) {
-    NOTREACHED();
-  }
-
-  GetNSSCertDatabaseForProfile(
-      Profile::FromWebUI(web_ui()),
-      base::Bind(&NetInternalsMessageHandler::ImportONCFileToNSSDB, AsWeakPtr(),
-                 onc_blob, passcode));
-}
-
-void DumpPolicyLogs(base::FilePath file_path, std::string json_policies) {
-  file_path = logging::GenerateTimestampedName(file_path, base::Time::Now());
-  base::WriteFile(file_path, json_policies.data(), json_policies.size());
-}
-
-void NetInternalsMessageHandler::OnStoreDebugLogs(bool combined,
-                                                  const char* received_event,
-                                                  const base::ListValue* list) {
-  DCHECK(list);
-
-  SendJavascriptCommand(received_event, base::Value("Creating log file..."));
-  Profile* profile = Profile::FromWebUI(web_ui());
-  const DownloadPrefs* const prefs = DownloadPrefs::FromBrowserContext(profile);
-  base::FilePath path = prefs->DownloadPath();
-  if (file_manager::util::IsUnderNonNativeLocalPath(profile, path))
-    path = prefs->GetDefaultDownloadDirectoryForProfile();
-  base::FilePath policies_path = path.Append("policies.json");
-  std::string json_policies = policy::GetAllPolicyValuesAsJSON(
-      web_ui()->GetWebContents()->GetBrowserContext(),
-      true /* with_user_policies */, false /* with_device_data */,
-      true /* is_pretty_print */);
-  base::PostTaskWithTraitsAndReply(
-      FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-       base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
-      base::BindOnce(DumpPolicyLogs, policies_path, json_policies),
-      base::BindOnce(&NetInternalsMessageHandler::OnDumpPolicyLogsCompleted,
-                     AsWeakPtr(), path, true /* should_compress */, combined,
-                     received_event));
-}
-
-void NetInternalsMessageHandler::OnDumpPolicyLogsCompleted(
-    const base::FilePath& path,
-    bool should_compress,
-    bool combined,
-    const char* received_event) {
-  if (combined) {
-    chromeos::DebugLogWriter::StoreCombinedLogs(
-        path,
-        base::BindOnce(&NetInternalsMessageHandler::OnStoreDebugLogsCompleted,
-                       AsWeakPtr(), received_event));
-  } else {
-    chromeos::DebugLogWriter::StoreLogs(
-        path, should_compress,
-        base::BindOnce(&NetInternalsMessageHandler::OnStoreDebugLogsCompleted,
-                       AsWeakPtr(), received_event));
-  }
-}
-
-void NetInternalsMessageHandler::OnStoreDebugLogsCompleted(
-    const char* received_event,
-    const base::FilePath& log_path,
-    bool succeeded) {
-  std::string status;
-  if (succeeded)
-    status = "Created log file: " + log_path.BaseName().AsUTF8Unsafe();
-  else
-    status = "Failed to create log file";
-  SendJavascriptCommand(received_event, base::Value(status));
-}
-
-void NetInternalsMessageHandler::OnSetNetworkDebugMode(
-    const base::ListValue* list) {
-  std::string subsystem;
-  if (list->GetSize() != 1 || !list->GetString(0, &subsystem))
-    NOTREACHED();
-  chromeos::DBusThreadManager::Get()->GetDebugDaemonClient()->
-      SetDebugMode(
-          subsystem,
-          base::Bind(
-              &NetInternalsMessageHandler::OnSetNetworkDebugModeCompleted,
-              AsWeakPtr(),
-              subsystem));
-}
-
-void NetInternalsMessageHandler::OnSetNetworkDebugModeCompleted(
-    const std::string& subsystem,
-    bool succeeded) {
-  std::string status = succeeded ? "Debug mode is changed to "
-                                 : "Failed to change debug mode to ";
-  status += subsystem;
-  SendJavascriptCommand("receivedSetNetworkDebugMode", base::Value(status));
-}
-#endif  // defined(OS_CHROMEOS)
+// g_network_context_for_testing is used only for testing.
+network::mojom::NetworkContext* g_network_context_for_testing = nullptr;
 
 network::mojom::NetworkContext*
 NetInternalsMessageHandler::GetNetworkContext() {
-  return content::BrowserContext::GetDefaultStoragePartition(
-             web_ui_->GetWebContents()->GetBrowserContext())
+  if (g_network_context_for_testing) {
+    return g_network_context_for_testing;
+  }
+  return web_ui_->GetWebContents()
+      ->GetBrowserContext()
+      ->GetDefaultStoragePartition()
       ->GetNetworkContext();
 }
 
@@ -527,4 +523,10 @@ NetInternalsUI::NetInternalsUI(content::WebUI* web_ui)
   // Set up the chrome://net-internals/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
   content::WebUIDataSource::Add(profile, CreateNetInternalsHTMLSource());
+}
+
+// static
+void NetInternalsUI::SetNetworkContextForTesting(
+    network::mojom::NetworkContext* network_context_for_testing) {
+  g_network_context_for_testing = network_context_for_testing;
 }

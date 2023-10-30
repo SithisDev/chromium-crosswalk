@@ -1,14 +1,15 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_PERFORMANCE_MANAGER_DECORATORS_FROZEN_FRAME_AGGREGATOR_H_
 #define CHROME_BROWSER_PERFORMANCE_MANAGER_DECORATORS_FROZEN_FRAME_AGGREGATOR_H_
 
-#include "chrome/browser/performance_manager/public/graph/frame_node.h"
-#include "chrome/browser/performance_manager/public/graph/graph.h"
-#include "chrome/browser/performance_manager/public/graph/page_node.h"
-#include "chrome/browser/performance_manager/public/graph/process_node.h"
+#include "components/performance_manager/public/graph/frame_node.h"
+#include "components/performance_manager/public/graph/graph.h"
+#include "components/performance_manager/public/graph/node_data_describer.h"
+#include "components/performance_manager/public/graph/page_node.h"
+#include "components/performance_manager/public/graph/process_node.h"
 
 namespace performance_manager {
 
@@ -22,6 +23,7 @@ class ProcessNodeImpl;
 // graph.
 class FrozenFrameAggregator : public FrameNode::ObserverDefaultImpl,
                               public GraphOwnedDefaultImpl,
+                              public NodeDataDescriberDefaultImpl,
                               public PageNode::ObserverDefaultImpl,
                               public ProcessNode::ObserverDefaultImpl {
  public:
@@ -30,6 +32,10 @@ class FrozenFrameAggregator : public FrameNode::ObserverDefaultImpl,
   // TODO(chrisha): Check that the graph is empty when this observer is added!
   // https://www.crbug.com/952891
   FrozenFrameAggregator();
+
+  FrozenFrameAggregator(const FrozenFrameAggregator&) = delete;
+  FrozenFrameAggregator& operator=(const FrozenFrameAggregator&) = delete;
+
   ~FrozenFrameAggregator() override;
 
   // FrameNodeObserver implementation:
@@ -45,8 +51,9 @@ class FrozenFrameAggregator : public FrameNode::ObserverDefaultImpl,
   // PageNodeObserver implementation:
   void OnPageNodeAdded(const PageNode* page_node) override;
 
-  // ProcessNodeObserver implementation:
-  void OnProcessNodeAdded(const ProcessNode* process_node) override;
+  // NodeDataDescriber implementation:
+  base::Value DescribePageNodeData(const PageNode* node) const override;
+  base::Value DescribeProcessNodeData(const ProcessNode* node) const override;
 
  protected:
   friend class FrozenFrameAggregatorTest;
@@ -67,9 +74,6 @@ class FrozenFrameAggregator : public FrameNode::ObserverDefaultImpl,
   void UpdateFrameCounts(FrameNodeImpl* frame_node,
                          int32_t current_frame_delta,
                          int32_t frozen_frame_delta);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FrozenFrameAggregator);
 };
 
 // This struct is stored internally on page and process nodes using

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,11 +14,10 @@
 
 #include "base/containers/flat_map.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
-#include "base/strings/string16.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -91,6 +90,9 @@ class JumpList : public sessions::TabRestoreServiceObserver,
                  public history::TopSitesObserver,
                  public KeyedService {
  public:
+  JumpList(const JumpList&) = delete;
+  JumpList& operator=(const JumpList&) = delete;
+
   // Returns true if the custom JumpList is enabled.
   static bool Enabled();
 
@@ -170,13 +172,27 @@ class JumpList : public sessions::TabRestoreServiceObserver,
   void OnMostVisitedURLsAvailable(const history::MostVisitedURLList& data);
 
   // Adds a new ShellLinkItem for |tab| to the JumpList data provided that doing
-  // so will not exceed |max_items|.
-  bool AddTab(const sessions::TabRestoreService::Tab& tab, size_t max_items);
+  // so will not exceed |max_items|. If |cmd_line_profile_dir| is not empty,
+  // it will be added to the command line switch --profile-directory.
+  bool AddTab(const sessions::TabRestoreService::Tab& tab,
+              const base::FilePath& cmd_line_profile_dir,
+              size_t max_items);
 
   // Adds a new ShellLinkItem for each tab in |window| to the JumpList data
-  // provided that doing so will not exceed |max_items|.
+  // provided that doing so will not exceed |max_items|. If
+  // |cmd_line_profile_dir| is not empty, it will be added to the command line
+  // switch --profile-directory.
   void AddWindow(const sessions::TabRestoreService::Window& window,
+                 const base::FilePath& cmd_line_profile_dir,
                  size_t max_items);
+
+  // Adds a new ShellLinkItem for each tab in |group| to the JumpList data
+  // provided that doing so will not exceed |max_items|. If
+  // |cmd_line_profile_dir| is not empty, it will be added to the command line
+  // switch --profile-directory.
+  void AddGroup(const sessions::TabRestoreService::Group& group,
+                const base::FilePath& cmd_line_profile_dir,
+                size_t max_items);
 
   // Starts loading a favicon for each URL in |icon_urls_|.
   // This function sends a query to HistoryService.
@@ -214,10 +230,11 @@ class JumpList : public sessions::TabRestoreServiceObserver,
   // 3) delete obsolete icon files. Any error along the way results in the old
   // JumpList being left as-is.
   static void RunUpdateJumpList(
-      const base::string16& app_id,
+      const std::wstring& app_id,
       const base::FilePath& profile_dir,
       const ShellLinkItemList& most_visited_pages,
       const ShellLinkItemList& recently_closed_pages,
+      const base::FilePath& cmd_line_profile_dir,
       bool most_visited_should_update,
       bool recently_closed_should_update,
       IncognitoModePrefs::Availability incognito_availability,
@@ -226,11 +243,12 @@ class JumpList : public sessions::TabRestoreServiceObserver,
   // Creates a new JumpList along with any icons that are not in the cache,
   // and notifies the OS.
   static void CreateNewJumpListAndNotifyOS(
-      const base::string16& app_id,
+      const std::wstring& app_id,
       const base::FilePath& most_visited_icon_dir,
       const base::FilePath& recently_closed_icon_dir,
       const ShellLinkItemList& most_visited_pages,
       const ShellLinkItemList& recently_closed_pages,
+      const base::FilePath& cmd_line_profile_dir,
       bool most_visited_should_update,
       bool recently_closed_should_update,
       IncognitoModePrefs::Availability incognito_availability,
@@ -262,17 +280,22 @@ class JumpList : public sessions::TabRestoreServiceObserver,
   static void DeleteIconFiles(const base::FilePath& icon_dir,
                               const URLIconCache& icons_cache);
 
+  // Gets the basename of the profile directory for |profile_|, suitable for
+  // appending --profile-directory=<profile name> to jumplist items' command
+  // lines. If the user has only one profile, this returns an empty FilePath.
+  base::FilePath GetCmdLineProfileDir();
+
   // Tracks FaviconService tasks.
   base::CancelableTaskTracker cancelable_task_tracker_;
 
   // The Profile object is used to listen for events.
-  Profile* profile_;
+  raw_ptr<Profile> profile_;
 
   // Manages the registration of pref change observers.
   std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
 
   // App id to associate with the JumpList.
-  base::string16 app_id_;
+  std::wstring app_id_;
 
   // Timer for requesting delayed JumpList updates.
   base::OneShotTimer timer_;
@@ -333,9 +356,7 @@ class JumpList : public sessions::TabRestoreServiceObserver,
   SEQUENCE_CHECKER(sequence_checker_);
 
   // For callbacks may run after destruction.
-  base::WeakPtrFactory<JumpList> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(JumpList);
+  base::WeakPtrFactory<JumpList> weak_ptr_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_WIN_JUMPLIST_H_

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@ import android.graphics.RectF;
 import org.junit.Assert;
 
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.chrome.test.util.RenderTestRule;
+import org.chromium.ui.test.util.RenderTestRule;
 
 import java.io.File;
 import java.io.IOException;

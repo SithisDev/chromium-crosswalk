@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/run_loop.h"
 #include "base/strings/strcat.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -17,6 +18,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/simple_url_loader_test_helper.h"
 #include "net/test/embedded_test_server/default_handlers.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -52,7 +54,7 @@ class ConditionalCacheCountingHelperBrowserTest : public InProcessBrowserTest {
 
   void WaitForTasksOnIOThread() {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
   }
 
@@ -60,9 +62,8 @@ class ConditionalCacheCountingHelperBrowserTest : public InProcessBrowserTest {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     last_size_ = -1;
     ConditionalCacheCountingHelper::Count(
-        content::BrowserContext::GetDefaultStoragePartition(
-            browser()->profile()),
-        begin_time, end_time,
+        browser()->profile()->GetDefaultStoragePartition(), begin_time,
+        end_time,
         base::BindOnce(
             &ConditionalCacheCountingHelperBrowserTest::CountCallback,
             base::Unretained(this)));
@@ -85,13 +86,24 @@ class ConditionalCacheCountingHelperBrowserTest : public InProcessBrowserTest {
           std::make_unique<network::ResourceRequest>();
       request->url =
           embedded_test_server()->GetURL(base::StrCat({"/cachetime/", key}));
+
+      // Populate the Network Isolation Key so that it is cacheable.
+      url::Origin origin =
+          url::Origin::Create(embedded_test_server()->base_url());
+      request->trusted_params = network::ResourceRequest::TrustedParams();
+      request->trusted_params->isolation_info =
+          net::IsolationInfo::CreateForInternalRequest(origin);
+      request->site_for_cookies =
+          request->trusted_params->isolation_info.site_for_cookies();
+
       content::SimpleURLLoaderTestHelper simple_loader_helper;
       std::unique_ptr<network::SimpleURLLoader> simple_loader =
           network::SimpleURLLoader::Create(std::move(request),
                                            TRAFFIC_ANNOTATION_FOR_TESTS);
       simple_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-          content::BrowserContext::GetDefaultStoragePartition(
-              browser()->profile())
+          browser()
+              ->profile()
+              ->GetDefaultStoragePartition()
               ->GetURLLoaderFactoryForBrowserProcess()
               .get(),
           simple_loader_helper.GetCallback());
@@ -108,21 +120,27 @@ class ConditionalCacheCountingHelperBrowserTest : public InProcessBrowserTest {
 
 // Tests that ConditionalCacheCountingHelper only counts those cache entries
 // that match the condition.
-IN_PROC_BROWSER_TEST_F(ConditionalCacheCountingHelperBrowserTest, Count) {
+// TODO(https://crbug.com/1287432): The test is flaky on Win.
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_Count DISABLED_Count
+#else
+#define MAYBE_Count Count
+#endif
+IN_PROC_BROWSER_TEST_F(ConditionalCacheCountingHelperBrowserTest, MAYBE_Count) {
   // Create 5 entries.
   std::set<std::string> keys1 = {"1", "2", "3", "4", "5"};
 
   base::Time t1 = base::Time::Now();
   CreateCacheEntries(keys1);
 
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(kTimeoutMs));
+  base::PlatformThread::Sleep(base::Milliseconds(kTimeoutMs));
   base::Time t2 = base::Time::Now();
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(kTimeoutMs));
+  base::PlatformThread::Sleep(base::Milliseconds(kTimeoutMs));
 
   std::set<std::string> keys2 = {"6", "7"};
   CreateCacheEntries(keys2);
 
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(kTimeoutMs));
+  base::PlatformThread::Sleep(base::Milliseconds(kTimeoutMs));
   base::Time t3 = base::Time::Now();
 
   // Count all entries.

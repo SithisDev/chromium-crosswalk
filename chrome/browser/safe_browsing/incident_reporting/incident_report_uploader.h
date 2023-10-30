@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,13 +32,14 @@ class IncidentReportUploader {
   // A callback run by the uploader upon success or failure. The first argument
   // indicates the result of the upload, while the second contains the response
   // received, if any.
-  typedef base::Callback<void(Result, std::unique_ptr<ClientIncidentResponse>)>
+  typedef base::OnceCallback<void(Result,
+                                  std::unique_ptr<ClientIncidentResponse>)>
       OnResultCallback;
 
   virtual ~IncidentReportUploader();
 
  protected:
-  explicit IncidentReportUploader(const OnResultCallback& callback);
+  explicit IncidentReportUploader(OnResultCallback callback);
 
   // The callback by which results are returned.
   OnResultCallback callback_;

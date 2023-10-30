@@ -1,21 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SYNC_TEST_INTEGRATION_SESSIONS_HELPER_H_
 #define CHROME_BROWSER_SYNC_TEST_INTEGRATION_SESSIONS_HELPER_H_
 
-#include <algorithm>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
 #include "chrome/browser/sync/test/integration/multi_client_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "components/sessions/core/session_types.h"
-#include "components/sync/syncable/nigori_util.h"
 #include "components/sync_sessions/synced_session.h"
 
 class GURL;
@@ -68,7 +65,6 @@ bool NavigationEquals(const sessions::SerializedNavigationEntry& expected,
 //    4. actual tab navigations contents
 // - false otherwise.
 bool WindowsMatch(const ScopedWindowMap& win1, const ScopedWindowMap& win2);
-bool WindowsMatch(const SessionWindowMap& win1, const ScopedWindowMap& win2);
 
 // Retrieves the foreign sessions for a particular profile and compares them
 // with a reference SessionWindow list.
@@ -142,23 +138,20 @@ bool GetLocalSession(int browser_index,
 // to the session tag within the SyncedSession we plan to delete.
 void DeleteForeignSession(int browser_index, std::string session_tag);
 
-}  // namespace sessions_helper
-
 // Checker to block until the foreign sessions for a particular profile matches
-// the reference windows.
+// the local sessions from another profile.
 class ForeignSessionsMatchChecker : public MultiClientStatusChangeChecker {
  public:
-  ForeignSessionsMatchChecker(
-      int browser_index,
-      const std::vector<sessions_helper::ScopedWindowMap>& windows);
+  ForeignSessionsMatchChecker(int profile_index, int foreign_profile_index);
 
   // StatusChangeChecker implementation.
-  bool IsExitConditionSatisfied() override;
-  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 
  private:
-  int browser_index_;
-  const std::vector<sessions_helper::ScopedWindowMap>& windows_;
+  const int profile_index_;
+  const int foreign_profile_index_;
 };
+
+}  // namespace sessions_helper
 
 #endif  // CHROME_BROWSER_SYNC_TEST_INTEGRATION_SESSIONS_HELPER_H_

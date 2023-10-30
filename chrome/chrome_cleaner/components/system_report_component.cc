@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,6 @@
 
 #include "base/base_paths_win.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_enumerator.h"
@@ -28,7 +27,6 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process/process_iterator.h"
-#include "base/stl_util.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -132,12 +130,16 @@ const RegistryValue system_values[] = {
      L"disablewindowsupdateaccess"}};
 
 const RegistryKey extension_policy_keys[] = {
-    {HKEY_LOCAL_MACHINE, kChromePoliciesWhitelistKeyPath},
-    {HKEY_CURRENT_USER, kChromePoliciesWhitelistKeyPath},
+    {HKEY_LOCAL_MACHINE, kChromePoliciesAllowlistKeyPath},
+    {HKEY_LOCAL_MACHINE, kChromePoliciesWhitelistKeyPathDeprecated},
+    {HKEY_CURRENT_USER, kChromePoliciesAllowlistKeyPath},
+    {HKEY_CURRENT_USER, kChromePoliciesWhitelistKeyPathDeprecated},
     {HKEY_LOCAL_MACHINE, kChromePoliciesForcelistKeyPath},
     {HKEY_CURRENT_USER, kChromePoliciesForcelistKeyPath},
-    {HKEY_LOCAL_MACHINE, kChromiumPoliciesWhitelistKeyPath},
-    {HKEY_CURRENT_USER, kChromiumPoliciesWhitelistKeyPath},
+    {HKEY_LOCAL_MACHINE, kChromiumPoliciesAllowlistKeyPath},
+    {HKEY_LOCAL_MACHINE, kChromiumPoliciesWhitelistKeyPathDeprecated},
+    {HKEY_CURRENT_USER, kChromiumPoliciesAllowlistKeyPath},
+    {HKEY_CURRENT_USER, kChromiumPoliciesWhitelistKeyPathDeprecated},
     {HKEY_LOCAL_MACHINE, kChromiumPoliciesForcelistKeyPath},
     {HKEY_CURRENT_USER, kChromiumPoliciesForcelistKeyPath}};
 
@@ -166,7 +168,7 @@ bool ExpandToAbsolutePathFromWindowsFolder(const base::FilePath& path,
 }
 
 void RetrieveDetailedFileInformationFromCommandLine(
-    const base::string16& content,
+    const std::wstring& content,
     internal::FileInformation* file_information,
     bool* white_listed) {
   // Handle the case where |content| contains only an executable path.
@@ -185,7 +187,7 @@ void RetrieveDetailedFileInformationFromCommandLine(
 
 void ReportRegistryValue(const RegKeyPath& key_path,
                          const wchar_t* name,
-                         const base::string16& content,
+                         const std::wstring& content,
                          bool has_file_information) {
   DCHECK(name);
   if (content.empty())
@@ -220,7 +222,7 @@ void ReportRegistryValues(const RegistryValue* report_data,
   DCHECK(report_data);
   for (size_t offset = 0; offset < report_data_length; ++offset) {
     // Retrieve the content of the registry value.
-    base::string16 content;
+    std::wstring content;
     const RegKeyPath key_path(report_data[offset].hkey,
                               report_data[offset].key_path, access_mask);
     RegistryError error;
@@ -247,7 +249,7 @@ void ReportRegistryKeys(const RegistryKey* report_data,
     base::win::RegistryValueIterator values_it(
         report_data[offset].hkey, report_data[offset].key_path, access_mask);
     for (; values_it.Valid(); ++values_it) {
-      base::string16 content;
+      std::wstring content;
       GetRegistryValueAsString(values_it.Value(), values_it.ValueSize(),
                                values_it.Type(), &content);
       RegKeyPath key_path(report_data[offset].hkey,
@@ -269,10 +271,10 @@ void ReportNameServer(REGSAM access_mask) {
                                          access_mask);
   // Check each key at this path.
   for (; keys_it.Valid(); ++keys_it) {
-    const base::string16 full_path =
+    const std::wstring full_path =
         base::StrCat({kNameServerPath, L"\\", keys_it.Name()});
 
-    base::string16 content;
+    std::wstring content;
     uint32_t content_type = REG_NONE;
     const RegKeyPath nameserver_key_path(HKEY_LOCAL_MACHINE, full_path.c_str(),
                                          access_mask);
@@ -290,7 +292,7 @@ void ReportNameServer(REGSAM access_mask) {
 }
 
 void ReportAppInitDllsTargets(REGSAM access_mask) {
-  base::string16 content;
+  std::wstring content;
   uint32_t content_type = REG_NONE;
   const RegKeyPath appinit_dlls_key_path(HKEY_LOCAL_MACHINE,
                                          kAppInitDllsKeyPath, access_mask);
@@ -300,9 +302,9 @@ void ReportAppInitDllsTargets(REGSAM access_mask) {
     return;
   }
 
-  base::string16 delimiters(PUPData::kCommonDelimiters,
-                            PUPData::kCommonDelimitersLength);
-  std::vector<base::string16> entries = base::SplitString(
+  std::wstring delimiters(PUPData::kCommonDelimiters,
+                          PUPData::kCommonDelimitersLength);
+  std::vector<std::wstring> entries = base::SplitString(
       content, delimiters, base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
 
   bool white_listed = false;
@@ -314,7 +316,7 @@ void ReportAppInitDllsTargets(REGSAM access_mask) {
   registry_value.data = content;
 
   for (const auto& entry : entries) {
-    base::string16 long_path;
+    std::wstring long_path;
     ConvertToLongPath(entry, &long_path);
     base::FilePath expanded_path(
         ExpandEnvPathAndWow64Path(base::FilePath(long_path)));
@@ -330,15 +332,15 @@ void ReportAppInitDllsTargets(REGSAM access_mask) {
 
 void ReportRegistry(REGSAM access_mask) {
   // Report on startup keys/values.
-  ReportRegistryKeys(startup_registry_keys, base::size(startup_registry_keys),
+  ReportRegistryKeys(startup_registry_keys, std::size(startup_registry_keys),
                      access_mask, kHasFileInformation);
-  ReportRegistryValues(system_path_values, base::size(system_path_values),
+  ReportRegistryValues(system_path_values, std::size(system_path_values),
                        access_mask, kHasFileInformation);
-  ReportRegistryValues(system_values, base::size(system_values), access_mask,
+  ReportRegistryValues(system_values, std::size(system_values), access_mask,
                        kNoFileInformation);
 
   // Report on extension policy keys.
-  ReportRegistryKeys(extension_policy_keys, base::size(extension_policy_keys),
+  ReportRegistryKeys(extension_policy_keys, std::size(extension_policy_keys),
                      access_mask, kNoFileInformation);
   ReportAppInitDllsTargets(access_mask);
   ReportNameServer(access_mask);
@@ -362,11 +364,11 @@ void ReportFoldersUnderPath(const base::FilePath& path, const wchar_t* prefix) {
 void ReportInstalledPrograms() {
   static unsigned int install_paths[] = {
       base::DIR_PROGRAM_FILES,     base::DIR_PROGRAM_FILESX86,
-      base::DIR_PROGRAM_FILES6432, base::DIR_APP_DATA,
+      base::DIR_PROGRAM_FILES6432, base::DIR_ROAMING_APP_DATA,
       base::DIR_LOCAL_APP_DATA,    base::DIR_COMMON_APP_DATA,
   };
   std::set<base::FilePath> path_processed;
-  for (size_t path = 0; path < base::size(install_paths); ++path) {
+  for (size_t path = 0; path < std::size(install_paths); ++path) {
     base::FilePath install_path;
     bool success = base::PathService::Get(install_paths[path], &install_path);
     if (!success) {
@@ -383,7 +385,7 @@ void ReportRunningProcesses() {
   while (const base::ProcessEntry* entry = iter.NextProcessEntry()) {
     base::win::ScopedHandle handle(
         ::OpenProcess(PROCESS_QUERY_INFORMATION, false, entry->pid()));
-    base::string16 exec_path;
+    std::wstring exec_path;
     if (handle.IsValid() &&
         GetProcessExecutablePath(handle.Get(), &exec_path)) {
       internal::FileInformation file_information;
@@ -405,7 +407,7 @@ bool RetrieveExecutablePathFromPid(DWORD pid, base::FilePath* path) {
   base::win::ScopedHandle process_handle(
       ::OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid));
 
-  base::string16 exe_path;
+  std::wstring exe_path;
   if (!GetProcessExecutablePath(process_handle.Get(), &exe_path))
     return false;
 
@@ -413,13 +415,13 @@ bool RetrieveExecutablePathFromPid(DWORD pid, base::FilePath* path) {
   return true;
 }
 
-bool RetrieveExecutablePathFromServiceName(const base::string16& service_name,
+bool RetrieveExecutablePathFromServiceName(const std::wstring& service_name,
                                            base::FilePath* service_path) {
   DCHECK(service_path);
-  base::string16 subkey_path(kServicesKeyPath);
+  std::wstring subkey_path(kServicesKeyPath);
   subkey_path += service_name;
 
-  base::string16 content;
+  std::wstring content;
   if (!ReadRegistryValue(RegKeyPath(HKEY_LOCAL_MACHINE, subkey_path.c_str()),
                          L"imagepath", &content, nullptr, nullptr)) {
     return false;
@@ -435,13 +437,13 @@ bool RetrieveExecutablePathFromServiceName(const base::string16& service_name,
                               base::CompareCase::INSENSITIVE_ASCII)) {
     // Remove the prefix "\??\" in front of the path.
     file_path = base::FilePath(
-        file_path.value().substr(base::size(kAbsolutePrefix) - 1));
+        file_path.value().substr(std::size(kAbsolutePrefix) - 1));
   } else if (base::StartsWith(file_path.value(), kSystemRootPrefix,
                               base::CompareCase::INSENSITIVE_ASCII)) {
     // Remove the prefix "\systemroot\" in front of the path. The path
     // will be resolved from the system folder.
     file_path = base::FilePath(
-        file_path.value().substr(base::size(kSystemRootPrefix) - 1));
+        file_path.value().substr(std::size(kSystemRootPrefix) - 1));
   }
 
   // For relative path, resolve them from %systemroot%.
@@ -493,7 +495,7 @@ void ReportRunningServices(DWORD services_type) {
 void ReportScheduledTasks() {
   std::unique_ptr<TaskScheduler> task_scheduler(
       TaskScheduler::CreateInstance());
-  std::vector<base::string16> task_names;
+  std::vector<std::wstring> task_names;
   if (!task_scheduler->GetTaskNameList(&task_names)) {
     LOG(ERROR) << "Failed to enumerate scheduled tasks.";
     return;
@@ -590,11 +592,11 @@ void ReportLayeredServiceProviders() {
         path.value(), &file_information, &white_listed);
 
     if (!white_listed) {
-      std::vector<base::string16> logged_guids;
+      std::vector<std::wstring> logged_guids;
       const std::set<GUID, GUIDLess>& guids = provider->second;
       for (std::set<GUID, GUIDLess>::const_iterator guid = guids.begin();
            guid != guids.end(); ++guid) {
-        logged_guids.push_back(base::win::String16FromGUID(*guid));
+        logged_guids.push_back(base::win::WStringFromGUID(*guid));
       }
       LoggingServiceAPI::GetInstance()->AddLayeredServiceProvider(
           logged_guids, file_information);
@@ -610,11 +612,11 @@ void ReportProxySettingsInformation() {
     // Report proxy information when it's not the default configuration.
     if (ie_proxy_info.lpszProxy || ie_proxy_info.lpszProxyBypass ||
         ie_proxy_info.lpszAutoConfigUrl || ie_proxy_info.fAutoDetect) {
-      base::string16 config =
+      std::wstring config =
           (ie_proxy_info.lpszProxy ? ie_proxy_info.lpszProxy : L"");
-      base::string16 bypass =
+      std::wstring bypass =
           (ie_proxy_info.lpszProxyBypass ? ie_proxy_info.lpszProxyBypass : L"");
-      base::string16 autoconfig =
+      std::wstring autoconfig =
           (ie_proxy_info.lpszAutoConfigUrl ? ie_proxy_info.lpszAutoConfigUrl
                                            : L"");
       LoggingServiceAPI::GetInstance()->SetWinInetProxySettings(
@@ -632,28 +634,11 @@ void ReportProxySettingsInformation() {
   // Retrieve the default WinHTTP proxy configuration from the registry.
   WINHTTP_PROXY_INFO proxy_info;
   if (::WinHttpGetDefaultProxyConfiguration(&proxy_info)) {
-    const char* access_type = nullptr;
-    switch (proxy_info.dwAccessType) {
-      case WINHTTP_ACCESS_TYPE_NO_PROXY:
-        access_type = "no proxy";
-        break;
-      case WINHTTP_ACCESS_TYPE_DEFAULT_PROXY:
-        access_type = "default proxy";
-        break;
-      case WINHTTP_ACCESS_TYPE_NAMED_PROXY:
-        access_type = "named proxy";
-        break;
-      default:
-        access_type = "unknown";
-        break;
-    }
-
     // Report proxy information when it's not the default configuration.
     if (proxy_info.dwAccessType != WINHTTP_ACCESS_TYPE_NO_PROXY ||
         proxy_info.lpszProxy || proxy_info.lpszProxyBypass) {
-      base::string16 config =
-          (proxy_info.lpszProxy ? proxy_info.lpszProxy : L"");
-      base::string16 bypass =
+      std::wstring config = (proxy_info.lpszProxy ? proxy_info.lpszProxy : L"");
+      std::wstring bypass =
           (proxy_info.lpszProxyBypass ? proxy_info.lpszProxyBypass : L"");
       LoggingServiceAPI::GetInstance()->SetWinHttpProxySettings(config, bypass);
     }
@@ -707,13 +692,14 @@ void ReportInstalledExtensions(JsonParserAPI* json_parser,
   GetNonWhitelistedDefaultExtensions(json_parser, &default_extension_policies,
                                      &default_extensions_done);
 
-  // Wait for all asynchronous parsing to be done
+  // Wait for all asynchronous parsing to be done with a single timeout for all
+  // phases combined.
   const base::TimeTicks end_time =
       base::TimeTicks::Now() +
-      base::TimeDelta::FromMilliseconds(kParseAttemptTimeoutMilliseconds);
-  extension_settings_done.TimedWaitUntil(end_time);
-  master_preferences_done.TimedWaitUntil(end_time);
-  default_extensions_done.TimedWaitUntil(end_time);
+      base::Milliseconds(kParseAttemptTimeoutMilliseconds);
+  extension_settings_done.TimedWait(end_time - base::TimeTicks::Now());
+  master_preferences_done.TimedWait(end_time - base::TimeTicks::Now());
+  default_extensions_done.TimedWait(end_time - base::TimeTicks::Now());
 
   // Log extensions that were found
   for (const ExtensionPolicyRegistryEntry& policy :
@@ -770,12 +756,13 @@ void ReportShortcutModifications(ShortcutParserAPI* shortcut_parser) {
   base::WaitableEvent event(WaitableEvent::ResetPolicy::MANUAL,
                             WaitableEvent::InitialState::NOT_SIGNALED);
 
-  std::set<base::FilePath> chrome_exe_paths;
-  ListChromeExePaths(&chrome_exe_paths);
+  std::set<base::FilePath> chrome_exe_directories;
+  ListChromeExeDirectories(&chrome_exe_directories);
 
+  const std::wstring kChromeExecutableName = L"chrome.exe";
   FilePathSet chrome_exe_file_path_set;
-  for (const auto& path : chrome_exe_paths)
-    chrome_exe_file_path_set.Insert(path);
+  for (const auto& path : chrome_exe_directories)
+    chrome_exe_file_path_set.Insert(path.Append(kChromeExecutableName));
 
   shortcut_parser->FindAndParseChromeShortcutsInFoldersAsync(
       paths_to_explore, chrome_exe_file_path_set,
@@ -791,7 +778,6 @@ void ReportShortcutModifications(ShortcutParserAPI* shortcut_parser) {
 
   InitializeFilePathSanitization();
 
-  const base::string16 kChromeExecutableName = L"chrome.exe";
   for (const ShortcutInformation& shortcut : shortcuts_found) {
     base::FilePath target_path(shortcut.target_path);
 
@@ -802,17 +788,17 @@ void ReportShortcutModifications(ShortcutParserAPI* shortcut_parser) {
     // logged.
     if (target_path.BaseName().value() != kChromeExecutableName ||
         !shortcut.command_line_arguments.empty()) {
-      base::string16 sanitized_target_path = SanitizePath(target_path);
-      base::string16 sanitized_lnk_path = SanitizePath(shortcut.lnk_path);
+      std::wstring sanitized_target_path = SanitizePath(target_path);
+      std::wstring sanitized_lnk_path = SanitizePath(shortcut.lnk_path);
 
-      std::string target_digest = "";
+      std::string target_digest;
       if (PathExists(target_path) &&
           !ComputeSHA256DigestOfPath(target_path, &target_digest)) {
         LOG(ERROR) << "Cannot compute the sha digest of the target path";
         target_digest = "";
       }
 
-      std::vector<base::string16> sanitized_command_line_arguments =
+      std::vector<std::wstring> sanitized_command_line_arguments =
           SanitizeArguments(shortcut.command_line_arguments);
       LoggingServiceAPI::GetInstance()->AddShortcutData(
           sanitized_lnk_path, sanitized_target_path, target_digest,

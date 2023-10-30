@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chrome/browser/android/download/download_controller_base.h"
-#include "chrome/browser/android/download/download_utils.h"
+#include "chrome/browser/download/android/download_controller_base.h"
+#include "chrome/browser/download/android/download_utils.h"
 #include "chrome/browser/offline_pages/offline_page_mhtml_archiver.h"
 #include "components/offline_pages/core/offline_page_client_policy.h"
 #include "components/offline_pages/core/offline_page_feature.h"
@@ -42,7 +42,7 @@ std::unique_ptr<OfflineItemShareInfo> CreateShareInfo(
 }  // namespace
 
 OfflinePageShareHelper::OfflinePageShareHelper(OfflinePageModel* model)
-    : model_(model), weak_ptr_factory_(this) {}
+    : model_(model) {}
 
 OfflinePageShareHelper::~OfflinePageShareHelper() = default;
 

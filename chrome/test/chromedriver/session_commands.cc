@@ -1,15 +1,20 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/chromedriver/session_commands.h"
 
 #include <list>
+#include <memory>
+#include <thread>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/files/file_util.h"
+#include "base/json/json_reader.h"
+#include "base/json/json_writer.h"
 #include "base/logging.h"  // For CHECK macros.
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_util.h"
@@ -18,15 +23,19 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/system/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/basic_types.h"
+#include "chrome/test/chromedriver/bidimapper/bidimapper.h"
 #include "chrome/test/chromedriver/capabilities.h"
-#include "chrome/test/chromedriver/chrome/automation_extension.h"
+#include "chrome/test/chromedriver/chrome/bidi_tracker.h"
 #include "chrome/test/chromedriver/chrome/browser_info.h"
 #include "chrome/test/chromedriver/chrome/chrome.h"
 #include "chrome/test/chromedriver/chrome/chrome_android_impl.h"
 #include "chrome/test/chromedriver/chrome/chrome_desktop_impl.h"
+#include "chrome/test/chromedriver/chrome/chrome_impl.h"
 #include "chrome/test/chromedriver/chrome/device_manager.h"
+#include "chrome/test/chromedriver/chrome/devtools_client_impl.h"
 #include "chrome/test/chromedriver/chrome/devtools_event_listener.h"
 #include "chrome/test/chromedriver/chrome/geoposition.h"
 #include "chrome/test/chromedriver/chrome/javascript_dialog_manager.h"
@@ -34,10 +43,10 @@
 #include "chrome/test/chromedriver/chrome/web_view.h"
 #include "chrome/test/chromedriver/chrome_launcher.h"
 #include "chrome/test/chromedriver/command_listener.h"
+#include "chrome/test/chromedriver/constants/version.h"
 #include "chrome/test/chromedriver/logging.h"
 #include "chrome/test/chromedriver/session.h"
 #include "chrome/test/chromedriver/util.h"
-#include "chrome/test/chromedriver/version.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 
 namespace {
@@ -58,26 +67,45 @@ const int k3GThroughput = 750 * 1024;
 const int k2GLatency = 300;
 const int k2GThroughput = 250 * 1024;
 
-Status EvaluateScriptAndIgnoreResult(Session* session, std::string expression) {
+Status EvaluateScriptAndIgnoreResult(Session* session,
+                                     std::string expression,
+                                     const bool awaitPromise = false) {
   WebView* web_view = nullptr;
   Status status = session->GetTargetWindow(&web_view);
   if (status.IsError())
     return status;
-  if (web_view->GetJavaScriptDialogManager()->IsDialogOpen())
-    return Status(kUnexpectedAlertOpen);
+  if (!web_view->IsServiceWorker() &&
+      web_view->GetJavaScriptDialogManager()->IsDialogOpen()) {
+    std::string alert_text;
+    status =
+        web_view->GetJavaScriptDialogManager()->GetDialogMessage(&alert_text);
+    if (status.IsError())
+      return Status(kUnexpectedAlertOpen);
+    return Status(kUnexpectedAlertOpen, "{Alert text : " + alert_text + "}");
+  }
   std::string frame_id = session->GetCurrentFrameId();
   std::unique_ptr<base::Value> result;
-  return web_view->EvaluateScript(frame_id, expression, &result);
+  return web_view->EvaluateScript(frame_id, expression, awaitPromise, &result);
+}
+
+void InitSessionForWebSocketConnection(SessionConnectionMap* session_map,
+                                       std::string session_id) {
+  session_map->insert({session_id, -1});
 }
 
 }  // namespace
 
-InitSessionParams::InitSessionParams(network::mojom::URLLoaderFactory* factory,
-                                     const SyncWebSocketFactory& socket_factory,
-                                     DeviceManager* device_manager)
+InitSessionParams::InitSessionParams(
+    network::mojom::URLLoaderFactory* factory,
+    const SyncWebSocketFactory& socket_factory,
+    DeviceManager* device_manager,
+    const scoped_refptr<base::SingleThreadTaskRunner> cmd_task_runner,
+    SessionConnectionMap* session_map)
     : url_loader_factory(factory),
       socket_factory(socket_factory),
-      device_manager(device_manager) {}
+      device_manager(device_manager),
+      cmd_task_runner(cmd_task_runner),
+      session_map(session_map) {}
 
 InitSessionParams::InitSessionParams(const InitSessionParams& other) = default;
 
@@ -85,33 +113,41 @@ InitSessionParams::~InitSessionParams() {}
 
 // Look for W3C mode setting in InitSession command parameters.
 bool GetW3CSetting(const base::DictionaryValue& params) {
-  bool w3c;
-  const base::ListValue* list;
-  const base::DictionaryValue* dict;
+  const base::DictionaryValue* options_dict;
 
-  if (params.GetDictionary("capabilities.alwaysMatch", &dict)) {
-    if (dict->GetBoolean("goog:chromeOptions.w3c", &w3c) ||
-        dict->GetBoolean("chromeOptions.w3c", &w3c)) {
-      return w3c;
+  const base::Value* caps_dict =
+      params.FindDictPath("capabilities.alwaysMatch");
+  if (caps_dict &&
+      GetChromeOptionsDictionary(base::Value::AsDictionaryValue(*caps_dict),
+                                 &options_dict)) {
+    absl::optional<bool> w3c = options_dict->FindBoolKey("w3c");
+    if (w3c.has_value())
+      return *w3c;
+  }
+
+  const base::Value* list = params.FindListPath("capabilities.firstMatch");
+  if (list && list->GetList().size()) {
+    const base::Value& caps_dict_ref = std::move(list->GetList()[0]);
+    if (caps_dict_ref.is_dict() &&
+        GetChromeOptionsDictionary(
+            base::Value::AsDictionaryValue(caps_dict_ref), &options_dict)) {
+      absl::optional<bool> w3c = options_dict->FindBoolKey("w3c");
+      if (w3c.has_value())
+        return *w3c;
     }
   }
 
-  if (params.GetList("capabilities.firstMatch", &list) &&
-      list->GetDictionary(0, &dict)) {
-    if (dict->GetBoolean("goog:chromeOptions.w3c", &w3c) ||
-        dict->GetBoolean("chromeOptions.w3c", &w3c)) {
-      return w3c;
-    }
+  caps_dict = params.FindDictKey("desiredCapabilities");
+  if (caps_dict &&
+      GetChromeOptionsDictionary(base::Value::AsDictionaryValue(*caps_dict),
+                                 &options_dict)) {
+    absl::optional<bool> w3c = options_dict->FindBoolKey("w3c");
+    if (w3c.has_value())
+      return *w3c;
   }
 
-  if (params.GetDictionary("desiredCapabilities", &dict)) {
-    if (dict->GetBoolean("goog:chromeOptions.w3c", &w3c) ||
-        dict->GetBoolean("chromeOptions.w3c", &w3c)) {
-      return w3c;
-    }
-  }
-
-  if (!params.HasKey("capabilities") && params.HasKey("desiredCapabilities")) {
+  if (!params.FindKey("capabilities") &&
+      params.FindKey("desiredCapabilities")) {
     return false;
   }
 
@@ -131,17 +167,19 @@ std::unique_ptr<base::DictionaryValue> CreateCapabilities(
 
   // Capabilities defined by W3C. Some of these capabilities have different
   // names in legacy mode.
-  caps->SetString("browserName", "chrome");
-  caps->SetString(session->w3c_compliant ? "browserVersion" : "version",
-                  session->chrome->GetBrowserInfo()->browser_version);
-  if (session->w3c_compliant)
-    caps->SetString(
-        "platformName",
-        base::ToLowerASCII(session->chrome->GetOperatingSystemName()));
-  else
-    caps->SetString("platform", session->chrome->GetOperatingSystemName());
-  caps->SetString("pageLoadStrategy", session->chrome->page_load_strategy());
-  caps->SetBoolean("acceptInsecureCerts", capabilities.accept_insecure_certs);
+  caps->SetStringKey("browserName", base::ToLowerASCII(kBrowserShortName));
+  caps->SetStringKey(session->w3c_compliant ? "browserVersion" : "version",
+                     session->chrome->GetBrowserInfo()->browser_version);
+  std::string operatingSystemName = session->chrome->GetOperatingSystemName();
+  if (operatingSystemName.find("Windows") != std::string::npos)
+    operatingSystemName = "Windows";
+  if (session->w3c_compliant) {
+    caps->SetStringKey("platformName", base::ToLowerASCII(operatingSystemName));
+  } else {
+    caps->SetStringKey("platform", operatingSystemName);
+  }
+  caps->SetStringKey("pageLoadStrategy", session->chrome->page_load_strategy());
+  caps->SetBoolKey("acceptInsecureCerts", capabilities.accept_insecure_certs);
   const base::Value* proxy = desired_caps.FindKey("proxy");
   if (proxy == nullptr || proxy->is_none())
     caps->SetKey("proxy", base::Value(base::Value::Type::DICTIONARY));
@@ -149,9 +187,9 @@ std::unique_ptr<base::DictionaryValue> CreateCapabilities(
     caps->SetKey("proxy", proxy->Clone());
   // add setWindowRect based on whether we are desktop/android/remote
   if (capabilities.IsAndroid() || capabilities.IsRemoteBrowser()) {
-    caps->SetBoolean("setWindowRect", false);
+    caps->SetBoolKey("setWindowRect", false);
   } else {
-    caps->SetBoolean("setWindowRect", true);
+    caps->SetBoolKey("setWindowRect", true);
   }
   if (session->script_timeout == base::TimeDelta::Max())
     caps->SetPath({"timeouts", "script"}, base::Value());
@@ -162,51 +200,69 @@ std::unique_ptr<base::DictionaryValue> CreateCapabilities(
              session->page_load_timeout.InMilliseconds());
   SetSafeInt(caps.get(), "timeouts.implicit",
              session->implicit_wait.InMilliseconds());
-  caps->SetBoolean("strictFileInteractability",
-                    session->strict_file_interactability);
-  caps->SetString(session->w3c_compliant ? "unhandledPromptBehavior"
-                                         : "unexpectedAlertBehaviour",
-                  session->unhandled_prompt_behavior);
+  caps->SetBoolKey("strictFileInteractability",
+                   session->strict_file_interactability);
+  caps->SetStringKey(session->w3c_compliant ? "unhandledPromptBehavior"
+                                            : "unexpectedAlertBehaviour",
+                     session->unhandled_prompt_behavior);
+
+  // Extensions defined by the W3C.
+  // See https://w3c.github.io/webauthn/#sctn-automation-webdriver-capability
+  caps->SetBoolKey("webauthn:virtualAuthenticators", !capabilities.IsAndroid());
+  caps->SetBoolKey("webauthn:extension:largeBlob", !capabilities.IsAndroid());
+  caps->SetBoolKey("webauthn:extension:credBlob", !capabilities.IsAndroid());
 
   // Chrome-specific extensions.
-  caps->SetString("chrome.chromedriverVersion", kChromeDriverVersion);
-  caps->SetString(
-      "goog:chromeOptions.debuggerAddress",
-      session->chrome->GetBrowserInfo()->debugger_address.ToString());
-  ChromeDesktopImpl* desktop = NULL;
+  const std::string chromedriverVersionKey = base::StringPrintf(
+      "%s.%sVersion", base::ToLowerASCII(kBrowserShortName).c_str(),
+      base::ToLowerASCII(kChromeDriverProductShortName).c_str());
+  caps->SetStringPath(chromedriverVersionKey, kChromeDriverVersion);
+  const std::string debuggerAddressKey =
+      base::StringPrintf("%s.debuggerAddress", kChromeDriverOptionsKeyPrefixed);
+  caps->SetStringPath(debuggerAddressKey, session->chrome->GetBrowserInfo()
+                                              ->debugger_endpoint.Address()
+                                              .ToString());
+  ChromeDesktopImpl* desktop = nullptr;
   Status status = session->chrome->GetAsDesktop(&desktop);
   if (status.IsOk()) {
-    caps->SetString("chrome.userDataDir",
-                    desktop->command().GetSwitchValueNative("user-data-dir"));
-    caps->SetBoolean("networkConnectionEnabled",
+    const std::string userDataDirKey = base::StringPrintf(
+        "%s.userDataDir", base::ToLowerASCII(kBrowserShortName).c_str());
+    caps->SetStringPath(
+        userDataDirKey,
+        desktop->command().GetSwitchValuePath("user-data-dir").AsUTF8Unsafe());
+    caps->SetBoolKey("networkConnectionEnabled",
                      desktop->IsNetworkConnectionEnabled());
   }
 
   // Legacy capabilities.
   if (!session->w3c_compliant) {
-    caps->SetBoolean("javascriptEnabled", true);
-    caps->SetBoolean("takesScreenshot", true);
-    caps->SetBoolean("takesHeapSnapshot", true);
-    caps->SetBoolean("handlesAlerts", true);
-    caps->SetBoolean("databaseEnabled", false);
-    caps->SetBoolean("locationContextEnabled", true);
-    caps->SetBoolean("mobileEmulationEnabled",
+    caps->SetBoolKey("javascriptEnabled", true);
+    caps->SetBoolKey("takesScreenshot", true);
+    caps->SetBoolKey("takesHeapSnapshot", true);
+    caps->SetBoolKey("handlesAlerts", true);
+    caps->SetBoolKey("databaseEnabled", false);
+    caps->SetBoolKey("locationContextEnabled", true);
+    caps->SetBoolKey("mobileEmulationEnabled",
                      session->chrome->IsMobileEmulationEnabled());
-    caps->SetBoolean("applicationCacheEnabled", false);
-    caps->SetBoolean("browserConnectionEnabled", false);
-    caps->SetBoolean("cssSelectorsEnabled", true);
-    caps->SetBoolean("webStorageEnabled", true);
-    caps->SetBoolean("rotatable", false);
-    caps->SetBoolean("acceptSslCerts", capabilities.accept_insecure_certs);
-    caps->SetBoolean("nativeEvents", true);
-    caps->SetBoolean("hasTouchScreen", session->chrome->HasTouchScreen());
+    caps->SetBoolKey("browserConnectionEnabled", false);
+    caps->SetBoolKey("cssSelectorsEnabled", true);
+    caps->SetBoolKey("webStorageEnabled", true);
+    caps->SetBoolKey("rotatable", false);
+    caps->SetBoolKey("acceptSslCerts", capabilities.accept_insecure_certs);
+    caps->SetBoolKey("nativeEvents", true);
+    caps->SetBoolKey("hasTouchScreen", session->chrome->HasTouchScreen());
+  }
+
+  if (session->webSocketUrl) {
+    caps->SetStringKey("webSocketUrl",
+                       "ws://" + session->host + "/session/" + session->id);
   }
 
   return caps;
 }
 
 Status CheckSessionCreated(Session* session) {
-  WebView* web_view = NULL;
+  WebView* web_view = nullptr;
   Status status = session->GetTargetWindow(&web_view);
   if (status.IsError())
     return Status(kSessionNotCreated, status);
@@ -215,15 +271,14 @@ Status CheckSessionCreated(Session* session) {
   if (status.IsError())
     return Status(kSessionNotCreated, status);
 
-  base::ListValue args;
+  base::Value::List args;
   std::unique_ptr<base::Value> result(new base::Value(0));
   status = web_view->CallFunction(session->GetCurrentFrameId(),
                                   "function(s) { return 1; }", args, &result);
   if (status.IsError())
     return Status(kSessionNotCreated, status);
 
-  int response;
-  if (!result->GetAsInteger(&response) || response != 1) {
+  if (!result->is_int() || result->GetInt() != 1) {
     return Status(kSessionNotCreated,
                   "unexpected response from browser");
   }
@@ -235,46 +290,14 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
                          Session* session,
                          const base::DictionaryValue& params,
                          std::unique_ptr<base::Value>* value) {
-  session->driver_log.reset(
-      new WebDriverLog(WebDriverLog::kDriverType, Log::kAll));
   const base::DictionaryValue* desired_caps;
   base::DictionaryValue merged_caps;
 
-  session->w3c_compliant = GetW3CSetting(params);
-  if (session->w3c_compliant) {
-    Status status = ProcessCapabilities(params, &merged_caps);
-    if (status.IsError())
-      return status;
-    desired_caps = &merged_caps;
-  } else if (!params.GetDictionary("desiredCapabilities", &desired_caps)) {
-    return Status(kSessionNotCreated,
-                  "Missing or invalid capabilities");
-  }
-
   Capabilities capabilities;
-  Status status = capabilities.Parse(*desired_caps, session->w3c_compliant);
+  Status status = internal::ConfigureSession(session, params, &desired_caps,
+                                             &merged_caps, &capabilities);
   if (status.IsError())
     return status;
-
-  if (capabilities.unhandled_prompt_behavior.length() > 0) {
-    session->unhandled_prompt_behavior = capabilities.unhandled_prompt_behavior;
-  } else {
-    // W3C spec (https://www.w3.org/TR/webdriver/#dfn-handle-any-user-prompts)
-    // shows the default behavior to be dismiss and notify. For backward
-    // compatibility, in legacy mode default behavior is not handling prompt.
-    session->unhandled_prompt_behavior =
-        session->w3c_compliant ? kDismissAndNotify : kIgnore;
-  }
-
-  session->implicit_wait = capabilities.implicit_wait_timeout;
-  session->page_load_timeout = capabilities.page_load_timeout;
-  session->script_timeout = capabilities.script_timeout;
-  session->strict_file_interactability =
-        capabilities.strict_file_interactability;
-  Log::Level driver_level = Log::kWarning;
-  if (capabilities.logging_prefs.count(WebDriverLog::kDriverType))
-    driver_level = capabilities.logging_prefs[WebDriverLog::kDriverType];
-  session->driver_log->set_min_level(driver_level);
 
   // Create Log's and DevToolsEventListener's for ones that are DevTools-based.
   // Session will own the Log's, Chrome will own the listeners.
@@ -292,11 +315,19 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
   // |session| will own the |CommandListener|s.
   session->command_listeners.swap(command_listeners);
 
+  if (session->webSocketUrl) {
+    BidiTracker* bidi_tracker = new BidiTracker();
+    bidi_tracker->SetBidiCallback(base::BindRepeating(
+        &Session::OnBidiResponse, base::Unretained(session)));
+    devtools_event_listeners.emplace_back(bidi_tracker);
+  }
+
   status =
       LaunchChrome(bound_params.url_loader_factory, bound_params.socket_factory,
                    bound_params.device_manager, capabilities,
                    std::move(devtools_event_listeners), &session->chrome,
                    session->w3c_compliant);
+
   if (status.IsError())
     return status;
 
@@ -314,36 +345,183 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
   session->capabilities =
       CreateCapabilities(session, capabilities, *desired_caps);
 
-  std::string download_directory;
-  if (capabilities.prefs &&
-      capabilities.prefs->GetString("download.default_directory",
-                                    &download_directory))
-    session->headless_download_directory =
-        std::make_unique<std::string>(download_directory);
-  else
-    session->headless_download_directory = std::make_unique<std::string>(".");
-  WebView* first_view;
-  session->chrome->GetWebViewById(session->window, &first_view);
-  status = first_view->OverrideDownloadDirectoryIfNeeded(
-      *session->headless_download_directory);
+  status = internal::ConfigureHeadlessSession(session, capabilities);
   if (status.IsError())
     return status;
 
   if (session->w3c_compliant) {
-    std::unique_ptr<base::DictionaryValue> capabilities =
-        std::unique_ptr<base::DictionaryValue>(
-            session->capabilities->DeepCopy());
-    base::DictionaryValue body;
-    body.SetDictionary("capabilities", std::move(capabilities));
-    body.SetString("sessionId", session->id);
-    value->reset(body.DeepCopy());
+    base::Value body(base::Value::Type::DICTIONARY);
+    body.SetKey("capabilities", session->capabilities->Clone());
+    body.SetStringKey("sessionId", session->id);
+    *value = base::Value::ToUniquePtrValue(body.Clone());
   } else {
-    value->reset(session->capabilities->DeepCopy());
+    *value = base::Value::ToUniquePtrValue(session->capabilities->Clone());
   }
-  return CheckSessionCreated(session);
+
+  status = CheckSessionCreated(session);
+  if (status.IsError())
+    return status;
+
+  if (session->webSocketUrl) {
+    WebView* web_view = nullptr;
+    status = session->GetTargetWindow(&web_view);
+    if (status.IsError())
+      return status;
+    session->bidi_mapper_web_view_id = session->window;
+    ChromeImpl* chrome = static_cast<ChromeImpl*>(session->chrome.get());
+    DevToolsClient* client = chrome->Client();
+
+    {
+      base::Value body(base::Value::Type::DICTIONARY);
+      body.SetStringKey("bindingName", "cdp");
+      body.SetStringKey("targetId", session->window);
+      client->SendCommandAndIgnoreResponse(
+          "Target.exposeDevToolsProtocol",
+          base::Value::AsDictionaryValue(body));
+    }
+
+    {
+      std::unique_ptr<base::Value> result;
+      base::Value body(base::Value::Type::DICTIONARY);
+      body.SetStringKey("name", "sendBidiResponse");
+      web_view->SendCommandAndGetResult(
+          "Runtime.addBinding", base::Value::AsDictionaryValue(body), &result);
+    }
+
+    status = EvaluateScriptAndIgnoreResult(session, kMapperScript);
+    if (status.IsError())
+      return status;
+
+    {
+      std::unique_ptr<base::Value> result;
+      base::Value body(base::Value::Type::DICTIONARY);
+      std::string window_id;
+      if (!base::JSONWriter::Write(session->window, &window_id)) {
+        return Status(kUnknownError,
+                      "cannot serialize be window id: " + session->window);
+      }
+      body.SetStringKey("expression",
+                        "window.setSelfTargetId(" + window_id + ")");
+      status = web_view->SendCommandAndGetResult(
+          "Runtime.evaluate", base::Value::AsDictionaryValue(body), &result);
+      if (status.IsError())
+        return status;
+    }
+
+    base::RepeatingCallback<Status(bool*)> bidi_mapper_is_launched =
+        base::BindRepeating(
+            [](Session* session, bool* condition_is_met) {
+              *condition_is_met = session->BidiMapperIsLaunched();
+              return Status{kOk};
+            },
+            base::Unretained(session));
+    // Assume that BiDiMapper initialization requires the same time as a regular
+    // script
+    web_view->HandleEventsUntil(bidi_mapper_is_launched,
+                                Timeout(session->script_timeout));
+
+    {
+      // Create a new tab because the default one is occupied by the BiDiMapper
+      std::string web_view_id;
+      status = session->chrome->NewWindow(
+          session->window, Chrome::WindowType::kTab, &web_view_id);
+
+      if (status.IsError())
+        return status;
+
+      std::string handle = WebViewIdToWindowHandle(web_view_id);
+
+      std::unique_ptr<base::Value> result;
+      base::Value body(base::Value::Type::DICTIONARY);
+      body.GetDict().Set("handle", handle);
+
+      status = ExecuteSwitchToWindow(
+          session, base::Value::AsDictionaryValue(body), &result);
+    }
+  }
+
+  return status;
 }
 
 }  // namespace
+
+namespace internal {
+
+Status ConfigureSession(Session* session,
+                        const base::DictionaryValue& params,
+                        const base::DictionaryValue** desired_caps,
+                        base::DictionaryValue* merged_caps,
+                        Capabilities* capabilities) {
+  session->driver_log =
+      std::make_unique<WebDriverLog>(WebDriverLog::kDriverType, Log::kAll);
+
+  session->w3c_compliant = GetW3CSetting(params);
+  if (session->w3c_compliant) {
+    Status status = ProcessCapabilities(params, merged_caps);
+    if (status.IsError())
+      return status;
+    *desired_caps = merged_caps;
+  } else {
+    const base::Value* caps = params.FindDictKey("desiredCapabilities");
+    if (!caps)
+      return Status(kSessionNotCreated, "Missing or invalid capabilities");
+
+    *desired_caps = static_cast<const base::DictionaryValue*>(caps);
+  }
+
+  Status status = capabilities->Parse(**desired_caps, session->w3c_compliant);
+  if (status.IsError())
+    return status;
+
+  if (capabilities->unhandled_prompt_behavior.length() > 0) {
+    session->unhandled_prompt_behavior =
+        capabilities->unhandled_prompt_behavior;
+  } else {
+    // W3C spec (https://www.w3.org/TR/webdriver/#dfn-handle-any-user-prompts)
+    // shows the default behavior to be dismiss and notify. For backward
+    // compatibility, in legacy mode default behavior is not handling prompt.
+    session->unhandled_prompt_behavior =
+        session->w3c_compliant ? kDismissAndNotify : kIgnore;
+  }
+
+  session->implicit_wait = capabilities->implicit_wait_timeout;
+  session->page_load_timeout = capabilities->page_load_timeout;
+  session->script_timeout = capabilities->script_timeout;
+  session->strict_file_interactability =
+      capabilities->strict_file_interactability;
+  session->webSocketUrl = capabilities->webSocketUrl;
+  Log::Level driver_level = Log::kWarning;
+  if (capabilities->logging_prefs.count(WebDriverLog::kDriverType))
+    driver_level = capabilities->logging_prefs[WebDriverLog::kDriverType];
+  session->driver_log->set_min_level(driver_level);
+
+  return Status(kOk);
+}
+
+Status ConfigureHeadlessSession(Session* session,
+                                const Capabilities& capabilities) {
+  if (!session->chrome->GetBrowserInfo()->is_headless)
+    return Status(kOk);
+
+  const std::string* download_directory = nullptr;
+  if (capabilities.prefs) {
+    download_directory =
+        capabilities.prefs->FindStringPath("download.default_directory");
+    if (!download_directory) {
+      download_directory =
+          capabilities.prefs->FindStringKey("download.default_directory");
+    }
+  }
+  session->headless_download_directory = std::make_unique<std::string>(
+      download_directory ? *download_directory : ".");
+
+  WebView* first_view;
+  session->chrome->GetWebViewById(session->window, &first_view);
+  return first_view->OverrideDownloadDirectoryIfNeeded(
+      *session->headless_download_directory);
+}
+
+}  // namespace internal
 
 bool MergeCapabilities(const base::DictionaryValue* always_match,
                        const base::DictionaryValue* first_match,
@@ -351,11 +529,10 @@ bool MergeCapabilities(const base::DictionaryValue* always_match,
   CHECK(always_match);
   CHECK(first_match);
   CHECK(merged);
-  merged->Clear();
+  merged->DictClear();
 
-  for (base::DictionaryValue::Iterator it(*first_match); !it.IsAtEnd();
-       it.Advance()) {
-    if (always_match->HasKey(it.key())) {
+  for (auto kv : first_match->DictItems()) {
+    if (always_match->FindKey(kv.first)) {
       // firstMatch cannot have the same |keys| as alwaysMatch.
       return false;
     }
@@ -370,26 +547,37 @@ bool MergeCapabilities(const base::DictionaryValue* always_match,
 // Implementation of "matching capabilities", as defined in W3C spec at
 // https://www.w3.org/TR/webdriver/#dfn-matching-capabilities.
 // It checks some requested capabilities and make sure they are supported.
-// Currently, we only check "browserName" and "platformName", but more can be
-// added as necessary.
+// Currently, we only check "browserName", "platformName", and webauthn
+// capabilities but more can be added as necessary.
 bool MatchCapabilities(const base::DictionaryValue* capabilities) {
-  const base::Value* name;
-  if (capabilities->Get("browserName", &name) && !name->is_none()) {
-    if (!(name->is_string() && name->GetString() == "chrome"))
+  const base::Value* name = capabilities->FindKey("browserName");
+  if (name && !name->is_none()) {
+    if (!(name->is_string() && name->GetString() == kBrowserCapabilityName))
       return false;
   }
 
-  const base::Value* platform_name_value;
-  if (capabilities->Get("platformName", &platform_name_value) &&
-      !platform_name_value->is_none()) {
+  const base::DictionaryValue* chrome_options;
+  const bool has_chrome_options =
+      GetChromeOptionsDictionary(*capabilities, &chrome_options);
+
+  bool is_android = has_chrome_options &&
+                    chrome_options->FindStringKey("androidPackage") != nullptr;
+
+  const base::Value* platform_name_value =
+      capabilities->FindPath("platformName");
+  if (platform_name_value && !platform_name_value->is_none()) {
     if (platform_name_value->is_string()) {
       std::string requested_platform_name = platform_name_value->GetString();
+      std::string requested_first_token =
+        requested_platform_name.substr(0, requested_platform_name.find(' '));
+
       std::string actual_platform_name =
-          base::ToLowerASCII(base::SysInfo::OperatingSystemName());
-      bool is_android = capabilities->FindPath(
-                            "goog:chromeOptions.androidPackage") != nullptr;
-      bool is_remote = capabilities->FindPath(
-                           "goog:chromeOptions.debuggerAddress") != nullptr;
+        base::ToLowerASCII(base::SysInfo::OperatingSystemName());
+      std::string actual_first_token =
+        actual_platform_name.substr(0, actual_platform_name.find(' '));
+
+      bool is_remote = has_chrome_options && chrome_options->FindStringKey(
+                                                 "debuggerAddress") != nullptr;
       if (requested_platform_name == "any" || is_remote ||
           (is_android && requested_platform_name == "android")) {
         // "any" can be used as a wild card for platformName.
@@ -398,16 +586,33 @@ bool MatchCapabilities(const base::DictionaryValue* capabilities) {
         // If any of the above cases pass, we return true.
       } else if (is_android && requested_platform_name != "android") {
         return false;
-      } else if (requested_platform_name == "mac" ||
-                 requested_platform_name == "windows" ||
-                 requested_platform_name == "linux") {
-        if (!base::StartsWith(actual_platform_name, requested_platform_name,
-                              base::CompareCase::SENSITIVE))
+      } else if (requested_first_token == "mac" ||
+                 requested_first_token == "windows" ||
+                 requested_first_token == "linux") {
+        if (actual_first_token != requested_first_token)
           return false;
       } else if (requested_platform_name != actual_platform_name) {
         return false;
       }
     } else {
+      return false;
+    }
+  }
+
+  const base::Value* virtual_authenticators_value =
+      capabilities->FindPath("webauthn:virtualAuthenticators");
+  if (virtual_authenticators_value) {
+    if (!virtual_authenticators_value->is_bool() ||
+        (virtual_authenticators_value->GetBool() && is_android)) {
+      return false;
+    }
+  }
+
+  const base::Value* large_blob_value =
+      capabilities->FindPath("webauthn:extension:largeBlob");
+  if (large_blob_value) {
+    if (!large_blob_value->is_bool() ||
+        (large_blob_value->GetBool() && is_android)) {
       return false;
     }
   }
@@ -421,8 +626,8 @@ bool MatchCapabilities(const base::DictionaryValue* capabilities) {
 Status ProcessCapabilities(const base::DictionaryValue& params,
                            base::DictionaryValue* result_capabilities) {
   // 1. Get the property "capabilities" from parameters.
-  const base::DictionaryValue* capabilities_request;
-  if (!params.GetDictionary("capabilities", &capabilities_request))
+  const base::Value* capabilities_request = params.FindDictKey("capabilities");
+  if (!capabilities_request)
     return Status(kInvalidArgument, "'capabilities' must be a JSON object");
 
   // 2. Get the property "alwaysMatch" from capabilities request.
@@ -443,16 +648,14 @@ Status ProcessCapabilities(const base::DictionaryValue& params,
   }
 
   // 3. Get the property "firstMatch" from capabilities request.
-  base::ListValue default_list;
-  const base::ListValue* all_first_match_capabilities;
-  const base::Value* all_first_match_capabilities_value =
+  base::Value default_list(base::Value::Type::LIST);
+  const base::Value* all_first_match_capabilities =
       capabilities_request->FindKey("firstMatch");
-  if (all_first_match_capabilities_value == nullptr) {
-    default_list.Append(std::make_unique<base::DictionaryValue>());
+  if (all_first_match_capabilities == nullptr) {
+    default_list.Append(base::Value(base::Value::Type::DICTIONARY));
     all_first_match_capabilities = &default_list;
-  } else if (all_first_match_capabilities_value->GetAsList(
-                 &all_first_match_capabilities)) {
-    if (all_first_match_capabilities->GetSize() < 1)
+  } else if (all_first_match_capabilities->is_list()) {
+    if (all_first_match_capabilities->GetList().size() < 1)
       return Status(kInvalidArgument,
                     "'firstMatch' must contain at least one entry");
   } else {
@@ -463,21 +666,22 @@ Status ProcessCapabilities(const base::DictionaryValue& params,
   std::vector<const base::DictionaryValue*> validated_first_match_capabilities;
 
   // 5. Validate all first match capabilities.
-  for (size_t i = 0; i < all_first_match_capabilities->GetSize(); ++i) {
-    const base::DictionaryValue* first_match;
-    if (!all_first_match_capabilities->GetDictionary(i, &first_match)) {
+  for (size_t i = 0; i < all_first_match_capabilities->GetList().size(); ++i) {
+    const base::Value& first_match = all_first_match_capabilities->GetList()[i];
+    if (!first_match.is_dict()) {
       return Status(kInvalidArgument,
                     base::StringPrintf(
                         "entry %zu of 'firstMatch' must be a JSON object", i));
     }
     Capabilities cap;
-    Status status = cap.Parse(*first_match);
+    Status status = cap.Parse(base::Value::AsDictionaryValue(first_match));
     if (status.IsError())
       return Status(
           kInvalidArgument,
           base::StringPrintf("entry %zu of 'firstMatch' is invalid", i),
           status);
-    validated_first_match_capabilities.push_back(first_match);
+    validated_first_match_capabilities.push_back(
+        &base::Value::AsDictionaryValue(first_match));
   }
 
   // 6. Let merged capabilities be an empty List.
@@ -522,8 +726,12 @@ Status ExecuteInitSession(const InitSessionParams& bound_params,
   Status status = InitSessionHelper(bound_params, session, params, value);
   if (status.IsError()) {
     session->quit = true;
-    if (session->chrome != NULL)
+    if (session->chrome != nullptr)
       session->chrome->Quit();
+  } else if (session->webSocketUrl) {
+    bound_params.cmd_task_runner->PostTask(
+        FROM_HERE, base::BindOnce(&InitSessionForWebSocketConnection,
+                                  bound_params.session_map, session->id));
   }
   return status;
 }
@@ -542,42 +750,23 @@ Status ExecuteQuit(bool allow_detach,
 Status ExecuteGetSessionCapabilities(Session* session,
                                      const base::DictionaryValue& params,
                                      std::unique_ptr<base::Value>* value) {
-  value->reset(session->capabilities->DeepCopy());
+  *value = base::Value::ToUniquePtrValue(session->capabilities->Clone());
   return Status(kOk);
 }
 
 Status ExecuteGetCurrentWindowHandle(Session* session,
                                      const base::DictionaryValue& params,
                                      std::unique_ptr<base::Value>* value) {
-  WebView* web_view = NULL;
+  WebView* web_view = nullptr;
   Status status = session->GetTargetWindow(&web_view);
   if (status.IsError())
     return status;
   status = web_view->ConnectIfNecessary();
   if (status.IsError())
     return status;
-  value->reset(new base::Value(WebViewIdToWindowHandle(web_view->GetId())));
+  *value =
+      std::make_unique<base::Value>(WebViewIdToWindowHandle(web_view->GetId()));
   return Status(kOk);
-}
-
-Status ExecuteLaunchApp(Session* session,
-                        const base::DictionaryValue& params,
-                        std::unique_ptr<base::Value>* value) {
-  std::string id;
-  if (!params.GetString("id", &id))
-    return Status(kInvalidArgument, "'id' must be a string");
-
-  ChromeDesktopImpl* desktop = NULL;
-  Status status = session->chrome->GetAsDesktop(&desktop);
-  if (status.IsError())
-    return status;
-
-  AutomationExtension* extension = NULL;
-  status = desktop->GetAutomationExtension(&extension, session->w3c_compliant);
-  if (status.IsError())
-    return status;
-
-  return extension->LaunchApp(id);
 }
 
 Status ExecuteClose(Session* session,
@@ -589,9 +778,12 @@ Status ExecuteClose(Session* session,
   if (status.IsError())
     return status;
   bool is_last_web_view = web_view_ids.size() == 1u;
+  if (session->webSocketUrl) {
+    is_last_web_view = web_view_ids.size() <= 2u;
+  }
   web_view_ids.clear();
 
-  WebView* web_view = NULL;
+  WebView* web_view = nullptr;
   status = session->GetTargetWindow(&web_view);
   if (status.IsError())
     return status;
@@ -635,12 +827,16 @@ Status ExecuteClose(Session* session,
   if (status.IsError())
     return status;
 
-  status = ExecuteGetWindowHandles(session, base::DictionaryValue(), value);
-  if ((status.code() == kChromeNotReachable && is_last_web_view) ||
-      (status.IsOk() && (*value)->GetList().empty())) {
-    // If the only open window was closed, close is the same as calling "quit".
+  if (is_last_web_view) {
+    // If there is only one window left, call quit as well.
     session->quit = true;
-    return session->chrome->Quit();
+    status = session->chrome->Quit();
+    if (status.IsOk())
+      *value = std::make_unique<base::Value>(base::Value::Type::LIST);
+  } else {
+    status = ExecuteGetWindowHandles(session, base::DictionaryValue(), value);
+    if (status.IsError())
+      return status;
   }
 
   return status;
@@ -654,10 +850,25 @@ Status ExecuteGetWindowHandles(Session* session,
                                                  session->w3c_compliant);
   if (status.IsError())
     return status;
-  std::unique_ptr<base::ListValue> window_ids(new base::ListValue());
+
+  if (session->webSocketUrl) {
+    std::string mapper_view_id;
+    // TODO(chromedriver:4181): How do we know for sure that the first page is
+    // the mapper?
+    status = session->chrome->GetWebViewIdForFirstTab(&mapper_view_id,
+                                                      session->w3c_compliant);
+    auto it =
+        std::find(web_view_ids.begin(), web_view_ids.end(), mapper_view_id);
+    if (it != web_view_ids.end()) {
+      web_view_ids.erase(it);
+    }
+  }
+
+  std::unique_ptr<base::Value> window_ids(
+      new base::Value(base::Value::Type::LIST));
   for (std::list<std::string>::const_iterator it = web_view_ids.begin();
        it != web_view_ids.end(); ++it) {
-    window_ids->AppendString(WebViewIdToWindowHandle(*it));
+    window_ids->Append(WebViewIdToWindowHandle(*it));
   }
   *value = std::move(window_ids);
   return Status(kOk);
@@ -666,12 +877,14 @@ Status ExecuteGetWindowHandles(Session* session,
 Status ExecuteSwitchToWindow(Session* session,
                              const base::DictionaryValue& params,
                              std::unique_ptr<base::Value>* value) {
-  std::string name;
+  const std::string* name;
   if (session->w3c_compliant) {
-    if (!params.GetString("handle", &name))
+    name = params.FindStringKey("handle");
+    if (!name)
       return Status(kInvalidArgument, "'handle' must be a string");
   } else {
-    if (!params.GetString("name", &name))
+    name = params.FindStringKey("name");
+    if (!name)
       return Status(kInvalidArgument, "'name' must be a string");
   }
 
@@ -683,7 +896,7 @@ Status ExecuteSwitchToWindow(Session* session,
 
   std::string web_view_id;
   bool found = false;
-  if (WindowHandleToWebViewId(name, &web_view_id)) {
+  if (WindowHandleToWebViewId(*name, &web_view_id)) {
     // Check if any web_view matches |web_view_id|.
     for (std::list<std::string>::const_iterator it = web_view_ids.begin();
          it != web_view_ids.end(); ++it) {
@@ -695,7 +908,7 @@ Status ExecuteSwitchToWindow(Session* session,
   } else {
     // Check if any of the tab window names match |name|.
     const char* kGetWindowNameScript = "function() { return window.name; }";
-    base::ListValue args;
+    base::Value::List args;
     for (std::list<std::string>::const_iterator it = web_view_ids.begin();
          it != web_view_ids.end(); ++it) {
       std::unique_ptr<base::Value> result;
@@ -710,10 +923,9 @@ Status ExecuteSwitchToWindow(Session* session,
           std::string(), kGetWindowNameScript, args, &result);
       if (status.IsError())
         return status;
-      std::string window_name;
-      if (!result->GetAsString(&window_name))
+      if (!result->is_string())
         return Status(kUnknownError, "failed to get window name");
-      if (window_name == name) {
+      if (result->GetString() == *name) {
         web_view_id = *it;
         found = true;
         break;
@@ -724,44 +936,37 @@ Status ExecuteSwitchToWindow(Session* session,
   if (!found)
     return Status(kNoSuchWindow);
 
-  if (session->overridden_geoposition) {
+  if (session->overridden_geoposition ||
+      session->overridden_network_conditions ||
+      session->headless_download_directory ||
+      session->chrome->IsMobileEmulationEnabled()) {
+    // Connect to new window to apply session configuration
     WebView* web_view;
-    Status status = session->chrome->GetWebViewById(web_view_id, &web_view);
+    status = session->chrome->GetWebViewById(web_view_id, &web_view);
     if (status.IsError())
       return status;
     status = web_view->ConnectIfNecessary();
     if (status.IsError())
       return status;
-    status = web_view->OverrideGeolocation(*session->overridden_geoposition);
-    if (status.IsError())
-      return status;
-  }
 
-  if (session->overridden_network_conditions) {
-    WebView* web_view;
-    Status status = session->chrome->GetWebViewById(web_view_id, &web_view);
-    if (status.IsError())
-      return status;
-    status = web_view->ConnectIfNecessary();
-    if (status.IsError())
-      return status;
-    status = web_view->OverrideNetworkConditions(
-        *session->overridden_network_conditions);
-    if (status.IsError())
-      return status;
-  }
-  if (session->headless_download_directory) {
-    WebView* web_view;
-    Status status = session->chrome->GetWebViewById(web_view_id, &web_view);
-    if (status.IsError())
-      return status;
-    status = web_view->ConnectIfNecessary();
-    if (status.IsError())
-      return status;
-    status = web_view->OverrideDownloadDirectoryIfNeeded(
-        *session->headless_download_directory);
-    if (status.IsError())
-      return status;
+    // apply type specific configurations:
+    if (session->overridden_geoposition) {
+      status = web_view->OverrideGeolocation(*session->overridden_geoposition);
+      if (status.IsError())
+        return status;
+    }
+    if (session->overridden_network_conditions) {
+      status = web_view->OverrideNetworkConditions(
+          *session->overridden_network_conditions);
+      if (status.IsError())
+        return status;
+    }
+    if (session->headless_download_directory) {
+      status = web_view->OverrideDownloadDirectoryIfNeeded(
+          *session->headless_download_directory);
+      if (status.IsError())
+        return status;
+    }
   }
 
   status = session->chrome->ActivateWebView(web_view_id);
@@ -774,29 +979,30 @@ Status ExecuteSwitchToWindow(Session* session,
 }
 
 // Handles legacy format SetTimeout command.
-// TODO(johnchen@chromium.org): Remove when we stop supporting legacy protocol.
+// TODO(crbug.com/chromedriver/2596): Remove when we stop supporting legacy
+// protocol.
 Status ExecuteSetTimeoutLegacy(Session* session,
                                const base::DictionaryValue& params,
                                std::unique_ptr<base::Value>* value) {
-  double ms_double;
-  if (!params.GetDouble("ms", &ms_double))
+  absl::optional<double> maybe_ms = params.FindDoubleKey("ms");
+  if (!maybe_ms.has_value())
     return Status(kInvalidArgument, "'ms' must be a double");
-  std::string type;
-  if (!params.GetString("type", &type))
+
+  const std::string* type = params.FindStringKey("type");
+  if (!type)
     return Status(kInvalidArgument, "'type' must be a string");
 
   base::TimeDelta timeout =
-      base::TimeDelta::FromMilliseconds(static_cast<int>(ms_double));
-  if (type == "implicit") {
+      base::Milliseconds(static_cast<int>(maybe_ms.value()));
+  if (*type == "implicit") {
     session->implicit_wait = timeout;
-  } else if (type == "script") {
+  } else if (*type == "script") {
     session->script_timeout = timeout;
-  } else if (type == "page load") {
+  } else if (*type == "page load") {
     session->page_load_timeout =
-        ((timeout < base::TimeDelta()) ? Session::kDefaultPageLoadTimeout
-                                       : timeout);
+        ((timeout.is_negative()) ? Session::kDefaultPageLoadTimeout : timeout);
   } else {
-    return Status(kInvalidArgument, "unknown type of timeout:" + type);
+    return Status(kInvalidArgument, "unknown type of timeout:" + *type);
   }
   return Status(kOk);
 }
@@ -804,7 +1010,7 @@ Status ExecuteSetTimeoutLegacy(Session* session,
 Status ExecuteSetTimeoutsW3C(Session* session,
                              const base::DictionaryValue& params,
                              std::unique_ptr<base::Value>* value) {
-  for (const auto& setting : params.DictItems()) {
+  for (auto setting : params.DictItems()) {
     int64_t timeout_ms_int64 = -1;
     base::TimeDelta timeout;
     const std::string& type = setting.first;
@@ -819,7 +1025,7 @@ Status ExecuteSetTimeoutsW3C(Session* session,
             return Status(kInvalidArgument,
                           "value must be a non-negative integer");
         else
-            timeout = base::TimeDelta::FromMilliseconds(timeout_ms_int64);
+          timeout = base::Milliseconds(timeout_ms_int64);
     }
     if (type == "script") {
       session->script_timeout = timeout;
@@ -835,10 +1041,10 @@ Status ExecuteSetTimeoutsW3C(Session* session,
 Status ExecuteSetTimeouts(Session* session,
                           const base::DictionaryValue& params,
                           std::unique_ptr<base::Value>* value) {
-  // TODO(johnchen@chromium.org): Remove legacy version support when we stop
-  // supporting non-W3C protocol. At that time, we can delete the legacy
+  // TODO(crbug.com/chromedriver/2596): Remove legacy version support when we
+  // stop supporting non-W3C protocol. At that time, we can delete the legacy
   // function and merge the W3C function into this function.
-  if (params.HasKey("ms")) {
+  if (params.FindKey("ms")) {
     return ExecuteSetTimeoutLegacy(session, params, value);
   } else {
     return ExecuteSetTimeoutsW3C(session, params, value);
@@ -858,36 +1064,36 @@ Status ExecuteGetTimeouts(Session* session,
                         session->page_load_timeout.InMilliseconds());
   SetSafeInt(&timeouts, "implicit", session->implicit_wait.InMilliseconds());
 
-  value->reset(timeouts.DeepCopy());
+  *value = base::Value::ToUniquePtrValue(timeouts.Clone());
   return Status(kOk);
 }
 
 Status ExecuteSetScriptTimeout(Session* session,
                                const base::DictionaryValue& params,
                                std::unique_ptr<base::Value>* value) {
-  double ms;
-  if (!params.GetDouble("ms", &ms) || ms < 0)
+  absl::optional<double> maybe_ms = params.FindDoubleKey("ms");
+  if (!maybe_ms.has_value() || maybe_ms.value() < 0)
     return Status(kInvalidArgument, "'ms' must be a non-negative number");
   session->script_timeout =
-      base::TimeDelta::FromMilliseconds(static_cast<int>(ms));
+      base::Milliseconds(static_cast<int>(maybe_ms.value()));
   return Status(kOk);
 }
 
 Status ExecuteImplicitlyWait(Session* session,
                              const base::DictionaryValue& params,
                              std::unique_ptr<base::Value>* value) {
-  double ms;
-  if (!params.GetDouble("ms", &ms) || ms < 0)
+  absl::optional<double> maybe_ms = params.FindDoubleKey("ms");
+  if (!maybe_ms.has_value() || maybe_ms.value() < 0)
     return Status(kInvalidArgument, "'ms' must be a non-negative number");
   session->implicit_wait =
-      base::TimeDelta::FromMilliseconds(static_cast<int>(ms));
+      base::Milliseconds(static_cast<int>(maybe_ms.value()));
   return Status(kOk);
 }
 
 Status ExecuteIsLoading(Session* session,
                         const base::DictionaryValue& params,
                         std::unique_ptr<base::Value>* value) {
-  WebView* web_view = NULL;
+  WebView* web_view = nullptr;
   Status status = session->GetTargetWindow(&web_view);
   if (status.IsError())
     return status;
@@ -897,11 +1103,10 @@ Status ExecuteIsLoading(Session* session,
     return status;
 
   bool is_pending;
-  status = web_view->IsPendingNavigation(
-      session->GetCurrentFrameId(), nullptr, &is_pending);
+  status = web_view->IsPendingNavigation(nullptr, &is_pending);
   if (status.IsError())
     return status;
-  value->reset(new base::Value(is_pending));
+  *value = std::make_unique<base::Value>(is_pending);
   return Status(kOk);
 }
 
@@ -912,14 +1117,15 @@ Status ExecuteGetLocation(Session* session,
     return Status(kUnknownError,
                   "Location must be set before it can be retrieved");
   }
-  base::DictionaryValue location;
-  location.SetDouble("latitude", session->overridden_geoposition->latitude);
-  location.SetDouble("longitude", session->overridden_geoposition->longitude);
-  location.SetDouble("accuracy", session->overridden_geoposition->accuracy);
+  base::Value location(base::Value::Type::DICTIONARY);
+  location.SetDoubleKey("latitude", session->overridden_geoposition->latitude);
+  location.SetDoubleKey("longitude",
+                        session->overridden_geoposition->longitude);
+  location.SetDoubleKey("accuracy", session->overridden_geoposition->accuracy);
   // Set a dummy altitude to make WebDriver clients happy.
   // https://code.google.com/p/chromedriver/issues/detail?id=281
-  location.SetDouble("altitude", 0);
-  value->reset(location.DeepCopy());
+  location.SetDoubleKey("altitude", 0);
+  *value = base::Value::ToUniquePtrValue(location.Clone());
   return Status(kOk);
 }
 
@@ -936,7 +1142,7 @@ Status ExecuteGetNetworkConnection(Session* session,
   int connection_type = 0;
   connection_type = desktop->GetNetworkConnection();
 
-  value->reset(new base::Value(connection_type));
+  *value = std::make_unique<base::Value>(connection_type);
   return Status(kOk);
 }
 
@@ -947,18 +1153,18 @@ Status ExecuteGetNetworkConditions(Session* session,
     return Status(kUnknownError,
                   "network conditions must be set before it can be retrieved");
   }
-  base::DictionaryValue conditions;
-  conditions.SetBoolean("offline",
+  base::Value conditions(base::Value::Type::DICTIONARY);
+  conditions.SetBoolKey("offline",
                         session->overridden_network_conditions->offline);
-  conditions.SetInteger("latency",
-                        session->overridden_network_conditions->latency);
-  conditions.SetInteger(
+  conditions.SetIntKey("latency",
+                       session->overridden_network_conditions->latency);
+  conditions.SetIntKey(
       "download_throughput",
       session->overridden_network_conditions->download_throughput);
-  conditions.SetInteger(
+  conditions.SetIntKey(
       "upload_throughput",
       session->overridden_network_conditions->upload_throughput);
-  value->reset(conditions.DeepCopy());
+  *value = base::Value::ToUniquePtrValue(conditions.Clone());
   return Status(kOk);
 }
 
@@ -972,31 +1178,31 @@ Status ExecuteSetNetworkConnection(Session* session,
   if (!desktop->IsNetworkConnectionEnabled())
     return Status(kUnknownError, "network connection must be enabled");
 
-  int connection_type;
-  if (!params.GetInteger("parameters.type", &connection_type))
+  absl::optional<int> connection_type = params.FindIntPath("parameters.type");
+  if (!connection_type)
     return Status(kInvalidArgument, "invalid connection_type");
 
-  desktop->SetNetworkConnection(connection_type);
+  desktop->SetNetworkConnection(*connection_type);
 
   std::unique_ptr<NetworkConditions> network_conditions(
       new NetworkConditions());
 
-  if (connection_type & kWifiMask) {
+  if (*connection_type & kWifiMask) {
     network_conditions->latency = kWifiLatency;
     network_conditions->upload_throughput = kWifiThroughput;
     network_conditions->download_throughput = kWifiThroughput;
     network_conditions->offline = false;
-  } else if (connection_type & k4GMask) {
+  } else if (*connection_type & k4GMask) {
     network_conditions->latency = k4GLatency;
     network_conditions->upload_throughput = k4GThroughput;
     network_conditions->download_throughput = k4GThroughput;
     network_conditions->offline = false;
-  } else if (connection_type & k3GMask) {
+  } else if (*connection_type & k3GMask) {
     network_conditions->latency = k3GLatency;
     network_conditions->upload_throughput = k3GThroughput;
     network_conditions->download_throughput = k3GThroughput;
     network_conditions->offline = false;
-  } else if (connection_type & k2GMask) {
+  } else if (*connection_type & k2GMask) {
     network_conditions->latency = k2GLatency;
     network_conditions->upload_throughput = k2GThroughput;
     network_conditions->download_throughput = k2GThroughput;
@@ -1029,89 +1235,93 @@ Status ExecuteSetNetworkConnection(Session* session,
       *session->overridden_network_conditions);
   }
 
-  value->reset(new base::Value(connection_type));
+  *value = std::make_unique<base::Value>(*connection_type);
   return Status(kOk);
 }
 
 Status ExecuteGetWindowPosition(Session* session,
                                 const base::DictionaryValue& params,
                                 std::unique_ptr<base::Value>* value) {
-  int x, y;
-  Status status = session->chrome->GetWindowPosition(session->window, &x, &y);
+  Chrome::WindowRect windowRect;
+  Status status = session->chrome->GetWindowRect(session->window, &windowRect);
 
   if (status.IsError())
     return status;
 
-  base::DictionaryValue position;
-  position.SetInteger("x", x);
-  position.SetInteger("y", y);
-  value->reset(position.DeepCopy());
+  base::Value position(base::Value::Type::DICTIONARY);
+  position.SetIntKey("x", windowRect.x);
+  position.SetIntKey("y", windowRect.y);
+  *value = base::Value::ToUniquePtrValue(position.Clone());
   return Status(kOk);
 }
 
 Status ExecuteSetWindowPosition(Session* session,
                                 const base::DictionaryValue& params,
                                 std::unique_ptr<base::Value>* value) {
-  double x = 0;
-  double y = 0;
-  if (!params.GetDouble("x", &x) || !params.GetDouble("y", &y))
+  absl::optional<double> maybe_x = params.FindDoubleKey("x");
+  absl::optional<double> maybe_y = params.FindDoubleKey("y");
+
+  if (!maybe_x.has_value() || !maybe_y.has_value())
     return Status(kInvalidArgument, "missing or invalid 'x' or 'y'");
 
-  return session->chrome->SetWindowPosition(session->window,
-                                            static_cast<int>(x),
-                                            static_cast<int>(y));
+  base::Value rect_params(base::Value::Type::DICTIONARY);
+  rect_params.SetIntKey("x", static_cast<int>(maybe_x.value()));
+  rect_params.SetIntKey("y", static_cast<int>(maybe_y.value()));
+  return session->chrome->SetWindowRect(
+      session->window, base::Value::AsDictionaryValue(rect_params));
 }
 
 Status ExecuteGetWindowSize(Session* session,
                             const base::DictionaryValue& params,
                             std::unique_ptr<base::Value>* value) {
-  int width, height;
+  Chrome::WindowRect windowRect;
+  Status status = session->chrome->GetWindowRect(session->window, &windowRect);
 
-  Status status =
-      session->chrome->GetWindowSize(session->window, &width, &height);
   if (status.IsError())
     return status;
 
-  base::DictionaryValue size;
-  size.SetInteger("width", width);
-  size.SetInteger("height", height);
-  value->reset(size.DeepCopy());
+  base::Value size(base::Value::Type::DICTIONARY);
+  size.SetIntKey("width", windowRect.width);
+  size.SetIntKey("height", windowRect.height);
+  *value = base::Value::ToUniquePtrValue(size.Clone());
   return Status(kOk);
 }
 
 Status ExecuteSetWindowSize(Session* session,
                             const base::DictionaryValue& params,
                             std::unique_ptr<base::Value>* value) {
-  double width = 0;
-  double height = 0;
-  if (!params.GetDouble("width", &width) ||
-      !params.GetDouble("height", &height))
+  absl::optional<double> maybe_width = params.FindDoubleKey("width");
+  absl::optional<double> maybe_height = params.FindDoubleKey("height");
+
+  if (!maybe_width.has_value() || !maybe_height.has_value())
     return Status(kInvalidArgument, "missing or invalid 'width' or 'height'");
 
-  return session->chrome->SetWindowSize(session->window,
-                                        static_cast<int>(width),
-                                        static_cast<int>(height));
+  base::Value rect_params(base::Value::Type::DICTIONARY);
+  rect_params.SetIntKey("width", static_cast<int>(maybe_width.value()));
+  rect_params.SetIntKey("height", static_cast<int>(maybe_height.value()));
+  return session->chrome->SetWindowRect(
+      session->window, base::Value::AsDictionaryValue(rect_params));
 }
 
 Status ExecuteGetAvailableLogTypes(Session* session,
                                    const base::DictionaryValue& params,
                                    std::unique_ptr<base::Value>* value) {
-  std::unique_ptr<base::ListValue> types(new base::ListValue());
+  std::unique_ptr<base::Value::List> types(new base::Value::List());
   std::vector<WebDriverLog*> logs = session->GetAllLogs();
   for (std::vector<WebDriverLog*>::const_iterator log = logs.begin();
        log != logs.end();
        ++log) {
-    types->AppendString((*log)->type());
+    types->Append((*log)->type());
   }
-  *value = std::move(types);
+  *value = std::make_unique<base::Value>(base::Value(std::move(*types)));
   return Status(kOk);
 }
 
 Status ExecuteGetLog(Session* session,
                      const base::DictionaryValue& params,
                      std::unique_ptr<base::Value>* value) {
-  std::string log_type;
-  if (!params.GetString("type", &log_type)) {
+  const std::string* log_type = params.FindStringKey("type");
+  if (!log_type) {
     return Status(kInvalidArgument, "missing or invalid 'type'");
   }
 
@@ -1130,22 +1340,22 @@ Status ExecuteGetLog(Session* session,
   for (std::vector<WebDriverLog*>::const_iterator log = logs.begin();
        log != logs.end();
        ++log) {
-    if (log_type == (*log)->type()) {
+    if (*log_type == (*log)->type()) {
       *value = (*log)->GetAndClearEntries();
       return Status(kOk);
     }
   }
-  return Status(kInvalidArgument, "log type '" + log_type + "' not found");
+  return Status(kInvalidArgument, "log type '" + *log_type + "' not found");
 }
 
 Status ExecuteUploadFile(Session* session,
                          const base::DictionaryValue& params,
                          std::unique_ptr<base::Value>* value) {
-  std::string base64_zip_data;
-  if (!params.GetString("file", &base64_zip_data))
+  const std::string* base64_zip_data = params.FindStringKey("file");
+  if (!base64_zip_data)
     return Status(kInvalidArgument, "missing or invalid 'file'");
   std::string zip_data;
-  if (!Base64Decode(base64_zip_data, &zip_data))
+  if (!Base64Decode(*base64_zip_data, &zip_data))
     return Status(kUnknownError, "unable to decode 'file'");
 
   if (!session->temp_dir.IsValid()) {
@@ -1164,7 +1374,7 @@ Status ExecuteUploadFile(Session* session,
   if (status.IsError())
     return Status(kUnknownError, "unable to unzip 'file'", status);
 
-  value->reset(new base::Value(upload.value()));
+  *value = std::make_unique<base::Value>(upload.AsUTF8Unsafe());
   return Status(kOk);
 }
 
@@ -1172,6 +1382,26 @@ Status ExecuteUnimplementedCommand(Session* session,
                                    const base::DictionaryValue& params,
                                    std::unique_ptr<base::Value>* value) {
   return Status(kUnknownCommand);
+}
+
+Status ExecuteSetSPCTransactionMode(Session* session,
+                                    const base::DictionaryValue& params,
+                                    std::unique_ptr<base::Value>* value) {
+  WebView* web_view = nullptr;
+  Status status = session->GetTargetWindow(&web_view);
+  if (status.IsError())
+    return status;
+
+  const std::string* mode = params.FindStringKey("mode");
+  if (!mode)
+    return Status(kInvalidArgument, "missing parameter 'mode'");
+
+  base::Value body(base::Value::Type::DICTIONARY);
+  body.SetStringKey("mode", *mode);
+
+  return web_view->SendCommandAndGetResult("Page.setSPCTransactionMode",
+                                           base::Value::AsDictionaryValue(body),
+                                           value);
 }
 
 Status ExecuteGenerateTestReport(Session* session,
@@ -1182,16 +1412,135 @@ Status ExecuteGenerateTestReport(Session* session,
   if (status.IsError())
     return status;
 
-  std::string message, group;
-  if (!params.GetString("message", &message))
+  const std::string* message = params.FindStringKey("message");
+  if (!message)
     return Status(kInvalidArgument, "missing parameter 'message'");
-  if (!params.GetString("group", &group))
-    group = "default";
+  const std::string* group = params.FindStringKey("group");
 
-  base::DictionaryValue body;
-  body.SetString("message", message);
-  body.SetString("group", group);
+  base::Value body(base::Value::Type::DICTIONARY);
+  body.SetStringKey("message", *message);
+  body.SetStringKey("group", group ? *group : "default");
 
-  web_view->SendCommandAndGetResult("Page.generateTestReport", body, value);
+  web_view->SendCommandAndGetResult(
+      "Page.generateTestReport", base::Value::AsDictionaryValue(body), value);
   return Status(kOk);
+}
+
+Status ExecuteSetTimeZone(Session* session,
+                          const base::DictionaryValue& params,
+                          std::unique_ptr<base::Value>* value) {
+  WebView* web_view = nullptr;
+  Status status = session->GetTargetWindow(&web_view);
+  if (status.IsError())
+    return status;
+
+  const std::string* time_zone = params.FindStringKey("time_zone");
+  if (!time_zone)
+    return Status(kInvalidArgument, "missing parameter 'time_zone'");
+
+  base::Value body(base::Value::Type::DICTIONARY);
+  body.SetStringKey("timezoneId", *time_zone);
+
+  web_view->SendCommandAndGetResult("Emulation.setTimezoneOverride",
+                                    base::Value::AsDictionaryValue(body),
+                                    value);
+  return Status(kOk);
+}
+
+// Run a BiDi command
+Status ExecuteBidiCommand(Session* session,
+                          const base::DictionaryValue& params,
+                          std::unique_ptr<base::Value>* value) {
+  // session == nullptr is a valid case: ExecuteQuit has already been handled
+  // in the session thread but the following
+  // TerminateSessionThreadOnCommandThread has not yet been executed (the later
+  // destroys the session thread) The connection has already been accepted by
+  // the CMD thread but soon it will be closed. We don't need to do anything.
+  if (session == nullptr) {
+    return Status{kNoSuchFrame, "session not found"};
+  }
+  std::string data;
+  params.GetString("bidiCommand", &data);
+
+  WebView* web_view = nullptr;
+  Status status = session->chrome->GetWebViewById(
+      session->bidi_mapper_web_view_id, &web_view);
+  if (status.IsError()) {
+    return status;
+  }
+
+  absl::optional<base::Value> dataParsed =
+      base::JSONReader::Read(data, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
+
+  if (!dataParsed) {
+    return Status(kUnknownError, "cannot parse the BiDi command: " + data);
+  }
+
+  if (!dataParsed->is_dict()) {
+    return Status(kUnknownError,
+                  "a JSON map is expected as a BiDi command: " + data);
+  }
+
+  absl::optional<int> cmd_id = dataParsed->GetDict().FindInt("id");
+  if (!cmd_id) {
+    return Status(kUnknownError, "BiDi command is missing 'id' field: " + data);
+  }
+
+  std::string* method = dataParsed->GetDict().FindString("method");
+  if (!method) {
+    return Status(kUnknownError,
+                  "BiDi command is missing 'method' field: " + data);
+  }
+
+  std::string msg;
+  if (!base::JSONWriter::Write(data, &msg)) {
+    return Status(kUnknownError, "cannot serialize be BiDi command: " + data);
+  }
+  std::string expression = "onBidiMessage(" + msg + ")";
+
+  if (*method == "browsingContext.close") {
+    // Closing of the context is handled in a blocking way.
+    // This simplifies us closing the browser if the last tab was closed.
+    session->awaited_bidi_response_id = *cmd_id;
+    status = web_view->EvaluateScript(std::string(), expression, false, value);
+    base::RepeatingCallback<Status(bool*)> bidi_response_is_received =
+        base::BindRepeating(
+            [](Session* session, int cmd_id, bool* condition_is_met) {
+              *condition_is_met = session->awaited_bidi_response_id != cmd_id;
+              return Status{kOk};
+            },
+            base::Unretained(session), *cmd_id);
+    if (status.IsError()) {
+      return status;
+    }
+
+    // The timeout is the same as in ChromeImpl::CloseTarget
+    status = web_view->HandleEventsUntil(std::move(bidi_response_is_received),
+                                         Timeout(base::Seconds(20)));
+    if (status.code() == kTimeout) {
+      // It looks like something is going wrong with the BiDiMapper.
+      // Terminating the session...
+      session->quit = true;
+      status = session->chrome->Quit();
+      return Status(kUnknownError, "failed to close window in 20 seconds");
+    }
+    if (status.IsError())
+      return status;
+
+    std::list<std::string> web_view_ids;
+    status =
+        session->chrome->GetWebViewIds(&web_view_ids, session->w3c_compliant);
+    if (status.IsError())
+      return status;
+
+    bool is_last_web_view = web_view_ids.size() <= 1u;
+    if (is_last_web_view) {
+      session->quit = true;
+      status = session->chrome->Quit();
+    }
+  } else {
+    status = web_view->EvaluateScript(std::string(), expression, false, value);
+  }
+
+  return status;
 }

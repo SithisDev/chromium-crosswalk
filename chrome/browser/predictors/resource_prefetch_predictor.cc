@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,22 +9,23 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/predictors/loading_data_collector.h"
 #include "chrome/browser/predictors/predictor_database.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"
+#include "chrome/browser/predictors/predictors_features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/history/core/browser/history_database.h"
-#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/url_utils.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
+#include "services/network/public/mojom/fetch_api.mojom.h"
+#include "url/origin.h"
 
 using content::BrowserThread;
 
@@ -43,7 +44,7 @@ float ComputeRedirectConfidence(const predictors::RedirectStat& redirect) {
 void InitializeOriginStatFromOriginRequestSummary(
     OriginStat* origin,
     const OriginRequestSummary& summary) {
-  origin->set_origin(summary.origin.spec());
+  origin->set_origin(summary.origin.GetURL().spec());
   origin->set_number_of_hits(1);
   origin->set_average_position(summary.first_occurrence + 1);
   origin->set_always_access_network(summary.always_access_network);
@@ -57,38 +58,68 @@ void InitializeOnDBSequence(
   origin_data->InitializeOnDBSequence();
 }
 
+GURL CreateRedirectURL(const std::string& scheme,
+                       const std::string& host,
+                       std::uint16_t port) {
+  return GURL(scheme + "://" + host + ":" + base::NumberToString(port));
+}
+
 }  // namespace
 
 PreconnectRequest::PreconnectRequest(
-    const GURL& origin,
+    const url::Origin& origin,
     int num_sockets,
-    net::NetworkIsolationKey network_isolation_key)
+    const net::NetworkAnonymizationKey& network_anonymization_key)
     : origin(origin),
       num_sockets(num_sockets),
-      network_isolation_key(std::move(network_isolation_key)) {
+      network_anonymization_key(network_anonymization_key) {
   DCHECK_GE(num_sockets, 0);
+  DCHECK(!network_anonymization_key.IsEmpty());
+}
+
+PrefetchRequest::PrefetchRequest(
+    const GURL& url,
+    const net::NetworkAnonymizationKey& network_anonymization_key,
+    network::mojom::RequestDestination destination)
+    : url(url),
+      network_anonymization_key(network_anonymization_key),
+      destination(destination) {
+  DCHECK(base::FeatureList::IsEnabled(features::kLoadingPredictorPrefetch));
+  DCHECK(!network_anonymization_key.IsEmpty());
 }
 
 PreconnectPrediction::PreconnectPrediction() = default;
 PreconnectPrediction::PreconnectPrediction(
     const PreconnectPrediction& prediction) = default;
+PreconnectPrediction::PreconnectPrediction(PreconnectPrediction&& other) =
+    default;
 PreconnectPrediction::~PreconnectPrediction() = default;
+
+PreconnectPrediction& PreconnectPrediction::operator=(
+    const PreconnectPrediction& other) = default;
+PreconnectPrediction& PreconnectPrediction::operator=(
+    PreconnectPrediction&& other) = default;
+
+OptimizationGuidePrediction::OptimizationGuidePrediction() = default;
+OptimizationGuidePrediction::OptimizationGuidePrediction(
+    const OptimizationGuidePrediction& prediction) = default;
+OptimizationGuidePrediction::~OptimizationGuidePrediction() = default;
 
 ////////////////////////////////////////////////////////////////////////////////
 // ResourcePrefetchPredictor static functions.
 
-bool ResourcePrefetchPredictor::GetRedirectEndpoint(
-    const std::string& entry_point,
+bool ResourcePrefetchPredictor::GetRedirectOrigin(
+    const url::Origin& entry_origin,
     const RedirectDataMap& redirect_data,
-    std::string* redirect_endpoint) const {
-  DCHECK(redirect_endpoint);
+    url::Origin* redirect_origin) {
+  DCHECK(redirect_origin);
 
   RedirectData data;
-  bool exists = redirect_data.TryGetData(entry_point, &data);
+  bool exists = redirect_data.TryGetData(entry_origin.host(), &data);
   if (!exists) {
     // Fallback to fetching URLs based on the incoming URL/host. By default
     // the predictor is confident that there is no redirect.
-    *redirect_endpoint = entry_point;
+    *redirect_origin = entry_origin;
     return true;
   }
 
@@ -109,15 +140,100 @@ bool ResourcePrefetchPredictor::GetRedirectEndpoint(
   // The predictor doesn't apply a minimum-number-of-hits threshold to
   // the no-redirect case because the no-redirect is a default assumption.
   const RedirectStat& redirect = data.redirect_endpoints(0);
+  bool redirect_origin_matches_entry_origin =
+      redirect.url() == entry_origin.host() &&
+      redirect.url_port() == entry_origin.port();
+
   if (ComputeRedirectConfidence(redirect) <
           kMinRedirectConfidenceToTriggerPrefetch ||
       (redirect.number_of_hits() < kMinRedirectHitsToTriggerPrefetch &&
-       redirect.url() != entry_point)) {
+       !redirect_origin_matches_entry_origin)) {
     return false;
   }
 
-  *redirect_endpoint = redirect.url();
+  // Create a GURL from |redirect|, and get the origin from it. Origins can
+  // be created be directly passing in scheme, host, and port, but the class
+  // DCHECKs if any of them are invalid, and best not to DCHECK when loading bad
+  // data from disk. GURL does not DCHECK on bad input, so safest to rely on its
+  // logic, though more computationally expensive.
+
+  GURL redirect_url;
+  // Old entries may have no scheme or port.
+  if (redirect.has_url_scheme() && redirect.has_url_port()) {
+    redirect_url = CreateRedirectURL(redirect.url_scheme(), redirect.url(),
+                                     redirect.url_port());
+  }
+
+  // If there was no scheme or port, or they don't make for a valid URL (most
+  // likely due to using 0 or an empty scheme as default values), default to
+  // HTTPS / port 443.
+  if (!redirect_url.is_valid())
+    redirect_url = CreateRedirectURL("https", redirect.url(), 443);
+
+  if (!redirect_url.is_valid())
+    return false;
+
+  *redirect_origin = url::Origin::Create(redirect_url);
   return true;
+}
+
+bool ResourcePrefetchPredictor::GetRedirectEndpointsForPreconnect(
+    const url::Origin& entry_origin,
+    const RedirectDataMap& redirect_data,
+    PreconnectPrediction* prediction) const {
+  if (!base::FeatureList::IsEnabled(
+          features::kLoadingPreconnectToRedirectTarget)) {
+    return false;
+  }
+  DCHECK(!prediction || prediction->requests.empty());
+
+  RedirectData data;
+  if (!redirect_data.TryGetData(entry_origin.host(), &data))
+    return false;
+
+  // The thresholds here are lower than the thresholds used above in
+  // GetRedirectOrigin() method. Here the overhead of a negative prediction is
+  // that the browser preconnects to one incorrectly predicted origin. In
+  // GetRedirectOrigin(), the overhead of wrong prediction is much higher
+  // (multiple incorrect preconnects).
+  const float kMinRedirectConfidenceToTriggerPrefetch = 0.1f;
+
+  bool at_least_one_redirect_endpoint_added = false;
+  for (const auto& redirect : data.redirect_endpoints()) {
+    if (ComputeRedirectConfidence(redirect) <
+        kMinRedirectConfidenceToTriggerPrefetch) {
+      continue;
+    }
+
+    // Assume HTTPS and port 443 by default.
+    std::string redirect_scheme =
+        redirect.url_scheme().empty() ? "https" : redirect.url_scheme();
+    int redirect_port = redirect.has_url_port() ? redirect.url_port() : 443;
+
+    const url::Origin redirect_origin = url::Origin::CreateFromNormalizedTuple(
+        redirect_scheme, redirect.url(), redirect_port);
+
+    if (redirect_origin == entry_origin) {
+      continue;
+    }
+
+    // Add the endpoint to which the predictor has seen redirects to.
+    // Set network anonymization key same as the origin of the redirect target.
+    if (prediction) {
+      prediction->requests.emplace_back(
+          redirect_origin, 1 /* num_scokets */,
+          net::NetworkAnonymizationKey(net::SchemefulSite(redirect_origin),
+                                       net::SchemefulSite(redirect_origin)));
+    }
+    at_least_one_redirect_endpoint_added = true;
+  }
+
+  if (prediction && prediction->host.empty() &&
+      at_least_one_redirect_endpoint_added) {
+    prediction->host = entry_origin.host();
+  }
+
+  return at_least_one_redirect_endpoint_added;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -131,8 +247,7 @@ ResourcePrefetchPredictor::ResourcePrefetchPredictor(
       config_(config),
       initialization_state_(NOT_INITIALIZED),
       tables_(PredictorDatabaseFactory::GetForProfile(profile)
-                  ->resource_prefetch_tables()),
-      history_service_observer_(this) {
+                  ->resource_prefetch_tables()) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
@@ -148,10 +263,10 @@ void ResourcePrefetchPredictor::StartInitialization() {
   // Create local caches using the database as loaded.
   auto host_redirect_data = std::make_unique<RedirectDataMap>(
       tables_, tables_->host_redirect_table(), config_.max_hosts_to_track,
-      base::TimeDelta::FromSeconds(config_.flush_data_to_disk_delay_seconds));
+      base::Seconds(config_.flush_data_to_disk_delay_seconds));
   auto origin_data = std::make_unique<OriginDataMap>(
       tables_, tables_->origin_table(), config_.max_hosts_to_track,
-      base::TimeDelta::FromSeconds(config_.flush_data_to_disk_delay_seconds));
+      base::Seconds(config_.flush_data_to_disk_delay_seconds));
 
   // Get raw pointers to pass to the first task. Ownership of the unique_ptrs
   // will be passed to the reply task.
@@ -175,7 +290,7 @@ void ResourcePrefetchPredictor::SetObserverForTesting(TestObserver* observer) {
 }
 
 void ResourcePrefetchPredictor::Shutdown() {
-  history_service_observer_.RemoveAll();
+  history_service_observation_.Reset();
 }
 
 void ResourcePrefetchPredictor::RecordPageRequestSummary(
@@ -196,7 +311,8 @@ void ResourcePrefetchPredictor::RecordPageRequestSummary(
   LearnRedirect(summary->initial_url.host(), summary->main_frame_url,
                 host_redirect_data_.get());
   LearnOrigins(summary->main_frame_url.host(),
-               summary->main_frame_url.GetOrigin(), summary->origins);
+               summary->main_frame_url.DeprecatedGetOriginAsURL(),
+               summary->origins);
 
   if (observer_)
     observer_->OnNavigationLearned(*summary);
@@ -210,21 +326,31 @@ bool ResourcePrefetchPredictor::PredictPreconnectOrigins(
   if (initialization_state_ != INITIALIZED)
     return false;
 
-  std::string host = url.host();
-  std::string redirect_endpoint;
-  if (!GetRedirectEndpoint(host, *host_redirect_data_, &redirect_endpoint))
-    return false;
-
-  OriginData data;
-  if (!origin_data_->TryGetData(redirect_endpoint, &data))
-    return false;
-
-  if (prediction) {
-    prediction->host = redirect_endpoint;
-    prediction->is_redirected = (host != redirect_endpoint);
+  url::Origin url_origin = url::Origin::Create(url);
+  url::Origin redirect_origin;
+  bool has_any_prediction = GetRedirectEndpointsForPreconnect(
+      url_origin, *host_redirect_data_, prediction);
+  if (!GetRedirectOrigin(url_origin, *host_redirect_data_, &redirect_origin)) {
+    // GetRedirectOrigin() may return false if it's not confident about the
+    // redirect target or the navigation target. Calling
+    // GetRedirectEndpointsForPreconnect() ensures we add all possible redirect
+    // targets to the preconnect prediction.
+    return has_any_prediction;
   }
 
-  bool has_any_prediction = false;
+  OriginData data;
+  if (!origin_data_->TryGetData(redirect_origin.host(), &data)) {
+    return has_any_prediction;
+  }
+
+  if (prediction) {
+    prediction->host = redirect_origin.host();
+    prediction->is_redirected = (redirect_origin != url_origin);
+  }
+  net::SchemefulSite redirect_site = net::SchemefulSite(redirect_origin);
+  net::NetworkAnonymizationKey network_anonymization_key(redirect_site,
+                                                         redirect_site);
+
   for (const OriginStat& origin : data.origins()) {
     float confidence = static_cast<float>(origin.number_of_hits()) /
                        (origin.number_of_hits() + origin.number_of_misses());
@@ -233,10 +359,15 @@ bool ResourcePrefetchPredictor::PredictPreconnectOrigins(
 
     has_any_prediction = true;
     if (prediction) {
-      if (confidence > kMinOriginConfidenceToTriggerPreconnect)
-        prediction->requests.emplace_back(GURL(origin.origin()), 1);
-      else
-        prediction->requests.emplace_back(GURL(origin.origin()), 0);
+      if (confidence > kMinOriginConfidenceToTriggerPreconnect) {
+        prediction->requests.emplace_back(
+            url::Origin::Create(GURL(origin.origin())), 1,
+            network_anonymization_key);
+      } else {
+        prediction->requests.emplace_back(
+            url::Origin::Create(GURL(origin.origin())), 0,
+            network_anonymization_key);
+      }
     }
   }
 
@@ -296,6 +427,7 @@ void ResourcePrefetchPredictor::LearnRedirect(const std::string& key,
                                               const GURL& final_redirect,
                                               RedirectDataMap* redirect_data) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
   // If the primary key is too long reject it.
   if (key.length() > ResourcePrefetchPredictorTables::kMaxStringLength)
     return;
@@ -309,6 +441,7 @@ void ResourcePrefetchPredictor::LearnRedirect(const std::string& key,
     redirect_to_add->set_url(final_redirect.host());
     redirect_to_add->set_number_of_hits(1);
     redirect_to_add->set_url_scheme(final_redirect.scheme());
+    redirect_to_add->set_url_port(final_redirect.EffectiveIntPort());
   } else {
     data.set_last_visit_time(base::Time::Now().ToInternalValue());
 
@@ -325,15 +458,26 @@ void ResourcePrefetchPredictor::LearnRedirect(const std::string& key,
           !redirect.url_scheme().empty() &&
           redirect.url_scheme() != final_redirect.scheme();
 
-      if (!host_mismatch && !url_scheme_mismatch) {
+      // When the existing port in database is empty, then difference in
+      // ports is not considered a mismatch. This case is treated
+      // specially since port was added later to the database, and previous
+      // entries would have empty value. In such case, we simply update the port
+      // in the database.
+      const bool url_port_mismatch =
+          redirect.has_url_port() &&
+          redirect.url_port() != final_redirect.EffectiveIntPort();
+
+      if (!host_mismatch && !url_scheme_mismatch && !url_port_mismatch) {
         // No mismatch.
         need_to_add = false;
         redirect.set_number_of_hits(redirect.number_of_hits() + 1);
         redirect.set_consecutive_misses(0);
 
-        // If existing scheme in database is empty, then update it.
+        // If existing scheme or port in database are empty, then update them.
         if (redirect.url_scheme().empty())
           redirect.set_url_scheme(final_redirect.scheme());
+        if (!redirect.has_url_port())
+          redirect.set_url_port(final_redirect.EffectiveIntPort());
       } else {
         // A real mismatch.
         redirect.set_number_of_misses(redirect.number_of_misses() + 1);
@@ -346,6 +490,7 @@ void ResourcePrefetchPredictor::LearnRedirect(const std::string& key,
       redirect_to_add->set_url(final_redirect.host());
       redirect_to_add->set_number_of_hits(1);
       redirect_to_add->set_url_scheme(final_redirect.scheme());
+      redirect_to_add->set_url_port(final_redirect.EffectiveIntPort());
     }
   }
 
@@ -362,7 +507,7 @@ void ResourcePrefetchPredictor::LearnRedirect(const std::string& key,
 void ResourcePrefetchPredictor::LearnOrigins(
     const std::string& host,
     const GURL& main_frame_origin,
-    const std::map<GURL, OriginRequestSummary>& summaries) {
+    const std::map<url::Origin, OriginRequestSummary>& summaries) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (host.size() > ResourcePrefetchPredictorTables::kMaxStringLength)
     return;
@@ -388,18 +533,20 @@ void ResourcePrefetchPredictor::LearnOrigins(
   } else {
     data.set_last_visit_time(base::Time::Now().ToInternalValue());
 
-    std::map<GURL, int> old_index;
+    std::map<url::Origin, int> old_index;
     int old_size = static_cast<int>(data.origins_size());
     for (int i = 0; i < old_size; ++i) {
       bool is_new =
-          old_index.insert({GURL(data.origins(i).origin()), i}).second;
+          old_index
+              .insert({url::Origin::Create(GURL(data.origins(i).origin())), i})
+              .second;
       DCHECK(is_new);
     }
 
     // Update the old origins.
     for (int i = 0; i < old_size; ++i) {
       auto* old_origin = data.mutable_origins(i);
-      GURL origin(old_origin->origin());
+      url::Origin origin = url::Origin::Create(GURL(old_origin->origin()));
       auto it = summaries.find(origin);
       if (it == summaries.end()) {
         // miss
@@ -479,8 +626,8 @@ void ResourcePrefetchPredictor::ConnectToHistoryService() {
                                            ServiceAccessType::EXPLICIT_ACCESS);
   if (!history_service)
     return;
-  DCHECK(!history_service_observer_.IsObserving(history_service));
-  history_service_observer_.Add(history_service);
+  DCHECK(!history_service_observation_.IsObservingSource(history_service));
+  history_service_observation_.Observe(history_service);
   if (history_service->BackendLoaded()) {
     // HistoryService is already loaded. Continue with Initialization.
     OnHistoryAndCacheLoaded();

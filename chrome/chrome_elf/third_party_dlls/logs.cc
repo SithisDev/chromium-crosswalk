@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,6 +67,9 @@ class Log {
   Log& operator=(Log&&) noexcept = default;
   // Constructor - |log_type| indicates what LogType this instance holds.
   explicit Log(LogType log_type) : log_type_(log_type) {}
+
+  Log(const Log&) = delete;
+  Log& operator=(const Log&) = delete;
 
   // Returns the size in bytes of the full log, in terms of LogEntry structs.
   // I.e. how many bytes would a provided buffer need to be to DrainLog().
@@ -177,10 +180,6 @@ class Log {
 
   LogType log_type_;
   std::vector<LogEntryInternal> entries_;
-
-  // DISALLOW_COPY_AND_ASSIGN(Log);
-  Log(const Log&) = delete;
-  Log& operator=(const Log&) = delete;
 };
 
 //------------------------------------------------------------------------------
@@ -273,17 +272,17 @@ void DeinitLogs() {
 // - Function definition in logging_api.h
 // - Export declared in chrome_elf_[x64|x86].def
 //------------------------------------------------------------------------------
-using namespace third_party_dlls;
 
 uint32_t DrainLog(uint8_t* buffer,
                   uint32_t buffer_size,
                   uint32_t* log_remaining) {
-  if (!g_log_mutex ||
-      ::WaitForSingleObject(g_log_mutex, kMaxMutexWaitMs) != WAIT_OBJECT_0)
+  if (!third_party_dlls::g_log_mutex ||
+      ::WaitForSingleObject(third_party_dlls::g_log_mutex,
+                            third_party_dlls::kMaxMutexWaitMs) != WAIT_OBJECT_0)
     return 0;
 
-  Log& blocked = GetBlockedLog();
-  Log& allowed = GetAllowedLog();
+  third_party_dlls::Log& blocked = third_party_dlls::GetBlockedLog();
+  third_party_dlls::Log& allowed = third_party_dlls::GetAllowedLog();
 
   uint32_t bytes_written = blocked.Drain(buffer, buffer_size);
   bytes_written +=
@@ -299,13 +298,13 @@ uint32_t DrainLog(uint8_t* buffer,
       *log_remaining = static_cast<uint32_t>(full_size);
   }
 
-  ::ReleaseMutex(g_log_mutex);
+  ::ReleaseMutex(third_party_dlls::g_log_mutex);
 
   return bytes_written;
 }
 
 bool RegisterLogNotification(HANDLE event_handle) {
-  if (!g_log_mutex)
+  if (!third_party_dlls::g_log_mutex)
     return false;
 
   // Duplicate the new handle, if not clearing with nullptr.
@@ -317,18 +316,20 @@ bool RegisterLogNotification(HANDLE event_handle) {
   }
 
   // Close any existing registered handle.
-  if (g_notification_event)
-    ::CloseHandle(g_notification_event);
+  if (third_party_dlls::g_notification_event)
+    ::CloseHandle(third_party_dlls::g_notification_event);
 
-  g_notification_event = temp;
+  third_party_dlls::g_notification_event = temp;
 
   return true;
 }
 
 uint32_t GetBlockedModulesCount() {
-  return g_blocked_modules_count.load(std::memory_order_relaxed);
+  return third_party_dlls::g_blocked_modules_count.load(
+      std::memory_order_relaxed);
 }
 
 uint32_t GetUniqueBlockedModulesCount() {
-  return g_unique_blocked_modules_count.load(std::memory_order_relaxed);
+  return third_party_dlls::g_unique_blocked_modules_count.load(
+      std::memory_order_relaxed);
 }

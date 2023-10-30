@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,14 +18,6 @@ var allTests = [
     assertEq('en', second.language, 'document manually declares lang="en"');
     assertEq('fr', second.detectedLanguage,
       'detected language should be French');
-    chrome.test.succeed();
-  },
-
-  function detectedLanguageForInvalidAttribute() {
-    var item = rootNode.children[2].children[0];
-    var langAnnotation =
-      item.languageAnnotationForStringAttribute('invalid attribute');
-    assertEq(0, langAnnotation.length);
     chrome.test.succeed();
   },
 

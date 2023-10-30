@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@ ChromeBackupWatcher::ChromeBackupWatcher(Profile* profile) {
   registrar_.Init(profile->GetPrefs());
   base::RepeatingClosure callback =
       base::BindRepeating(&BackupPrefsChanged, java_watcher_);
-  for (const std::string pref_name : GetBackupPrefNames()) {
+  for (const std::string& pref_name : GetBackupPrefNames()) {
     registrar_.Add(pref_name, callback);
   }
 }

@@ -1,18 +1,20 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.keyboard_accessory.tab_layout_component;
 
 import android.content.Context;
+import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.Nullable;
-import android.support.annotation.StringRes;
-import android.support.design.widget.TabLayout;
-import android.support.v4.graphics.drawable.DrawableCompat;
 import android.util.AttributeSet;
 
-import org.chromium.chrome.browser.keyboard_accessory.R;
+import androidx.annotation.Nullable;
+import androidx.annotation.StringRes;
+
+import com.google.android.material.tabs.TabLayout;
+
+import org.chromium.components.browser_ui.styles.SemanticColorUtils;
 
 /**
  * A {@link TabLayout} containing the tabs in the keyboard accessory.
@@ -33,7 +35,8 @@ class KeyboardAccessoryTabLayoutView extends TabLayout {
     void addTabAt(int position, Drawable icon, CharSequence contentDescription) {
         TabLayout.Tab tab = newTab();
         tab.setIcon(icon.mutate()); // mutate() needed to change the active tint.
-        DrawableCompat.setTint(tab.getIcon(), getResources().getColor(R.color.default_icon_color));
+        tab.getIcon().setColorFilter(
+                SemanticColorUtils.getDefaultIconColor(getContext()), PorterDuff.Mode.SRC_IN);
         tab.setContentDescription(contentDescription);
         addTab(tab, position, false);
     }
@@ -77,9 +80,9 @@ class KeyboardAccessoryTabLayoutView extends TabLayout {
                 // This triggers the tab observer but as the active tab doesn't change, it's a noop.
                 t.select();
             }
-            DrawableCompat.setTint(t.getIcon(),
-                    getTabTextColors().getColorForState(
-                            new int[] {activeState}, getTabTextColors().getDefaultColor()));
+            t.getIcon().setColorFilter(getTabTextColors().getColorForState(new int[] {activeState},
+                                               getTabTextColors().getDefaultColor()),
+                    PorterDuff.Mode.SRC_IN);
         }
     }
 

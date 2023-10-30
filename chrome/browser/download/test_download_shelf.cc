@@ -1,16 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/download/test_download_shelf.h"
 
-#include "content/public/browser/download_manager.h"
+#include "base/time/time.h"
 
-TestDownloadShelf::TestDownloadShelf()
-    : is_showing_(false), did_add_download_(false), profile_(nullptr) {}
+TestDownloadShelf::TestDownloadShelf(Profile* profile)
+    : DownloadShelf(nullptr, profile) {}
 
-TestDownloadShelf::~TestDownloadShelf() {
-}
+TestDownloadShelf::~TestDownloadShelf() = default;
 
 bool TestDownloadShelf::IsShowing() const {
   return is_showing_;
@@ -20,11 +19,12 @@ bool TestDownloadShelf::IsClosing() const {
   return false;
 }
 
-Browser* TestDownloadShelf::browser() const {
-  return NULL;
+views::View* TestDownloadShelf::GetView() {
+  return nullptr;
 }
 
-void TestDownloadShelf::DoAddDownload(DownloadUIModelPtr download) {
+void TestDownloadShelf::DoShowDownload(
+    DownloadUIModel::DownloadUIModelPtr download) {
   did_add_download_ = true;
 }
 
@@ -32,7 +32,7 @@ void TestDownloadShelf::DoOpen() {
   is_showing_ = true;
 }
 
-void TestDownloadShelf::DoClose(CloseReason reason) {
+void TestDownloadShelf::DoClose() {
   is_showing_ = false;
 }
 
@@ -44,10 +44,6 @@ void TestDownloadShelf::DoUnhide() {
   is_showing_ = true;
 }
 
-base::TimeDelta TestDownloadShelf::GetTransientDownloadShowDelay() {
+base::TimeDelta TestDownloadShelf::GetTransientDownloadShowDelay() const {
   return base::TimeDelta();
-}
-
-Profile* TestDownloadShelf::profile() const {
-  return profile_;
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,11 @@
 
 #include <utility>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -17,8 +18,10 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_notifier_impl.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#include <windows.h>
 
 namespace safe_browsing {
 namespace platform_state_store {
@@ -35,6 +38,10 @@ class PlatformStateStoreWinTest : public ::testing::Test {
   PlatformStateStoreWinTest()
       : profile_(nullptr),
         profile_manager_(TestingBrowserProcess::GetGlobal()) {}
+
+  PlatformStateStoreWinTest(const PlatformStateStoreWinTest&) = delete;
+  PlatformStateStoreWinTest& operator=(const PlatformStateStoreWinTest&) =
+      delete;
 
   void SetUp() override {
     ::testing::Test::SetUp();
@@ -55,8 +62,8 @@ class PlatformStateStoreWinTest : public ::testing::Test {
     RegisterUserProfilePrefs(prefs->registry());
     profile_ = profile_manager_.CreateTestingProfile(
         kProfileName_, std::move(prefs), base::UTF8ToUTF16(kProfileName_), 0,
-        std::string(), TestingProfile::TestingFactories(),
-        base::Optional<bool>(new_profile));
+        TestingProfile::TestingFactories(), /*is_supervised_profile=*/false,
+        absl::optional<bool>(new_profile));
     if (new_profile)
       ASSERT_TRUE(profile_->IsNewProfile());
     else
@@ -68,7 +75,7 @@ class PlatformStateStoreWinTest : public ::testing::Test {
     ASSERT_EQ(ERROR_SUCCESS, key.Create(HKEY_CURRENT_USER, kStoreKeyName_,
                                         KEY_SET_VALUE | KEY_WOW64_32KEY));
     ASSERT_EQ(ERROR_SUCCESS,
-              key.WriteValue(base::UTF8ToUTF16(kProfileName_).c_str(),
+              key.WriteValue(base::UTF8ToWide(kProfileName_).c_str(),
                              &kTestData_[0], kTestDataSize_, REG_BINARY));
   }
 
@@ -76,7 +83,7 @@ class PlatformStateStoreWinTest : public ::testing::Test {
     base::win::RegKey key;
     ASSERT_EQ(ERROR_SUCCESS, key.Open(HKEY_CURRENT_USER, kStoreKeyName_,
                                       KEY_QUERY_VALUE | KEY_WOW64_32KEY));
-    ASSERT_FALSE(key.HasValue(base::UTF8ToUTF16(kProfileName_).c_str()));
+    ASSERT_FALSE(key.HasValue(base::UTF8ToWide(kProfileName_).c_str()));
   }
 
   void AssertTestDataIsPresent() {
@@ -87,8 +94,8 @@ class PlatformStateStoreWinTest : public ::testing::Test {
     DWORD data_size = kTestDataSize_;
     DWORD data_type = REG_NONE;
     ASSERT_EQ(ERROR_SUCCESS,
-              key.ReadValue(base::UTF8ToUTF16(kProfileName_).c_str(),
-                            &buffer[0], &data_size, &data_type));
+              key.ReadValue(base::UTF8ToWide(kProfileName_).c_str(), &buffer[0],
+                            &data_size, &data_type));
     EXPECT_EQ(static_cast<DWORD>(REG_BINARY), data_type);
     ASSERT_EQ(kTestDataSize_, data_size);
     EXPECT_EQ(std::string(&buffer[0], data_size),
@@ -96,24 +103,22 @@ class PlatformStateStoreWinTest : public ::testing::Test {
   }
 
   static const char kProfileName_[];
-  static const base::char16 kStoreKeyName_[];
-  TestingProfile* profile_;
+  static const wchar_t kStoreKeyName_[];
+  raw_ptr<TestingProfile> profile_;
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   registry_util::RegistryOverrideManager registry_override_manager_;
   TestingProfileManager profile_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(PlatformStateStoreWinTest);
 };
 
 // static
 const char PlatformStateStoreWinTest::kProfileName_[] = "test_profile";
-#if defined(GOOGLE_CHROME_BUILD)
-const base::char16 PlatformStateStoreWinTest::kStoreKeyName_[] =
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+const wchar_t PlatformStateStoreWinTest::kStoreKeyName_[] =
     L"Software\\Google\\Chrome\\IncidentsSent";
 #else
-const base::char16 PlatformStateStoreWinTest::kStoreKeyName_[] =
+const wchar_t PlatformStateStoreWinTest::kStoreKeyName_[] =
     L"Software\\Chromium\\IncidentsSent";
 #endif
 
@@ -123,7 +128,7 @@ TEST_F(PlatformStateStoreWinTest, WriteStoreData) {
 
   ASSERT_FALSE(base::win::RegKey(HKEY_CURRENT_USER, kStoreKeyName_,
                                  KEY_QUERY_VALUE | KEY_WOW64_32KEY)
-                   .HasValue(base::UTF8ToUTF16(kProfileName_).c_str()));
+                   .HasValue(base::UTF8ToWide(kProfileName_).c_str()));
   WriteStoreData(profile_, kTestData_);
   AssertTestDataIsPresent();
 }

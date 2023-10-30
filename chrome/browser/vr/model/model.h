@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 
+#include "base/time/time.h"
 #include "chrome/browser/vr/gl_texture_location.h"
 #include "chrome/browser/vr/model/capturing_state_model.h"
 #include "chrome/browser/vr/model/color_scheme.h"
@@ -23,7 +24,7 @@
 #include "chrome/browser/vr/model/ui_mode.h"
 #include "chrome/browser/vr/model/web_vr_model.h"
 #include "chrome/browser/vr/vr_ui_export.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace vr {
 
@@ -32,7 +33,6 @@ struct VR_UI_EXPORT Model {
   ~Model();
 
   // VR browsing state.
-  bool browsing_disabled = false;
   bool loading = false;
   float load_progress = 0.0f;
   bool incognito = false;
@@ -58,6 +58,8 @@ struct VR_UI_EXPORT Model {
   bool standalone_vr_device = false;
   bool menu_button_long_pressed = false;
   float floor_height = 0.0f;
+  bool gvr_input_support = false;
+  base::TimeTicks current_time;
 
   // WebVR state.
   WebVrModel web_vr;
@@ -81,12 +83,20 @@ struct VR_UI_EXPORT Model {
   bool reposition_window_enabled() const;
   bool reposition_window_permitted() const;
 
+  // Helper methods which update the text field state
+  // as well as 'touched' field, to ensure bindings are
+  // run even if the text state has not changed.
+  void set_omnibox_text_field_info(EditedText text);
+  void set_web_input_text_field_info(EditedText text);
+
   // Focused text state.
   bool editing_input = false;
   bool editing_web_input = false;
   // Editable text field state.
   EditedText omnibox_text_field_info;
+  base::TimeTicks omnibox_text_field_touched;
   EditedText web_input_text_field_info;
+  base::TimeTicks web_input_text_field_touched;
 
   // Controller state.
   const ControllerModel& primary_controller() const;

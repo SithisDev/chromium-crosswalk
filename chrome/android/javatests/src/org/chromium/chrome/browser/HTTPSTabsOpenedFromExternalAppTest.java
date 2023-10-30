@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@ package org.chromium.chrome.browser;
 import static org.chromium.chrome.browser.TabsOpenedFromExternalAppTest.HTTP_REFERRER;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.LargeTest;
+
+import androidx.test.filters.LargeTest;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -16,6 +17,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -42,18 +44,16 @@ public class HTTPSTabsOpenedFromExternalAppTest {
     /**
      * Tests that an http:// referrer is not stripped in case of https:// navigation with
      * default Policy.
-     * @throws InterruptedException
      */
     @Test
     @LargeTest
     @Feature({"Navigation"})
-    public void testReferrerPolicyHttpReferrerHttpsNavigationsPolicyDefault()
-            throws InterruptedException {
+    public void testReferrerPolicyHttpReferrerHttpsNavigationsPolicyDefault() {
         mTestServer = EmbeddedTestServer.createAndStartHTTPSServer(
                 InstrumentationRegistry.getContext(), ServerCertificate.CERT_OK);
         try {
             String url = mTestServer.getURL("/chrome/test/data/android/about.html");
-            TabsOpenedFromExternalAppTest.launchAndVerifyReferrerWithPolicy(
+            TabsOpenedFromExternalAppTest.loadUrlAndVerifyReferrerWithPolicy(
                     url, mActivityTestRule, ReferrerPolicy.DEFAULT, HTTP_REFERRER, HTTP_REFERRER);
         } finally {
             if (mTestServer != null) mTestServer.stopAndDestroyServer();

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 
 #include <vector>
 
+#include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/win/windows_version.h"
 
@@ -60,8 +61,7 @@ void SetBackgroundMode() {
   }
 }
 bool IsWowRedirectionActive() {
-  return base::win::OSInfo::GetInstance()->wow64_status() ==
-         base::win::OSInfo::WOW64_ENABLED;
+  return base::win::OSInfo::GetInstance()->IsWowX86OnAMD64();
 }
 
 bool IsX64Architecture() {

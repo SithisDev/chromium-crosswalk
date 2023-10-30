@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,9 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/time.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -33,7 +35,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
-#include "services/service_manager/sandbox/features.h"
+#include "sandbox/policy/features.h"
 #include "third_party/zlib/google/compression_utils.h"
 #include "ui/gl/gl_switches.h"
 
@@ -51,8 +53,7 @@ void TabCapturePerformanceTestBase::SetUp() {
 
   feature_list_.InitWithFeatures(
       {
-          service_manager::features::kAudioServiceSandbox,
-          features::kAudioServiceAudioStreams,
+          features::kAudioServiceSandbox,
           features::kAudioServiceLaunchOnStartup,
           features::kAudioServiceOutOfProcess,
       },
@@ -63,6 +64,8 @@ void TabCapturePerformanceTestBase::SetUp() {
 
 void TabCapturePerformanceTestBase::SetUpOnMainThread() {
   InProcessBrowserTest::SetUpOnMainThread();
+
+  best_effort_fence_.emplace();
 
   host_resolver()->AddRule("*", "127.0.0.1");
   embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
@@ -75,22 +78,14 @@ void TabCapturePerformanceTestBase::SetUpCommandLine(
     base::CommandLine* command_line) {
   is_full_performance_run_ = command_line->HasSwitch(kFullPerformanceRunSwitch);
 
-  // In the spirit of the NoBestEffortTasksTests, it's important to add this
-  // flag to make sure best-effort tasks are not required for the success of
-  // these tests. In a performance test run, this also removes sources of
-  // variance.
-  command_line->AppendSwitch(switches::kDisableBestEffortTasks);
-
   // Note: The naming "kUseGpuInTests" is very misleading. It actually means
   // "don't use a software OpenGL implementation." Subclasses will either call
   // UseSoftwareCompositing() to use Chrome's software compositor, or else they
   // won't (which means use the default hardware-accelerated compositor).
   command_line->AppendSwitch(switches::kUseGpuInTests);
 
-  command_line->AppendSwitchASCII(extensions::switches::kWhitelistedExtensionID,
+  command_line->AppendSwitchASCII(extensions::switches::kAllowlistedExtensionID,
                                   kExtensionId);
-
-  InProcessBrowserTest::SetUpCommandLine(command_line);
 }
 
 void TabCapturePerformanceTestBase::LoadExtension(
@@ -106,7 +101,7 @@ void TabCapturePerformanceTestBase::LoadExtension(
       extensions::ExtensionSystem::Get(browser()->profile())
           ->extension_service();
   extensions::UnpackedInstaller::Create(extension_service)->Load(unpacked_dir);
-  extension_ = registry_observer.WaitForExtensionReady();
+  extension_ = registry_observer.WaitForExtensionReady().get();
   CHECK(extension_);
   CHECK_EQ(kExtensionId, extension_->id());
 }
@@ -115,9 +110,9 @@ void TabCapturePerformanceTestBase::NavigateToTestPage(
     const std::string& test_page_html_content) {
   LOG(INFO) << "Navigating to test page...";
   test_page_to_serve_ = test_page_html_content;
-  ui_test_utils::NavigateToURL(
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(),
-      embedded_test_server()->GetURL(kTestWebPageHostname, kTestWebPagePath));
+      embedded_test_server()->GetURL(kTestWebPageHostname, kTestWebPagePath)));
 }
 
 base::Value TabCapturePerformanceTestBase::SendMessageToExtension(
@@ -248,9 +243,11 @@ void TabCapturePerformanceTestBase::QueryTraceEvents(
     base::StringPiece event_name,
     trace_analyzer::TraceEventVector* events) {
   const trace_analyzer::Query kQuery =
-      trace_analyzer::Query::EventNameIs(event_name.as_string()) &&
+      trace_analyzer::Query::EventNameIs(std::string(event_name)) &&
       (trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_BEGIN) ||
        trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_ASYNC_BEGIN) ||
+       trace_analyzer::Query::EventPhaseIs(
+           TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN) ||
        trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_FLOW_BEGIN) ||
        trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_INSTANT) ||
        trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_COMPLETE));

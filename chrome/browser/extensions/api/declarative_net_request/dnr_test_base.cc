@@ -1,18 +1,15 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/api/declarative_net_request/dnr_test_base.h"
 
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
-#include "components/version_info/version_info.h"
 
 namespace extensions {
 namespace declarative_net_request {
 
-// Use channel UNKNOWN to ensure that the declarativeNetRequest API is
-// available, irrespective of its actual availability.
-DNRTestBase::DNRTestBase() : channel_(::version_info::Channel::UNKNOWN) {}
+DNRTestBase::DNRTestBase() = default;
 
 void DNRTestBase::SetUp() {
   ExtensionServiceTestBase::SetUp();

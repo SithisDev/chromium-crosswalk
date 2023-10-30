@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/test_browser_window.h"
@@ -36,14 +37,14 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyCount) {
   // Create more browsers/windows.
   Browser::CreateParams native_params(profile(), true);
   std::unique_ptr<Browser> browser2(
-      CreateBrowserWithTestWindowForParams(&native_params));
+      CreateBrowserWithTestWindowForParams(native_params));
   // Create browser 3 and 4 on the Ash desktop (the iterator shouldn't see the
   // difference).
   Browser::CreateParams ash_params(profile(), true);
   std::unique_ptr<Browser> browser3(
-      CreateBrowserWithTestWindowForParams(&ash_params));
+      CreateBrowserWithTestWindowForParams(ash_params));
   std::unique_ptr<Browser> browser4(
-      CreateBrowserWithTestWindowForParams(&ash_params));
+      CreateBrowserWithTestWindowForParams(ash_params));
 
   // Sanity checks.
   EXPECT_EQ(4U, BrowserList::GetInstance()->size());
@@ -82,12 +83,12 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyBrowser) {
   // Create more browsers/windows.
   Browser::CreateParams native_params(profile(), true);
   std::unique_ptr<Browser> browser2(
-      CreateBrowserWithTestWindowForParams(&native_params));
+      CreateBrowserWithTestWindowForParams(native_params));
   // Create browser 3 on the Ash desktop (the iterator shouldn't see the
   // difference).
   Browser::CreateParams ash_params(profile(), true);
   std::unique_ptr<Browser> browser3(
-      CreateBrowserWithTestWindowForParams(&ash_params));
+      CreateBrowserWithTestWindowForParams(ash_params));
 
   // Sanity checks.
   EXPECT_EQ(3U, BrowserList::GetInstance()->size());
@@ -117,7 +118,7 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyBrowser) {
 
   // Close some tabs.
   browser2->tab_strip_model()->CloseAllTabs();
-  browser3->tab_strip_model()->CloseWebContentsAt(1, TabStripModel::CLOSE_NONE);
+  browser3->tab_strip_model()->CloseWebContentsAt(1, TabCloseTypes::CLOSE_NONE);
 
   count = 0;
   for (auto iterator = all_tabs.begin(), end = all_tabs.end(); iterator != end;

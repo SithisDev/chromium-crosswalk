@@ -1,8 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/vr/model/model.h"
+
+#include "base/containers/adapters.h"
 
 namespace vr {
 
@@ -70,9 +72,9 @@ UiMode Model::get_mode() const {
 }
 
 UiMode Model::get_last_opaque_mode() const {
-  for (auto iter = ui_modes.rbegin(); iter != ui_modes.rend(); ++iter) {
-    if (IsOpaqueUiMode(*iter))
-      return *iter;
+  for (const UiMode& ui_mode : base::Reversed(ui_modes)) {
+    if (IsOpaqueUiMode(ui_mode))
+      return ui_mode;
   }
   DCHECK(false) << "get_last_opaque_mode should only be called with at least "
                    "one opaque mode.";
@@ -136,6 +138,16 @@ const ControllerModel& Model::primary_controller() const {
 
 ControllerModel& Model::mutable_primary_controller() {
   return controllers[0];
+}
+
+void Model::set_omnibox_text_field_info(EditedText text) {
+  omnibox_text_field_info = std::move(text);
+  omnibox_text_field_touched = current_time;
+}
+
+void Model::set_web_input_text_field_info(EditedText text) {
+  web_input_text_field_info = std::move(text);
+  web_input_text_field_touched = current_time;
 }
 
 }  // namespace vr

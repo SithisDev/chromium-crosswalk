@@ -1,33 +1,37 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/media/media_engagement_ui.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/media/media_engagement_score.h"
+#include "chrome/browser/media/media_engagement_score_details.mojom.h"
 #include "chrome/browser/media/media_engagement_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/browser_resources.h"
+#include "chrome/grit/media_resources.h"
 #include "components/component_updater/component_updater_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_data_source.h"
-#include "content/public/common/web_preferences.h"
 #include "media/base/media_switches.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "third_party/blink/public/common/web_preferences/web_preferences.h"
+#include "third_party/blink/public/mojom/webpreferences/web_preferences.mojom.h"
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #endif
@@ -48,15 +52,20 @@ class MediaEngagementScoreDetailsProviderImpl
  public:
   MediaEngagementScoreDetailsProviderImpl(
       content::WebUI* web_ui,
-      mojo::InterfaceRequest<media::mojom::MediaEngagementScoreDetailsProvider>
-          request)
+      mojo::PendingReceiver<media::mojom::MediaEngagementScoreDetailsProvider>
+          receiver)
       : web_ui_(web_ui),
         profile_(Profile::FromWebUI(web_ui)),
-        binding_(this, std::move(request)) {
+        receiver_(this, std::move(receiver)) {
     DCHECK(web_ui_);
     DCHECK(profile_);
     service_ = MediaEngagementService::Get(profile_);
   }
+
+  MediaEngagementScoreDetailsProviderImpl(
+      const MediaEngagementScoreDetailsProviderImpl&) = delete;
+  MediaEngagementScoreDetailsProviderImpl& operator=(
+      const MediaEngagementScoreDetailsProviderImpl&) = delete;
 
   ~MediaEngagementScoreDetailsProviderImpl() override {}
 
@@ -80,7 +89,6 @@ class MediaEngagementScoreDetailsProviderImpl
         base::FeatureList::IsEnabled(media::kPreloadMediaEngagementData),
         base::FeatureList::IsEnabled(media::kMediaEngagementHTTPSOnly),
         base::FeatureList::IsEnabled(media::kAutoplayDisableSettings),
-        base::FeatureList::IsEnabled(media::kAutoplayWhitelistSettings),
         GetBlockAutoplayPref(),
         base::CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kAutoplayPolicy),
@@ -90,14 +98,13 @@ class MediaEngagementScoreDetailsProviderImpl
  private:
   const std::string GetAppliedAutoplayPolicy() {
     switch (web_ui_->GetWebContents()
-                ->GetRenderViewHost()
-                ->GetWebkitPreferences()
+                ->GetOrCreateWebPreferences()
                 .autoplay_policy) {
-      case content::AutoplayPolicy::kNoUserGestureRequired:
+      case blink::mojom::AutoplayPolicy::kNoUserGestureRequired:
         return "no-user-gesture-required";
-      case content::AutoplayPolicy::kUserGestureRequired:
+      case blink::mojom::AutoplayPolicy::kUserGestureRequired:
         return "user-gesture-required";
-      case content::AutoplayPolicy::kDocumentUserActivationRequired:
+      case blink::mojom::AutoplayPolicy::kDocumentUserActivationRequired:
         return "document-user-activation-required";
     }
   }
@@ -117,22 +124,20 @@ class MediaEngagementScoreDetailsProviderImpl
 
   // Pref is not available on Android.
   bool GetBlockAutoplayPref() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     return false;
 #else
     return profile_->GetPrefs()->GetBoolean(prefs::kBlockAutoplayEnabled);
 #endif
   }
 
-  content::WebUI* web_ui_;
+  raw_ptr<content::WebUI> web_ui_;
 
-  Profile* profile_;
+  raw_ptr<Profile> profile_;
 
-  MediaEngagementService* service_;
+  raw_ptr<MediaEngagementService> service_;
 
-  mojo::Binding<media::mojom::MediaEngagementScoreDetailsProvider> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaEngagementScoreDetailsProviderImpl);
+  mojo::Receiver<media::mojom::MediaEngagementScoreDetailsProvider> receiver_;
 };
 
 }  // namespace
@@ -142,21 +147,25 @@ MediaEngagementUI::MediaEngagementUI(content::WebUI* web_ui)
   // Setup the data source behind chrome://media-engagement.
   std::unique_ptr<content::WebUIDataSource> source(
       content::WebUIDataSource::Create(chrome::kChromeUIMediaEngagementHost));
-  source->AddResourcePath("media-engagement.js", IDR_MEDIA_ENGAGEMENT_JS);
+  source->OverrideContentSecurityPolicy(
+      network::mojom::CSPDirectiveName::ScriptSrc,
+      "script-src chrome://resources chrome://webui-test 'self';");
+
+  source->AddResourcePath("media_engagement.js", IDR_MEDIA_MEDIA_ENGAGEMENT_JS);
   source->AddResourcePath(
-      "chrome/browser/media/media_engagement_score_details.mojom-lite.js",
-      IDR_MEDIA_ENGAGEMENT_SCORE_DETAILS_MOJOM_LITE_JS);
-  source->SetDefaultResource(IDR_MEDIA_ENGAGEMENT_HTML);
+      "media_engagement_score_details.mojom-webui.js",
+      IDR_MEDIA_MEDIA_ENGAGEMENT_SCORE_DETAILS_MOJOM_WEBUI_JS);
+  source->SetDefaultResource(IDR_MEDIA_MEDIA_ENGAGEMENT_HTML);
   content::WebUIDataSource::Add(Profile::FromWebUI(web_ui), source.release());
-  AddHandlerToRegistry(base::BindRepeating(
-      &MediaEngagementUI::BindMediaEngagementScoreDetailsProvider,
-      base::Unretained(this)));
 }
+
+WEB_UI_CONTROLLER_TYPE_IMPL(MediaEngagementUI)
 
 MediaEngagementUI::~MediaEngagementUI() = default;
 
-void MediaEngagementUI::BindMediaEngagementScoreDetailsProvider(
-    media::mojom::MediaEngagementScoreDetailsProviderRequest request) {
+void MediaEngagementUI::BindInterface(
+    mojo::PendingReceiver<media::mojom::MediaEngagementScoreDetailsProvider>
+        receiver) {
   ui_handler_ = std::make_unique<MediaEngagementScoreDetailsProviderImpl>(
-      web_ui(), std::move(request));
+      web_ui(), std::move(receiver));
 }

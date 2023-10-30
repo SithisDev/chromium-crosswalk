@@ -1,17 +1,14 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/policy/cloud/remote_commands_invalidator.h"
 
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
-#include "chrome/common/chrome_features.h"
-#include "components/invalidation/impl/deprecated_invalidator_registrar.h"
+#include "base/test/task_environment.h"
+#include "components/invalidation/impl/fake_ack_handler.h"
 #include "components/invalidation/impl/fake_invalidation_service.h"
-#include "components/invalidation/impl/mock_ack_handler.h"
+#include "components/invalidation/impl/invalidator_registrar_with_memory.h"
 #include "components/invalidation/public/invalidation.h"
 #include "components/invalidation/public/invalidation_util.h"
 #include "components/invalidation/public/invalidator_state.h"
@@ -20,89 +17,105 @@
 
 namespace em = enterprise_management;
 
+using ::testing::_;
+using ::testing::Eq;
 using ::testing::Mock;
 using ::testing::StrictMock;
 
 namespace policy {
 
+// TODO(crbug.com/1319443): Remove mock and test the actual invalidator.
 class MockRemoteCommandInvalidator : public RemoteCommandsInvalidator {
  public:
-  MockRemoteCommandInvalidator() {}
+  MockRemoteCommandInvalidator()
+      : RemoteCommandsInvalidator("RemoteCommands.Test") {}
+  MockRemoteCommandInvalidator(const MockRemoteCommandInvalidator&) = delete;
+  MockRemoteCommandInvalidator& operator=(const MockRemoteCommandInvalidator&) =
+      delete;
 
   MOCK_METHOD0(OnInitialize, void());
   MOCK_METHOD0(OnShutdown, void());
   MOCK_METHOD0(OnStart, void());
   MOCK_METHOD0(OnStop, void());
-  MOCK_METHOD0(DoRemoteCommandsFetch, void());
+  MOCK_METHOD1(DoRemoteCommandsFetch, void(const invalidation::Invalidation&));
 
-  void SetInvalidationObjectID(const invalidation::ObjectId& object_id,
-                               bool is_fcm_enabled) {
+  void SetInvalidationTopic(const invalidation::Topic& topic) {
     em::PolicyData policy_data;
-    if (is_fcm_enabled) {
-      policy_data.set_command_invalidation_topic(object_id.name());
-    } else {
-      policy_data.set_command_invalidation_source(object_id.source());
-      policy_data.set_command_invalidation_name(object_id.name());
-    }
+    policy_data.set_command_invalidation_topic(topic);
     ReloadPolicyData(&policy_data);
   }
 
-  void ClearInvalidationObjectID() {
+  void ClearInvalidationTopic() {
     const em::PolicyData policy_data;
     ReloadPolicyData(&policy_data);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockRemoteCommandInvalidator);
 };
 
-class RemoteCommandsInvalidatorTest : public testing::TestWithParam<bool> {
+class RemoteCommandsInvalidatorTest : public testing::Test {
  public:
-  RemoteCommandsInvalidatorTest() : is_fcm_enabled_(GetParam()) {
-    feature_list_.InitWithFeatureState(features::kPolicyFcmInvalidations,
-                                       is_fcm_enabled_);
-
-    if (is_fcm_enabled_) {
-      kTestingObjectId1 =
-          invalidation::ObjectId(syncer::kDeprecatedSourceForFCM, "abcdef");
-      kTestingObjectId2 =
-          invalidation::ObjectId(syncer::kDeprecatedSourceForFCM, "defabc");
-      return;
-    }
-    kTestingObjectId1 = invalidation::ObjectId(123456, "abcdef");
-    kTestingObjectId2 = invalidation::ObjectId(654321, "defabc");
-  }
+  RemoteCommandsInvalidatorTest()
+      : kTestingTopic1("abcdef"), kTestingTopic2("defabc") {}
+  RemoteCommandsInvalidatorTest(const RemoteCommandsInvalidatorTest&) = delete;
+  RemoteCommandsInvalidatorTest& operator=(
+      const RemoteCommandsInvalidatorTest&) = delete;
 
   void EnableInvalidationService() {
-    invalidation_service_.SetInvalidatorState(syncer::INVALIDATIONS_ENABLED);
+    invalidation_service_.SetInvalidatorState(
+        invalidation::INVALIDATIONS_ENABLED);
   }
 
   void DisableInvalidationService() {
     invalidation_service_.SetInvalidatorState(
-        syncer::TRANSIENT_INVALIDATION_ERROR);
+        invalidation::TRANSIENT_INVALIDATION_ERROR);
   }
 
-  syncer::Invalidation FireInvalidation(
-      const invalidation::ObjectId& object_id) {
-    const syncer::Invalidation invalidation =
-        syncer::Invalidation::InitUnknownVersion(object_id);
+  invalidation::Invalidation CreateInvalidation(
+      const invalidation::Topic& topic) {
+    return invalidation::Invalidation::InitUnknownVersion(topic);
+  }
+
+  invalidation::Invalidation FireInvalidation(
+      const invalidation::Topic& topic) {
+    const invalidation::Invalidation invalidation = CreateInvalidation(topic);
     invalidation_service_.EmitInvalidationForTest(invalidation);
     return invalidation;
   }
 
-  bool IsInvalidationSent(const syncer::Invalidation& invalidation) {
-    return !invalidation_service_.GetMockAckHandler()->IsUnsent(invalidation);
+  bool IsInvalidationSent(const invalidation::Invalidation& invalidation) {
+    return !invalidation_service_.GetFakeAckHandler()->IsUnsent(invalidation);
   }
 
-  bool IsInvalidationAcknowledged(const syncer::Invalidation& invalidation) {
-    return invalidation_service_.GetMockAckHandler()->IsAcknowledged(
+  bool IsInvalidationAcknowledged(
+      const invalidation::Invalidation& invalidation) {
+    return invalidation_service_.GetFakeAckHandler()->IsAcknowledged(
         invalidation);
   }
 
   bool IsInvalidatorRegistered() {
     return !invalidation_service_.invalidator_registrar()
-                .GetRegisteredIds(&invalidator_)
+                .GetRegisteredTopics(&invalidator_)
                 .empty();
+  }
+
+  std::set<std::string> GetSubscribedTopics() {
+    std::set<std::string> topics;
+    for (const auto& topic : invalidation_service_.invalidator_registrar()
+                                 .GetAllSubscribedTopics()) {
+      topics.insert(topic.first);
+    }
+
+    return topics;
+  }
+
+  std::set<std::string> GetRegisteredTopics() {
+    std::set<std::string> topics;
+    for (const auto& topic :
+         invalidation_service_.invalidator_registrar().GetRegisteredTopics(
+             &invalidator_)) {
+      topics.insert(topic.first);
+    }
+
+    return topics;
   }
 
   void VerifyExpectations() {
@@ -132,19 +145,21 @@ class RemoteCommandsInvalidatorTest : public testing::TestWithParam<bool> {
   }
 
   // Fire an invalidation to verify that invalidation is not working.
-  void VerifyInvalidationDisabled(const invalidation::ObjectId& object_id) {
-    const syncer::Invalidation invalidation = FireInvalidation(object_id);
+  void VerifyInvalidationDisabled(const invalidation::Topic& topic) {
+    const invalidation::Invalidation invalidation = FireInvalidation(topic);
 
     base::RunLoop().RunUntilIdle();
     EXPECT_FALSE(IsInvalidationSent(invalidation));
   }
 
   // Fire an invalidation to verify that invalidation works.
-  void VerifyInvalidationEnabled(const invalidation::ObjectId& object_id) {
+  void VerifyInvalidationEnabled(const invalidation::Topic& topic) {
     EXPECT_TRUE(invalidator_.invalidations_enabled());
 
-    EXPECT_CALL(invalidator_, DoRemoteCommandsFetch()).Times(1);
-    const syncer::Invalidation invalidation = FireInvalidation(object_id);
+    EXPECT_CALL(invalidator_,
+                DoRemoteCommandsFetch(Eq(CreateInvalidation(topic))))
+        .Times(1);
+    const invalidation::Invalidation invalidation = FireInvalidation(topic);
 
     base::RunLoop().RunUntilIdle();
     EXPECT_TRUE(IsInvalidationSent(invalidation));
@@ -152,31 +167,39 @@ class RemoteCommandsInvalidatorTest : public testing::TestWithParam<bool> {
     VerifyExpectations();
   }
 
-  invalidation::ObjectId kTestingObjectId1;
-  invalidation::ObjectId kTestingObjectId2;
+  // Fire an invalidation to verify that invalidation is not working. It is
+  // expected that invalidator did not receive/acknowledged the invalidation.
+  void VerifyTopicSubscribedButInvalidationDisabled(
+      const invalidation::Topic& topic) {
+    EXPECT_FALSE(invalidator_.invalidations_enabled());
+    EXPECT_CALL(invalidator_, DoRemoteCommandsFetch(_)).Times(0);
+    const invalidation::Invalidation invalidation = FireInvalidation(topic);
 
-  const bool is_fcm_enabled_;
+    EXPECT_TRUE(
+        invalidation_service_.GetFakeAckHandler()->IsUnacked(invalidation));
+    EXPECT_FALSE(invalidation_service_.GetFakeAckHandler()->IsAcknowledged(
+        invalidation));
+    VerifyExpectations();
+  }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  invalidation::Topic kTestingTopic1;
+  invalidation::Topic kTestingTopic2;
 
-  base::test::ScopedFeatureList feature_list_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
   invalidation::FakeInvalidationService invalidation_service_;
   StrictMock<MockRemoteCommandInvalidator> invalidator_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RemoteCommandsInvalidatorTest);
 };
 
 // Verifies that only the fired invalidations will be received.
-TEST_P(RemoteCommandsInvalidatorTest, FiredInvalidation) {
+TEST_F(RemoteCommandsInvalidatorTest, FiredInvalidation) {
   InitializeAndStart();
 
   // Invalidator won't work at this point.
   EXPECT_FALSE(invalidator_.invalidations_enabled());
 
   // Load the policy data, it should work now.
-  invalidator_.SetInvalidationObjectID(kTestingObjectId1, is_fcm_enabled_);
+  invalidator_.SetInvalidationTopic(kTestingTopic1);
   EXPECT_TRUE(invalidator_.invalidations_enabled());
 
   base::RunLoop().RunUntilIdle();
@@ -185,8 +208,8 @@ TEST_P(RemoteCommandsInvalidatorTest, FiredInvalidation) {
 
   // Fire an invalidation with different object id, no invalidation will be
   // received.
-  const syncer::Invalidation invalidation1 =
-      FireInvalidation(kTestingObjectId2);
+  const invalidation::Invalidation invalidation1 =
+      FireInvalidation(kTestingTopic2);
 
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(IsInvalidationSent(invalidation1));
@@ -194,9 +217,11 @@ TEST_P(RemoteCommandsInvalidatorTest, FiredInvalidation) {
 
   // Fire the invalidation, it should be acknowledged and trigger a remote
   // commands fetch.
-  EXPECT_CALL(invalidator_, DoRemoteCommandsFetch()).Times(1);
-  const syncer::Invalidation invalidation2 =
-      FireInvalidation(kTestingObjectId1);
+  EXPECT_CALL(invalidator_,
+              DoRemoteCommandsFetch(Eq(CreateInvalidation(kTestingTopic1))))
+      .Times(1);
+  const invalidation::Invalidation invalidation2 =
+      FireInvalidation(kTestingTopic1);
 
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(IsInvalidationSent(invalidation2));
@@ -207,22 +232,22 @@ TEST_P(RemoteCommandsInvalidatorTest, FiredInvalidation) {
 }
 
 // Verifies that no invalidation will be received when invalidator is shutdown.
-TEST_P(RemoteCommandsInvalidatorTest, ShutDown) {
+TEST_F(RemoteCommandsInvalidatorTest, ShutDown) {
   EXPECT_FALSE(invalidator_.invalidations_enabled());
-  FireInvalidation(kTestingObjectId1);
+  FireInvalidation(kTestingTopic1);
 
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(invalidator_.invalidations_enabled());
 }
 
 // Verifies that no invalidation will be received when invalidator is stopped.
-TEST_P(RemoteCommandsInvalidatorTest, Stopped) {
+TEST_F(RemoteCommandsInvalidatorTest, Stopped) {
   EXPECT_CALL(invalidator_, OnInitialize()).Times(1);
   invalidator_.Initialize(&invalidation_service_);
   VerifyExpectations();
 
   EXPECT_FALSE(invalidator_.invalidations_enabled());
-  FireInvalidation(kTestingObjectId2);
+  FireInvalidation(kTestingTopic2);
 
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(invalidator_.invalidations_enabled());
@@ -232,76 +257,82 @@ TEST_P(RemoteCommandsInvalidatorTest, Stopped) {
 }
 
 // Verifies that stated/stopped state changes work as expected.
-TEST_P(RemoteCommandsInvalidatorTest, StartedStateChange) {
+TEST_F(RemoteCommandsInvalidatorTest, StartedStateChange) {
   InitializeAndStart();
 
-  // Invalidator requires object id to work.
-  VerifyInvalidationDisabled(kTestingObjectId1);
+  // Invalidator requires topic to work.
+  VerifyInvalidationDisabled(kTestingTopic1);
   EXPECT_FALSE(invalidator_.invalidations_enabled());
-  invalidator_.SetInvalidationObjectID(kTestingObjectId1, is_fcm_enabled_);
-  VerifyInvalidationEnabled(kTestingObjectId1);
+  invalidator_.SetInvalidationTopic(kTestingTopic1);
+  VerifyInvalidationEnabled(kTestingTopic1);
+  EXPECT_EQ(GetSubscribedTopics(), std::set<std::string>{kTestingTopic1});
+  EXPECT_EQ(GetRegisteredTopics(), std::set<std::string>{kTestingTopic1});
 
   // Stop and restart invalidator.
   EXPECT_CALL(invalidator_, OnStop()).Times(1);
   invalidator_.Stop();
   VerifyExpectations();
 
-  VerifyInvalidationDisabled(kTestingObjectId1);
+  VerifyTopicSubscribedButInvalidationDisabled(kTestingTopic1);
   EXPECT_FALSE(invalidator_.invalidations_enabled());
+  EXPECT_EQ(GetSubscribedTopics(), std::set<std::string>{kTestingTopic1});
+  EXPECT_EQ(GetRegisteredTopics(), std::set<std::string>{});
 
   EXPECT_CALL(invalidator_, OnStart()).Times(1);
   invalidator_.Start();
   VerifyExpectations();
 
-  // Invalidator requires object id to work.
-  invalidator_.SetInvalidationObjectID(kTestingObjectId1, is_fcm_enabled_);
-  VerifyInvalidationEnabled(kTestingObjectId1);
+  // Invalidator requires topic to work.
+  invalidator_.SetInvalidationTopic(kTestingTopic1);
+  VerifyInvalidationEnabled(kTestingTopic1);
+  EXPECT_EQ(GetSubscribedTopics(), std::set<std::string>{kTestingTopic1});
+  EXPECT_EQ(GetRegisteredTopics(), std::set<std::string>{kTestingTopic1});
 
   StopAndShutdown();
 }
 
 // Verifies that registered state changes work as expected.
-TEST_P(RemoteCommandsInvalidatorTest, RegistedStateChange) {
+TEST_F(RemoteCommandsInvalidatorTest, RegistedStateChange) {
   InitializeAndStart();
 
-  invalidator_.SetInvalidationObjectID(kTestingObjectId1, is_fcm_enabled_);
-  VerifyInvalidationEnabled(kTestingObjectId1);
+  invalidator_.SetInvalidationTopic(kTestingTopic1);
+  VerifyInvalidationEnabled(kTestingTopic1);
 
-  invalidator_.SetInvalidationObjectID(kTestingObjectId2, is_fcm_enabled_);
-  VerifyInvalidationEnabled(kTestingObjectId2);
-  VerifyInvalidationDisabled(kTestingObjectId1);
+  invalidator_.SetInvalidationTopic(kTestingTopic2);
+  VerifyInvalidationEnabled(kTestingTopic2);
+  VerifyInvalidationDisabled(kTestingTopic1);
 
-  invalidator_.SetInvalidationObjectID(kTestingObjectId1, is_fcm_enabled_);
-  VerifyInvalidationEnabled(kTestingObjectId1);
-  VerifyInvalidationDisabled(kTestingObjectId2);
+  invalidator_.SetInvalidationTopic(kTestingTopic1);
+  VerifyInvalidationEnabled(kTestingTopic1);
+  VerifyInvalidationDisabled(kTestingTopic2);
 
-  invalidator_.ClearInvalidationObjectID();
-  VerifyInvalidationDisabled(kTestingObjectId1);
-  VerifyInvalidationDisabled(kTestingObjectId2);
+  invalidator_.ClearInvalidationTopic();
+  VerifyInvalidationDisabled(kTestingTopic1);
+  VerifyInvalidationDisabled(kTestingTopic2);
   EXPECT_FALSE(invalidator_.invalidations_enabled());
 
-  invalidator_.SetInvalidationObjectID(kTestingObjectId2, is_fcm_enabled_);
-  VerifyInvalidationEnabled(kTestingObjectId2);
-  VerifyInvalidationDisabled(kTestingObjectId1);
+  invalidator_.SetInvalidationTopic(kTestingTopic2);
+  VerifyInvalidationEnabled(kTestingTopic2);
+  VerifyInvalidationDisabled(kTestingTopic1);
 
   StopAndShutdown();
 }
 
 // Verifies that invalidation service enabled state changes work as expected.
-TEST_P(RemoteCommandsInvalidatorTest, InvalidationServiceEnabledStateChanged) {
+TEST_F(RemoteCommandsInvalidatorTest, InvalidationServiceEnabledStateChanged) {
   InitializeAndStart();
 
-  invalidator_.SetInvalidationObjectID(kTestingObjectId1, is_fcm_enabled_);
-  VerifyInvalidationEnabled(kTestingObjectId1);
+  invalidator_.SetInvalidationTopic(kTestingTopic1);
+  VerifyInvalidationEnabled(kTestingTopic1);
 
   DisableInvalidationService();
   EXPECT_FALSE(invalidator_.invalidations_enabled());
 
   EnableInvalidationService();
-  VerifyInvalidationEnabled(kTestingObjectId1);
+  VerifyInvalidationEnabled(kTestingTopic1);
 
   EnableInvalidationService();
-  VerifyInvalidationEnabled(kTestingObjectId1);
+  VerifyInvalidationEnabled(kTestingTopic1);
 
   DisableInvalidationService();
   EXPECT_FALSE(invalidator_.invalidations_enabled());
@@ -311,9 +342,5 @@ TEST_P(RemoteCommandsInvalidatorTest, InvalidationServiceEnabledStateChanged) {
 
   StopAndShutdown();
 }
-
-INSTANTIATE_TEST_SUITE_P(ToggleIsFcmEnabled,
-                         RemoteCommandsInvalidatorTest,
-                         testing::Bool() /* is_fcm_enabled */);
 
 }  // namespace policy

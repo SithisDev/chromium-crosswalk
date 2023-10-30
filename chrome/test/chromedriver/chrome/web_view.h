@@ -1,20 +1,20 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_CHROMEDRIVER_CHROME_WEB_VIEW_H_
 #define CHROME_TEST_CHROMEDRIVER_CHROME_WEB_VIEW_H_
 
-#include <list>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "base/callback_forward.h"
+#include "base/values.h"
 
 namespace base {
 class DictionaryValue;
 class FilePath;
-class ListValue;
 class TimeDelta;
 class Value;
 }
@@ -23,6 +23,7 @@ class FrameTracker;
 struct Geoposition;
 class JavaScriptDialogManager;
 struct KeyEvent;
+class MobileEmulationOverrideManager;
 struct MouseEvent;
 struct NetworkConditions;
 class Status;
@@ -31,7 +32,12 @@ struct TouchEvent;
 
 class WebView {
  public:
-  virtual ~WebView() {}
+  typedef base::RepeatingCallback<Status(bool* is_condition_met)>
+      ConditionalFunc;
+
+  virtual ~WebView() = default;
+
+  virtual bool IsServiceWorker() const = 0;
 
   // Return the id for this WebView.
   virtual std::string GetId() = 0;
@@ -41,6 +47,14 @@ class WebView {
 
   // Make DevToolsCient connect to DevTools if it is disconnected.
   virtual Status ConnectIfNecessary() = 0;
+
+  // Handles events until the given function reports the condition is met
+  // and there are no more received events to handle. If the given
+  // function ever returns an error, returns immediately with the error.
+  // If the condition is not met within |timeout|, kTimeout status
+  // is returned eventually. If |timeout| is 0, this function will not block.
+  virtual Status HandleEventsUntil(const ConditionalFunc& conditional_func,
+                                   const Timeout& timeout) = 0;
 
   // Handles events that have been received but not yet handled.
   virtual Status HandleReceivedEvents() = 0;
@@ -64,6 +78,11 @@ class WebView {
   virtual Status SendCommand(const std::string& cmd,
                              const base::DictionaryValue& params) = 0;
 
+  // Send a command to the DevTools debugger. Received from WebSocket
+  virtual Status SendCommandFromWebSocket(const std::string& cmd,
+                                          const base::DictionaryValue& params,
+                                          const int client_cmd_id) = 0;
+
   // Send a command to the DevTools debugger and wait for the result
   virtual Status SendCommandAndGetResult(
           const std::string& cmd,
@@ -79,9 +98,12 @@ class WebView {
   // the result. |frame| is a frame ID or an empty string for the main frame.
   // If the expression evaluates to a element, it will be bound to a unique ID
   // (per frame) and the ID will be returned.
+  // |awaitPromise| controls awaitPromise parameter for Command
+  // send to devtools backend
   // |result| will never be NULL on success.
   virtual Status EvaluateScript(const std::string& frame,
                                 const std::string& expression,
+                                const bool awaitPromise,
                                 std::unique_ptr<base::Value>* result) = 0;
 
   // Calls a JavaScript function in a specified frame with the given args and
@@ -92,7 +114,7 @@ class WebView {
   // |result| will never be NULL on success.
   virtual Status CallFunction(const std::string& frame,
                               const std::string& function,
-                              const base::ListValue& args,
+                              const base::Value::List& args,
                               std::unique_ptr<base::Value>* result) = 0;
 
   // Calls a JavaScript function in a specified frame with the given args and
@@ -102,7 +124,7 @@ class WebView {
   // |result| will never be NULL on success.
   virtual Status CallAsyncFunction(const std::string& frame,
                                    const std::string& function,
-                                   const base::ListValue& args,
+                                   const base::Value::List& args,
                                    const base::TimeDelta& timeout,
                                    std::unique_ptr<base::Value>* result) = 0;
 
@@ -113,7 +135,7 @@ class WebView {
   virtual Status CallUserAsyncFunction(
       const std::string& frame,
       const std::string& function,
-      const base::ListValue& args,
+      const base::Value::List& args,
       const base::TimeDelta& timeout,
       std::unique_ptr<base::Value>* result) = 0;
 
@@ -123,7 +145,7 @@ class WebView {
   // |result| will never be NULL on success.
   virtual Status CallUserSyncScript(const std::string& frame,
                                     const std::string& script,
-                                    const base::ListValue& args,
+                                    const base::Value::List& args,
                                     const base::TimeDelta& timeout,
                                     std::unique_ptr<base::Value>* result) = 0;
 
@@ -132,24 +154,32 @@ class WebView {
   // frame.
   virtual Status GetFrameByFunction(const std::string& frame,
                                     const std::string& function,
-                                    const base::ListValue& args,
+                                    const base::Value::List& args,
                                     std::string* out_frame) = 0;
 
   // Dispatch a sequence of mouse events.
-  virtual Status DispatchMouseEvents(const std::list<MouseEvent>& events,
-                                     const std::string& frame) = 0;
+  virtual Status DispatchMouseEvents(const std::vector<MouseEvent>& events,
+                                     const std::string& frame,
+                                     bool async_dispatch_events) = 0;
 
   // Dispatch a single touch event.
-  virtual Status DispatchTouchEvent(const TouchEvent& event) = 0;
+  virtual Status DispatchTouchEvent(const TouchEvent& event,
+                                    bool async_dispatch_events) = 0;
 
   // Dispatch a sequence of touch events.
-  virtual Status DispatchTouchEvents(const std::list<TouchEvent>& events) = 0;
+  virtual Status DispatchTouchEvents(const std::vector<TouchEvent>& events,
+                                     bool async_dispatch_events) = 0;
 
+  // Dispatch a single touch event with more than one touch point.
+  virtual Status DispatchTouchEventWithMultiPoints(
+      const std::vector<TouchEvent>& events,
+      bool async_dispatch_events) = 0;
   // Dispatch a sequence of key events.
-  virtual Status DispatchKeyEvents(const std::list<KeyEvent>& events) = 0;
+  virtual Status DispatchKeyEvents(const std::vector<KeyEvent>& events,
+                                   bool async_dispatch_events) = 0;
 
   // Return all the cookies visible to the current page.
-  virtual Status GetCookies(std::unique_ptr<base::ListValue>* cookies,
+  virtual Status GetCookies(base::Value* cookies,
                             const std::string& current_page_url) = 0;
 
   // Delete the cookie with the given name.
@@ -163,6 +193,7 @@ class WebView {
                            const std::string& value,
                            const std::string& domain,
                            const std::string& path,
+                           const std::string& sameSite,
                            bool secure,
                            bool httpOnly,
                            double expiry) = 0;
@@ -178,13 +209,16 @@ class WebView {
                                            const Timeout& timeout,
                                            bool stop_load_on_timeout) = 0;
 
-  // Returns whether the frame is pending navigation.
-  virtual Status IsPendingNavigation(const std::string& frame_id,
-                                     const Timeout* timeout,
-                                     bool* is_pending) = 0;
+  // Returns whether the current frame is pending navigation.
+  virtual Status IsPendingNavigation(const Timeout* timeout,
+                                     bool* is_pending) const = 0;
 
   // Returns the JavaScriptDialogManager. Never null.
   virtual JavaScriptDialogManager* GetJavaScriptDialogManager() = 0;
+
+  // Returns the MobileEmulationOverrideManager.
+  virtual MobileEmulationOverrideManager* GetMobileEmulationOverrideManager()
+      const = 0;
 
   // Overrides normal geolocation with a given geoposition.
   virtual Status OverrideGeolocation(const Geoposition& geoposition) = 0;
@@ -202,10 +236,13 @@ class WebView {
       std::string* screenshot,
       const base::DictionaryValue& params) = 0;
 
+  virtual Status PrintToPDF(const base::DictionaryValue& params,
+                            std::string* pdf) = 0;
+
   // Set files in a file input element.
   // |element| is the WebElement JSON Object of the input element.
   virtual Status SetFileInputFiles(const std::string& frame,
-                                   const base::DictionaryValue& element,
+                                   const base::Value& element,
                                    const std::vector<base::FilePath>& files,
                                    const bool append) = 0;
 
@@ -233,13 +270,19 @@ class WebView {
                                          int xoffset,
                                          int yoffset) = 0;
 
-  virtual bool IsOOPIF(const std::string& frame_id) = 0;
+  virtual bool IsNonBlocking() const = 0;
 
   virtual FrameTracker* GetFrameTracker() const = 0;
 
   virtual std::unique_ptr<base::Value> GetCastSinks() = 0;
 
   virtual std::unique_ptr<base::Value> GetCastIssueMessage() = 0;
+
+  virtual void SetFrame(const std::string& new_frame_id) = 0;
+
+  virtual Status GetBackendNodeIdByElement(const std::string& frame,
+                                           const base::Value& element,
+                                           int* backend_node_id) = 0;
 };
 
 #endif  // CHROME_TEST_CHROMEDRIVER_CHROME_WEB_VIEW_H_

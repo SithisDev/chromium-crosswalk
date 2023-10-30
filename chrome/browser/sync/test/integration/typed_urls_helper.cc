@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,9 @@
 #include <sstream>
 
 #include "base/big_endian.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/compiler_specific.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
@@ -26,9 +27,8 @@
 #include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service.h"
-#include "components/sync/syncable/read_node.h"
-#include "components/sync/syncable/read_transaction.h"
-#include "components/sync/syncable/user_share.h"
+#include "components/sync/model/metadata_batch.h"
+#include "components/sync/protocol/entity_metadata.pb.h"
 
 using sync_datatype_helper::test;
 
@@ -47,9 +47,9 @@ class FlushHistoryDBQueueTask : public history::HistoryDBTask {
   void DoneRunOnMainThread() override {}
 
  private:
-  ~FlushHistoryDBQueueTask() override {}
+  ~FlushHistoryDBQueueTask() override = default;
 
-  base::WaitableEvent* wait_event_;
+  raw_ptr<base::WaitableEvent> wait_event_;
 };
 
 class GetTypedUrlsTask : public history::HistoryDBTask {
@@ -68,10 +68,10 @@ class GetTypedUrlsTask : public history::HistoryDBTask {
   void DoneRunOnMainThread() override {}
 
  private:
-  ~GetTypedUrlsTask() override {}
+  ~GetTypedUrlsTask() override = default;
 
-  history::URLRows* rows_;
-  base::WaitableEvent* wait_event_;
+  raw_ptr<history::URLRows> rows_;
+  raw_ptr<base::WaitableEvent> wait_event_;
 };
 
 class GetUrlTask : public history::HistoryDBTask {
@@ -93,12 +93,12 @@ class GetUrlTask : public history::HistoryDBTask {
   void DoneRunOnMainThread() override {}
 
  private:
-  ~GetUrlTask() override {}
+  ~GetUrlTask() override = default;
 
   GURL url_;
-  history::URLRow* row_;
-  base::WaitableEvent* wait_event_;
-  bool* found_;
+  raw_ptr<history::URLRow> row_;
+  raw_ptr<base::WaitableEvent> wait_event_;
+  raw_ptr<bool> found_;
 };
 
 class GetVisitsTask : public history::HistoryDBTask {
@@ -119,11 +119,11 @@ class GetVisitsTask : public history::HistoryDBTask {
   void DoneRunOnMainThread() override {}
 
  private:
-  ~GetVisitsTask() override {}
+  ~GetVisitsTask() override = default;
 
   history::URLID id_;
-  history::VisitVector* visits_;
-  base::WaitableEvent* wait_event_;
+  raw_ptr<history::VisitVector> visits_;
+  raw_ptr<base::WaitableEvent> wait_event_;
 };
 
 class RemoveVisitsTask : public history::HistoryDBTask {
@@ -143,10 +143,10 @@ class RemoveVisitsTask : public history::HistoryDBTask {
   void DoneRunOnMainThread() override {}
 
  private:
-  ~RemoveVisitsTask() override {}
+  ~RemoveVisitsTask() override = default;
 
   const history::VisitVector& visits_;
-  base::WaitableEvent* wait_event_;
+  raw_ptr<base::WaitableEvent> wait_event_;
 };
 
 // Waits for the history DB thread to finish executing its current set of
@@ -171,12 +171,12 @@ class GetTypedUrlsMetadataTask : public history::HistoryDBTask {
   GetTypedUrlsMetadataTask(syncer::MetadataBatch* metadata_batch,
                            base::WaitableEvent* event)
       : metadata_batch_(metadata_batch), wait_event_(event) {}
-  ~GetTypedUrlsMetadataTask() override {}
+  ~GetTypedUrlsMetadataTask() override = default;
 
   bool RunOnDBThread(history::HistoryBackend* backend,
                      history::HistoryDatabase* db) override {
     // Fetch the typed URLs.
-    db->GetAllSyncMetadata(metadata_batch_);
+    db->GetTypedURLMetadataDB()->GetAllSyncMetadata(metadata_batch_);
     wait_event_->Signal();
     return true;
   }
@@ -184,8 +184,33 @@ class GetTypedUrlsMetadataTask : public history::HistoryDBTask {
   void DoneRunOnMainThread() override {}
 
  private:
-  syncer::MetadataBatch* metadata_batch_;
-  base::WaitableEvent* wait_event_;
+  raw_ptr<syncer::MetadataBatch> metadata_batch_;
+  raw_ptr<base::WaitableEvent> wait_event_;
+};
+
+class WriteTypedUrlsMetadataTask : public history::HistoryDBTask {
+ public:
+  WriteTypedUrlsMetadataTask(const std::string& storage_key,
+                             const sync_pb::EntityMetadata& metadata,
+                             base::WaitableEvent* event)
+      : storage_key_(storage_key), metadata_(metadata), wait_event_(event) {}
+  ~WriteTypedUrlsMetadataTask() override = default;
+
+  bool RunOnDBThread(history::HistoryBackend* backend,
+                     history::HistoryDatabase* db) override {
+    // Write the metadata to the DB.
+    db->GetTypedURLMetadataDB()->UpdateSyncMetadata(syncer::TYPED_URLS,
+                                                    storage_key_, metadata_);
+    wait_event_->Signal();
+    return true;
+  }
+
+  void DoneRunOnMainThread() override {}
+
+ private:
+  const std::string storage_key_;
+  const sync_pb::EntityMetadata metadata_;
+  raw_ptr<base::WaitableEvent> wait_event_;
 };
 
 // Creates a URLRow in the specified HistoryService with the passed transition
@@ -195,11 +220,10 @@ void AddToHistory(history::HistoryService* service,
                   ui::PageTransition transition,
                   history::VisitSource source,
                   const base::Time& timestamp) {
-  service->AddPage(url, timestamp,
-                   nullptr,  // scope
-                   1234,     // nav_entry_id
-                   GURL(),   // referrer
-                   history::RedirectList(), transition, source, false);
+  service->AddPage(url, timestamp, /*context_id=*/nullptr,
+                   /*nav_entry_id=*/1234,
+                   /*referrer=*/GURL(), history::RedirectList(), transition,
+                   source, /*did_replace_entry=*/false);
 }
 
 history::URLRows GetTypedUrlsFromHistoryService(
@@ -275,6 +299,21 @@ void GetMetadataBatchFromHistoryService(history::HistoryService* service,
   wait_event.Wait();
 }
 
+void WriteMetadataToHistoryService(history::HistoryService* service,
+                                   const std::string& storage_key,
+                                   const sync_pb::EntityMetadata& metadata) {
+  base::CancelableTaskTracker tracker;
+  base::WaitableEvent wait_event(
+      base::WaitableEvent::ResetPolicy::MANUAL,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
+
+  service->ScheduleDBTask(FROM_HERE,
+                          std::make_unique<WriteTypedUrlsMetadataTask>(
+                              storage_key, metadata, &wait_event),
+                          &tracker);
+  wait_event.Wait();
+}
+
 history::HistoryService* GetHistoryServiceFromClient(int index) {
   return HistoryServiceFactory::GetForProfileWithoutCreating(
       test()->GetProfile(index));
@@ -305,8 +344,9 @@ history::VisitVector GetVisitsFromClient(int index, history::URLID id) {
 history::VisitVector GetVisitsForURLFromClient(int index, const GURL& url) {
   history::HistoryService* service = GetHistoryServiceFromClient(index);
   history::URLRow url_row;
-  if (!GetUrlFromHistoryService(service, url, &url_row))
+  if (!GetUrlFromHistoryService(service, url, &url_row)) {
     return history::VisitVector();
+  }
   return GetVisitsFromHistoryService(service, url_row.id());
 }
 
@@ -315,15 +355,23 @@ void RemoveVisitsFromClient(int index, const history::VisitVector& visits) {
   RemoveVisitsFromHistoryService(service, visits);
 }
 
+void WriteMetadataToClient(int index,
+                           const std::string& storage_key,
+                           const sync_pb::EntityMetadata& metadata) {
+  history::HistoryService* service = GetHistoryServiceFromClient(index);
+  WriteMetadataToHistoryService(service, storage_key, metadata);
+}
+
 base::Time GetTimestamp() {
   // The history subsystem doesn't like identical timestamps for page visits,
   // and it will massage the visit timestamps if we try to use identical
   // values, which can lead to spurious errors. So make sure all timestamps
   // are unique.
-  if (!::timestamp)
+  if (!::timestamp) {
     ::timestamp = new base::Time(base::Time::Now());
+  }
   base::Time original = *::timestamp;
-  *::timestamp += base::TimeDelta::FromMilliseconds(1);
+  *::timestamp += base::Milliseconds(1);
   return original;
 }
 
@@ -345,10 +393,11 @@ void AddUrlToHistoryWithTimestamp(int index,
                                   const base::Time& timestamp) {
   AddToHistory(GetHistoryServiceFromClient(index), url, transition, source,
                timestamp);
-  if (test()->use_verifier())
+  if (test()->UseVerifier()) {
     AddToHistory(HistoryServiceFactory::GetForProfile(
                      test()->verifier(), ServiceAccessType::IMPLICIT_ACCESS),
                  url, transition, source, timestamp);
+  }
 
   // Wait until the AddPage() request has completed so we know the change has
   // filtered down to the sync observers (don't need to wait for the
@@ -360,7 +409,7 @@ void ExpireHistoryBefore(int index, base::Time end_time) {
   base::CancelableTaskTracker task_tracker;
   GetHistoryServiceFromClient(index)->ExpireHistoryBeforeForTesting(
       end_time, base::DoNothing(), &task_tracker);
-  if (test()->use_verifier()) {
+  if (test()->UseVerifier()) {
     HistoryServiceFactory::GetForProfile(test()->verifier(),
                                          ServiceAccessType::IMPLICIT_ACCESS)
         ->ExpireHistoryBeforeForTesting(end_time, base::DoNothing(),
@@ -376,7 +425,7 @@ void ExpireHistoryBetween(int index,
   GetHistoryServiceFromClient(index)->ExpireHistoryBetween(
       {}, begin_time, end_time, /*user_initiated*/ true, base::DoNothing(),
       &task_tracker);
-  if (test()->use_verifier()) {
+  if (test()->UseVerifier()) {
     HistoryServiceFactory::GetForProfile(test()->verifier(),
                                          ServiceAccessType::IMPLICIT_ACCESS)
         ->ExpireHistoryBetween({}, begin_time, end_time,
@@ -387,29 +436,35 @@ void ExpireHistoryBetween(int index,
 }
 
 void DeleteUrlFromHistory(int index, const GURL& url) {
-  GetHistoryServiceFromClient(index)->DeleteURL(url);
-  if (test()->use_verifier())
-    HistoryServiceFactory::GetForProfile(
-        test()->verifier(), ServiceAccessType::IMPLICIT_ACCESS)->DeleteURL(url);
+  GetHistoryServiceFromClient(index)->DeleteURLs({url});
+
+  if (test()->UseVerifier()) {
+    HistoryServiceFactory::GetForProfile(test()->verifier(),
+                                         ServiceAccessType::IMPLICIT_ACCESS)
+        ->DeleteURLs({url});
+  }
+
   WaitForHistoryDBThread(index);
 }
 
 void DeleteUrlsFromHistory(int index, const std::vector<GURL>& urls) {
-  GetHistoryServiceFromClient(index)->DeleteURLsForTest(urls);
-  if (test()->use_verifier())
+  GetHistoryServiceFromClient(index)->DeleteURLs(urls);
+  if (test()->UseVerifier()) {
     HistoryServiceFactory::GetForProfile(test()->verifier(),
                                          ServiceAccessType::IMPLICIT_ACCESS)
-        ->DeleteURLsForTest(urls);
+        ->DeleteURLs(urls);
+  }
   WaitForHistoryDBThread(index);
 }
 
 void SetPageTitle(int index, const GURL& url, const std::string& title) {
   HistoryServiceFactory::GetForProfileWithoutCreating(test()->GetProfile(index))
       ->SetPageTitle(url, base::UTF8ToUTF16(title));
-  if (test()->use_verifier())
+  if (test()->UseVerifier()) {
     HistoryServiceFactory::GetForProfile(test()->verifier(),
                                          ServiceAccessType::IMPLICIT_ACCESS)
         ->SetPageTitle(url, base::UTF8ToUTF16(title));
+  }
   WaitForHistoryDBThread(index);
 }
 
@@ -427,46 +482,52 @@ std::string PrintUrlRows(const history::URLRows& rows,
 
 bool CheckURLRowVectorsAreEqualForTypedURLs(const history::URLRows& left,
                                             const history::URLRows& right) {
-  if (left.size() != right.size())
+  if (left.size() != right.size()) {
     return false;
-  for (size_t i = 0; i < left.size(); ++i) {
+  }
+  for (const history::URLRow& left_url_row : left) {
     // URLs could be out-of-order, so look for a matching URL in the second
     // array.
     bool found = false;
-    for (size_t j = 0; j < right.size(); ++j) {
-      if (left[i].url() == right[j].url()) {
-        if (CheckURLRowsAreEqualForTypedURLs(left[i], right[j])) {
+    for (const history::URLRow& right_url_row : right) {
+      if (left_url_row.url() == right_url_row.url()) {
+        if (CheckURLRowsAreEqualForTypedURLs(left_url_row, right_url_row)) {
           found = true;
           break;
         }
       }
     }
-    if (!found)
+    if (!found) {
       return false;
+    }
   }
   return true;
 }
 
 bool AreVisitsEqual(const history::VisitVector& visit1,
                     const history::VisitVector& visit2) {
-  if (visit1.size() != visit2.size())
+  if (visit1.size() != visit2.size()) {
     return false;
+  }
   for (size_t i = 0; i < visit1.size(); ++i) {
     if (!ui::PageTransitionTypeIncludingQualifiersIs(visit1[i].transition,
-                                                     visit2[i].transition))
+                                                     visit2[i].transition)) {
       return false;
-    if (visit1[i].visit_time != visit2[i].visit_time)
+    }
+    if (visit1[i].visit_time != visit2[i].visit_time) {
       return false;
+    }
   }
   return true;
 }
 
 bool AreVisitsUnique(const history::VisitVector& visits) {
   base::Time t = base::Time::FromInternalValue(0);
-  for (size_t i = 0; i < visits.size(); ++i) {
-    if (t == visits[i].visit_time)
+  for (const history::VisitRow& visit : visits) {
+    if (t == visit.visit_time) {
       return false;
-    t = visits[i].visit_time;
+    }
+    t = visit.visit_time;
   }
   return true;
 }
@@ -491,7 +552,7 @@ bool CheckURLRowsAreEqualForTypedURLs(const history::URLRow& left,
 
 bool CheckAllProfilesHaveSameTypedURLs() {
   history::URLRows golden_urls;
-  if (test()->use_verifier()) {
+  if (test()->UseVerifier()) {
     history::HistoryService* verifier_service =
         HistoryServiceFactory::GetForProfile(
             test()->verifier(), ServiceAccessType::IMPLICIT_ACCESS);
@@ -503,8 +564,8 @@ bool CheckAllProfilesHaveSameTypedURLs() {
     history::URLRows urls = GetTypedUrlsFromClient(i);
     if (!CheckURLRowVectorsAreEqualForTypedURLs(golden_urls, urls)) {
       DVLOG(1) << "Found no match in typed URLs between two profiles";
-      DVLOG(1) << PrintUrlRows(
-          golden_urls, test()->use_verifier() ? "verifier" : "client 0");
+      DVLOG(1) << PrintUrlRows(golden_urls,
+                               test()->UseVerifier() ? "verifier" : "client 0");
       DVLOG(1) << PrintUrlRows(urls, base::StringPrintf("client %i", i));
       return false;
     }
@@ -515,19 +576,21 @@ bool CheckAllProfilesHaveSameTypedURLs() {
 bool CheckSyncHasURLMetadata(int index, const GURL& url) {
   history::URLRow row;
   history::HistoryService* service = GetHistoryServiceFromClient(index);
-  if (!GetUrlFromHistoryService(service, url, &row))
+  if (!GetUrlFromHistoryService(service, url, &row)) {
     return false;
+  }
 
   syncer::MetadataBatch batch;
   GetMetadataBatchFromHistoryService(service, &batch);
 
-  std::string storage_key(sizeof(row.id()), 0);
-  base::WriteBigEndian<history::URLID>(&storage_key[0], row.id());
+  std::string expected_storage_key(sizeof(row.id()), 0);
+  base::WriteBigEndian<history::URLID>(&expected_storage_key[0], row.id());
 
   syncer::EntityMetadataMap metadata_map(batch.TakeAllMetadata());
-  for (const auto& kv : metadata_map) {
-    if (kv.first == storage_key)
+  for (const auto& [storage_key, metadata] : metadata_map) {
+    if (storage_key == expected_storage_key) {
       return true;
+    }
   }
   return false;
 }
@@ -539,15 +602,25 @@ bool CheckSyncHasMetadataForURLID(int index, history::URLID url_id) {
   syncer::MetadataBatch batch;
   GetMetadataBatchFromHistoryService(service, &batch);
 
-  std::string storage_key(sizeof(url_id), 0);
-  base::WriteBigEndian<history::URLID>(&storage_key[0], url_id);
+  std::string expected_storage_key(sizeof(url_id), 0);
+  base::WriteBigEndian<history::URLID>(&expected_storage_key[0], url_id);
 
   syncer::EntityMetadataMap metadata_map(batch.TakeAllMetadata());
-  for (const auto& kv : metadata_map) {
-    if (kv.first == storage_key)
+  for (const auto& [storage_key, metadata] : metadata_map) {
+    if (storage_key == expected_storage_key) {
       return true;
+    }
   }
   return false;
+}
+
+syncer::MetadataBatch GetAllSyncMetadata(int index) {
+  history::URLRow row;
+  history::HistoryService* service = GetHistoryServiceFromClient(index);
+
+  syncer::MetadataBatch batch;
+  GetMetadataBatchFromHistoryService(service, &batch);
+  return batch;
 }
 
 }  // namespace typed_urls_helper
@@ -556,12 +629,10 @@ ProfilesHaveSameTypedURLsChecker::ProfilesHaveSameTypedURLsChecker()
     : MultiClientStatusChangeChecker(
           sync_datatype_helper::test()->GetSyncServices()) {}
 
-bool ProfilesHaveSameTypedURLsChecker::IsExitConditionSatisfied() {
+bool ProfilesHaveSameTypedURLsChecker::IsExitConditionSatisfied(
+    std::ostream* os) {
+  *os << "Waiting for matching typed urls profiles";
   return typed_urls_helper::CheckAllProfilesHaveSameTypedURLs();
-}
-
-std::string ProfilesHaveSameTypedURLsChecker::GetDebugMessage() const {
-  return "Waiting for matching typed urls profiles";
 }
 
 TypedURLChecker::TypedURLChecker(int index, const std::string& url)
@@ -570,18 +641,17 @@ TypedURLChecker::TypedURLChecker(int index, const std::string& url)
       index_(index),
       url_(url) {}
 
-TypedURLChecker::~TypedURLChecker() {}
+TypedURLChecker::~TypedURLChecker() = default;
 
-bool TypedURLChecker::IsExitConditionSatisfied() {
+bool TypedURLChecker::IsExitConditionSatisfied(std::ostream* os) {
+  *os << "Waiting for data for url '" << url_ << "' to be populated.";
+
   history::URLRows rows = typed_urls_helper::GetTypedUrlsFromClient(index_);
 
-  for (auto row : rows) {
-    if (row.url().spec() == url_)
+  for (const history::URLRow& row : rows) {
+    if (row.url().spec() == url_) {
       return true;
+    }
   }
   return false;
-}
-
-std::string TypedURLChecker::GetDebugMessage() const {
-  return "Waiting for data for url '" + url_ + "' to be populated.";
 }

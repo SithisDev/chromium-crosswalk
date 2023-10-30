@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/chrome_cleaner/constants/uws_id.h"
 #include "chrome/chrome_cleaner/http/http_agent_factory.h"
 #include "chrome/chrome_cleaner/http/mock_http_agent_factory.h"
@@ -47,8 +47,7 @@ PUPData::PUP CreateSimpleDetectedPUP() {
 class ReporterLoggingServiceTest : public testing::Test {
  public:
   ReporterLoggingServiceTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::UI) {}
 
   // LoggingServiceAPI::UploadResultCallback implementation.
   void LoggingServiceDone(base::OnceClosure run_loop_quit, bool success) {
@@ -61,7 +60,8 @@ class ReporterLoggingServiceTest : public testing::Test {
   }
 
   void SetUp() override {
-    registry_logger_.reset(new RegistryLogger(RegistryLogger::Mode::REPORTER));
+    registry_logger_ =
+        std::make_unique<RegistryLogger>(RegistryLogger::Mode::REPORTER);
 
     reporter_logging_service_ = ReporterLoggingService::GetInstance();
     reporter_logging_service_->Initialize(registry_logger_.get());
@@ -93,7 +93,7 @@ class ReporterLoggingServiceTest : public testing::Test {
   LoggingServiceAPI* reporter_logging_service_;
 
   // Needed for the current task runner to be available.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   // |done_callback_called_| is set to true in |LoggingServiceDone| to confirm
   // it was called appropriately.
@@ -239,8 +239,8 @@ TEST_F(ReporterLoggingServiceTest, LogProcessInformation) {
   io_counters.ReadTransferCount = 4;
   io_counters.WriteTransferCount = 5;
   io_counters.OtherTransferCount = 6;
-  SystemResourceUsage usage = {io_counters, base::TimeDelta::FromSeconds(10),
-                               base::TimeDelta::FromSeconds(20), 123456};
+  SystemResourceUsage usage = {io_counters, base::Seconds(10),
+                               base::Seconds(20), 123456};
 
   StrictMock<MockSettings> mock_settings;
   EXPECT_CALL(mock_settings, engine()).WillOnce(Return(Engine::TEST_ONLY));

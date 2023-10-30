@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,12 +30,11 @@ void HttpsEngagementService::RecordTimeOnPage(base::TimeDelta foreground_time,
 }
 
 void HttpsEngagementService::StoreMetricsAndClear() {
-  double total_time =
-      time_on_https_.InMillisecondsF() + time_on_http_.InMillisecondsF();
-  if (total_time == 0)
+  const base::TimeDelta total_time = time_on_https_ + time_on_http_;
+  if (total_time.is_zero())
     return;
 
-  double https_ratio = 100.0 * (time_on_https_.InMillisecondsF() / total_time);
+  const double https_ratio = 100.0 * (time_on_https_ / total_time);
   UMA_HISTOGRAM_PERCENTAGE(internal::kHttpsEngagementSessionPercentage,
                            https_ratio);
 

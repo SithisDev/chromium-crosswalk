@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 package org.chromium.chrome.browser.notifications.channels;
@@ -7,14 +7,17 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
-import android.annotation.TargetApi;
 import android.app.NotificationChannel;
 import android.content.Context;
 import android.os.Build;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.MediumTest;
-import android.support.test.filters.SmallTest;
+
+import androidx.annotation.RequiresApi;
+import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 
 import org.hamcrest.BaseMatcher;
 import org.hamcrest.Description;
@@ -28,12 +31,16 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.chrome.browser.notifications.NotificationChannelStatus;
-import org.chromium.chrome.browser.notifications.NotificationManagerProxy;
-import org.chromium.chrome.browser.notifications.NotificationManagerProxyImpl;
 import org.chromium.chrome.browser.notifications.NotificationSettingsBridge;
-import org.chromium.chrome.browser.preferences.website.ContentSettingValues;
-import org.chromium.chrome.browser.preferences.website.PermissionInfo;
+import org.chromium.chrome.browser.profiles.OTRProfileID;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.test.ChromeBrowserTestRule;
+import org.chromium.components.browser_ui.notifications.NotificationManagerProxy;
+import org.chromium.components.browser_ui.notifications.NotificationManagerProxyImpl;
+import org.chromium.components.browser_ui.site_settings.PermissionInfo;
+import org.chromium.components.content_settings.ContentSettingValues;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.content_public.browser.test.NativeLibraryTestUtils;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.ArrayList;
@@ -50,15 +57,15 @@ import java.util.List;
  * blocked. Thus some of these tests use different channel ids to avoid this problem.
  */
 @RunWith(BaseJUnit4ClassRunner.class)
-@TargetApi(Build.VERSION_CODES.O)
+@RequiresApi(Build.VERSION_CODES.O)
 public class SiteChannelsManagerTest {
     private SiteChannelsManager mSiteChannelsManager;
     @Rule
     public ChromeBrowserTestRule mChromeBrowserTestRule = new ChromeBrowserTestRule();
 
     @Before
-    public void setUp() throws Exception {
-        mChromeBrowserTestRule.loadNativeLibraryAndInitBrowserProcess();
+    public void setUp() {
+        NativeLibraryTestUtils.loadNativeLibraryAndInitBrowserProcess();
 
         Context mContext = InstrumentationRegistry.getTargetContext();
         NotificationManagerProxy notificationManagerProxy =
@@ -70,10 +77,10 @@ public class SiteChannelsManagerTest {
     private static void clearExistingSiteChannels(
             NotificationManagerProxy notificationManagerProxy) {
         for (NotificationChannel channel : notificationManagerProxy.getNotificationChannels()) {
-            if (channel.getId().startsWith(ChannelDefinitions.CHANNEL_ID_PREFIX_SITES)
+            if (SiteChannelsManager.isValidSiteChannelId(channel.getId())
                     || (channel.getGroup() != null
-                               && channel.getGroup().equals(
-                                          ChannelDefinitions.ChannelGroupId.SITES))) {
+                            && channel.getGroup().equals(
+                                    ChromeChannelDefinitions.ChannelGroupId.SITES))) {
                 notificationManagerProxy.deleteNotificationChannel(channel.getId());
             }
         }
@@ -82,7 +89,7 @@ public class SiteChannelsManagerTest {
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @SmallTest
-    public void testCreateSiteChannel_enabled() throws Exception {
+    public void testCreateSiteChannel_enabled() {
         mSiteChannelsManager.createSiteChannel("https://example-enabled.org", 62102180000L, true);
         assertThat(Arrays.asList(mSiteChannelsManager.getSiteChannels()), hasSize(1));
         NotificationSettingsBridge.SiteChannel channel = mSiteChannelsManager.getSiteChannels()[0];
@@ -94,7 +101,7 @@ public class SiteChannelsManagerTest {
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @SmallTest
-    public void testCreateSiteChannel_stripsSchemaForChannelName() throws Exception {
+    public void testCreateSiteChannel_stripsSchemaForChannelName() {
         mSiteChannelsManager.createSiteChannel("http://127.0.0.1", 0L, true);
         mSiteChannelsManager.createSiteChannel("https://example.com", 0L, true);
         mSiteChannelsManager.createSiteChannel("ftp://127.0.0.1", 0L, true);
@@ -108,9 +115,9 @@ public class SiteChannelsManagerTest {
 
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
-    @TargetApi(Build.VERSION_CODES.O)
+    @RequiresApi(Build.VERSION_CODES.O)
     @SmallTest
-    public void testCreateSiteChannel_disabled() throws Exception {
+    public void testCreateSiteChannel_disabled() {
         mSiteChannelsManager.createSiteChannel("https://example-blocked.org", 0L, false);
         assertThat(Arrays.asList(mSiteChannelsManager.getSiteChannels()), hasSize(1));
         NotificationSettingsBridge.SiteChannel channel = mSiteChannelsManager.getSiteChannels()[0];
@@ -121,7 +128,7 @@ public class SiteChannelsManagerTest {
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @SmallTest
-    public void testDeleteSiteChannel_channelExists() throws Exception {
+    public void testDeleteSiteChannel_channelExists() {
         NotificationSettingsBridge.SiteChannel channel =
                 mSiteChannelsManager.createSiteChannel("https://chromium.org", 0L, true);
         mSiteChannelsManager.deleteSiteChannel(channel.getId());
@@ -131,7 +138,7 @@ public class SiteChannelsManagerTest {
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @SmallTest
-    public void testDeleteAllSiteChannels() throws Exception {
+    public void testDeleteAllSiteChannels() {
         mSiteChannelsManager.createSiteChannel("https://chromium.org", 0L, true);
         mSiteChannelsManager.createSiteChannel("https://tests.peter.sh", 0L, true);
         mSiteChannelsManager.deleteAllSiteChannels();
@@ -141,7 +148,7 @@ public class SiteChannelsManagerTest {
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @SmallTest
-    public void testDeleteSiteChannel_channelDoesNotExist() throws Exception {
+    public void testDeleteSiteChannel_channelDoesNotExist() {
         mSiteChannelsManager.createSiteChannel("https://chromium.org", 0L, true);
         mSiteChannelsManager.deleteSiteChannel("https://some-other-origin.org");
         assertThat(Arrays.asList(mSiteChannelsManager.getSiteChannels()), hasSize(1));
@@ -150,7 +157,7 @@ public class SiteChannelsManagerTest {
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @SmallTest
-    public void testGetChannelStatus_channelCreatedAsEnabled() throws Exception {
+    public void testGetChannelStatus_channelCreatedAsEnabled() {
         NotificationSettingsBridge.SiteChannel channel =
                 mSiteChannelsManager.createSiteChannel("https://example-enabled.org", 0L, true);
         assertThat(mSiteChannelsManager.getChannelStatus(channel.getId()),
@@ -160,7 +167,7 @@ public class SiteChannelsManagerTest {
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @SmallTest
-    public void testGetChannelStatus_channelCreatedAsBlocked() throws Exception {
+    public void testGetChannelStatus_channelCreatedAsBlocked() {
         assertThat(mSiteChannelsManager.getChannelStatus("https://example-blocked.com"),
                 matchesChannelStatus(NotificationChannelStatus.UNAVAILABLE));
         NotificationSettingsBridge.SiteChannel channel =
@@ -172,7 +179,7 @@ public class SiteChannelsManagerTest {
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @SmallTest
-    public void testGetChannelStatus_channelNotCreated() throws Exception {
+    public void testGetChannelStatus_channelNotCreated() {
         assertThat(mSiteChannelsManager.getChannelStatus("invalid-channel-id"),
                 matchesChannelStatus(NotificationChannelStatus.UNAVAILABLE));
     }
@@ -180,7 +187,7 @@ public class SiteChannelsManagerTest {
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @SmallTest
-    public void testGetChannelStatus_channelCreatedThenDeleted() throws Exception {
+    public void testGetChannelStatus_channelCreatedThenDeleted() {
         NotificationSettingsBridge.SiteChannel channel =
                 mSiteChannelsManager.createSiteChannel("https://chromium.org", 0L, true);
         mSiteChannelsManager.deleteSiteChannel(channel.getId());
@@ -191,11 +198,32 @@ public class SiteChannelsManagerTest {
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @SmallTest
-    public void testBlockingPermissionInIncognitoCreatesNoChannels() throws Exception {
+    public void testBlockingPermissionInIncognitoTabbedActivityCreatesNoChannels() {
         PermissionInfo info = new PermissionInfo(
-                PermissionInfo.Type.NOTIFICATION, "https://example-incognito.com", null, true);
-        TestThreadUtils.runOnUiThreadBlocking(
-                () -> info.setContentSetting(ContentSettingValues.BLOCK));
+                ContentSettingsType.NOTIFICATIONS, "https://example-incognito.com", null, true);
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            info.setContentSetting(Profile.getLastUsedRegularProfile().getPrimaryOTRProfile(
+                                           /*createIfNeeded=*/true),
+                    ContentSettingValues.BLOCK);
+        });
+        assertThat(Arrays.asList(mSiteChannelsManager.getSiteChannels()), hasSize(0));
+    }
+
+    @Test
+    @MinAndroidSdkLevel(Build.VERSION_CODES.O)
+    @SmallTest
+    public void testBlockingPermissionInIncognitoCCTCreatesNoChannels() {
+        PermissionInfo info = new PermissionInfo(
+                ContentSettingsType.NOTIFICATIONS, "https://example-incognito.com", null, true);
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            OTRProfileID otrProfileID = OTRProfileID.createUnique("CCT:Incognito");
+            Profile nonPrimaryOTRProfile =
+                    Profile.getLastUsedRegularProfile().getOffTheRecordProfile(
+                            otrProfileID, /*createIfNeeded=*/true);
+            assertNotNull(nonPrimaryOTRProfile);
+            assertTrue(nonPrimaryOTRProfile.isOffTheRecord());
+            info.setContentSetting(nonPrimaryOTRProfile, ContentSettingValues.BLOCK);
+        });
         assertThat(Arrays.asList(mSiteChannelsManager.getSiteChannels()), hasSize(0));
     }
 
@@ -235,10 +263,10 @@ public class SiteChannelsManagerTest {
     @Test
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @MediumTest
-    public void testGetChannelIdForOrigin_unknownOrigin() throws Exception {
+    public void testGetChannelIdForOrigin_unknownOrigin() {
         String channelId = mSiteChannelsManager.getChannelIdForOrigin("https://unknown.com");
 
-        assertThat(channelId, is(ChannelDefinitions.ChannelId.SITES));
+        assertThat(channelId, is(ChromeChannelDefinitions.ChannelId.SITES));
 
         assertThat(RecordHistogram.getHistogramTotalCountForTesting(
                            "Notifications.Android.SitesChannel"),

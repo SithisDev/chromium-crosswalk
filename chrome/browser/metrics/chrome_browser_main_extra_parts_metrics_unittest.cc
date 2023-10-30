@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,45 +6,68 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "content/public/test/test_service_manager_context.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/display/screen.h"
 #include "ui/display/test/test_screen.h"
 #include "ui/gfx/geometry/size.h"
 
-#if defined(USE_OZONE) || defined(USE_X11)
+#if defined(USE_OZONE)
 #include "ui/events/devices/device_data_manager_test_api.h"
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chromeos/dbus/u2f/u2f_client.h"  // nogncheck
 #endif
 
 namespace {
 
 const char kTouchEventFeatureDetectionEnabledHistogramName[] =
     "Touchscreen.TouchEventsEnabled";
+const char kSupportsHDRHistogramName[] = "Hardware.Display.SupportsHDR";
 
 }  // namespace
 
 class ChromeBrowserMainExtraPartsMetricsTest : public testing::Test {
  public:
   ChromeBrowserMainExtraPartsMetricsTest();
+
+  ChromeBrowserMainExtraPartsMetricsTest(
+      const ChromeBrowserMainExtraPartsMetricsTest&) = delete;
+  ChromeBrowserMainExtraPartsMetricsTest& operator=(
+      const ChromeBrowserMainExtraPartsMetricsTest&) = delete;
+
   ~ChromeBrowserMainExtraPartsMetricsTest() override;
 
  protected:
-#if defined(USE_OZONE) || defined(USE_X11)
+  void SetUp() override {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    // ChromeBrowserMainExtraPartsMetrics::RecordMetrics() requires a U2FClient,
+    // which would ordinarily have been set up by browser DBus initialization.
+    chromeos::U2FClient::InitializeFake();
+#endif
+  }
+
+  void TearDown() override {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    task_environment_.RunUntilIdle();
+    chromeos::U2FClient::Shutdown();
+#endif
+  }
+
+#if defined(USE_OZONE)
   ui::DeviceDataManagerTestApi device_data_manager_test_api_;
 #endif
 
  private:
   // Provides a message loop and allows the use of the task scheduler
-  content::TestBrowserThreadBundle thread_bundle_;
-  content::TestServiceManagerContext service_manager_context_;
+  content::BrowserTaskEnvironment task_environment_;
 
   // Dummy screen required by a ChromeBrowserMainExtraPartsMetrics test target.
   display::test::TestScreen test_screen_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainExtraPartsMetricsTest);
 };
 
 ChromeBrowserMainExtraPartsMetricsTest::
@@ -66,7 +89,7 @@ TEST_F(ChromeBrowserMainExtraPartsMetricsTest,
       kTouchEventFeatureDetectionEnabledHistogramName, 0);
 }
 
-#if defined(USE_OZONE) || defined(USE_X11)
+#if defined(USE_OZONE)
 
 // Verify a TouchEventsEnabled value isn't recorded during PostBrowserStart if
 // the device scan hasn't completed yet.
@@ -127,8 +150,16 @@ TEST_F(ChromeBrowserMainExtraPartsMetricsTest,
 #else
 
 // Verify a TouchEventsEnabled value is recorded during PostBrowserStart.
+// Flaky on Win only.  http://crbug.com/1026946
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart \
+  DISABLED_VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart
+#else
+#define MAYBE_VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart \
+  VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart
+#endif
 TEST_F(ChromeBrowserMainExtraPartsMetricsTest,
-       VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart) {
+       MAYBE_VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart) {
   base::HistogramTester histogram_tester;
   ChromeBrowserMainExtraPartsMetrics test_target;
 
@@ -137,4 +168,15 @@ TEST_F(ChromeBrowserMainExtraPartsMetricsTest,
       kTouchEventFeatureDetectionEnabledHistogramName, 1);
 }
 
-#endif  // defined(USE_OZONE) || defined(USE_X11)
+#endif  // defined(USE_OZONE)
+
+// Verify a Hardware.Display.SupportsHDR value is recorded during
+// PostBrowserStart.
+TEST_F(ChromeBrowserMainExtraPartsMetricsTest,
+       VerifySupportsHDRIsRecordedAfterPostBrowserStart) {
+  base::HistogramTester histogram_tester;
+  ChromeBrowserMainExtraPartsMetrics test_target;
+
+  test_target.PostBrowserStart();
+  histogram_tester.ExpectTotalCount(kSupportsHDRHistogramName, 1);
+}

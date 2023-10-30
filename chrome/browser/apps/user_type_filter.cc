@@ -1,9 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/apps/user_type_filter.h"
 
+#include "base/logging.h"
 #include "base/values.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/profiles/profile.h"
@@ -18,18 +19,15 @@ const char kKeyUserType[] = "user_type";
 const char kUserTypeChild[] = "child";
 const char kUserTypeGuest[] = "guest";
 const char kUserTypeManaged[] = "managed";
-const char kUserTypeSupervised[] = "supervised";
 const char kUserTypeUnmanaged[] = "unmanaged";
 
 std::string DetermineUserType(Profile* profile) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DCHECK(!profile->IsOffTheRecord());
   if (profile->IsGuestSession())
     return kUserTypeGuest;
+  DCHECK(!profile->IsOffTheRecord());
   if (profile->IsChild())
     return kUserTypeChild;
-  if (profile->IsLegacySupervised())
-    return kUserTypeSupervised;
   if (profile->GetProfilePolicyConnector()->IsManaged()) {
     return kUserTypeManaged;
   }
@@ -61,7 +59,7 @@ bool UserTypeMatchesJsonUserType(const std::string& user_type,
   }
 
   bool user_type_match = false;
-  for (const auto& it : value->GetList()) {
+  for (const auto& it : value->GetListDeprecated()) {
     if (!it.is_string()) {
       LOG(ERROR) << "Invalid user type value for " << app_id << ".";
       return false;

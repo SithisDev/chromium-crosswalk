@@ -1,22 +1,27 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/frame/web_contents_close_handler.h"
 
-#include "base/macros.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/ui/views/frame/web_contents_close_handler_delegate.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class MockWebContentsCloseHandlerDelegate
     : public WebContentsCloseHandlerDelegate {
  public:
-  explicit MockWebContentsCloseHandlerDelegate()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI),
+  MockWebContentsCloseHandlerDelegate()
+      : task_environment_(
+            base::test::SingleThreadTaskEnvironment::MainThreadType::UI),
         got_clone_(false),
         got_destroy_(false) {}
+
+  MockWebContentsCloseHandlerDelegate(
+      const MockWebContentsCloseHandlerDelegate&) = delete;
+  MockWebContentsCloseHandlerDelegate& operator=(
+      const MockWebContentsCloseHandlerDelegate&) = delete;
+
   ~MockWebContentsCloseHandlerDelegate() override {}
 
   void Clear() {
@@ -34,11 +39,9 @@ class MockWebContentsCloseHandlerDelegate
   void DestroyClonedLayer() override { got_destroy_ = true; }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   bool got_clone_;
   bool got_destroy_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockWebContentsCloseHandlerDelegate);
 };
 
 // -----------------------------------------------------------------------------
@@ -46,6 +49,11 @@ class MockWebContentsCloseHandlerDelegate
 class WebContentsCloseHandlerTest : public testing::Test {
  public:
   WebContentsCloseHandlerTest() : close_handler_(&close_handler_delegate_) {}
+
+  WebContentsCloseHandlerTest(const WebContentsCloseHandlerTest&) = delete;
+  WebContentsCloseHandlerTest& operator=(const WebContentsCloseHandlerTest&) =
+      delete;
+
   ~WebContentsCloseHandlerTest() override {}
 
  protected:
@@ -55,9 +63,6 @@ class WebContentsCloseHandlerTest : public testing::Test {
 
   MockWebContentsCloseHandlerDelegate close_handler_delegate_;
   WebContentsCloseHandler close_handler_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(WebContentsCloseHandlerTest);
 };
 
 // Verifies ActiveTabChanged() sends the right functions to the delegate.

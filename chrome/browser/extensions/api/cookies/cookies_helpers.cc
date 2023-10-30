@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -38,6 +38,28 @@ namespace GetAll = extensions::api::cookies::GetAll;
 
 namespace extensions {
 
+namespace {
+
+void AppendCookieToVectorIfMatchAndHasHostPermission(
+    const net::CanonicalCookie cookie,
+    GetAll::Params::Details* details,
+    const Extension* extension,
+    std::vector<Cookie>* match_vector) {
+  // Ignore any cookie whose domain doesn't match the extension's
+  // host permissions.
+  GURL cookie_domain_url = cookies_helpers::GetURLFromCanonicalCookie(cookie);
+  if (!extension->permissions_data()->HasHostPermission(cookie_domain_url))
+    return;
+  // Filter the cookie using the match filter.
+  cookies_helpers::MatchFilter filter(details);
+  if (filter.MatchesCookie(cookie)) {
+    match_vector->push_back(
+        cookies_helpers::CreateCookie(cookie, *details->store_id));
+  }
+}
+
+}  // namespace
+
 namespace cookies_helpers {
 
 static const char kOriginalProfileStoreId[] = "0";
@@ -49,12 +71,12 @@ Profile* ChooseProfileFromStoreId(const std::string& store_id,
   DCHECK(profile);
   bool allow_original = !profile->IsOffTheRecord();
   bool allow_incognito = profile->IsOffTheRecord() ||
-      (include_incognito && profile->HasOffTheRecordProfile());
+                         (include_incognito && profile->HasPrimaryOTRProfile());
   if (store_id == kOriginalProfileStoreId && allow_original)
     return profile->GetOriginalProfile();
   if (store_id == kOffTheRecordProfileStoreId && allow_incognito)
-    return profile->GetOffTheRecordProfile();
-  return NULL;
+    return profile->GetPrimaryOTRProfile(/*create_if_needed=*/true);
+  return nullptr;
 }
 
 const char* GetStoreIdFromProfile(Profile* profile) {
@@ -86,7 +108,6 @@ Cookie CreateCookie(const net::CanonicalCookie& canonical_cookie,
       cookie.same_site = api::cookies::SAME_SITE_STATUS_NO_RESTRICTION;
       break;
     case net::CookieSameSite::LAX_MODE:
-    case net::CookieSameSite::EXTENDED_MODE:
       cookie.same_site = api::cookies::SAME_SITE_STATUS_LAX;
       break;
     case net::CookieSameSite::STRICT_MODE:
@@ -104,7 +125,7 @@ Cookie CreateCookie(const net::CanonicalCookie& canonical_cookie,
         !std::isfinite(expiration_date)) {
       expiration_date = std::numeric_limits<double>::max();
     }
-    cookie.expiration_date = std::make_unique<double>(expiration_date);
+    cookie.expiration_date = expiration_date;
   }
   cookie.store_id = store_id;
 
@@ -116,8 +137,10 @@ CookieStore CreateCookieStore(Profile* profile,
   DCHECK(profile);
   DCHECK(tab_ids);
   base::DictionaryValue dict;
-  dict.SetString(cookies_api_constants::kIdKey, GetStoreIdFromProfile(profile));
-  dict.Set(cookies_api_constants::kTabIdsKey, std::move(tab_ids));
+  dict.SetStringKey(cookies_api_constants::kIdKey,
+                    GetStoreIdFromProfile(profile));
+  dict.SetKey(cookies_api_constants::kTabIdsKey,
+              base::Value::FromUniquePtrValue(std::move(tab_ids)));
 
   CookieStore cookie_store;
   bool rv = CookieStore::Populate(dict, &cookie_store);
@@ -129,50 +152,49 @@ void GetCookieListFromManager(
     network::mojom::CookieManager* manager,
     const GURL& url,
     network::mojom::CookieManager::GetCookieListCallback callback) {
-  if (url.is_empty()) {
-    // GetAllCookies has a different callback signature than GetCookieList, but
-    // can be treated as the same, just returning no excluded cookies.
-    // |AddCookieStatusList| takes a |GetCookieListCallback| and returns a
-    // callback that calls the input callback with an empty excluded list.
-    manager->GetAllCookies(
-        net::cookie_util::AddCookieStatusList(std::move(callback)));
-  } else {
-    net::CookieOptions options;
-    options.set_include_httponly();
-    options.set_same_site_cookie_context(
-        net::CookieOptions::SameSiteCookieContext::SAME_SITE_STRICT);
-    options.set_do_not_update_access_time();
+  manager->GetCookieList(url, net::CookieOptions::MakeAllInclusive(),
+                         net::CookiePartitionKeyCollection::Todo(),
+                         std::move(callback));
+}
 
-    manager->GetCookieList(url, options, std::move(callback));
-  }
+void GetAllCookiesFromManager(
+    network::mojom::CookieManager* manager,
+    network::mojom::CookieManager::GetAllCookiesCallback callback) {
+  manager->GetAllCookies(std::move(callback));
 }
 
 GURL GetURLFromCanonicalCookie(const net::CanonicalCookie& cookie) {
-  const std::string& domain_key = cookie.Domain();
-  const std::string scheme =
-      cookie.IsSecure() ? url::kHttpsScheme : url::kHttpScheme;
-  const std::string host =
-      base::StartsWith(domain_key, ".", base::CompareCase::SENSITIVE)
-          ? domain_key.substr(1)
-          : domain_key;
-  return GURL(scheme + url::kStandardSchemeSeparator + host + "/");
+  // This is only ever called for CanonicalCookies that have come from a
+  // CookieStore, which means they should not have an empty domain. Only file
+  // cookies are allowed to have empty domains, and those are only permitted on
+  // Android, and hopefully not for much longer (see crbug.com/582985).
+  DCHECK(!cookie.Domain().empty());
+
+  return net::cookie_util::CookieOriginToURL(cookie.Domain(),
+                                             cookie.IsSecure());
 }
 
-void AppendMatchingCookiesToVector(const net::CookieList& all_cookies,
-                                   const GURL& url,
-                                   const GetAll::Params::Details* details,
-                                   const Extension* extension,
-                                   std::vector<Cookie>* match_vector) {
+void AppendMatchingCookiesFromCookieListToVector(
+    const net::CookieList& all_cookies,
+    GetAll::Params::Details* details,
+    const Extension* extension,
+    std::vector<Cookie>* match_vector) {
   for (const net::CanonicalCookie& cookie : all_cookies) {
-    // Ignore any cookie whose domain doesn't match the extension's
-    // host permissions.
-    GURL cookie_domain_url = GetURLFromCanonicalCookie(cookie);
-    if (!extension->permissions_data()->HasHostPermission(cookie_domain_url))
-      continue;
-    // Filter the cookie using the match filter.
-    cookies_helpers::MatchFilter filter(details);
-    if (filter.MatchesCookie(cookie))
-      match_vector->push_back(CreateCookie(cookie, *details->store_id));
+    AppendCookieToVectorIfMatchAndHasHostPermission(cookie, details, extension,
+                                                    match_vector);
+  }
+}
+
+void AppendMatchingCookiesFromCookieAccessResultListToVector(
+    const net::CookieAccessResultList& all_cookies_with_access_result,
+    GetAll::Params::Details* details,
+    const Extension* extension,
+    std::vector<Cookie>* match_vector) {
+  for (const net::CookieWithAccessResult& cookie_with_access_result :
+       all_cookies_with_access_result) {
+    const net::CanonicalCookie& cookie = cookie_with_access_result.cookie;
+    AppendCookieToVectorIfMatchAndHasHostPermission(cookie, details, extension,
+                                                    match_vector);
   }
 }
 
@@ -181,38 +203,36 @@ void AppendToTabIdList(Browser* browser, base::ListValue* tab_ids) {
   DCHECK(tab_ids);
   TabStripModel* tab_strip = browser->tab_strip_model();
   for (int i = 0; i < tab_strip->count(); ++i) {
-    tab_ids->AppendInteger(
-        ExtensionTabUtil::GetTabId(tab_strip->GetWebContentsAt(i)));
+    tab_ids->Append(ExtensionTabUtil::GetTabId(tab_strip->GetWebContentsAt(i)));
   }
 }
 
-MatchFilter::MatchFilter(const GetAll::Params::Details* details)
-    : details_(details) {
+MatchFilter::MatchFilter(GetAll::Params::Details* details) : details_(details) {
   DCHECK(details_);
 }
 
 bool MatchFilter::MatchesCookie(
     const net::CanonicalCookie& cookie) {
-  if (details_->name.get() && *details_->name != cookie.Name())
+  if (details_->name && *details_->name != cookie.Name())
     return false;
 
   if (!MatchesDomain(cookie.Domain()))
     return false;
 
-  if (details_->path.get() && *details_->path != cookie.Path())
+  if (details_->path && *details_->path != cookie.Path())
     return false;
 
-  if (details_->secure.get() && *details_->secure != cookie.IsSecure())
+  if (details_->secure && *details_->secure != cookie.IsSecure())
     return false;
 
-  if (details_->session.get() && *details_->session != !cookie.IsPersistent())
+  if (details_->session && *details_->session != !cookie.IsPersistent())
     return false;
 
   return true;
 }
 
 bool MatchFilter::MatchesDomain(const std::string& domain) {
-  if (!details_->domain.get())
+  if (!details_->domain)
     return true;
 
   // Add a leading '.' character to the filter domain if it doesn't exist.

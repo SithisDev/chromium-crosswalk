@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 
 #include <unordered_set>
 
+#include "base/containers/contains.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_constants.h"
@@ -731,7 +731,7 @@ int64_t MetadataDatabaseIndexOnDisk::DeleteTrackerIndexes() {
   };
 
   int64_t num_deletes_before = db_->num_deletes();
-  for (size_t i = 0; i < base::size(kIndexPrefixes); ++i)
+  for (size_t i = 0; i < std::size(kIndexPrefixes); ++i)
     DeleteKeyStartsWith(kIndexPrefixes[i]);
   num_dirty_trackers_ = 0;
   return db_->num_deletes() - num_deletes_before;

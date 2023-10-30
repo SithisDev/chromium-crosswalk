@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,15 +15,6 @@ class WebMouseWheelEvent;
 namespace ui {
 struct DidOverscrollParams;
 }
-
-@class HistorySwiper;
-@protocol HistorySwiperDelegate
-// Return NO from this method if the view/render_widget_host should not
-// allow history swiping.
-- (BOOL)shouldAllowHistorySwiping;
-// The history overlay is added to the view returned from this method.
-- (NSView*)viewThatWantsHistoryOverlay;
-@end
 
 namespace history_swiper {
 enum NavigationDirection {
@@ -58,6 +49,22 @@ enum RecognitionState {
   kCancelled,
 };
 } // history_swiper
+
+@class HistorySwiper;
+@protocol HistorySwiperDelegate
+// Return NO from this method if the view/render_widget_host should not
+// allow history swiping.
+- (BOOL)shouldAllowHistorySwiping;
+// The history overlay is added to the view returned from this method.
+- (NSView*)viewThatWantsHistoryOverlay;
+// Check whether can navigate in direction.
+- (BOOL)canNavigateInDirection:(history_swiper::NavigationDirection)direction
+                      onWindow:(NSWindow*)window;
+// Navigate in direction.
+- (void)navigateInDirection:(history_swiper::NavigationDirection)direction
+                   onWindow:(NSWindow*)window;
+
+@end
 
 // History swiping is the feature wherein a horizontal 2-finger swipe of of a
 // trackpad causes the browser to navigate forwards or backwards.
@@ -134,29 +141,29 @@ enum RecognitionState {
 @interface HistorySwiper : NSObject {
  @private
   // This controller will exist if and only if the UI is in history swipe mode.
-  HistoryOverlayController* historyOverlay_;
+  HistoryOverlayController* _historyOverlay;
   // The location of the fingers when the gesture started.
-  NSPoint gestureStartPoint_;
+  NSPoint _gestureStartPoint;
   // The current location of the fingers in the gesture.
-  NSPoint gestureCurrentPoint_;
+  NSPoint _gestureCurrentPoint;
   // The total Y distance moved since the beginning of the gesture.
-  CGFloat gestureTotalY_;
+  CGFloat _gestureTotalY;
   // A flag that indicates that there is an ongoing gesture. Only used to
   // determine whether swipe events are coming from a Magic Mouse.
-  BOOL inGesture_;
+  BOOL _inGesture;
   // A flag that indicates that Chrome is receiving a series of touch events.
-  BOOL receivingTouches_;
+  BOOL _receivingTouches;
   // Each time a new gesture begins, we must get a new start point.
   // This ivar determines whether the start point is valid.
-  int gestureStartPointValid_;
+  int _gestureStartPointValid;
 
   // The user's intended direction with the history swipe. Set during the
   // transition from kPending -> kPotential.
-  history_swiper::NavigationDirection historySwipeDirection_;
+  history_swiper::NavigationDirection _historySwipeDirection;
 
   // Whether the history swipe gesture has its direction inverted. Set during
   // the transition from kPending -> kPotential.
-  BOOL historySwipeDirectionInverted_;
+  BOOL _historySwipeDirectionInverted;
 
   // Whether:
   //  1) When wheel gestures are disabled if the wheel event with phase
@@ -164,29 +171,29 @@ enum RecognitionState {
   //  2) When wheel gestures are enabled and if the first gesture
   //     scroll was not consumed by the renderer.
   // This variables defaults to NO for new gestures.
-  BOOL firstScrollUnconsumed_;
+  BOOL _firstScrollUnconsumed;
 
   // Whether the overscroll has been triggered by renderer and is not disabled
   // by CSSOverscrollBehavior.
-  BOOL overscrollTriggeredByRenderer_;
+  BOOL _overscrollTriggeredByRenderer;
 
   // Whether we have received a gesture scroll begin and are awiting on the
   // first gesture scroll update to deteremine of the event was consumed by
   // the renderer.
-  BOOL waitingForFirstGestureScroll_;
+  BOOL _waitingForFirstGestureScroll;
 
-  history_swiper::RecognitionState recognitionState_;
+  history_swiper::RecognitionState _recognitionState;
 
-  id<HistorySwiperDelegate> delegate_;
+  id<HistorySwiperDelegate> _delegate;
 
   // Cumulative scroll delta since scroll gesture start. Only valid during
   // scroll gesture handling. Only used to trigger Magic Mouse history swiping.
-  NSSize mouseScrollDelta_;
+  NSSize _mouseScrollDelta;
 }
 
 // Many event types are passed in, but the only one we care about is
-// NSScrollWheel. We look at the phase to determine whether to trigger history
-// swiping
+// NSEventTypeScrollWheel. We look at the phase to determine whether to trigger
+// history swiping
 - (BOOL)handleEvent:(NSEvent*)event;
 - (void)rendererHandledWheelEvent:(const blink::WebMouseWheelEvent&)event
                          consumed:(BOOL)consumed;
@@ -221,7 +228,7 @@ enum RecognitionState {
 - (void)endGestureWithEvent:(NSEvent*)event;
 
 // Designated initializer.
-- (id)initWithDelegate:(id<HistorySwiperDelegate>)delegate;
+- (instancetype)initWithDelegate:(id<HistorySwiperDelegate>)delegate;
 
 @property (nonatomic, assign) id<HistorySwiperDelegate> delegate;
 

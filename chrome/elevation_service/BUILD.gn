@@ -1,16 +1,15 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//build/config/chrome_build.gni")
+import("//build/config/ui.gni")
 import("//build/toolchain/win/midl.gni")
 import("//chrome/process_version_rc_template.gni")
 import("//testing/test.gni")
 
 midl("elevation_service_idl") {
-  sources = [
-    "elevation_service_idl.idl",
-  ]
+  sources = [ "elevation_service_idl.idl" ]
 
   writes_tlb = true
 }
@@ -39,7 +38,10 @@ executable("elevation_service") {
     "elevation_service.rc",
   ]
 
-  configs -= [ "//build/config/win:console" ]
+  configs -= [
+    "//build/config/compiler:cet_shadow_stack",
+    "//build/config/win:console",
+  ]
   configs += [ "//build/config/win:windowed" ]
   configs += [ ":no-missing-braces" ]
   configs -= [ "//build/config/win:winver" ]
@@ -50,45 +52,55 @@ executable("elevation_service") {
     ":version_resources",
     "//base",
     "//build/win:default_exe_manifest",
+    "//chrome/install_static:install_static_util",
     "//chrome/install_static:primary_module",
     "//components/crx_file",
     "//third_party/zlib/google:zip",
   ]
 }
 
+source_set("public_headers") {
+  sources = [ "elevator.h" ]
+
+  deps = [ "//base" ]
+
+  public_deps = [ ":elevation_service_idl" ]
+}
+
 source_set("lib") {
   visibility = [ ":*" ]
 
-  public = [
-    "elevated_recovery_impl.h",
-    "elevator.h",
-    "service_main.h",
-  ]
-
   sources = [
+    "caller_validation.cc",
+    "caller_validation.h",
     "elevated_recovery_impl.cc",
+    "elevated_recovery_impl.h",
     "elevator.cc",
     "service_main.cc",
+    "service_main.h",
   ]
 
   configs += [ ":no-missing-braces" ]
   configs -= [ "//build/config/win:winver" ]
   configs += [ ":winver" ]
 
-  public_deps = [
-    ":elevation_service_idl",
+  deps = [
     "//base",
+    "//chrome/install_static:install_static_util",
+    "//components/crx_file:crx_file",
+    "//third_party/zlib/google:zip",
   ]
 
-  deps = [
-    "//chrome/install_static:install_static_util",
+  public_deps = [ ":public_headers" ]
+
+  libs = [
+    "crypt32.lib",
+    "rpcrt4.lib",
   ]
 }
 
 process_version_rc_template("version_resources") {
-  sources = [
-    "elevation_service_exe.ver",
-  ]
+  sources = [ "elevation_service_exe.ver" ]
   output = "$target_gen_dir/elevation_service_exe.rc"
 }
 
@@ -98,15 +110,19 @@ copy("elevation_service_unittests_files") {
     "//components/test/data/crx_file/valid_publisher.crx3",
     "//components/test/data/update_client/ChromeRecovery.crx3",
   ]
-  outputs = [
-    "$root_out_dir/elevated_recovery_unittest/{{source_file_part}}",
-  ]
+  outputs = [ "$root_out_dir/elevated_recovery_unittest/{{source_file_part}}" ]
 }
 
 test("elevation_service_unittests") {
+  use_xvfb = use_xvfb_in_this_config
+
   sources = [
+    "caller_validation_unittest.cc",
     "elevated_recovery_unittest.cc",
+    "elevator_unittest.cc",
     "run_all_unittests.cc",
+    "scoped_mock_context.cc",
+    "scoped_mock_context.h",
     "service_main_unittest.cc",
   ]
 
@@ -117,6 +133,7 @@ test("elevation_service_unittests") {
     ":lib",
     "//base",
     "//base/test:test_support",
+    "//chrome/elevation_service:elevation_service_idl",
     "//chrome/install_static:install_static_util",
     "//chrome/install_static/test:test_support",
     "//components/crx_file",

@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Signing Model Objects
@@ -6,7 +6,38 @@
 This module contains classes that encapsulate data about the signing process.
 """
 
+import enum
 import os.path
+import re
+import string
+
+from . import commands
+
+
+def _get_identity_hash(identity):
+    """Returns a string of the SHA-1 hash of a specified keychain identity.
+
+    Args:
+        identity: A string specifying the identity.
+
+    Returns:
+        A string with the hash, with a-f in lower case.
+
+    Raises:
+        ValueError: If the identity cannot be found.
+    """
+    if len(identity) == 40 and all(ch in string.hexdigits for ch in identity):
+        return identity.lower()
+
+    command = ['security', 'find-certificate', '-a', '-c', identity, '-Z']
+    output = commands.run_command_output(command)
+
+    hash_match = re.search(
+        b'^SHA-1 hash: ([0-9A-Fa-f]{40})$', output, flags=re.MULTILINE)
+    if not hash_match:
+        raise ValueError('Cannot find identity', identity)
+
+    return hash_match.group(1).decode('utf-8').lower()
 
 
 class CodeSignedProduct(object):
@@ -29,8 +60,7 @@ class CodeSignedProduct(object):
             identifier: The unique identifier set when code signing. This is
                 only explicitly passed with the `--identifier` flag if
                 |sign_with_identifier| is True.
-            options: Options flags to pass to `codesign --options`, from
-                |CodeSignOptions|.
+            options: |CodeSignOptions| flags to pass to `codesign --options`.
             requirements: String for additional `--requirements` to pass to the
                 `codesign` command. These are joined with a space to the
                 |config.CodeSignConfig.codesign_requirements_basic| string. See
@@ -44,20 +74,20 @@ class CodeSignedProduct(object):
                 infer the identifier itself.
             entitlements: File name of the entitlements file to sign the product
                 with. The file should reside in the |Paths.packaging_dir|.
-            verify_options: Flags to pass to `codesign --verify`, from
-                |VerifyOptions|.
+            verify_options: |VerifyOptions| flags to pass to `codesign
+                --verify`.
         """
         self.path = path
         self.identifier = identifier
-        if not CodeSignOptions.valid(options):
-            raise ValueError('Invalid CodeSignOptions: {}'.format(options))
+        if options and not isinstance(options, CodeSignOptions):
+            raise ValueError('Must be a CodeSignOptions')
         self.options = options
         self.requirements = requirements
         self.identifier_requirement = identifier_requirement
         self.sign_with_identifier = sign_with_identifier
         self.entitlements = entitlements
-        if not VerifyOptions.valid(verify_options):
-            raise ValueError('Invalid VerifyOptions: {}'.format(verify_options))
+        if verify_options and not isinstance(verify_options, VerifyOptions):
+            raise ValueError('Must be a VerifyOptions')
         self.verify_options = verify_options
 
     def requirements_string(self, config):
@@ -75,7 +105,12 @@ class CodeSignedProduct(object):
         # a hash to the identifier, which would violate the
         # identifier_requirement and most other requirements that would be
         # specified.
-        if config.identity == '-':
+        #
+        # Similarly, if no explicit requirements are available, let codesign
+        # --sign use its defaults, which should be appropriate in any case where
+        # requirement customization is unnecessary.
+        if config.identity == '-' or (not self.requirements and
+                                      not config.codesign_requirements_basic):
             return ''
 
         reqs = []
@@ -93,65 +128,110 @@ class CodeSignedProduct(object):
                 'options={0.options}, path={0.path})'.format(self)
 
 
-def make_enum(class_name, options):
-    """Makes a new class type for an enum.
+class VerifyOptions(enum.Flag):
+    """Enum for the options that can be specified when validating the results of
+    code signing.
 
-    Args:
-        class_name: Name of the new type to make.
-        options: A dictionary of enum options to use. The keys will become
-            attributes on the class, and the values will be wrapped in a tuple
-            so that the options can be joined together.
-
-    Returns:
-        A new class for the enum.
+    These options are passed to `codesign --verify` after the
+    |CodeSignedProduct| has been signed.
     """
-    attrs = {}
+    DEEP = enum.auto()
+    STRICT = enum.auto()
+    NO_STRICT = enum.auto()
+    IGNORE_RESOURCES = enum.auto()
+
+    def to_list(self):
+        result = []
+        values = {
+            self.DEEP: '--deep',
+            self.STRICT: '--strict',
+            self.NO_STRICT: '--no-strict',
+            self.IGNORE_RESOURCES: '--ignore-resources',
+        }
+
+        for key, value in values.items():
+            if key & self:
+                result.append(value)
+
+        return sorted(result)
+
+
+class CodeSignOptions(enum.Flag):
+    """Enum for the options that can be specified when signing the code.
+
+    These options are passed to `codesign --sign --options`.
+    """
+    RESTRICT = enum.auto()
+    LIBRARY_VALIDATION = enum.auto()
+    HARDENED_RUNTIME = enum.auto()
+    KILL = enum.auto()
+    # Specify the components of HARDENED_RUNTIME that are also available on
+    # older macOS versions.
+    FULL_HARDENED_RUNTIME_OPTIONS = (
+        RESTRICT | LIBRARY_VALIDATION | HARDENED_RUNTIME | KILL)
+
+    def to_comma_delimited_string(self):
+        result = []
+        values = {
+            self.RESTRICT: 'restrict',
+            self.LIBRARY_VALIDATION: 'library',
+            self.HARDENED_RUNTIME: 'runtime',
+            self.KILL: 'kill',
+        }
+
+        for key, value in values.items():
+            if key & self:
+                result.append(value)
+
+        return ','.join(sorted(result))
+
+
+class NotarizeAndStapleLevel(enum.Enum):
+    """An enum specifying the level of notarization and stapling to do.
+
+    `NONE` means no notarization tasks should be performed.
+
+    `NOWAIT` means to submit the signed application and packaging to Apple for
+    notarization, but not to wait for a reply.
+
+    `WAIT_NOSTAPLE` means to submit the signed application and packaging to
+    Apple for notarization, and wait for a reply, but not to staple the
+    resulting notarization ticket.
+
+    `STAPLE` means to submit the signed application and packaging to Apple for
+    notarization, wait for a reply, and staple the resulting notarization
+    ticket.
+    """
+    NONE = 0
+    NOWAIT = 1
+    WAIT_NOSTAPLE = 2
+    STAPLE = 3
+
+    def should_notarize(self):
+        return self.value > self.NONE.value
+
+    def should_wait(self):
+        return self.value > self.NOWAIT.value
+
+    def should_staple(self):
+        return self.value > self.WAIT_NOSTAPLE.value
 
     @classmethod
-    def valid(cls, opts_to_check):
-        """Tests if the specified |opts_to_check| are valid.
+    def valid_strings(cls):
+        return tuple(level.name.lower().replace('_', '-') for level in cls)
 
-        Args:
-            options: Iterable of option strings.
-
-        Returns:
-            True if all the options are valid, False if otherwise.
-        """
-        if opts_to_check is None:
-            return True
-        valid_values = options.values()
-        return all([option in valid_values for option in opts_to_check])
-
-    attrs['valid'] = valid
-
-    for name, value in options.items():
-        assert type(name) is str
-        assert type(value) is str
-        attrs[name] = (value,)
-
-    return type(class_name, (object,), attrs)
+    @classmethod
+    def from_string(cls, str):
+        return cls[str.upper().replace('-', '_')]
 
 
-"""Enum for the options that can be specified when validating the results of
-code signing.
+class NotarizationTool(enum.Enum):
+    """The tool to use for submitting notarization requests."""
+    ALTOOL = 'altool'
+    NOTARYTOOL = 'notarytool'
 
-These options are passed to `codesign --verify` after the
-|CodeSignedProduct| has been signed.
-"""
-VerifyOptions = make_enum(
-    'signing.model.VerifyOptions', {
-        'DEEP': '--deep',
-        'NO_STRICT': '--no-strict',
-        'IGNORE_RESOURCES': '--ignore-resources',
-    })
-
-CodeSignOptions = make_enum(
-    'signing.model.CodeSignOptions', {
-        'RESTRICT': 'restrict',
-        'LIBRARY_VALIDATION': 'library',
-        'HARDENED_RUNTIME': 'runtime',
-        'KILL': 'kill',
-    })
+    def __str__(self):
+        return self.value
 
 
 class Distribution(object):
@@ -166,10 +246,13 @@ class Distribution(object):
                  channel=None,
                  branding_code=None,
                  app_name_fragment=None,
-                 dmg_name_fragment=None,
+                 packaging_name_fragment=None,
                  product_dirname=None,
                  creator_code=None,
-                 channel_customize=False):
+                 channel_customize=False,
+                 package_as_dmg=True,
+                 package_as_pkg=False,
+                 inflation_kilobytes=0):
         """Creates a new Distribution object. All arguments are optional.
 
         Args:
@@ -179,8 +262,8 @@ class Distribution(object):
             app_name_fragment: If present, this string fragment is appended to
                 the |config.CodeSignConfig.app_product|. This renames the binary
                 and outer app bundle.
-            dmg_name_fragment: If present, this is appended to the
-                |config.CodeSignConfig.dmg_basename| to help differentiate
+            packaging_name_fragment: If present, this is appended to the
+                |config.CodeSignConfig.packaging_basename| to help differentiate
                 different |branding_code|s.
             product_dirname: If present, this string value is set in the app's
                 Info.plist with the key "CrProductDirName". This key influences
@@ -195,14 +278,46 @@ class Distribution(object):
                   |config.CodeSignConfig.base_bundle_id|.
                 - The product will be renamed with |app_name_fragment|.
                 - Different assets will be used for icons in the app.
+            package_as_dmg: If True, then a .dmg file will be created containing
+                the product.
+            package_as_pkg: If True, then a .pkg file will be created containing
+                the product.
+            inflation_kilobytes: If non-zero, a blob of this size will be
+                inserted into the DMG. Incompatible with package_as_pkg = True.
         """
+        if channel_customize:
+            # Side-by-side channels must have a distinct names and creator
+            # codes, as well as keep their user data in separate locations.
+            assert channel
+            assert app_name_fragment
+            assert product_dirname
+            assert creator_code
+
         self.channel = channel
         self.branding_code = branding_code
         self.app_name_fragment = app_name_fragment
-        self.dmg_name_fragment = dmg_name_fragment
+        self.packaging_name_fragment = packaging_name_fragment
         self.product_dirname = product_dirname
         self.creator_code = creator_code
         self.channel_customize = channel_customize
+        self.package_as_dmg = package_as_dmg
+        self.package_as_pkg = package_as_pkg
+        self.inflation_kilobytes = inflation_kilobytes
+
+        # inflation_kilobytes are only inserted into DMGs
+        assert not self.inflation_kilobytes or self.package_as_dmg
+
+    def brandless_copy(self):
+        """Derives and returns a copy of this Distribution object, identical
+        except for not having a branding code.
+
+        This is useful in the case where a non-branded app bundle needs to be
+        created with otherwise the same configuration.
+        """
+        return Distribution(self.channel, None, self.app_name_fragment,
+                            self.packaging_name_fragment, self.product_dirname,
+                            self.creator_code, self.channel_customize,
+                            self.package_as_dmg, self.package_as_pkg)
 
     def to_config(self, base_config):
         """Produces a derived |config.CodeSignConfig| for the Distribution.
@@ -242,22 +357,35 @@ class Distribution(object):
 
             @property
             def provisioning_profile_basename(self):
-                profile = base_config.provisioning_profile_basename
-                if profile and this.channel_customize:
-                    return '{}_{}'.format(profile, this.app_name_fragment)
-                return profile
+                profile_basename = base_config.provisioning_profile_basename
+                if not profile_basename:
+                    return profile_basename
+
+                if this.channel_customize:
+                    profile_basename = '{}_{}'.format(profile_basename,
+                                                      this.app_name_fragment)
+                if base_config.identity:
+                    profile_basename = '{}.{}'.format(
+                        profile_basename,
+                        _get_identity_hash(base_config.identity))
+
+                return profile_basename
 
             @property
-            def dmg_basename(self):
-                if this.dmg_name_fragment:
+            def packaging_basename(self):
+                if this.packaging_name_fragment:
                     return '{}-{}-{}'.format(
                         self.app_product.replace(' ', ''), self.version,
-                        this.dmg_name_fragment)
-                return super(DistributionCodeSignConfig, self).dmg_basename
+                        this.packaging_name_fragment)
+                return super(DistributionCodeSignConfig,
+                             self).packaging_basename
 
         return DistributionCodeSignConfig(
-            base_config.identity, base_config.keychain, base_config.notary_user,
-            base_config.notary_password, base_config.notary_asc_provider)
+            **pick(base_config, ('identity', 'installer_identity',
+                                 'notary_user', 'notary_password',
+                                 'notary_asc_provider', 'notary_team_id',
+                                 'codesign_requirements_basic',
+                                 'notarization_tool')))
 
 
 class Paths(object):
@@ -269,9 +397,11 @@ class Paths(object):
     """
 
     def __init__(self, input, output, work):
-        self._input = input
-        self._output = output
+        self._input = os.path.abspath(input)
+        self._output = os.path.abspath(output)
         self._work = work
+        if self._work:
+            self._work = os.path.abspath(self._work)
 
     @property
     def input(self):
@@ -311,3 +441,25 @@ class Paths(object):
     def __repr__(self):
         return 'Paths(input={0.input}, output={0.output}, ' \
                 'work={0.work})'.format(self)
+
+
+def pick(o, keys):
+    """Returns a dictionary with the values of |o| from the keys specified
+    in |keys|.
+
+    Args:
+        o: object or dictionary, An object to take values from.
+        keys: list of string, Keys to pick from |o|.
+
+    Returns:
+        A new dictionary with keys from |keys| and values from |o|. Keys not
+        in |o| will be omitted.
+    """
+    d = {}
+    iterable = hasattr(o, '__getitem__')
+    for k in keys:
+        if hasattr(o, k):
+            d[k] = getattr(o, k)
+        elif iterable and k in o:
+            d[k] = o[k]
+    return d

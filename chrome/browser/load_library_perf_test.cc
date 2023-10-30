@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,9 @@
 #include "base/scoped_native_library.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "build/build_config.h"
 #include "media/media_buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "testing/perf/perf_test.h"
+#include "testing/perf/perf_result_reporter.h"
 #include "third_party/widevine/cdm/buildflags.h"
 #include "third_party/widevine/cdm/widevine_cdm_common.h"
 
@@ -27,25 +26,35 @@ namespace {
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
+constexpr char kMetricLibrarySizeBytes[] = "library_size";
+constexpr char kMetricTimeToLoadLibraryMs[] = "time_to_load_library";
+
+perf_test::PerfResultReporter SetUpReporter(const std::string& story) {
+  perf_test::PerfResultReporter reporter("", story);
+  reporter.RegisterImportantMetric(kMetricLibrarySizeBytes, "bytes");
+  reporter.RegisterImportantMetric(kMetricTimeToLoadLibraryMs, "ms");
+  return reporter;
+}
+
 // Measures the size (bytes) and time to load (sec) of a native library.
 // |library_relative_dir| is the relative path based on DIR_MODULE.
 void MeasureSizeAndTimeToLoadNativeLibrary(
     const base::FilePath& library_relative_dir,
     const base::FilePath& library_name) {
+  // External ClearKey is a loadable_module used only in tests, and the Widevine
+  // CDM is copied to the output directory. Both can be considered generated
+  // test data even though one is production code.
   base::FilePath output_dir;
-  ASSERT_TRUE(base::PathService::Get(base::DIR_MODULE, &output_dir));
+  ASSERT_TRUE(
+      base::PathService::Get(base::DIR_GEN_TEST_DATA_ROOT, &output_dir));
   output_dir = output_dir.Append(library_relative_dir);
   base::FilePath library_path = output_dir.Append(library_name);
   ASSERT_TRUE(base::PathExists(library_path)) << library_path.value();
 
   int64_t size = 0;
   ASSERT_TRUE(base::GetFileSize(library_path, &size));
-  perf_test::PrintResult("library_size",
-                         "",
-                         library_name.AsUTF8Unsafe(),
-                         static_cast<size_t>(size),
-                         "bytes",
-                         true);
+  auto reporter = SetUpReporter(library_name.AsUTF8Unsafe());
+  reporter.AddResult(kMetricLibrarySizeBytes, static_cast<size_t>(size));
 
   base::NativeLibraryLoadError error;
   base::TimeTicks start = base::TimeTicks::Now();
@@ -54,12 +63,7 @@ void MeasureSizeAndTimeToLoadNativeLibrary(
   double delta = (base::TimeTicks::Now() - start).InMillisecondsF();
   ASSERT_TRUE(native_library) << "Error loading library: " << error.ToString();
   base::UnloadNativeLibrary(native_library);
-  perf_test::PrintResult("time_to_load_library",
-                         "",
-                         library_name.AsUTF8Unsafe(),
-                         delta,
-                         "ms",
-                         true);
+  reporter.AddResult(kMetricTimeToLoadLibraryMs, delta);
 }
 
 void MeasureSizeAndTimeToLoadCdm(const std::string& cdm_base_dir,

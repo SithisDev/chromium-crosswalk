@@ -1,27 +1,26 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/offline_pages/offline_page_mhtml_archiver.h"
 
+#include <string>
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/strings/string16.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/offline_pages/offline_page_utils.h"
 #include "components/offline_pages/core/archive_validator.h"
 #include "components/offline_pages/core/model/offline_page_model_utils.h"
 #include "components/offline_pages/core/offline_clock.h"
-#include "components/offline_pages/core/offline_page_feature.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/mhtml_generation_params.h"
@@ -29,13 +28,14 @@
 
 namespace offline_pages {
 namespace {
+
 void DeleteFileOnFileThread(const base::FilePath& file_path,
-                            const base::Closure& callback) {
-  base::PostTaskWithTraitsAndReply(
+                            base::OnceClosure callback) {
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-      base::BindOnce(base::IgnoreResult(&base::DeleteFile), file_path,
-                     false /* recursive */),
-      callback);
+      base::GetDeleteFileCallback(
+          file_path, base::OnceCallback<void(bool)>(base::DoNothing())
+                         .Then(std::move(callback))));
 }
 
 // Compute a SHA256 digest using a background thread. The computed digest will
@@ -44,7 +44,7 @@ void DeleteFileOnFileThread(const base::FilePath& file_path,
 void ComputeDigestOnFileThread(
     const base::FilePath& file_path,
     base::OnceCallback<void(const std::string&)> callback) {
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&ArchiveValidator::ComputeDigest, file_path),
       std::move(callback));
@@ -52,8 +52,7 @@ void ComputeDigestOnFileThread(
 }  // namespace
 
 // static
-OfflinePageMHTMLArchiver::OfflinePageMHTMLArchiver()
-    : weak_ptr_factory_(this) {}
+OfflinePageMHTMLArchiver::OfflinePageMHTMLArchiver() {}
 
 OfflinePageMHTMLArchiver::~OfflinePageMHTMLArchiver() {
 }
@@ -93,7 +92,7 @@ void OfflinePageMHTMLArchiver::GenerateMHTML(
   }
 
   GURL url(web_contents->GetLastCommittedURL());
-  base::string16 title(web_contents->GetTitle());
+  std::u16string title(web_contents->GetTitle());
   base::FilePath file_path(
       archives_dir.Append(base::GenerateGUID())
           .AddExtension(OfflinePageUtils::kMHTMLExtension));
@@ -102,9 +101,8 @@ void OfflinePageMHTMLArchiver::GenerateMHTML(
   params.remove_popup_overlay = create_archive_params.remove_popup_overlay;
   params.use_page_problem_detectors =
       create_archive_params.use_page_problem_detectors;
-  params.compute_contents_hash = IsOnTheFlyMhtmlHashComputationEnabled();
 
-  web_contents->GenerateMHTML(
+  web_contents->GenerateMHTMLWithResult(
       params,
       base::BindOnce(&OfflinePageMHTMLArchiver::OnGenerateMHTMLDone,
                      weak_ptr_factory_.GetWeakPtr(), url, file_path, title,
@@ -114,11 +112,11 @@ void OfflinePageMHTMLArchiver::GenerateMHTML(
 void OfflinePageMHTMLArchiver::OnGenerateMHTMLDone(
     const GURL& url,
     const base::FilePath& file_path,
-    const base::string16& title,
+    const std::u16string& title,
     const std::string& name_space,
     base::Time mhtml_start_time,
-    int64_t file_size) {
-  if (file_size < 0) {
+    const content::MHTMLGenerationResult& result) {
+  if (result.file_size < 0) {
     DeleteFileAndReportFailure(file_path,
                                ArchiverResult::ERROR_ARCHIVE_CREATION_FAILED);
     return;
@@ -129,17 +127,23 @@ void OfflinePageMHTMLArchiver::OnGenerateMHTMLDone(
       model_utils::AddHistogramSuffix(
           name_space, "OfflinePages.SavePage.CreateArchiveTime"),
       digest_start_time - mhtml_start_time);
-  ComputeDigestOnFileThread(
-      file_path,
-      base::BindOnce(&OfflinePageMHTMLArchiver::OnComputeDigestDone,
-                     weak_ptr_factory_.GetWeakPtr(), url, file_path, title,
-                     name_space, digest_start_time, file_size));
+
+  if (result.file_digest) {
+    OnComputeDigestDone(url, file_path, title, name_space, base::Time(),
+                        result.file_size, result.file_digest.value());
+  } else {
+    ComputeDigestOnFileThread(
+        file_path,
+        base::BindOnce(&OfflinePageMHTMLArchiver::OnComputeDigestDone,
+                       weak_ptr_factory_.GetWeakPtr(), url, file_path, title,
+                       name_space, digest_start_time, result.file_size));
+  }
 }
 
 void OfflinePageMHTMLArchiver::OnComputeDigestDone(
     const GURL& url,
     const base::FilePath& file_path,
-    const base::string16& title,
+    const std::u16string& title,
     const std::string& name_space,
     base::Time digest_start_time,
     int64_t file_size,
@@ -150,10 +154,12 @@ void OfflinePageMHTMLArchiver::OnComputeDigestDone(
     return;
   }
 
-  base::UmaHistogramTimes(
-      model_utils::AddHistogramSuffix(
-          name_space, "OfflinePages.SavePage.ComputeDigestTime"),
-      OfflineTimeNow() - digest_start_time);
+  if (!digest_start_time.is_null()) {
+    base::UmaHistogramTimes(
+        model_utils::AddHistogramSuffix(
+            name_space, "OfflinePages.SavePage.ComputeDigestTime"),
+        OfflineTimeNow() - digest_start_time);
+  }
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
@@ -164,9 +170,9 @@ void OfflinePageMHTMLArchiver::OnComputeDigestDone(
 void OfflinePageMHTMLArchiver::DeleteFileAndReportFailure(
     const base::FilePath& file_path,
     ArchiverResult result) {
-  DeleteFileOnFileThread(file_path,
-                         base::Bind(&OfflinePageMHTMLArchiver::ReportFailure,
-                                    weak_ptr_factory_.GetWeakPtr(), result));
+  DeleteFileOnFileThread(
+      file_path, base::BindOnce(&OfflinePageMHTMLArchiver::ReportFailure,
+                                weak_ptr_factory_.GetWeakPtr(), result));
 }
 
 void OfflinePageMHTMLArchiver::ReportFailure(ArchiverResult result) {
@@ -174,7 +180,7 @@ void OfflinePageMHTMLArchiver::ReportFailure(ArchiverResult result) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::BindOnce(std::move(callback_), result, GURL(), base::FilePath(),
-                     base::string16(), 0, std::string()));
+                     std::u16string(), 0, std::string()));
 }
 
 }  // namespace offline_pages

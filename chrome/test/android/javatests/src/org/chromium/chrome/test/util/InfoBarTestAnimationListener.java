@@ -1,12 +1,12 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.test.util;
 
 import org.chromium.base.test.util.CallbackHelper;
-import org.chromium.chrome.browser.infobar.InfoBarContainer.InfoBarAnimationListener;
-import org.chromium.chrome.browser.infobar.InfoBarContainerLayout.Item;
+import org.chromium.components.infobars.InfoBarAnimationListener;
+import org.chromium.components.infobars.InfoBarUiItem;
 
 import java.util.concurrent.TimeoutException;
 
@@ -47,22 +47,19 @@ public class InfoBarTestAnimationListener implements InfoBarAnimationListener {
     }
 
     @Override
-    public void notifyAllAnimationsFinished(Item frontInfoBar) {}
+    public void notifyAllAnimationsFinished(InfoBarUiItem frontInfoBar) {}
 
-    public void addInfoBarAnimationFinished(String msg)
-            throws InterruptedException, TimeoutException {
+    public void addInfoBarAnimationFinished(String msg) throws TimeoutException {
         mAddAnimationFinished.waitForCallback(msg, mAddCallCount);
         mAddCallCount++;
     }
 
-    public void swapInfoBarAnimationFinished(String msg)
-            throws InterruptedException, TimeoutException {
+    public void swapInfoBarAnimationFinished(String msg) throws TimeoutException {
         mSwapAnimationFinished.waitForCallback(msg, mSwapCallCount);
         mSwapCallCount++;
     }
 
-    public void removeInfoBarAnimationFinished(String msg)
-            throws InterruptedException, TimeoutException {
+    public void removeInfoBarAnimationFinished(String msg) throws TimeoutException {
         mRemoveAnimationFinished.waitForCallback(msg, mRemoveCallCount);
         mRemoveCallCount++;
     }

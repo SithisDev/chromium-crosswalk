@@ -1,28 +1,31 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSION_FUNCTION_DETAILS_H_
 #define CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSION_FUNCTION_DETAILS_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "ui/gfx/native_widget_types.h"
 
 class Browser;
-class Profile;
-class UIThreadExtensionFunction;
+class ExtensionFunction;
 
-// Provides Chrome-specific details to UIThreadExtensionFunction
+// Provides Chrome-specific details to ExtensionFunction
 // implementations.
 class ChromeExtensionFunctionDetails {
  public:
   // Constructs a new ChromeExtensionFunctionDetails instance for |function|.
   // This instance does not own |function|. |function| must outlive this
   // instance.
-  explicit ChromeExtensionFunctionDetails(UIThreadExtensionFunction* function);
-  ~ChromeExtensionFunctionDetails();
+  explicit ChromeExtensionFunctionDetails(ExtensionFunction* function);
 
-  Profile* GetProfile() const;
+  ChromeExtensionFunctionDetails(const ChromeExtensionFunctionDetails&) =
+      delete;
+  ChromeExtensionFunctionDetails& operator=(
+      const ChromeExtensionFunctionDetails&) = delete;
+
+  ~ChromeExtensionFunctionDetails();
 
   // Gets the "current" browser, if any.
   //
@@ -55,16 +58,14 @@ class ChromeExtensionFunctionDetails {
   // - A browser with the same profile
   gfx::NativeWindow GetNativeWindowForUI();
 
-  // Returns a pointer to the associated UIThreadExtensionFunction
-  UIThreadExtensionFunction* function() { return function_; }
-  const UIThreadExtensionFunction* function() const { return function_; }
+  // Returns a pointer to the associated ExtensionFunction
+  ExtensionFunction* function() { return function_; }
+  const ExtensionFunction* function() const { return function_; }
 
  private:
   // The function for which these details have been created. Must outlive the
   // ChromeExtensionFunctionDetails instance.
-  UIThreadExtensionFunction* function_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeExtensionFunctionDetails);
+  raw_ptr<ExtensionFunction> function_;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSION_FUNCTION_DETAILS_H_

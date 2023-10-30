@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,28 +7,23 @@
 //     --gtest_filter=ExtensionContentSettingsApiTest.Incognito*
 //
 // Arguments: [Permission]
-// Example Arguments: "?allow"
+// Example Arguments: "allow"
 
 'use strict';
 
 var cs = chrome.contentSettings;
 
-var queryString = window.location.search;
-var givenPermission = queryString[0] === '?' ? queryString.substr(1)
-                                              : queryString;
-
+var givenPermission;
 
 var settings = [
   'cookies',
   'images',
   'javascript',
-  'plugins',
   'popups',
   'location',
   'notifications',
   'microphone',
   'camera',
-  'unsandboxedPlugins',
   'automaticDownloads'
 ];
 
@@ -39,6 +34,12 @@ var settings = [
 }
 
 chrome.test.runTests([
+  function setup() {
+    chrome.test.getConfig(function(config) {
+      givenPermission = config.customArg;
+      chrome.test.succeed();
+    });
+  },
   function setContentSettings() {
     settings.forEach(function(type) {
       cs[type].set({

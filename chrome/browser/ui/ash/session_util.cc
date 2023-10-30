@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "ash/public/cpp/multi_user_window_manager.h"
 #include "build/build_config.h"
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
@@ -70,7 +70,7 @@ bool CanShowWindowForUser(
 }
 
 gfx::ImageSkia GetAvatarImageForContext(content::BrowserContext* context) {
-  return GetAvatarImageForUser(chromeos::ProfileHelper::Get()->GetUserByProfile(
+  return GetAvatarImageForUser(ash::ProfileHelper::Get()->GetUserByProfile(
       Profile::FromBrowserContext(context)));
 }
 

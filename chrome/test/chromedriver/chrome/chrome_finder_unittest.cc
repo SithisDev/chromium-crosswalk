@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,11 +29,8 @@ void AssertFound(const base::FilePath& found,
                  const std::vector<base::FilePath>& rel_paths,
                  const std::vector<base::FilePath>& locations) {
   base::FilePath exe;
-  ASSERT_TRUE(internal::FindExe(
-      base::Bind(&PathIn, existing_paths),
-      rel_paths,
-      locations,
-      &exe));
+  ASSERT_TRUE(internal::FindExe(base::BindRepeating(&PathIn, existing_paths),
+                                rel_paths, locations, &exe));
   ASSERT_EQ(found, exe);
 }
 
@@ -95,11 +92,8 @@ TEST(ChromeFinderTest, FindExeNotFound) {
   std::vector<base::FilePath> locations;
   locations.push_back(found.DirName());
   base::FilePath exe;
-  ASSERT_FALSE(internal::FindExe(
-      base::Bind(&PathIn, existing_paths),
-      rel_paths,
-      locations,
-      &exe));
+  ASSERT_FALSE(internal::FindExe(base::BindRepeating(&PathIn, existing_paths),
+                                 rel_paths, locations, &exe));
 }
 
 TEST(ChromeFinderTest, NoCrash) {

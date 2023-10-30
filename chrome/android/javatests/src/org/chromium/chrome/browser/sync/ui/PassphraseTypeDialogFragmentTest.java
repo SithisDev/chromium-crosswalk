@@ -1,149 +1,178 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.sync.ui;
 
-import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
-import android.widget.CheckedTextView;
-import android.widget.HeaderViewListAdapter;
-import android.widget.ListView;
+import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.assertion.ViewAssertions.matches;
+import static androidx.test.espresso.matcher.ViewMatchers.Visibility.GONE;
+import static androidx.test.espresso.matcher.ViewMatchers.Visibility.VISIBLE;
+import static androidx.test.espresso.matcher.ViewMatchers.isChecked;
+import static androidx.test.espresso.matcher.ViewMatchers.isEnabled;
+import static androidx.test.espresso.matcher.ViewMatchers.isNotChecked;
+import static androidx.test.espresso.matcher.ViewMatchers.withEffectiveVisibility;
+import static androidx.test.espresso.matcher.ViewMatchers.withId;
 
-import org.junit.Assert;
+import static org.hamcrest.Matchers.not;
+
+import android.view.View;
+
+import androidx.test.filters.SmallTest;
+
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.FlakyTest;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.sync.SyncTestRule;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.components.sync.Passphrase;
+import org.chromium.chrome.test.util.ActivityTestUtils;
+import org.chromium.components.sync.PassphraseType;
+import org.chromium.ui.test.util.BlankUiTestActivityTestCase;
+import org.chromium.ui.test.util.RenderTestRule;
+
+import java.io.IOException;
 
 /**
  * Tests to make sure that PassphraseTypeDialogFragment presents the correct options.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
-public class PassphraseTypeDialogFragmentTest {
+public class PassphraseTypeDialogFragmentTest extends BlankUiTestActivityTestCase {
     @Rule
-    public SyncTestRule mSyncTestRule = new SyncTestRule();
+    public RenderTestRule mRenderTestRule =
+            RenderTestRule.Builder.withPublicCorpus()
+                    .setRevision(1)
+                    .setBugComponent(RenderTestRule.Component.SERVICES_SYNC)
+                    .build();
 
     private static final String TAG = "PassphraseTypeDialogFragmentTest";
-
-    private static final boolean ENABLED = true;
-    private static final boolean DISABLED = false;
-    private static final boolean CHECKED = true;
-    private static final boolean UNCHECKED = false;
-
-    private static class TypeOptions {
-        public final @Passphrase.Type int type;
-        public final boolean isEnabled;
-        public final boolean isChecked;
-        public TypeOptions(@Passphrase.Type int type, boolean isEnabled, boolean isChecked) {
-            this.type = type;
-            this.isEnabled = isEnabled;
-            this.isChecked = isChecked;
-        }
-    }
 
     private PassphraseTypeDialogFragment mTypeFragment;
 
     @Test
     @SmallTest
     @Feature({"Sync"})
-    public void testKeystoreEncryptionOptions() throws Exception {
-        createFragment(Passphrase.Type.KEYSTORE, true);
-        assertPassphraseTypeOptions(false,
-                new TypeOptions(Passphrase.Type.CUSTOM, ENABLED, UNCHECKED),
-                new TypeOptions(Passphrase.Type.KEYSTORE, ENABLED, CHECKED));
+    public void testKeystoreEncryptionOptions() {
+        createFragment(PassphraseType.KEYSTORE_PASSPHRASE, true);
+        onView(withId(R.id.explicit_passphrase_checkbox)).check(matches(isNotChecked()));
+        onView(withId(R.id.explicit_passphrase_checkbox)).check(matches(isEnabled()));
+        onView(withId(R.id.keystore_passphrase_checkbox)).check(matches(isChecked()));
+        onView(withId(R.id.keystore_passphrase_checkbox)).check(matches(isEnabled()));
+        onView(withId(R.id.reset_sync_link)).check(matches(withEffectiveVisibility(GONE)));
     }
 
     @Test
     @SmallTest
     @Feature({"Sync"})
-    public void testCustomEncryptionOptions() throws Exception {
-        createFragment(Passphrase.Type.CUSTOM, true);
-        assertPassphraseTypeOptions(true,
-                new TypeOptions(Passphrase.Type.CUSTOM, DISABLED, CHECKED),
-                new TypeOptions(Passphrase.Type.KEYSTORE, DISABLED, UNCHECKED));
-    }
-
-    /*
-     * @SmallTest
-     * @Feature({"Sync"})
-     */
-    @Test
-    @FlakyTest(message = "crbug.com/588050")
-    public void testFrozenImplicitEncryptionOptions() throws Exception {
-        createFragment(Passphrase.Type.FROZEN_IMPLICIT, true);
-        assertPassphraseTypeOptions(true,
-                new TypeOptions(Passphrase.Type.FROZEN_IMPLICIT, DISABLED, CHECKED),
-                new TypeOptions(Passphrase.Type.KEYSTORE, DISABLED, UNCHECKED));
+    public void testCustomEncryptionOptions() {
+        createFragment(PassphraseType.CUSTOM_PASSPHRASE, true);
+        onView(withId(R.id.explicit_passphrase_checkbox)).check(matches(isChecked()));
+        onView(withId(R.id.explicit_passphrase_checkbox)).check(matches(not(isEnabled())));
+        onView(withId(R.id.keystore_passphrase_checkbox)).check(matches(isNotChecked()));
+        onView(withId(R.id.keystore_passphrase_checkbox)).check(matches(not(isEnabled())));
+        onView(withId(R.id.reset_sync_link)).check(matches(withEffectiveVisibility(VISIBLE)));
     }
 
     @Test
     @SmallTest
     @Feature({"Sync"})
-    public void testImplicitEncryptionOptions() throws Exception {
-        createFragment(Passphrase.Type.IMPLICIT, true);
-        assertPassphraseTypeOptions(false,
-                new TypeOptions(Passphrase.Type.CUSTOM, ENABLED, UNCHECKED),
-                new TypeOptions(Passphrase.Type.IMPLICIT, ENABLED, CHECKED));
+    public void testFrozenImplicitEncryptionOptions() {
+        createFragment(PassphraseType.FROZEN_IMPLICIT_PASSPHRASE, true);
+        onView(withId(R.id.explicit_passphrase_checkbox)).check(matches(isChecked()));
+        onView(withId(R.id.explicit_passphrase_checkbox)).check(matches(not(isEnabled())));
+        onView(withId(R.id.keystore_passphrase_checkbox)).check(matches(isNotChecked()));
+        onView(withId(R.id.keystore_passphrase_checkbox)).check(matches(not(isEnabled())));
+        onView(withId(R.id.reset_sync_link)).check(matches(withEffectiveVisibility(VISIBLE)));
     }
 
     @Test
     @SmallTest
     @Feature({"Sync"})
-    public void testKeystoreEncryptionOptionsEncryptEverythingDisallowed() throws Exception {
-        createFragment(Passphrase.Type.KEYSTORE, false);
-        assertPassphraseTypeOptions(false,
-                new TypeOptions(Passphrase.Type.CUSTOM, DISABLED, UNCHECKED),
-                new TypeOptions(Passphrase.Type.KEYSTORE, ENABLED, CHECKED));
+    public void testImplicitEncryptionOptions() {
+        createFragment(PassphraseType.IMPLICIT_PASSPHRASE, true);
+        onView(withId(R.id.explicit_passphrase_checkbox)).check(matches(isNotChecked()));
+        onView(withId(R.id.explicit_passphrase_checkbox)).check(matches(isEnabled()));
+        onView(withId(R.id.keystore_passphrase_checkbox)).check(matches(isChecked()));
+        onView(withId(R.id.keystore_passphrase_checkbox)).check(matches(isEnabled()));
+        onView(withId(R.id.reset_sync_link)).check(matches(withEffectiveVisibility(GONE)));
     }
 
     @Test
     @SmallTest
     @Feature({"Sync"})
-    public void testImplicitEncryptionOptionsEncryptEverythingDisallowed() throws Exception {
-        createFragment(Passphrase.Type.IMPLICIT, false);
-        assertPassphraseTypeOptions(false,
-                new TypeOptions(Passphrase.Type.CUSTOM, DISABLED, UNCHECKED),
-                new TypeOptions(Passphrase.Type.IMPLICIT, ENABLED, CHECKED));
+    public void testKeystoreEncryptionOptionsCustomPassphraseDisallowed() {
+        createFragment(PassphraseType.KEYSTORE_PASSPHRASE, false);
+        onView(withId(R.id.explicit_passphrase_checkbox)).check(matches(isNotChecked()));
+        onView(withId(R.id.explicit_passphrase_checkbox)).check(matches(not(isEnabled())));
+        onView(withId(R.id.keystore_passphrase_checkbox)).check(matches(isChecked()));
+        onView(withId(R.id.keystore_passphrase_checkbox)).check(matches(isEnabled()));
+        onView(withId(R.id.reset_sync_link)).check(matches(withEffectiveVisibility(GONE)));
     }
 
-    public void createFragment(@Passphrase.Type int type, boolean isEncryptEverythingAllowed) {
-        mTypeFragment = PassphraseTypeDialogFragment.create(type, 0, isEncryptEverythingAllowed);
-        mTypeFragment.show(mSyncTestRule.getActivity().getSupportFragmentManager(), TAG);
-        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+    @Test
+    @SmallTest
+    @Feature({"Sync"})
+    public void testImplicitEncryptionOptionsCustomPassphraseDisallowed() {
+        createFragment(PassphraseType.IMPLICIT_PASSPHRASE, false);
+        onView(withId(R.id.explicit_passphrase_checkbox)).check(matches(isNotChecked()));
+        onView(withId(R.id.explicit_passphrase_checkbox)).check(matches(not(isEnabled())));
+        onView(withId(R.id.keystore_passphrase_checkbox)).check(matches(isChecked()));
+        onView(withId(R.id.keystore_passphrase_checkbox)).check(matches(isEnabled()));
+        onView(withId(R.id.reset_sync_link)).check(matches(withEffectiveVisibility(GONE)));
     }
 
-    public void assertPassphraseTypeOptions(boolean hasFooter, TypeOptions... optionsList) {
-        ListView listView =
-                (ListView) mTypeFragment.getDialog().findViewById(R.id.passphrase_type_list);
-        PassphraseTypeDialogFragment.Adapter adapter;
-        if (hasFooter) {
-            HeaderViewListAdapter headerAdapter = (HeaderViewListAdapter) listView.getAdapter();
-            adapter = (PassphraseTypeDialogFragment.Adapter) headerAdapter.getWrappedAdapter();
-        } else {
-            adapter = (PassphraseTypeDialogFragment.Adapter) listView.getAdapter();
-        }
+    @Test
+    @SmallTest
+    @Feature({"RenderTest", "Sync"})
+    public void testKeystorePassphraseRendering() throws IOException {
+        createFragment(PassphraseType.KEYSTORE_PASSPHRASE, true);
+        mRenderTestRule.render(getDialogView(), "keystore_passphrase");
+    }
 
-        Assert.assertEquals(
-                "Number of options doesn't match.", optionsList.length, adapter.getCount());
-        for (int i = 0; i < optionsList.length; i++) {
-            TypeOptions options = optionsList[i];
-            Assert.assertEquals(
-                    "Option " + i + " type is wrong.", options.type, adapter.getType(i));
-            CheckedTextView checkedView = (CheckedTextView) listView.getChildAt(i);
-            Assert.assertEquals("Option " + i + " enabled state is wrong.", options.isEnabled,
-                    checkedView.isEnabled());
-            Assert.assertEquals("Option " + i + " checked state is wrong.", options.isChecked,
-                    checkedView.isChecked());
-        }
+    @Test
+    @SmallTest
+    @Feature({"RenderTest", "Sync"})
+    public void testCustomPassphraseRendering() throws IOException {
+        createFragment(PassphraseType.CUSTOM_PASSPHRASE, true);
+        mRenderTestRule.render(getDialogView(), "custom_passphrase");
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"RenderTest", "Sync"})
+    public void testFrozenImplicitPassphraseRendering() throws IOException {
+        createFragment(PassphraseType.FROZEN_IMPLICIT_PASSPHRASE, true);
+        mRenderTestRule.render(getDialogView(), "frozen_implicit_passphrase");
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"RenderTest", "Sync"})
+    public void testImplicitPassphraseRendering() throws IOException {
+        createFragment(PassphraseType.IMPLICIT_PASSPHRASE, true);
+        mRenderTestRule.render(getDialogView(), "implicit_passphrase");
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"RenderTest", "Sync"})
+    public void testKeystorePassphraseWithCustomPassphraseDisallowedRendering() throws IOException {
+        createFragment(PassphraseType.KEYSTORE_PASSPHRASE, false);
+        mRenderTestRule.render(
+                getDialogView(), "keystore_passphrase_with_custom_passphrase_disallowed");
+    }
+
+    public void createFragment(@PassphraseType int type, boolean isCustomPassphraseAllowed) {
+        mTypeFragment = PassphraseTypeDialogFragment.create(type, isCustomPassphraseAllowed);
+        mTypeFragment.show(getActivity().getSupportFragmentManager(), TAG);
+        ActivityTestUtils.waitForFragment(getActivity(), TAG);
+    }
+
+    private View getDialogView() {
+        return mTypeFragment.getDialog().getWindow().getDecorView();
     }
 }

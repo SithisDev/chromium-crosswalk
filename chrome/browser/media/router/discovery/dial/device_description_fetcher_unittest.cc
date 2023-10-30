@@ -1,65 +1,72 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/media/router/discovery/dial/device_description_fetcher.h"
 #include "chrome/browser/media/router/discovery/dial/dial_device_data.h"
-#include "chrome/browser/media/router/test/test_helper.h"
-#include "net/url_request/test_url_fetcher_factory.h"
-#include "net/url_request/url_fetcher.h"
+#include "chrome/browser/media/router/test/provider_test_helpers.h"
+#include "net/base/ip_address.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
 using testing::HasSubstr;
+using testing::NiceMock;
 
 namespace media_router {
 
 class TestDeviceDescriptionFetcher : public DeviceDescriptionFetcher {
  public:
   TestDeviceDescriptionFetcher(
-      const GURL& device_description_url,
+      const DialDeviceData& device_data,
       base::OnceCallback<void(const DialDeviceDescriptionData&)> success_cb,
       base::OnceCallback<void(const std::string&)> error_cb,
       network::TestURLLoaderFactory* factory)
-      : DeviceDescriptionFetcher(device_description_url,
+      : DeviceDescriptionFetcher(device_data,
                                  std::move(success_cb),
                                  std::move(error_cb)),
         factory_(factory) {}
   ~TestDeviceDescriptionFetcher() override = default;
 
   void Start() override {
-    fetcher_ = std::make_unique<TestDialURLFetcher>(
+    fetcher_ = std::make_unique<NiceMock<TestDialURLFetcher>>(
         base::BindOnce(&DeviceDescriptionFetcher::ProcessResponse,
                        base::Unretained(this)),
         base::BindOnce(&DeviceDescriptionFetcher::ReportError,
                        base::Unretained(this)),
         factory_);
-    fetcher_->Get(device_description_url_);
+    fetcher_->Get(device_data_.device_description_url());
   }
 
  private:
-  std::vector<network::mojom::URLLoaderFactoryRequest> requests_;
-  network::TestURLLoaderFactory* const factory_;
+  const raw_ptr<network::TestURLLoaderFactory> factory_;
 };
 
 class DeviceDescriptionFetcherTest : public testing::Test {
  public:
   DeviceDescriptionFetcherTest() : url_("http://127.0.0.1/description.xml") {}
+  DeviceDescriptionFetcherTest(DeviceDescriptionFetcherTest&) = delete;
+  DeviceDescriptionFetcherTest& operator=(DeviceDescriptionFetcherTest&) =
+      delete;
 
   void StartRequest() {
+    DialDeviceData device_data;
+    device_data.set_device_description_url(url_);
+    device_data.set_ip_address(net::IPAddress::IPv4Localhost());
     description_fetcher_ = std::make_unique<TestDeviceDescriptionFetcher>(
-        url_,
+        device_data,
         base::BindOnce(&DeviceDescriptionFetcherTest::OnSuccess,
                        base::Unretained(this)),
         base::BindOnce(&DeviceDescriptionFetcherTest::OnError,
@@ -73,25 +80,22 @@ class DeviceDescriptionFetcherTest : public testing::Test {
   MOCK_METHOD1(OnSuccess, void(const DialDeviceDescriptionData&));
   MOCK_METHOD1(OnError, void(const std::string&));
 
-  base::test::ScopedTaskEnvironment environment_;
+  base::test::TaskEnvironment environment_;
   const GURL url_;
   network::TestURLLoaderFactory loader_factory_;
   std::unique_ptr<TestDeviceDescriptionFetcher> description_fetcher_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DeviceDescriptionFetcherTest);
 };
 
 TEST_F(DeviceDescriptionFetcherTest, FetchSuccessful) {
   std::string body("<xml>description</xml>");
   EXPECT_CALL(*this, OnSuccess(DialDeviceDescriptionData(
                          body, GURL("http://127.0.0.1/apps"))));
-  network::ResourceResponseHead head;
-  head.headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
-  head.headers->AddHeader("Application-URL: http://127.0.0.1/apps");
+  auto head = network::mojom::URLResponseHead::New();
+  head->headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
+  head->headers->AddHeader("Application-URL", "http://127.0.0.1/apps");
   network::URLLoaderCompletionStatus status;
   status.decoded_body_length = body.size();
-  loader_factory_.AddResponse(url_, head, body, status);
+  loader_factory_.AddResponse(url_, std::move(head), body, status);
   StartRequest();
 }
 
@@ -99,19 +103,19 @@ TEST_F(DeviceDescriptionFetcherTest, FetchSuccessfulAppUrlWithTrailingSlash) {
   std::string body("<xml>description</xml>");
   EXPECT_CALL(*this, OnSuccess(DialDeviceDescriptionData(
                          body, GURL("http://127.0.0.1/apps"))));
-  network::ResourceResponseHead head;
-  head.headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
-  head.headers->AddHeader("Application-URL: http://127.0.0.1/apps/");
+  auto head = network::mojom::URLResponseHead::New();
+  head->headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
+  head->headers->AddHeader("Application-URL", "http://127.0.0.1/apps/");
   network::URLLoaderCompletionStatus status;
   status.decoded_body_length = body.size();
-  loader_factory_.AddResponse(url_, head, body, status);
+  loader_factory_.AddResponse(url_, std::move(head), body, status);
   StartRequest();
 }
 
 TEST_F(DeviceDescriptionFetcherTest, FetchFailsOnMissingDescription) {
   EXPECT_CALL(*this, OnError(HasSubstr("404")));
   loader_factory_.AddResponse(
-      url_, network::ResourceResponseHead(), "",
+      url_, network::mojom::URLResponseHead::New(), "",
       network::URLLoaderCompletionStatus(net::HTTP_NOT_FOUND));
   StartRequest();
 }
@@ -121,42 +125,42 @@ TEST_F(DeviceDescriptionFetcherTest, FetchFailsOnMissingAppUrl) {
   EXPECT_CALL(*this, OnError(HasSubstr("Missing or empty Application-URL:")));
   network::URLLoaderCompletionStatus status;
   status.decoded_body_length = body.size();
-  loader_factory_.AddResponse(url_, network::ResourceResponseHead(), body,
-                              status);
+  loader_factory_.AddResponse(url_, network::mojom::URLResponseHead::New(),
+                              body, status);
   StartRequest();
 }
 
 TEST_F(DeviceDescriptionFetcherTest, FetchFailsOnEmptyAppUrl) {
   EXPECT_CALL(*this, OnError(HasSubstr("Missing or empty Application-URL:")));
   std::string body("<xml>description</xml>");
-  network::ResourceResponseHead head;
-  head.headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
-  head.headers->AddHeader("Application-URL:");
+  auto head = network::mojom::URLResponseHead::New();
+  head->headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
+  head->headers->AddHeader("Application-URL", "");
   network::URLLoaderCompletionStatus status;
   status.decoded_body_length = body.size();
-  loader_factory_.AddResponse(url_, head, body, status);
+  loader_factory_.AddResponse(url_, std::move(head), body, status);
   StartRequest();
 }
 
 TEST_F(DeviceDescriptionFetcherTest, FetchFailsOnInvalidAppUrl) {
   EXPECT_CALL(*this, OnError(HasSubstr("Invalid Application-URL:")));
   std::string body("<xml>description</xml>");
-  network::ResourceResponseHead head;
-  head.headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
-  head.headers->AddHeader("Application-URL: http://www.example.com");
+  auto head = network::mojom::URLResponseHead::New();
+  head->headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
+  head->headers->AddHeader("Application-URL", "http://www.example.com");
   network::URLLoaderCompletionStatus status;
   status.decoded_body_length = body.size();
-  loader_factory_.AddResponse(url_, head, body, status);
+  loader_factory_.AddResponse(url_, std::move(head), body, status);
   StartRequest();
 }
 
 TEST_F(DeviceDescriptionFetcherTest, FetchFailsOnEmptyDescription) {
   EXPECT_CALL(*this, OnError(HasSubstr("Missing or empty response")));
-  network::ResourceResponseHead head;
-  head.headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
-  head.headers->AddHeader("Application-URL: http://127.0.0.1/apps");
+  auto head = network::mojom::URLResponseHead::New();
+  head->headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
+  head->headers->AddHeader("Application-URL", "http://127.0.0.1/apps");
 
-  loader_factory_.AddResponse(url_, head, "",
+  loader_factory_.AddResponse(url_, std::move(head), "",
                               network::URLLoaderCompletionStatus());
   StartRequest();
 }
@@ -164,12 +168,12 @@ TEST_F(DeviceDescriptionFetcherTest, FetchFailsOnEmptyDescription) {
 TEST_F(DeviceDescriptionFetcherTest, FetchFailsOnBadDescription) {
   EXPECT_CALL(*this, OnError(HasSubstr("Invalid response encoding")));
   std::string body("\xfc\x9c\xbf\x80\xbf\x80");
-  network::ResourceResponseHead head;
-  head.headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
-  head.headers->AddHeader("Application-URL: http://127.0.0.1/apps");
+  auto head = network::mojom::URLResponseHead::New();
+  head->headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
+  head->headers->AddHeader("Application-URL", "http://127.0.0.1/apps");
   network::URLLoaderCompletionStatus status;
   status.decoded_body_length = body.size();
-  loader_factory_.AddResponse(url_, head, body, status);
+  loader_factory_.AddResponse(url_, std::move(head), body, status);
   StartRequest();
 }
 

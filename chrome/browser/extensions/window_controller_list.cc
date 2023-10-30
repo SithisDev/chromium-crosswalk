@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/observer_list.h"
 #include "chrome/browser/extensions/api/tabs/windows_util.h"
 #include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "chrome/browser/extensions/window_controller_list_observer.h"
@@ -45,6 +46,14 @@ void WindowControllerList::RemoveExtensionWindow(WindowController* window) {
   }
 }
 
+void WindowControllerList::NotifyWindowBoundsChanged(WindowController* window) {
+  auto iter = std::find(windows_.begin(), windows_.end(), window);
+  if (iter != windows_.end()) {
+    for (auto& observer : observers_)
+      observer.OnWindowBoundsChanged(window);
+  }
+}
+
 void WindowControllerList::AddObserver(WindowControllerListObserver* observer) {
   observers_.AddObserver(observer);
 }
@@ -55,7 +64,7 @@ void WindowControllerList::RemoveObserver(
 }
 
 WindowController* WindowControllerList::FindWindowForFunctionByIdWithFilter(
-    const UIThreadExtensionFunction* function,
+    const ExtensionFunction* function,
     int id,
     WindowController::TypeFilter filter) const {
   for (auto iter = windows().begin(); iter != windows().end(); ++iter) {
@@ -69,13 +78,13 @@ WindowController* WindowControllerList::FindWindowForFunctionByIdWithFilter(
 }
 
 WindowController* WindowControllerList::CurrentWindowForFunction(
-    const UIThreadExtensionFunction* function) const {
+    const ExtensionFunction* function) const {
   return CurrentWindowForFunctionWithFilter(function,
                                             WindowController::kNoWindowFilter);
 }
 
 WindowController* WindowControllerList::CurrentWindowForFunctionWithFilter(
-    const UIThreadExtensionFunction* function,
+    const ExtensionFunction* function,
     WindowController::TypeFilter filter) const {
   WindowController* result = nullptr;
   // Returns either the focused window (if any), or the last window in the list.

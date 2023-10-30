@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,9 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
+#include "services/data_decoder/public/cpp/data_decoder.h"
 
 class BrandcodedDefaultSettings;
 class GURL;
@@ -27,12 +28,16 @@ class URLLoaderFactory;
 // default settings. Caller should provide a FetchCallback.
 class BrandcodeConfigFetcher {
  public:
-  typedef base::Callback<void ()> FetchCallback;
+  typedef base::OnceCallback<void()> FetchCallback;
 
   BrandcodeConfigFetcher(network::mojom::URLLoaderFactory* url_loader_factory,
-                         const FetchCallback& callback,
+                         FetchCallback callback,
                          const GURL& url,
                          const std::string& brandcode);
+
+  BrandcodeConfigFetcher(const BrandcodeConfigFetcher&) = delete;
+  BrandcodeConfigFetcher& operator=(const BrandcodeConfigFetcher&) = delete;
+
   ~BrandcodeConfigFetcher();
 
   bool IsActive() const { return !!simple_url_loader_; }
@@ -42,10 +47,12 @@ class BrandcodeConfigFetcher {
   }
 
   // Sets the new callback. The previous one won't be called.
-  void SetCallback(const FetchCallback& callback);
+  void SetCallback(FetchCallback callback);
 
  private:
   void OnSimpleLoaderComplete(std::unique_ptr<std::string> response_body);
+  void OnXmlConfigParsed(
+      data_decoder::DataDecoder::ValueOrError value_or_error);
 
   void OnDownloadTimeout();
 
@@ -62,7 +69,7 @@ class BrandcodeConfigFetcher {
   // Fetched settings.
   std::unique_ptr<BrandcodedDefaultSettings> default_settings_;
 
-  DISALLOW_COPY_AND_ASSIGN(BrandcodeConfigFetcher);
+  base::WeakPtrFactory<BrandcodeConfigFetcher> weak_ptr_factory_;
 };
 
 #endif  // CHROME_BROWSER_PROFILE_RESETTER_BRANDCODE_CONFIG_FETCHER_H_

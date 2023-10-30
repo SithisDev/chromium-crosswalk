@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,22 @@
 #include <memory>
 #include <string>
 
+#include "base/memory/raw_ptr.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/recently_audible_helper.h"
+#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/ukm/content/source_url_recorder.h"
 #include "components/ukm/test_ukm_recorder.h"
-#include "content/public/test/test_service_manager_context.h"
 #include "content/public/test/web_contents_tester.h"
+#include "media/base/media_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #endif
 
@@ -29,7 +32,7 @@ constexpr char kURL1[] = "http://google.com/";
 constexpr char kURL2[] = "http://youtube.com/";
 constexpr char kSiteMutedEvent[] = "Media.SiteMuted";
 constexpr char kSiteMutedReason[] = "MuteReason";
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 constexpr char kChromeURL[] = "chrome://dino";
 constexpr char kExtensionId[] = "extensionid";
 #endif
@@ -38,14 +41,19 @@ constexpr char kExtensionId[] = "extensionid";
 
 class SoundContentSettingObserverTest : public ChromeRenderViewHostTestHarness {
  public:
-  SoundContentSettingObserverTest() = default;
+  SoundContentSettingObserverTest() {
+    scoped_feature_list_.InitWithFeatures({media::kEnableTabMuting}, {});
+  }
+
+  SoundContentSettingObserverTest(const SoundContentSettingObserverTest&) =
+      delete;
+  SoundContentSettingObserverTest& operator=(
+      const SoundContentSettingObserverTest&) = delete;
+
   ~SoundContentSettingObserverTest() override = default;
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
-
-    test_service_manager_context_ =
-        std::make_unique<content::TestServiceManagerContext>();
 
     RecentlyAudibleHelper::CreateForWebContents(web_contents());
     SoundContentSettingObserver::CreateForWebContents(web_contents());
@@ -57,22 +65,16 @@ class SoundContentSettingObserverTest : public ChromeRenderViewHostTestHarness {
     NavigateAndCommit(GURL(kURL1));
   }
 
-  void TearDown() override {
-    // Must be reset before browser thread teardown.
-    test_service_manager_context_.reset();
-    ChromeRenderViewHostTestHarness::TearDown();
-  }
-
  protected:
   void ChangeSoundContentSettingTo(ContentSetting setting) {
     GURL url = web_contents()->GetLastCommittedURL();
     host_content_settings_map_->SetContentSettingDefaultScope(
-        url, url, CONTENT_SETTINGS_TYPE_SOUND, std::string(), setting);
+        url, url, ContentSettingsType::SOUND, setting);
   }
 
   void ChangeDefaultSoundContentSettingTo(ContentSetting setting) {
     host_content_settings_map_->SetDefaultContentSetting(
-        CONTENT_SETTINGS_TYPE_SOUND, setting);
+        ContentSettingsType::SOUND, setting);
   }
 
   void SimulateAudioStarting() {
@@ -100,22 +102,16 @@ class SoundContentSettingObserverTest : public ChromeRenderViewHostTestHarness {
   }
 
 // TabMutedReason does not exist on Android.
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   void SetMuteStateForReason(bool state, TabMutedReason reason) {
     chrome::SetTabAudioMuted(web_contents(), state, reason, kExtensionId);
   }
 #endif
 
  private:
-  HostContentSettingsMap* host_content_settings_map_;
+  raw_ptr<HostContentSettingsMap> host_content_settings_map_;
   std::unique_ptr<ukm::TestUkmRecorder> test_ukm_recorder_;
-
-  // WebContentsImpl accesses the system Connector, so make sure the Service
-  // Manager is initialized.
-  std::unique_ptr<content::TestServiceManagerContext>
-      test_service_manager_context_;
-
-  DISALLOW_COPY_AND_ASSIGN(SoundContentSettingObserverTest);
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 TEST_F(SoundContentSettingObserverTest, AudioMutingUpdatesWithContentSetting) {
@@ -167,7 +163,7 @@ TEST_F(SoundContentSettingObserverTest, AudioMutingUpdatesWithNavigation) {
 }
 
 // TabMutedReason does not exist on Android.
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 TEST_F(SoundContentSettingObserverTest, DontMuteWhenUnmutedByExtension) {
   EXPECT_FALSE(web_contents()->IsAudioMuted());
 
@@ -198,13 +194,13 @@ TEST_F(SoundContentSettingObserverTest, DontUnmuteWhenMutedByExtension) {
   EXPECT_TRUE(web_contents()->IsAudioMuted());
 }
 
-TEST_F(SoundContentSettingObserverTest, DontUnmuteWhenMutedForMediaCapture) {
+TEST_F(SoundContentSettingObserverTest, DontUnmuteWhenMutedByAudioIndicator) {
   EXPECT_FALSE(web_contents()->IsAudioMuted());
 
-  SetMuteStateForReason(true, TabMutedReason::MEDIA_CAPTURE);
+  SetMuteStateForReason(true, TabMutedReason::AUDIO_INDICATOR);
   EXPECT_TRUE(web_contents()->IsAudioMuted());
 
-  // Navigating to a new URL should not unmute the tab muted for media capture.
+  // Navigating to a new URL should not unmute the tab muted by audio indicator.
   NavigateAndCommit(GURL(kURL2));
   EXPECT_TRUE(web_contents()->IsAudioMuted());
 }
@@ -243,7 +239,7 @@ TEST_F(SoundContentSettingObserverTest,
   NavigateAndCommit(GURL(kChromeURL));
   EXPECT_FALSE(web_contents()->IsAudioMuted());
 }
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 TEST_F(SoundContentSettingObserverTest,
        UnmutedAudioPlayingDoesNotRecordSiteMuted) {

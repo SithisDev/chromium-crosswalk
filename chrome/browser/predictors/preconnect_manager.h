@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,15 +12,19 @@
 #include <vector>
 
 #include "base/containers/id_map.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "chrome/browser/predictors/proxy_lookup_client_impl.h"
 #include "chrome/browser/predictors/resolve_host_client_impl.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/network_anonymization_key.h"
 #include "url/gurl.h"
 
-class Profile;
+namespace content {
+class BrowserContext;
+}
 
 namespace network {
 namespace mojom {
@@ -33,30 +37,35 @@ namespace predictors {
 struct PreconnectRequest;
 
 struct PreconnectedRequestStats {
-  PreconnectedRequestStats(const GURL& origin,
-                           bool was_preconnected);
+  PreconnectedRequestStats(const url::Origin& origin, bool was_preconnected);
   PreconnectedRequestStats(const PreconnectedRequestStats& other);
   ~PreconnectedRequestStats();
 
-  GURL origin;
+  url::Origin origin;
   bool was_preconnected;
 };
 
 struct PreconnectStats {
   explicit PreconnectStats(const GURL& url);
+
+  // Stats must be moved only.
+  PreconnectStats(const PreconnectStats&) = delete;
+  PreconnectStats& operator=(const PreconnectStats&) = delete;
+
   ~PreconnectStats();
 
   GURL url;
   base::TimeTicks start_time;
   std::vector<PreconnectedRequestStats> requests_stats;
-
-  // Stats must be moved only.
-  DISALLOW_COPY_AND_ASSIGN(PreconnectStats);
 };
 
 // Stores the status of all preconnects associated with a given |url|.
 struct PreresolveInfo {
   PreresolveInfo(const GURL& url, size_t count);
+
+  PreresolveInfo(const PreresolveInfo&) = delete;
+  PreresolveInfo& operator=(const PreresolveInfo&) = delete;
+
   ~PreresolveInfo();
 
   bool is_done() const { return queued_count == 0 && inflight_count == 0; }
@@ -66,8 +75,6 @@ struct PreresolveInfo {
   size_t inflight_count = 0;
   bool was_canceled = false;
   std::unique_ptr<PreconnectStats> stats;
-
-  DISALLOW_COPY_AND_ASSIGN(PreresolveInfo);
 };
 
 // Stores all data need for running a preresolve and a subsequent optional
@@ -76,11 +83,17 @@ struct PreresolveJob {
   PreresolveJob(const GURL& url,
                 int num_sockets,
                 bool allow_credentials,
-                net::NetworkIsolationKey network_isolation_key,
+                net::NetworkAnonymizationKey network_anonymization_key,
                 PreresolveInfo* info);
+
+  PreresolveJob(const PreresolveJob&) = delete;
+  PreresolveJob& operator=(const PreresolveJob&) = delete;
+
   PreresolveJob(PreconnectRequest preconnect_request, PreresolveInfo* info);
   PreresolveJob(PreresolveJob&& other);
+
   ~PreresolveJob();
+
   bool need_preconnect() const {
     return num_sockets > 0 && !(info && info->was_canceled);
   }
@@ -88,16 +101,15 @@ struct PreresolveJob {
   GURL url;
   int num_sockets;
   bool allow_credentials;
-  net::NetworkIsolationKey network_isolation_key;
+  net::NetworkAnonymizationKey network_anonymization_key;
   // Raw pointer usage is fine here because even though PreresolveJob can
   // outlive PreresolveInfo. It's only accessed on PreconnectManager class
   // context and PreresolveInfo lifetime is tied to PreconnectManager.
   // May be equal to nullptr in case of detached job.
-  PreresolveInfo* info;
+  raw_ptr<PreresolveInfo> info;
   std::unique_ptr<ResolveHostClientImpl> resolve_host_client;
   std::unique_ptr<ProxyLookupClientImpl> proxy_lookup_client;
-
-  DISALLOW_COPY_AND_ASSIGN(PreresolveJob);
+  base::TimeTicks creation_time;
 };
 
 // PreconnectManager is responsible for preresolving and preconnecting to
@@ -116,6 +128,10 @@ class PreconnectManager {
    public:
     virtual ~Delegate() {}
 
+    // Called when a preconnect to |preconnect_url| is initiated for |url|.
+    virtual void PreconnectInitiated(const GURL& url,
+                                     const GURL& preconnect_url) = 0;
+
     // Called when all preresolve jobs for the |stats->url| are finished. Note
     // that some preconnect jobs can be still in progress, because they are
     // fire-and-forget.
@@ -132,13 +148,24 @@ class PreconnectManager {
                                  int num_sockets,
                                  bool allow_credentials) {}
 
-    virtual void OnPreresolveFinished(const GURL& url, bool success) {}
-    virtual void OnProxyLookupFinished(const GURL& url, bool success) {}
+    virtual void OnPreresolveFinished(
+        const GURL& url,
+        const net::NetworkAnonymizationKey& network_anonymization_key,
+        bool success) {}
+    virtual void OnProxyLookupFinished(
+        const GURL& url,
+        const net::NetworkAnonymizationKey& network_anonymization_key,
+        bool success) {}
   };
 
   static const size_t kMaxInflightPreresolves = 3;
 
-  PreconnectManager(base::WeakPtr<Delegate> delegate, Profile* profile);
+  PreconnectManager(base::WeakPtr<Delegate> delegate,
+                    content::BrowserContext* browser_context);
+
+  PreconnectManager(const PreconnectManager&) = delete;
+  PreconnectManager& operator=(const PreconnectManager&) = delete;
+
   virtual ~PreconnectManager();
 
   // Starts preconnect and preresolve jobs keyed by |url|.
@@ -147,21 +174,21 @@ class PreconnectManager {
   // Starts special preconnect and preresolve jobs that are not cancellable and
   // don't report about their completion. They are considered more important
   // than trackable requests thus they are put in the front of the jobs queue.
-  virtual void StartPreresolveHost(const GURL& url);
-  virtual void StartPreresolveHosts(const std::vector<std::string>& hostnames);
-  // |network_isolation_key| specifies the key that network requests for the
-  // preconnected URL are expected to use. If a request is issued with a
-  // different key, it may not use the preconnected socket.
   //
-  // TODO(https://crbug.com/966896): Update consumers and make
-  // |network_isolation_key| a mandatory argument. Note that this is a temporary
-  // style guide violation, but keeping this until all consumers correctly fill
-  // the argument reduces the chances of forgetting to update one.
+  // |network_anonymization_key| specifies the key that the corresponding
+  // network requests are expected to use. If a request is issued with a
+  // different key, it may not use the prefetched DNS entry or preconnected
+  // socket.
+  virtual void StartPreresolveHost(
+      const GURL& url,
+      const net::NetworkAnonymizationKey& network_anonymization_key);
+  virtual void StartPreresolveHosts(
+      const std::vector<std::string>& hostnames,
+      const net::NetworkAnonymizationKey& network_anonymization_key);
   virtual void StartPreconnectUrl(
       const GURL& url,
       bool allow_credentials,
-      net::NetworkIsolationKey network_isolation_key =
-          net::NetworkIsolationKey());
+      net::NetworkAnonymizationKey network_anonymization_key);
 
   // No additional jobs keyed by the |url| will be queued after this.
   virtual void Stop(const GURL& url);
@@ -186,12 +213,14 @@ class PreconnectManager {
       const GURL& url,
       int num_sockets,
       bool allow_credentials,
-      const net::NetworkIsolationKey& network_isolation_key) const;
+      const net::NetworkAnonymizationKey& network_anonymization_key) const;
   std::unique_ptr<ResolveHostClientImpl> PreresolveUrl(
       const GURL& url,
+      const net::NetworkAnonymizationKey& network_anonymization_key,
       ResolveHostCallback callback) const;
   std::unique_ptr<ProxyLookupClientImpl> LookupProxyForUrl(
       const GURL& url,
+      const net::NetworkAnonymizationKey& network_anonymization_key,
       ProxyLookupCallback callback) const;
 
   void TryToLaunchPreresolveJobs();
@@ -199,22 +228,22 @@ class PreconnectManager {
   void OnProxyLookupFinished(PreresolveJobId job_id, bool success);
   void FinishPreresolveJob(PreresolveJobId job_id, bool success);
   void AllPreresolvesForUrlFinished(PreresolveInfo* info);
+
+  // NOTE: Returns a non-null pointer outside of unittesting contexts.
   network::mojom::NetworkContext* GetNetworkContext() const;
 
   base::WeakPtr<Delegate> delegate_;
-  Profile* const profile_;
+  const raw_ptr<content::BrowserContext> browser_context_;
   std::list<PreresolveJobId> queued_jobs_;
   PreresolveJobMap preresolve_jobs_;
-  std::map<std::string, std::unique_ptr<PreresolveInfo>> preresolve_info_;
+  std::map<GURL, std::unique_ptr<PreresolveInfo>> preresolve_info_;
   size_t inflight_preresolves_count_ = 0;
 
   // Only used in tests.
-  network::mojom::NetworkContext* network_context_ = nullptr;
-  Observer* observer_ = nullptr;
+  raw_ptr<network::mojom::NetworkContext> network_context_ = nullptr;
+  raw_ptr<Observer> observer_ = nullptr;
 
   base::WeakPtrFactory<PreconnectManager> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PreconnectManager);
 };
 
 }  // namespace predictors

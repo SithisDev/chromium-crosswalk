@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,12 @@
 #define CHROME_BROWSER_UI_VIEWS_STATUS_ICONS_STATUS_TRAY_STATE_CHANGER_WIN_H_
 
 #include <wrl/client.h>
+#include <wrl/implements.h>
 
 #include <memory>
+#include <string>
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
 #include "base/threading/thread_checker.h"
-#include "base/win/iunknown_impl.h"
 
 // The known values for NOTIFYITEM's dwPreference member.
 enum NOTIFYITEM_PREFERENCE {
@@ -53,10 +52,16 @@ class __declspec(uuid("D782CCBA-AFB0-43F1-94DB-FDA3779EACCB")) INotificationCB
 // area in the Windows taskbar.  It is used to promote a tray icon from the
 // overflow area to the taskbar, and refuses to do anything if the user has
 // explicitly marked an icon to be always hidden.
-class StatusTrayStateChangerWin : public INotificationCB,
-                                  public base::win::IUnknownImpl {
+class StatusTrayStateChangerWin
+    : public Microsoft::WRL::RuntimeClass<
+          Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>,
+          INotificationCB> {
  public:
   StatusTrayStateChangerWin(UINT icon_id, HWND window);
+
+  StatusTrayStateChangerWin(const StatusTrayStateChangerWin&) = delete;
+  StatusTrayStateChangerWin& operator=(const StatusTrayStateChangerWin&) =
+      delete;
 
   // Call this method to move the icon matching |icon_id| and |window| to the
   // taskbar from the overflow area.  This will not make any changes if the
@@ -64,17 +69,12 @@ class StatusTrayStateChangerWin : public INotificationCB,
   // the explicit wishes/configuration of the user.
   void EnsureTrayIconVisible();
 
-  // IUnknown.
-  ULONG STDMETHODCALLTYPE AddRef() override;
-  ULONG STDMETHODCALLTYPE Release() override;
-  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, PVOID*) override;
-
   // INotificationCB.
   // Notify is called in response to RegisterCallback for each current
   // entry in Explorer's list of notification area icons, and ever time
   // one of them changes, until UnregisterCallback is called or |this|
   // is destroyed.
-  HRESULT STDMETHODCALLTYPE Notify(ULONG, NOTIFYITEM*) override;
+  IFACEMETHODIMP Notify(ULONG, NOTIFYITEM*) override;
 
  protected:
   ~StatusTrayStateChangerWin() override;
@@ -119,7 +119,7 @@ class StatusTrayStateChangerWin : public INotificationCB,
   const HWND window_;
   // Executable name of the current program.  Along with |icon_id_| and
   // |window_|, this uniquely identifies a notification area entry to Explorer.
-  base::string16 file_name_;
+  std::wstring file_name_;
 
   // Temporary storage for the matched NOTIFYITEM.  This is necessary because
   // Notify doesn't return anything.  The call flow looks like this:
@@ -130,8 +130,6 @@ class StatusTrayStateChangerWin : public INotificationCB,
   std::unique_ptr<NOTIFYITEM> notify_item_;
 
   THREAD_CHECKER(thread_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(StatusTrayStateChangerWin);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_STATUS_ICONS_STATUS_TRAY_STATE_CHANGER_WIN_H_

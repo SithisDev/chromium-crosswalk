@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,33 +6,49 @@ package org.chromium.chrome.browser.tasks.tab_management;
 
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.ANIMATE_VISIBILITY_CHANGES;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.BOTTOM_CONTROLS_HEIGHT;
+import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.BOTTOM_PADDING;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.INITIAL_SCROLL_INDEX;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.IS_INCOGNITO;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.IS_VISIBLE;
-import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.SHADOW_TOP_MARGIN;
-import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.TOP_CONTROLS_HEIGHT;
-import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.TOP_PADDING;
+import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.SHADOW_TOP_OFFSET;
+import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.TAB_LIST_ITEM_ANIMATOR_ENABLED;
+import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.TOP_MARGIN;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.VISIBILITY_LISTENER;
 
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.os.Handler;
-import android.support.annotation.Nullable;
+import android.os.SystemClock;
+import android.view.View;
+import android.view.ViewGroup;
 
-import org.chromium.base.ContextUtils;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.Log;
 import org.chromium.base.ObserverList;
-import org.chromium.base.VisibleForTesting;
+import org.chromium.base.StrictModeContext;
+import org.chromium.base.ThreadUtils;
+import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.compositor.CompositorViewHolder;
-import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
-import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
-import org.chromium.chrome.browser.fullscreen.FullscreenManager;
+import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.task.PostTask;
+import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
+import org.chromium.chrome.browser.compositor.layouts.LayoutManagerImpl;
+import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.multiwindow.MultiWindowModeStateDispatcher;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
+import org.chromium.chrome.browser.price_tracking.PriceTrackingUtilities;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
-import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
-import org.chromium.chrome.browser.tabmodel.TabLaunchType;
+import org.chromium.chrome.browser.tab.TabCreationState;
+import org.chromium.chrome.browser.tab.TabHidingType;
+import org.chromium.chrome.browser.tab.TabSelectionType;
+import org.chromium.chrome.browser.tab.state.ShoppingPersistedTabData;
 import org.chromium.chrome.browser.tabmodel.TabList;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelFilter;
@@ -40,13 +56,17 @@ import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
-import org.chromium.chrome.browser.tabmodel.TabSelectionType;
-import org.chromium.chrome.browser.tasks.ReturnToChromeExperimentsUtil;
+import org.chromium.chrome.browser.tasks.ReturnToChromeUtil;
+import org.chromium.chrome.browser.tasks.pseudotab.PseudoTab;
 import org.chromium.chrome.browser.tasks.tab_groups.TabGroupModelFilter;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.chrome.browser.util.UrlConstants;
+import org.chromium.chrome.browser.tasks.tab_management.TabListCoordinator.TabListMode;
+import org.chromium.chrome.browser.tasks.tab_management.TabManagementDelegate.TabSwitcherType;
+import org.chromium.chrome.browser.tasks.tab_management.TabSwitcher.TabSwitcherViewObserver;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.chrome.features.start_surface.StartSurfaceUserData;
 import org.chromium.chrome.tab_ui.R;
-import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.components.browser_ui.util.FirstDrawDetector;
+import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.List;
@@ -56,12 +76,15 @@ import java.util.List;
  * model changes.
  */
 class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView.VisibilityListener,
-                                     TabListMediator.GridCardOnClickListenerProvider {
+                                     TabListMediator.GridCardOnClickListenerProvider,
+                                     PriceMessageService.PriceWelcomeMessageReviewActionProvider,
+                                     TabSwitcherCustomViewManager.Delegate {
     private static final String TAG = "TabSwitcherMediator";
 
     // This should be the same as TabListCoordinator.GRID_LAYOUT_SPAN_COUNT for the selected tab
     // to be on the 2nd row.
-    static final int INITIAL_SCROLL_INDEX_OFFSET = 2;
+    static final int INITIAL_SCROLL_INDEX_OFFSET_GTS = 2;
+    static final int INITIAL_SCROLL_INDEX_OFFSET_CAROUSEL = 1;
 
     private static final int DEFAULT_TOP_PADDING = 0;
 
@@ -74,8 +97,7 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
     private static final int DEFAULT_SOFT_CLEANUP_DELAY_MS = 3_000;
     private static final String CLEANUP_DELAY_PARAM = "cleanup-delay";
     private static final int DEFAULT_CLEANUP_DELAY_MS = 30_000;
-    private Integer mSoftCleanupDelayMsForTesting;
-    private Integer mCleanupDelayMsForTesting;
+
     private final Handler mHandler;
     private final Runnable mSoftClearTabListRunnable;
     private final Runnable mClearTabListRunnable;
@@ -85,32 +107,37 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
     private final TabModelSelector mTabModelSelector;
     private final TabModelObserver mTabModelObserver;
     private final TabModelSelectorObserver mTabModelSelectorObserver;
-    private final ObserverList<TabSwitcher.OverviewModeObserver> mObservers = new ObserverList<>();
-    private final ChromeFullscreenManager mFullscreenManager;
-    private TabGridDialogMediator.ResetHandler mTabGridDialogResetHandler;
-    private final ChromeFullscreenManager.FullscreenListener mFullscreenListener =
-            new ChromeFullscreenManager.FullscreenListener() {
-                @Override
-                public void onContentOffsetChanged(int offset) {}
+    private final ObserverList<TabSwitcherViewObserver> mObservers = new ObserverList<>();
+    private final BrowserControlsStateProvider mBrowserControlsStateProvider;
+    private final BrowserControlsStateProvider.Observer mBrowserControlsObserver;
+    private final ViewGroup mContainerView;
+    private final TabContentManager mTabContentManager;
+    private final MultiWindowModeStateDispatcher mMultiWindowModeStateDispatcher;
+    private final MultiWindowModeStateDispatcher.MultiWindowModeObserver mMultiWindowModeObserver;
+    private final ObservableSupplierImpl<Boolean> mBackPressChangedSupplier =
+            new ObservableSupplierImpl<>();
+    private final ObservableSupplierImpl<Boolean> mIsDialogVisibleSupplier =
+            new ObservableSupplierImpl<>();
 
-                @Override
-                public void onControlsOffsetChanged(
-                        int topOffset, int bottomOffset, boolean needsAnimate) {}
-
-                @Override
-                public void onToggleOverlayVideoMode(boolean enabled) {}
-
-                @Override
-                public void onBottomControlsHeightChanged(int bottomControlsHeight) {
-                    mContainerViewModel.set(BOTTOM_CONTROLS_HEIGHT, bottomControlsHeight);
-                }
-            };
-
-    private final CompositorViewHolder mCompositorViewHolder;
-    private final TabSelectionEditorCoordinator
+    private Integer mSoftCleanupDelayMsForTesting;
+    private Integer mCleanupDelayMsForTesting;
+    private TabGridDialogMediator.DialogController mTabGridDialogController;
+    private TabSelectionEditorCoordinator
             .TabSelectionEditorController mTabSelectionEditorController;
     private TabSwitcher.OnTabSelectingListener mOnTabSelectingListener;
-    private IphProvider mIphProvider;
+    private PriceMessageService mPriceMessageService;
+    private boolean mIsOnHomepage;
+
+    /**
+     * A custom view that can be supplied by clients to be shown inside the tab grid.
+     * Only one client at a time is supported. The custom view is set to null when the client
+     * signals the mediator for removal.
+     */
+    private @Nullable View mCustomView;
+    /**
+     * A back press {@link Runnable} that can be supplied by clients when adding a custom view.
+     */
+    private @Nullable Runnable mCustomViewBackPressRunnable;
 
     /**
      * In cases where a didSelectTab was due to switching models with a toggle,
@@ -119,9 +146,33 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
     private boolean mShouldIgnoreNextSelect;
 
     private int mModelIndexWhenShown;
-    private int mTabIdwhenShown;
+    private int mTabIdWhenShown;
     private int mIndexInNewModelWhenSwitched;
     private boolean mIsSelectingInTabSwitcher;
+
+    private boolean mShowTabsInMruOrder;
+
+    private static class FirstMeaningfulPaintRecorder {
+        private final long mActivityCreationTimeMs;
+
+        private FirstMeaningfulPaintRecorder(long activityCreationTimeMs) {
+            mActivityCreationTimeMs = activityCreationTimeMs;
+        }
+
+        private void record(int numOfThumbnails) {
+            assert numOfThumbnails >= 0;
+            long elapsed = SystemClock.elapsedRealtime() - mActivityCreationTimeMs;
+            PostTask.postTask(UiThreadTaskTraits.BEST_EFFORT,
+                    ()
+                            -> ReturnToChromeUtil.recordTimeToGTSFirstMeaningfulPaint(
+                                    elapsed, numOfThumbnails));
+        }
+    }
+    private FirstMeaningfulPaintRecorder mFirstMeaningfulPaintRecorder;
+    private boolean mRegisteredFirstMeaningfulPaintRecorder;
+    private @TabListCoordinator.TabListMode int mMode;
+    private Context mContext;
+    private SnackbarManager mSnackbarManager;
 
     /**
      * Interface to delegate resetting the tab grid.
@@ -131,43 +182,102 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
          * Reset the tab grid with the given {@link TabList}, which can be null.
          * @param tabList The {@link TabList} to show the tabs for in the grid.
          * @param quickMode Whether to skip capturing the selected live tab for the thumbnail.
+         * @param mruMode Whether order the Tabs by MRU.
          * @return Whether the {@link TabListRecyclerView} can be shown quickly.
          */
-        boolean resetWithTabList(@Nullable TabList tabList, boolean quickMode);
+        boolean resetWithTabList(@Nullable TabList tabList, boolean quickMode, boolean mruMode);
 
         /**
-         * Release the thumbnail {@link Bitmap} but keep the {@link TabGridViewHolder}.
+         * Reset the tab grid with the given {@link List<PseudoTab>}, which can be null.
+         * @param tabs The {@link List<PseudoTab>} to show the tabs for in the grid.
+         * @param quickMode Whether to skip capturing the selected live tab for the thumbnail.
+         * @param mruMode Whether order the Tabs by MRU.
+         * @return Whether the {@link TabListRecyclerView} can be shown quickly.
+         */
+        boolean resetWithTabs(@Nullable List<PseudoTab> tabs, boolean quickMode, boolean mruMode);
+
+        /**
+         * Release the thumbnail {@link Bitmap} but keep the {@link TabGridView}.
          */
         void softCleanup();
+
+        /**
+         * Check to see if there are any not viewed price drops when the user leaves the tab
+         * switcher. This is done only before the coordinator is destroyed to reduce the amount of
+         * calls to ShoppingPersistedTabData.
+         */
+        void hardCleanup();
     }
 
     /**
-     * An interface to control whether to show IPH on grid tab switcher.
+     * Interface to control message items in grid tab switcher.
      */
-    public interface IphProvider { void maybeShowIPH(); }
+    interface MessageItemsController {
+        /**
+         * Remove all the message items in the model list. Right now this is used when all tabs are
+         * closed in the grid tab switcher.
+         */
+        void removeAllAppendedMessage();
+
+        /**
+         * Restore all the message items that should show. Right now this is only used to restore
+         * message items when the closure of the last tab in tab switcher is undone.
+         */
+        void restoreAllAppendedMessage();
+    }
+
+    /**
+     * An interface to control price welcome message in grid tab switcher.
+     */
+    interface PriceWelcomeMessageController {
+        /**
+         * Remove the price welcome message item in the model list. Right now this is used when
+         * its binding tab is closed in the grid tab switcher.
+         */
+        void removePriceWelcomeMessage();
+
+        /**
+         * Restore the price welcome message item that should show. Right now this is only used
+         * when the closure of the binding tab in tab switcher is undone.
+         */
+        void restorePriceWelcomeMessage();
+
+        /**
+         * Show the price welcome message in tab switcher. This is used when any open tab in tab
+         * switcher has a price drop.
+         */
+        void showPriceWelcomeMessage(PriceMessageService.PriceTabData priceTabData);
+    }
 
     /**
      * Basic constructor for the Mediator.
+     * @param context The context to use for accessing {@link android.content.res.Resources}.
      * @param resetHandler The {@link ResetHandler} that handles reset for this Mediator.
      * @param containerViewModel The {@link PropertyModel} to keep state on the View containing the
      *         grid or carousel.
      * @param tabModelSelector {@link TabModelSelector} to observer for model and selection changes.
-     * @param fullscreenManager {@link FullscreenManager} to use.
-     * @param compositorViewHolder {@link CompositorViewHolder} to use.
-     * @param tabSelectionEditorController The controller that can control the visibility of the
-     *                                     TabSelectionEditor.
+     * @param browserControlsStateProvider {@link BrowserControlsStateProvider} to use.
+     * @param containerView The container {@link ViewGroup} to use.
+     * @param tabContentManager The {@link TabContentManager} for first meaningful paint event.
+     * @param multiWindowModeStateDispatcher The {@link MultiWindowModeStateDispatcher} to observe
+     *         for multi-window related changes.
+     * @param mode One of the {@link TabListMode}.
      */
-    TabSwitcherMediator(ResetHandler resetHandler, PropertyModel containerViewModel,
-            TabModelSelector tabModelSelector, ChromeFullscreenManager fullscreenManager,
-            CompositorViewHolder compositorViewHolder,
-            TabSelectionEditorCoordinator
-                    .TabSelectionEditorController tabSelectionEditorController) {
+    TabSwitcherMediator(Context context, ResetHandler resetHandler,
+            PropertyModel containerViewModel, TabModelSelector tabModelSelector,
+            BrowserControlsStateProvider browserControlsStateProvider, ViewGroup containerView,
+            TabContentManager tabContentManager, MessageItemsController messageItemsController,
+            PriceWelcomeMessageController priceWelcomeMessageController,
+            MultiWindowModeStateDispatcher multiWindowModeStateDispatcher, @TabListMode int mode) {
         mResetHandler = resetHandler;
         mContainerViewModel = containerViewModel;
         mTabModelSelector = tabModelSelector;
-        mFullscreenManager = fullscreenManager;
+        mBrowserControlsStateProvider = browserControlsStateProvider;
+        mMultiWindowModeStateDispatcher = multiWindowModeStateDispatcher;
+        mMode = mode;
+        mContext = context;
 
-        mTabModelSelectorObserver = new EmptyTabModelSelectorObserver() {
+        mTabModelSelectorObserver = new TabModelSelectorObserver() {
             @Override
             public void onTabModelSelected(TabModel newModel, TabModel oldModel) {
                 mShouldIgnoreNextSelect = true;
@@ -175,24 +285,43 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
 
                 TabList currentTabModelFilter =
                         mTabModelSelector.getTabModelFilterProvider().getCurrentTabModelFilter();
-                mResetHandler.resetWithTabList(currentTabModelFilter, false);
                 mContainerViewModel.set(IS_INCOGNITO, currentTabModelFilter.isIncognito());
-                if (mTabGridDialogResetHandler != null) {
-                    mTabGridDialogResetHandler.hideDialog(false);
+                if (mTabGridDialogController != null) {
+                    mTabGridDialogController.hideDialog(false);
                 }
+                if (!mContainerViewModel.get(IS_VISIBLE)) return;
+                mResetHandler.resetWithTabList(currentTabModelFilter, false, mShowTabsInMruOrder);
+
+                // Hide the currently selected tab when moving to an empty incognito model.
+                // TODO(crbug.com/1082612): If the need arises, generalize this solution in the
+                // IncognitoTabModel.
+                if (newModel.isIncognito() && newModel.getCount() == 0 && oldModel.getCount() > 0) {
+                    oldModel.getTabAt(oldModel.index()).hide(TabHidingType.CHANGED_TABS);
+                }
+                setInitialScrollIndexOffset();
             }
         };
         mTabModelSelector.addObserver(mTabModelSelectorObserver);
 
-        mTabModelObserver = new EmptyTabModelObserver() {
+        mTabModelObserver = new TabModelObserver() {
             @Override
-            public void didAddTab(Tab tab, int type) {
+            public void didAddTab(Tab tab, int type, @TabCreationState int creationState) {
+                // TODO(wychen): move didAddTab and didSelectTab to another observer and inject
+                //  after restoreCompleted.
+                if (!mTabModelSelector.isTabStateInitialized()) {
+                    return;
+                }
                 mShouldIgnoreNextSelect = false;
             }
 
             @Override
             public void didSelectTab(Tab tab, int type, int lastId) {
-                if (type == TabSelectionType.FROM_CLOSE || mShouldIgnoreNextSelect) {
+                if (!mTabModelSelector.isTabStateInitialized()) {
+                    return;
+                }
+                notifyBackPressStateChangedInternal();
+                if (type == TabSelectionType.FROM_CLOSE || mShouldIgnoreNextSelect
+                        || type == TabSelectionType.FROM_UNDO) {
                     mShouldIgnoreNextSelect = false;
                     return;
                 }
@@ -209,55 +338,176 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
                 }
 
                 if (mContainerViewModel.get(IS_VISIBLE)) {
-                    onTabSelecting(tab.getId());
+                    onTabSelecting(tab.getId(), false);
+                }
+            }
+
+            @Override
+            public void restoreCompleted() {
+                if (!mContainerViewModel.get(IS_VISIBLE)) return;
+
+                mResetHandler.resetWithTabList(
+                        mTabModelSelector.getTabModelFilterProvider().getCurrentTabModelFilter(),
+                        false, mShowTabsInMruOrder);
+                recordTabCounts();
+                setInitialScrollIndexOffset();
+            }
+
+            @Override
+            public void willCloseTab(Tab tab, boolean animate, boolean didCloseAlone) {
+                if (mTabModelSelector.getCurrentModel().getCount() == 1) {
+                    messageItemsController.removeAllAppendedMessage();
+                } else if (mPriceMessageService != null
+                        && mPriceMessageService.getBindingTabId() == tab.getId()) {
+                    priceWelcomeMessageController.removePriceWelcomeMessage();
+                }
+            }
+
+            @Override
+            public void tabClosureUndone(Tab tab) {
+                if (mTabModelSelector.getCurrentModel().getCount() == 1) {
+                    messageItemsController.restoreAllAppendedMessage();
+                }
+                if (mPriceMessageService != null
+                        && mPriceMessageService.getBindingTabId() == tab.getId()) {
+                    priceWelcomeMessageController.restorePriceWelcomeMessage();
+                }
+                notifyBackPressStateChangedInternal();
+            }
+
+            @Override
+            public void tabPendingClosure(Tab tab) {
+                notifyBackPressStateChangedInternal();
+            }
+
+            @Override
+            public void multipleTabsPendingClosure(List<Tab> tabs, boolean isAllTabs) {
+                notifyBackPressStateChangedInternal();
+            }
+
+            @Override
+            public void tabClosureCommitted(Tab tab) {
+                // TODO(crbug.com/1157578): Auto update the PriceMessageService instead of
+                // updating it based on the client caller.
+                if (mPriceMessageService != null
+                        && mPriceMessageService.getBindingTabId() == tab.getId()) {
+                    mPriceMessageService.invalidateMessage();
                 }
             }
         };
 
-        mFullscreenManager.addListener(mFullscreenListener);
-        mTabModelSelector.getTabModelFilterProvider().addTabModelFilterObserver(mTabModelObserver);
+        mBrowserControlsObserver = new BrowserControlsStateProvider.Observer() {
+            @Override
+            public void onControlsOffsetChanged(int topOffset, int topControlsMinHeightOffset,
+                    int bottomOffset, int bottomControlsMinHeightOffset, boolean needsAnimate) {
+                if (mMode == TabListCoordinator.TabListMode.CAROUSEL) return;
+
+                updateTopControlsProperties();
+            }
+
+            @Override
+            public void onTopControlsHeightChanged(
+                    int topControlsHeight, int topControlsMinHeight) {
+                if (mMode == TabListCoordinator.TabListMode.CAROUSEL) return;
+
+                updateTopControlsProperties();
+            }
+
+            @Override
+            public void onBottomControlsHeightChanged(
+                    int bottomControlsHeight, int bottomControlsMinHeight) {
+                mContainerViewModel.set(BOTTOM_CONTROLS_HEIGHT, bottomControlsHeight);
+            }
+        };
+
+        mBrowserControlsStateProvider.addObserver(mBrowserControlsObserver);
+
+        if (mTabModelSelector.getModels().isEmpty()) {
+            TabModelSelectorObserver selectorObserver = new TabModelSelectorObserver() {
+                @Override
+                public void onChange() {
+                    assert !mTabModelSelector.getModels().isEmpty();
+                    assert mTabModelSelector.getTabModelFilterProvider().getTabModelFilter(false)
+                            != null;
+                    assert mTabModelSelector.getTabModelFilterProvider().getTabModelFilter(true)
+                            != null;
+                    mTabModelSelector.removeObserver(this);
+                    mTabModelSelector.getTabModelFilterProvider().addTabModelFilterObserver(
+                            mTabModelObserver);
+                }
+            };
+            mTabModelSelector.addObserver(selectorObserver);
+        } else {
+            mTabModelSelector.getTabModelFilterProvider().addTabModelFilterObserver(
+                    mTabModelObserver);
+        }
 
         mContainerViewModel.set(VISIBILITY_LISTENER, this);
-        mContainerViewModel.set(IS_INCOGNITO,
-                mTabModelSelector.getTabModelFilterProvider()
-                        .getCurrentTabModelFilter()
-                        .isIncognito());
-        mContainerViewModel.set(ANIMATE_VISIBILITY_CHANGES, true);
-        mContainerViewModel.set(TOP_CONTROLS_HEIGHT, fullscreenManager.getTopControlsHeight());
+        TabModelFilter tabModelFilter =
+                mTabModelSelector.getTabModelFilterProvider().getCurrentTabModelFilter();
         mContainerViewModel.set(
-                BOTTOM_CONTROLS_HEIGHT, fullscreenManager.getBottomControlsHeight());
+                IS_INCOGNITO, tabModelFilter == null ? false : tabModelFilter.isIncognito());
+        mContainerViewModel.set(ANIMATE_VISIBILITY_CHANGES, true);
 
-        int toolbarHeight =
-                ContextUtils.getApplicationContext().getResources().getDimensionPixelSize(
-                        R.dimen.toolbar_height_no_shadow);
-        int topPadding = ReturnToChromeExperimentsUtil.shouldShowOmniboxOnTabSwitcher()
-                ? toolbarHeight
-                : DEFAULT_TOP_PADDING;
-        mContainerViewModel.set(TOP_PADDING, topPadding);
-        int shadowTopMargin = ReturnToChromeExperimentsUtil.shouldShowOmniboxOnTabSwitcher()
-                ? toolbarHeight * 2
-                : toolbarHeight;
-        mContainerViewModel.set(SHADOW_TOP_MARGIN, shadowTopMargin);
+        // Container view takes care of padding and margin in start surface.
+        if (mMode != TabListCoordinator.TabListMode.CAROUSEL) {
+            updateTopControlsProperties();
+            mContainerViewModel.set(
+                    BOTTOM_CONTROLS_HEIGHT, browserControlsStateProvider.getBottomControlsHeight());
+        }
 
-        mCompositorViewHolder = compositorViewHolder;
+        if (mMode == TabListMode.GRID) {
+            mContainerViewModel.set(BOTTOM_PADDING,
+                    (int) context.getResources().getDimension(R.dimen.tab_grid_bottom_padding));
+        }
+
+        mContainerView = containerView;
 
         mSoftClearTabListRunnable = mResetHandler::softCleanup;
-        mClearTabListRunnable = () -> mResetHandler.resetWithTabList(null, false);
+        mClearTabListRunnable = () -> {
+            mResetHandler.hardCleanup();
+            mResetHandler.resetWithTabList(null, false, mShowTabsInMruOrder);
+        };
         mHandler = new Handler();
-        mTabSelectionEditorController = tabSelectionEditorController;
-    }
+        mTabContentManager = tabContentManager;
 
-    void setBottomControlsHeight(int bottomControlsHeight) {
-        mContainerViewModel.set(BOTTOM_CONTROLS_HEIGHT, bottomControlsHeight);
+        mShowTabsInMruOrder = TabSwitcherCoordinator.isShowingTabsInMRUOrder(mMode);
+
+        mMultiWindowModeObserver = isInMultiWindowMode -> {
+            if (isInMultiWindowMode) {
+                messageItemsController.removeAllAppendedMessage();
+            } else {
+                messageItemsController.restoreAllAppendedMessage();
+            }
+        };
+        mMultiWindowModeStateDispatcher.addObserver(mMultiWindowModeObserver);
     }
 
     /**
-     * Set the handler of the Grid Dialog so that it can be directly controlled.
-     * @param tabGridDialogResetHandler The handler of the Grid Dialog
+     * Called after native initialization is completed.
+     * @param tabSelectionEditorController The controller that can control the visibility of the
+     *                                     TabSelectionEditor.
      */
-    void setTabGridDialogResetHandler(
-            TabGridDialogMediator.ResetHandler tabGridDialogResetHandler) {
-        mTabGridDialogResetHandler = tabGridDialogResetHandler;
+    public void initWithNative(@Nullable TabSelectionEditorCoordinator
+                                       .TabSelectionEditorController tabSelectionEditorController,
+            @Nullable SnackbarManager snackbarManager) {
+        if (tabSelectionEditorController != null) {
+            mTabSelectionEditorController = tabSelectionEditorController;
+            mTabSelectionEditorController.getHandleBackPressChangedSupplier().addObserver(
+                    this::notifyBackPressStateChanged);
+        }
+        mSnackbarManager = snackbarManager;
+    }
+
+    /**
+     * Set the controller of the TabGridDialog so that it can be directly controlled.
+     * @param tabGridDialogController The handler of the Grid Dialog
+     */
+    void setTabGridDialogController(
+            TabGridDialogMediator.DialogController tabGridDialogController) {
+        mTabGridDialogController = tabGridDialogController;
+        mTabGridDialogController.getHandleBackPressChangedSupplier().addObserver(
+                this::notifyBackPressStateChanged);
     }
 
     @VisibleForTesting
@@ -267,14 +517,13 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
 
     private int getSoftCleanupDelay() {
         if (mSoftCleanupDelayMsForTesting != null) return mSoftCleanupDelayMsForTesting;
-
-        String delay = ChromeFeatureList.getFieldTrialParamByFeature(
-                ChromeFeatureList.TAB_GRID_LAYOUT_ANDROID, SOFT_CLEANUP_DELAY_PARAM);
-        try {
-            return Integer.valueOf(delay);
-        } catch (NumberFormatException e) {
-            return DEFAULT_SOFT_CLEANUP_DELAY_MS;
+        if (!LibraryLoader.getInstance().isInitialized()) {
+            return 0;
         }
+
+        return ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
+                ChromeFeatureList.TAB_GRID_LAYOUT_ANDROID, SOFT_CLEANUP_DELAY_PARAM,
+                DEFAULT_SOFT_CLEANUP_DELAY_MS);
     }
 
     @VisibleForTesting
@@ -284,14 +533,13 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
 
     private int getCleanupDelay() {
         if (mCleanupDelayMsForTesting != null) return mCleanupDelayMsForTesting;
-
-        String delay = ChromeFeatureList.getFieldTrialParamByFeature(
-                ChromeFeatureList.TAB_GRID_LAYOUT_ANDROID, CLEANUP_DELAY_PARAM);
-        try {
-            return Integer.valueOf(delay);
-        } catch (NumberFormatException e) {
-            return DEFAULT_CLEANUP_DELAY_MS;
+        if (!LibraryLoader.getInstance().isInitialized()) {
+            return 0;
         }
+
+        return ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
+                ChromeFeatureList.TAB_GRID_LAYOUT_ANDROID, CLEANUP_DELAY_PARAM,
+                DEFAULT_CLEANUP_DELAY_MS);
     }
 
     private void setVisibility(boolean isVisible) {
@@ -300,12 +548,34 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
         }
 
         mContainerViewModel.set(IS_VISIBLE, isVisible);
+        notifyBackPressStateChangedInternal();
     }
 
-    private void setContentOverlayVisibility(boolean isVisible) {
-        Tab currentTab = mTabModelSelector.getCurrentTab();
-        if (currentTab == null) return;
-        mCompositorViewHolder.setContentOverlayVisibility(isVisible, true);
+    private void updateTopControlsProperties() {
+        // If the Start surface is enabled, it will handle the margins and positioning of the tab
+        // switcher. So, we shouldn't do it here.
+        if (ReturnToChromeUtil.isStartSurfaceEnabled(mContext)
+                && !ReturnToChromeUtil.isTabSwitcherOnlyRefactorEnabled(mContext)) {
+            mContainerViewModel.set(TOP_MARGIN, 0);
+            mContainerViewModel.set(SHADOW_TOP_OFFSET, 0);
+            return;
+        }
+
+        // The polished version of the grid tab switcher for tablets translates up over top of the
+        // browser controls.
+        if (TabUiFeatureUtilities.isTabletGridTabSwitcherPolishEnabled(mContext)) {
+            final int toolbarHeight =
+                    mContext.getResources().getDimensionPixelSize(R.dimen.toolbar_height_no_shadow);
+
+            mContainerViewModel.set(TOP_MARGIN, toolbarHeight);
+            mContainerViewModel.set(SHADOW_TOP_OFFSET, toolbarHeight);
+            return;
+        }
+
+        final int contentOffset = mBrowserControlsStateProvider.getContentOffset();
+
+        mContainerViewModel.set(TOP_MARGIN, contentOffset);
+        mContainerViewModel.set(SHADOW_TOP_OFFSET, contentOffset);
     }
 
     /**
@@ -323,7 +593,14 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
         Tab fromTab = TabModelUtils.getTabById(mTabModelSelector.getCurrentModel(), lastId);
         assert fromTab != null;
         if (mModelIndexWhenShown == mTabModelSelector.getCurrentModelIndex()) {
-            if (tab.getId() == mTabIdwhenShown) {
+            if (tab.getId() == mTabIdWhenShown) {
+                if (mMode == TabListCoordinator.TabListMode.CAROUSEL) {
+                    RecordUserAction.record("MobileTabReturnedToCurrentTab.TabCarousel");
+                } else if (mMode == TabListCoordinator.TabListMode.GRID) {
+                    RecordUserAction.record("MobileTabReturnedToCurrentTab.TabGrid");
+                } else {
+                    // TODO(crbug.com/1085246): Differentiate others.
+                }
                 RecordUserAction.record("MobileTabReturnedToCurrentTab");
                 RecordHistogram.recordSparseHistogram(
                         "Tabs.TabOffsetOfSwitch." + TabSwitcherCoordinator.COMPONENT_NAME, 0);
@@ -335,10 +612,9 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
                                       .getCurrentTabModelFilter()
                                       .indexOf(tab);
 
-                if (fromIndex != toIndex || fromTab.getId() == tab.getId()) {
+                if (fromIndex != toIndex) {
                     // Only log when you switch a tab page directly from tab switcher.
-                    if (!FeatureUtilities.isTabGroupsAndroidUiImprovementsEnabled()
-                            || getRelatedTabs(tab.getId()).size() == 1) {
+                    if (getRelatedTabs(tab.getId()).size() == 1) {
                         RecordUserAction.record(
                                 "MobileTabSwitched." + TabSwitcherCoordinator.COMPONENT_NAME);
                     }
@@ -359,11 +635,19 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
                 RecordUserAction.record("MobileTabSwitched");
             }
             // Only log when you switch a tab page directly from tab switcher.
-            if (!FeatureUtilities.isTabGroupsAndroidUiImprovementsEnabled()
+            if (!TabUiFeatureUtilities.isTabGroupsAndroidEnabled(mContext)
                     || getRelatedTabs(tab.getId()).size() == 1) {
                 RecordUserAction.record(
                         "MobileTabSwitched." + TabSwitcherCoordinator.COMPONENT_NAME);
             }
+        }
+        if (mMode == TabListCoordinator.TabListMode.GRID
+                && PriceTrackingUtilities.isTabModelPriceTrackingEligible(
+                        mTabModelSelector.getCurrentModel())
+                && PriceTrackingUtilities.isTrackPricesOnTabsEnabled()) {
+            RecordUserAction.record("Commerce.TabGridSwitched."
+                    + (ShoppingPersistedTabData.hasPriceDrop(tab) ? "HasPriceDrop"
+                                                                  : "NoPriceDrop"));
         }
     }
 
@@ -373,108 +657,300 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
     }
 
     @Override
-    public void addOverviewModeObserver(TabSwitcher.OverviewModeObserver observer) {
+    public ViewGroup getTabSwitcherContainer() {
+        return mContainerView;
+    }
+
+    @Override
+    public void addTabSwitcherViewObserver(TabSwitcherViewObserver observer) {
         mObservers.addObserver(observer);
     }
 
     @Override
-    public void removeOverviewModeObserver(TabSwitcher.OverviewModeObserver observer) {
+    public void removeTabSwitcherViewObserver(TabSwitcherViewObserver observer) {
         mObservers.removeObserver(observer);
     }
 
     @Override
-    public void hideOverview(boolean animate) {
+    public void prepareHideTabSwitcherView() {
+        if (mTabGridDialogController != null) {
+            // Don't wait until switcher container view hides.
+            // Hide dialog before GTS hides.
+            mTabGridDialogController.hideDialog(false);
+        }
+    }
+
+    @Override
+    public void hideTabSwitcherView(boolean animate) {
         if (!animate) mContainerViewModel.set(ANIMATE_VISIBILITY_CHANGES, false);
         setVisibility(false);
         mContainerViewModel.set(ANIMATE_VISIBILITY_CHANGES, true);
 
-        if (mTabGridDialogResetHandler != null) {
+        if (mTabGridDialogController != null) {
             // Don't wait until didSelectTab(), which is after the GTS animation.
             // We need to hide the dialog immediately.
-            mTabGridDialogResetHandler.hideDialog(false);
+            mTabGridDialogController.hideDialog(false);
         }
     }
 
-    boolean prepareOverview() {
+    void registerFirstMeaningfulPaintRecorder() {
+        ThreadUtils.assertOnUiThread();
+
+        if (mFirstMeaningfulPaintRecorder == null) return;
+        if (mRegisteredFirstMeaningfulPaintRecorder) return;
+        mRegisteredFirstMeaningfulPaintRecorder = true;
+
+        boolean hasTabs = getTabCount() > 0;
+
+        if (!hasTabs) {
+            FirstDrawDetector.waitForFirstDraw(
+                    mContainerView, this::notifyOnFirstMeaningfulPaintNoTab);
+        } else {
+            mTabContentManager.addOnLastThumbnailListener(this::notifyOnFirstMeaningfulPaint);
+        }
+    }
+
+    private void notifyOnFirstMeaningfulPaintNoTab() {
+        notifyOnFirstMeaningfulPaint(0);
+    }
+
+    private void notifyOnFirstMeaningfulPaint(int numOfThumbnails) {
+        ThreadUtils.assertOnUiThread();
+
+        mFirstMeaningfulPaintRecorder.record(numOfThumbnails);
+        mFirstMeaningfulPaintRecorder = null;
+    }
+
+    boolean prepareTabSwitcherView() {
         mHandler.removeCallbacks(mSoftClearTabListRunnable);
         mHandler.removeCallbacks(mClearTabListRunnable);
         boolean quick = false;
-        if (FeatureUtilities.isTabToGtsAnimationEnabled()) {
+        if (!mTabModelSelector.isTabStateInitialized()) return quick;
+        if (TabUiFeatureUtilities.isTabToGtsAnimationEnabled()) {
             quick = mResetHandler.resetWithTabList(
-                    mTabModelSelector.getTabModelFilterProvider().getCurrentTabModelFilter(),
-                    false);
+                    mTabModelSelector.getTabModelFilterProvider().getCurrentTabModelFilter(), false,
+                    mShowTabsInMruOrder);
         }
-        int initialPosition = Math.max(
-                mTabModelSelector.getTabModelFilterProvider().getCurrentTabModelFilter().index()
-                        - INITIAL_SCROLL_INDEX_OFFSET,
-                0);
-        mContainerViewModel.set(INITIAL_SCROLL_INDEX, initialPosition);
+        setInitialScrollIndexOffset();
+
         return quick;
     }
 
+    private void setInitialScrollIndexOffset() {
+        int offset = mMode == TabListMode.CAROUSEL ? INITIAL_SCROLL_INDEX_OFFSET_CAROUSEL
+                                                   : INITIAL_SCROLL_INDEX_OFFSET_GTS;
+        int initialPosition = Math.max(
+                mTabModelSelector.getTabModelFilterProvider().getCurrentTabModelFilter().index()
+                        - offset,
+                0);
+        // In MRU order, selected Tab is always at the first position.
+        if (mShowTabsInMruOrder) initialPosition = 0;
+        mContainerViewModel.set(INITIAL_SCROLL_INDEX, initialPosition);
+    }
+
     @Override
-    public void showOverview(boolean animate) {
-        mResetHandler.resetWithTabList(
-                mTabModelSelector.getTabModelFilterProvider().getCurrentTabModelFilter(),
-                FeatureUtilities.isTabToGtsAnimationEnabled());
+    public void showTabSwitcherView(boolean animate) {
+        mHandler.removeCallbacks(mSoftClearTabListRunnable);
+        mHandler.removeCallbacks(mClearTabListRunnable);
+        if (mTabModelSelector.isTabStateInitialized()) {
+            mResetHandler.resetWithTabList(
+                    mTabModelSelector.getTabModelFilterProvider().getCurrentTabModelFilter(),
+                    TabUiFeatureUtilities.isTabToGtsAnimationEnabled(), mShowTabsInMruOrder);
+            recordTabCounts();
+            // When |mTabModelSelector.isTabStateInitialized| is false and INSTANT_START is enabled,
+            // the scrolling request is already processed in TabModelObserver#restoreCompleted.
+            // Therefore, we only need to handle the case with isTabStateInitialized() here.
+            setInitialScrollIndexOffset();
+        } else if (ChromeFeatureList.sInstantStart.isEnabled()) {
+            List<PseudoTab> allTabs;
+            try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
+                allTabs = PseudoTab.getAllPseudoTabsFromStateFile(mContext);
+            }
+            mResetHandler.resetWithTabs(allTabs, TabUiFeatureUtilities.isTabToGtsAnimationEnabled(),
+                    mShowTabsInMruOrder);
+        }
+
         if (!animate) mContainerViewModel.set(ANIMATE_VISIBILITY_CHANGES, false);
         setVisibility(true);
         mModelIndexWhenShown = mTabModelSelector.getCurrentModelIndex();
-        mTabIdwhenShown = mTabModelSelector.getCurrentTabId();
+        mTabIdWhenShown = mTabModelSelector.getCurrentTabId();
         mContainerViewModel.set(ANIMATE_VISIBILITY_CHANGES, true);
-        if (mIphProvider != null) {
-            mIphProvider.maybeShowIPH();
-        }
-
-        recordTabCounts();
     }
 
     @Override
     public void startedShowing(boolean isAnimating) {
-        for (TabSwitcher.OverviewModeObserver observer : mObservers) {
+        for (TabSwitcherViewObserver observer : mObservers) {
             observer.startedShowing();
         }
     }
 
     @Override
     public void finishedShowing() {
-        for (TabSwitcher.OverviewModeObserver observer : mObservers) {
+        for (TabSwitcherViewObserver observer : mObservers) {
             observer.finishedShowing();
         }
-        setContentOverlayVisibility(false);
     }
 
     @Override
     public void startedHiding(boolean isAnimating) {
-        setContentOverlayVisibility(true);
-        for (TabSwitcher.OverviewModeObserver observer : mObservers) {
+        for (TabSwitcherViewObserver observer : mObservers) {
             observer.startedHiding();
         }
     }
 
     @Override
     public void finishedHiding() {
-        for (TabSwitcher.OverviewModeObserver observer : mObservers) {
+        for (TabSwitcherViewObserver observer : mObservers) {
             observer.finishedHiding();
         }
     }
 
     @Override
-    public boolean onBackPressed() {
+    public boolean onBackPressed(boolean isOnHomepage) {
+        // The TabSelectionEditor dialog can be shown on the Start surface without showing the Grid
+        // Tab switcher, so skip the check of visibility of mContainerViewModel here.
+        if (mTabSelectionEditorController != null
+                && mTabSelectionEditorController.handleBackPressed()) {
+            return true;
+        }
+
+        if (mCustomViewBackPressRunnable != null) {
+            mCustomViewBackPressRunnable.run();
+            return true;
+        }
+
         if (!mContainerViewModel.get(IS_VISIBLE)) return false;
-        if (mTabSelectionEditorController.handleBackPressed()) return true;
+
+        if (mTabGridDialogController != null && mTabGridDialogController.handleBackPressed()) {
+            return true;
+        }
+
+        // When the Start surface is showing, we no longer need to call onTabSelecting().
+        if (isOnHomepage && mMode == TabListCoordinator.TabListMode.CAROUSEL) return false;
+
         if (mTabModelSelector.getCurrentTab() == null) return false;
 
-        recordUserSwitchedTab(
-                mTabModelSelector.getCurrentTab(), mTabModelSelector.getCurrentTabId());
-        onTabSelecting(mTabModelSelector.getCurrentTabId());
+        onTabSelecting(mTabModelSelector.getCurrentTabId(), false);
 
         return true;
     }
 
+    @Override
+    public void handleBackPress() {
+        boolean ret = onBackPressed(mIsOnHomepage);
+        assert ret;
+    }
+
+    @Override
+    public ObservableSupplier<Boolean> getHandleBackPressChangedSupplier() {
+        return mBackPressChangedSupplier;
+    }
+
+    @Override
+    public boolean isDialogVisible() {
+        if (mTabSelectionEditorController != null && mTabSelectionEditorController.isVisible()) {
+            return true;
+        }
+
+        if (mTabGridDialogController != null && mTabGridDialogController.isVisible()) {
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public ObservableSupplier<Boolean> isDialogVisibleSupplier() {
+        return mIsDialogVisibleSupplier;
+    }
+
+    @Override
+    public void showTabSelectionEditor(List<Tab> tabs) {
+        if (mTabSelectionEditorController == null) {
+            return;
+        }
+        mTabSelectionEditorController.show(tabs);
+    }
+
+    @Override
+    public void enableRecordingFirstMeaningfulPaint(long activityCreateTimeMs) {
+        mFirstMeaningfulPaintRecorder = new FirstMeaningfulPaintRecorder(activityCreateTimeMs);
+    }
+
+    @Override
+    public void onOverviewShownAtLaunch(long activityCreationTimeMs) {
+        if (mMode == TabListMode.CAROUSEL) {
+            ReturnToChromeUtil.recordLastVisitedTabIsSRPWhenOverviewIsShownAtLaunch();
+        }
+    }
+
+    @Override
+    public @TabSwitcherType int getTabSwitcherType() {
+        switch (mMode) {
+            case TabListMode.CAROUSEL:
+                return TabSwitcherType.CAROUSEL;
+            case TabListMode.GRID:
+                return TabSwitcherType.GRID;
+            case TabListMode.LIST:
+            case TabListMode.STRIP:
+            default:
+                return TabSwitcherType.NONE;
+        }
+    }
+
+    @Override
+    public void onHomepageChanged(boolean isOnHomepage) {
+        mIsOnHomepage = isOnHomepage;
+        notifyBackPressStateChangedInternal();
+    }
+
+    @Override
+    public void setSnackbarParentView(ViewGroup parentView) {
+        if (mSnackbarManager == null) return;
+        mSnackbarManager.setParentView(parentView);
+    }
+
+    /**
+     * A method to handle signal from outside world that a client is requesting to show a custom
+     * view inside the tab switcher.
+     *
+     * @param customView A {@link View} view that needs to be shown.
+     * @param backPressRunnable A {@link Runnable} which can be supplied if clients also wish to
+     *         handle back presses while the custom view is shown. A null value can be passed to not
+     *         intercept back presses.
+     */
+    @Override
+    public void addCustomView(@NonNull View customView, @Nullable Runnable backPressRunnable) {
+        assert mCustomView == null : "Only one client at a time is supported to add a custom view.";
+        mContainerView.addView(customView);
+        mCustomView = customView;
+        mCustomViewBackPressRunnable = backPressRunnable;
+        notifyBackPressStateChangedInternal();
+
+        // Disable the animation on the tab list during the time period of the custom view.
+        mContainerViewModel.set(TAB_LIST_ITEM_ANIMATOR_ENABLED, false);
+    }
+
+    /**
+     * A method to handle signal from outside world that a client is requesting to remove the custom
+     * view from the tab switcher.
+     *
+     * @param customView A {@link View} view that needs to be removed.
+     */
+    @Override
+    public void removeCustomView(@NonNull View customView) {
+        assert mCustomView
+                != null : "No client previously passed a custom view that needs removal.";
+        mContainerView.removeView(customView);
+        mCustomView = null;
+        mCustomViewBackPressRunnable = null;
+        notifyBackPressStateChangedInternal();
+
+        mContainerViewModel.set(TAB_LIST_ITEM_ANIMATOR_ENABLED, true);
+    }
+
     /**
      * Do clean-up work after the overview hiding animation is finished.
-     * @see TabSwitcher#postHiding
+     * @see TabSwitcher.TabListDelegate#postHiding
      */
     void postHiding() {
         Log.d(TAG, "SoftCleanupDelay = " + getSoftCleanupDelay());
@@ -498,73 +974,73 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
     }
 
     /**
-     * Setup the drag-and-drop IPH provider.
-     */
-    void setIphProvider(IphProvider iphProvider) {
-        mIphProvider = iphProvider;
-    }
-
-    /**
      * Destroy any members that needs clean up.
      */
     public void destroy() {
+        if (mTabSelectionEditorController != null) {
+            mTabSelectionEditorController.getHandleBackPressChangedSupplier().removeObserver(
+                    this::notifyBackPressStateChanged);
+        }
+
+        if (mTabGridDialogController != null) {
+            mTabGridDialogController.getHandleBackPressChangedSupplier().removeObserver(
+                    this::notifyBackPressStateChanged);
+        }
         mTabModelSelector.removeObserver(mTabModelSelectorObserver);
-        mFullscreenManager.removeListener(mFullscreenListener);
+        mBrowserControlsStateProvider.removeObserver(mBrowserControlsObserver);
         mTabModelSelector.getTabModelFilterProvider().removeTabModelFilterObserver(
                 mTabModelObserver);
+        mMultiWindowModeStateDispatcher.removeObserver(mMultiWindowModeObserver);
     }
 
     void setOnTabSelectingListener(TabSwitcher.OnTabSelectingListener listener) {
         mOnTabSelectingListener = listener;
     }
 
+    void setPriceMessageService(PriceMessageService priceMessageService) {
+        mPriceMessageService = priceMessageService;
+    }
+
     // GridCardOnClickListenerProvider implementation.
     @Override
     @Nullable
     public TabListMediator.TabActionListener openTabGridDialog(Tab tab) {
-        if (!FeatureUtilities.isTabGroupsAndroidUiImprovementsEnabled()) return null;
         if (!ableToOpenDialog(tab)) return null;
         assert getRelatedTabs(tab.getId()).size() != 1;
-        assert mTabGridDialogResetHandler != null;
+        assert mTabGridDialogController != null;
         return tabId -> {
             List<Tab> relatedTabs = getRelatedTabs(tabId);
             if (relatedTabs.size() == 0) {
                 relatedTabs = null;
             }
-            mTabGridDialogResetHandler.resetWithListOfTabs(relatedTabs);
+            mTabGridDialogController.resetWithListOfTabs(relatedTabs);
             RecordUserAction.record("TabGridDialog.ExpandedFromSwitcher");
         };
     }
 
     @Override
-    public void onTabSelecting(int tabId) {
+    public void onTabSelecting(int tabId, boolean fromActionButton) {
+        if (fromActionButton && (mMode == TabListMode.CAROUSEL || mMode == TabListMode.GRID)) {
+            Tab newlySelectedTab =
+                    TabModelUtils.getTabById(mTabModelSelector.getCurrentModel(), tabId);
+            StartSurfaceUserData.setKeepTab(newlySelectedTab, true);
+            if (mMode == TabListMode.CAROUSEL) {
+                StartSurfaceUserData.setOpenedFromStart(newlySelectedTab);
+            }
+        }
         mIsSelectingInTabSwitcher = true;
-        mOnTabSelectingListener.onTabSelecting(LayoutManager.time(), tabId);
+        if (mOnTabSelectingListener != null) {
+            mOnTabSelectingListener.onTabSelecting(LayoutManagerImpl.time(), tabId);
+        }
     }
 
-    @Nullable
-    TabListMediator.TabActionListener getCreateGroupButtonOnClickListener(Tab tab) {
-        if (!ableToCreateGroup(tab) || FeatureUtilities.isTabGroupsAndroidUiImprovementsEnabled())
-            return null;
-
-        return tabId -> {
-            Tab parentTab = TabModelUtils.getTabById(mTabModelSelector.getCurrentModel(), tabId);
-            mTabModelSelector.getCurrentModel().commitAllTabClosures();
-            mTabModelSelector.openNewTab(new LoadUrlParams(UrlConstants.NTP_URL),
-                    TabLaunchType.FROM_CHROME_UI, parentTab,
-                    mTabModelSelector.isIncognitoSelected());
-            RecordUserAction.record("TabGroup.Created.TabSwitcher");
-        };
-    }
-
-    private boolean ableToCreateGroup(Tab tab) {
-        return FeatureUtilities.isTabGroupsAndroidEnabled()
-                && mTabModelSelector.isIncognitoSelected() == tab.isIncognito()
-                && getRelatedTabs(tab.getId()).size() == 1;
+    @Override
+    public void scrollToTab(int tabIndex) {
+        mContainerViewModel.set(TabListContainerProperties.INITIAL_SCROLL_INDEX, tabIndex);
     }
 
     private boolean ableToOpenDialog(Tab tab) {
-        return FeatureUtilities.isTabGroupsAndroidEnabled()
+        return TabUiFeatureUtilities.isTabGroupsAndroidEnabled(mContext)
                 && mTabModelSelector.isIncognitoSelected() == tab.isIncognito()
                 && getRelatedTabs(tab.getId()).size() != 1;
     }
@@ -578,11 +1054,53 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
     private void recordTabCounts() {
         final TabModel model = mTabModelSelector.getCurrentModel();
         if (model == null) return;
-        RecordHistogram.recordCountHistogram(TAB_COUNT_HISTOGRAM, model.getCount());
+        RecordHistogram.recordCount1MHistogram(TAB_COUNT_HISTOGRAM, model.getCount());
 
         final TabModelFilter filter =
                 mTabModelSelector.getTabModelFilterProvider().getCurrentTabModelFilter();
         if (filter == null) return;
-        RecordHistogram.recordCountHistogram(TAB_ENTRIES_HISTOGRAM, filter.getCount());
+        RecordHistogram.recordCount1MHistogram(TAB_ENTRIES_HISTOGRAM, filter.getCount());
+    }
+
+    private int getTabCount() {
+        if (mTabModelSelector.isTabStateInitialized()) {
+            return mTabModelSelector.getTabModelFilterProvider()
+                    .getCurrentTabModelFilter()
+                    .getCount();
+        } else {
+            return SharedPreferencesManager.getInstance().readInt(
+                    ChromePreferenceKeys.REGULAR_TAB_COUNT);
+        }
+    }
+
+    private void notifyBackPressStateChanged(boolean noop) {
+        notifyBackPressStateChangedInternal();
+    }
+
+    private void notifyBackPressStateChangedInternal() {
+        mIsDialogVisibleSupplier.set(isDialogVisible());
+        mBackPressChangedSupplier.set(shouldInterceptBackPress());
+    }
+
+    /**
+     * A method to indicate whether back press should be intercepted. The respective interceptors
+     * should also take care of invoking #notifyBackPressStateChangedInternal each time their
+     * decision to intercept back press has changed.
+     *
+     * @return A boolean to indicate if back press should be intercepted or not.
+     */
+    @VisibleForTesting
+    boolean shouldInterceptBackPress() {
+        if (isDialogVisible()) return true;
+        if (mCustomViewBackPressRunnable != null) return true;
+
+        if (!mContainerViewModel.get(IS_VISIBLE)) return false;
+
+        // When the Start surface is showing, we no longer need to call onTabSelecting().
+        if (mIsOnHomepage && mMode == TabListCoordinator.TabListMode.CAROUSEL) return false;
+
+        if (mTabModelSelector.getCurrentTab() == null) return false;
+
+        return true;
     }
 }

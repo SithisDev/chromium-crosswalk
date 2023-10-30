@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@ TEST(ProcessExtensions, NoExtension) {
   base::FilePath extension_dir;
   std::vector<std::string> bg_pages;
   Status status = internal::ProcessExtensions(extensions, extension_dir,
-                                              false, &switches, &bg_pages);
+                                              &switches, &bg_pages);
   ASSERT_TRUE(status.IsOk());
   ASSERT_FALSE(switches.HasSwitch("load-extension"));
   ASSERT_EQ(0u, bg_pages.size());
@@ -62,7 +62,7 @@ TEST(ProcessExtensions, GenerateIds) {
   ASSERT_TRUE(extension_dir.CreateUniqueTempDir());
 
   Status status = internal::ProcessExtensions(
-      extensions, extension_dir.GetPath(), false, &switches, &bg_pages);
+      extensions, extension_dir.GetPath(), &switches, &bg_pages);
 
   ASSERT_EQ(kOk, status.code()) << status.message();
   ASSERT_EQ(3u, bg_pages.size());
@@ -85,7 +85,7 @@ TEST(ProcessExtensions, GenerateIdCrx3) {
   ASSERT_TRUE(extension_dir.CreateUniqueTempDir());
 
   Status status = internal::ProcessExtensions(
-      extensions, extension_dir.GetPath(), false, &switches, &bg_pages);
+      extensions, extension_dir.GetPath(), &switches, &bg_pages);
 
   ASSERT_EQ(kOk, status.code()) << status.message();
   ASSERT_EQ(1u, bg_pages.size());
@@ -105,7 +105,7 @@ TEST(ProcessExtensions, SingleExtensionWithBgPage) {
   Switches switches;
   std::vector<std::string> bg_pages;
   Status status = internal::ProcessExtensions(
-      extensions, extension_dir.GetPath(), false, &switches, &bg_pages);
+      extensions, extension_dir.GetPath(), &switches, &bg_pages);
   ASSERT_TRUE(status.IsOk());
   ASSERT_TRUE(switches.HasSwitch("load-extension"));
   base::FilePath temp_ext_path(switches.GetSwitchValueNative("load-extension"));
@@ -116,19 +116,26 @@ TEST(ProcessExtensions, SingleExtensionWithBgPage) {
   std::unique_ptr<base::Value> manifest =
       base::JSONReader::ReadDeprecated(manifest_txt);
   ASSERT_TRUE(manifest);
-  base::DictionaryValue* manifest_dict = NULL;
+  base::DictionaryValue* manifest_dict = nullptr;
   ASSERT_TRUE(manifest->GetAsDictionary(&manifest_dict));
   std::string key;
   ASSERT_TRUE(manifest_dict->GetString("key", &key));
   ASSERT_EQ(
-      "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC8qhZthEHjTIA3IYMzi79s2KFepVziY0du"
-      "JzHcqRUB/YHSGseIUqcYXGazJhDz/"
-      "4FbRg8ef9fQazL1UbMMGBIf4za1kJ2os2MsRrNXzHslkbtcLVj2VfofhuHJmu+"
-      "CnKJ77UWamJiNAaQSiclu4duwnEWrkx+g/8ChQfhZzC4jvQIDAQAB",
+      "MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAxbE7gPHcoZQX7Nv1Tpq8Osz3hhC"
+      "fUPZpMCcsYALXYsICUMdFNPvsq4AsfzcIJN2Qc6C9GwlDgBEYQgC6zD9ULoSnHu3iJem49b"
+      "yAzBciO5zMCXBKHx3HN63QJBOKXhIZMdpZePx22fnZjfeLA6zOnGoH6F0YXX+uNsU5qgV9l"
+      "G4je2XwU050l1u1DAcuzrPVcma32rbfXC3mwZjQxgghCqn/hI0/OBcCU37sWBgPci8uk4Wd"
+      "Ee1frQTN2vpQJ0fJl0SaPGCNmpmJ708n/qwpVvmqK99JPznJoT5dahuZoTyoGl092sbpstY"
+      "H+nQ/66yDoztwerywl+lRYgMJstLlRUgrTwmaA4klweuctSfSA40+2kMWSOL+myCyziZ7Ec"
+      "E98ZEGtLaPW5OYxO8r4aQz11q4NyGL/wVDevWHJmprlrjP/zd3GAo6/nwhu+WvdtHlnkGHr"
+      "OVtOdjUPhL+FCvqaj/sMt3ELgIK5h8nt42xPxf8P/cYV+aRuZCd2hAqiNXOQ6HLU0TIdc2X"
+      "dnQtotb3/wuPvRFXqU0o0SAeEwGRoOxr6WqkOLuBuvwNtcKc/cCqxWMlcnId5TWX+tPEpUM"
+      "4Imgbf6jIB2FPpSXQMLHQkag+k95aiXqkpirlhUaBA5yrClFLjw+Ld2yqJfh961yncxF+IB"
+      "EmivSdNH0cYZBISf8CAwEAAQ==",
       key);
   ASSERT_EQ(1u, bg_pages.size());
   ASSERT_EQ(
-      "chrome-extension://jijhlkpcmmeckhlgdipjhnchhoabdjae/"
+      "chrome-extension://ejapkfeonjhabbbnlpmcgholnoicapdb/"
       "_generated_background_page.html",
       bg_pages[0]);
 }
@@ -144,7 +151,7 @@ TEST(ProcessExtensions, MultipleExtensionsNoBgPages) {
   Switches switches;
   std::vector<std::string> bg_pages;
   Status status = internal::ProcessExtensions(
-      extensions, extension_dir.GetPath(), false, &switches, &bg_pages);
+      extensions, extension_dir.GetPath(), &switches, &bg_pages);
   ASSERT_TRUE(status.IsOk());
   ASSERT_TRUE(switches.HasSwitch("load-extension"));
   base::CommandLine::StringType ext_paths =
@@ -168,7 +175,7 @@ TEST(ProcessExtensions, CommandLineExtensions) {
   switches.SetSwitch("load-extension", "/a");
   std::vector<std::string> bg_pages;
   Status status = internal::ProcessExtensions(
-      extensions, extension_dir.GetPath(), false, &switches, &bg_pages);
+      extensions, extension_dir.GetPath(), &switches, &bg_pages);
   ASSERT_EQ(kOk, status.code());
   base::FilePath::StringType load = switches.GetSwitchValueNative(
       "load-extension");
@@ -208,7 +215,7 @@ TEST(PrepareUserDataDir, CustomPrefs) {
   ASSERT_TRUE(base::ReadFileToString(prefs_file, &prefs_str));
   std::unique_ptr<base::Value> prefs_value =
       base::JSONReader::ReadDeprecated(prefs_str);
-  const base::DictionaryValue* prefs_dict = NULL;
+  const base::DictionaryValue* prefs_dict = nullptr;
   ASSERT_TRUE(prefs_value->GetAsDictionary(&prefs_dict));
   AssertEQ(*prefs_dict, "myPrefsKey", "ok");
   AssertEQ(*prefs_dict, "pref.sub", "1");
@@ -219,7 +226,7 @@ TEST(PrepareUserDataDir, CustomPrefs) {
   ASSERT_TRUE(base::ReadFileToString(local_state_file, &local_state_str));
   std::unique_ptr<base::Value> local_state_value =
       base::JSONReader::ReadDeprecated(local_state_str);
-  const base::DictionaryValue* local_state_dict = NULL;
+  const base::DictionaryValue* local_state_dict = nullptr;
   ASSERT_TRUE(local_state_value->GetAsDictionary(&local_state_dict));
   AssertEQ(*local_state_dict, "myLocalKey", "ok");
   AssertEQ(*local_state_dict, "local.state.sub", "2");
@@ -287,7 +294,7 @@ TEST(DesktopLauncher, RemoveOldDevToolsActivePortFile_Success) {
   ASSERT_TRUE(base::PathExists(temp_dir.GetPath()));
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 TEST(DesktopLauncher, RemoveOldDevToolsActivePortFile_Failure) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());

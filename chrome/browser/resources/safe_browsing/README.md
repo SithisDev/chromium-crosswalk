@@ -6,24 +6,24 @@ here, and stored in `download_file_types.asciipb`, will be both baked into
 Chrome released and pushable to Chrome between releases (via
 `FileTypePolicies` class).  http://crbug.com/596555
 
-Rendered version of this file: https://chromium.googlesource.com/chromium/src/+/master/chrome/browser/resources/safe_browsing/README.md
+Rendered version of this file: https://chromium.googlesource.com/chromium/src/+/main/chrome/browser/resources/safe_browsing/README.md
 
 
 ## Procedure for adding/modifying file type(s)
-  * **Edit** `download_file_types.asciipb`, `enums.xml`, and `download_stats.cc`
+  * **Edit** `download_file_types.asciipb` and `enums.xml`.
   * Get it reviewed, **submit.**
   * **Push** it to all users via component update:
     * Wait 1-3 day for this to run on Canary to verify it doesn't crash Chrome.
     * In a synced checkout, run the following to generate protos for all
       platforms and push them to GCS. Replace the arg with your build directory:
-        * % `chrome/browser/resources/safe_browsing/push_file_type_proto.py -d
+        * % `components/safe_browsing/content/resources/push_file_type_proto.py -d
           out-gn/Debug`
     * It will ask you to double check its actions before proceeding.  It will
       fail if you're not a member of
       `chrome-file-type-policies-pushers@google.com`, since that's required for
       access to the GCS bucket.
     * The Component Updater system will notice those files and push them to
-      users withing ~6 hours. If not, contact `waffles@.`
+      users within ~6 hours. If not, contact `waffles@.`
 
 ## Procedure for rollback
 While Omaha allows rollback through the release manager, the Chrome client will
@@ -42,7 +42,7 @@ versions on Canary/Dev channel). Rolling back a bad version is best achieved by:
   * **Upload** the new version of the file types.
     * In a synced checkout, run the following to generate protos for all
       platforms and push them to GCS. Replace the arg with your build directory:
-        * % `chrome/browser/resources/safe_browsing/push_file_type_proto.py -d
+        * % `components/safe_browsing/content/resources/push_file_type_proto.py -d
           out-gn/Debug`
   * Create a new cohort.
     * Under _Cohorts_, click _Manage_, then _Create Subcohort_ of Auto.
@@ -61,6 +61,42 @@ An example script using this API is
 If we regularly need incremental rollouts, it may be worth creating our own
 scripts to do so reliably.
 
+## Procedure for incremental rollout with A/B testing
+  * Open the Omaha Release manager at:
+    https://omaharelease.corp.google.com/product/1436/cohorts
+  * **Disable** the automatic push by changing the _Push Scheduler_ from
+    `LATEST_TO_AUTO` to `NONE`. Then commit the changes by clicking _Commit
+    Automation Changes_.
+  * **Edit** the `download_file_types_experiment.asciipb` file. Make sure the
+    version in this file is greater than the version in
+    `download_file_types.asciipb`. Do not edit `download_file_types.asciipb`.
+    Otherwise, the experiment version will be automatically released with Chrome
+    binary.
+  * **Upload** the new version of the file types.
+    * In a synced checkout, run the following to generate experiment protos for all
+      platforms and push them to GCS. Replace the arg with your build directory:
+        * % `components/safe_browsing/content/resources/push_file_type_proto.py -d
+          out-gn/Debug --experiment`
+  * Create a new cohort.
+    * Name the new cohort with the new experiment version (e.g. `v44`).
+    * Select the file group as `auto_$EXPERIMENT_VERSION_ID`.
+    * Add an attribute with name `tag` and value `$EXPERIMENT_VERSION_ID`
+      (e.g. `44`).
+    * Keep the `auto` cohort unchanged. The auto cohort should be matching to
+      any tag value.
+  * **Rollout** Create a finch study to rollout the new version.
+    * The finch study should set the `tag` value to `$EXPERIMENT_VERSION_ID`
+      that is sent to Omaha.
+    * Recommended schedule: Canary_Dev 50% -> Beta 50% -> Stable 1% -> Launched.
+  * **Cleanup** After the incremental rollout is complete, perform the following
+    cleanup:
+    * Update `download_file_types.asciipb` with changes in
+      `download_file_types_experiment.asciipb`. Make sure the `version_id` is
+      also updated to be equal to the `version_id` in the experiment config.
+      Chrome will then get the new version by default.
+    * Update the `auto` cohort to match to the new file group. Delete the
+      experiment cohort.
+    * set the _Push Scheduler_ back to `LATEST_TO_AUTO`.
 
 ## Guidelines for a DownloadFileType entry:
 See `download_file_types.proto` for all fields.
@@ -83,14 +119,14 @@ See `download_file_types.proto` for all fields.
        send a no-PII "light-ping" for a random sample of SBER users.
        This should be used for known safe types. The verdict won't be used.
 
-    * `NO_PING`:  Don’t send any pings. This file is whitelisted. All
+    * `NO_PING`:  Don’t send any pings. This file is allowlisted. All
       NOT_DANGEROUS files should normally use this.
     * `FULL_PING`: Send full pings and use the verdict. All dangerous
       file should use this.
 
   * `platform_settings`: (repeated) Zero or more settings to differentiate
      behavior by platform. Keep them sorted by platform. At build time,
-     this list will be filtered to contain exactly one setting by chosing
+     this list will be filtered to contain exactly one setting by choosing
      as follows before writing out the binary proto.
 
        1. If there's an entry matching the built platform,
@@ -100,6 +136,12 @@ See `download_file_types.proto` for all fields.
        that will be used. Otherwise,
 
        3. The `default_file_type`'s settings will be filled in.
+
+    **Warning**: When specifying a new `platform_settings` for a file type, be
+    sure to specify values for all necessary settings. The `platform_settings`
+    will override all of the `default_file_type`'s settings, and this may result
+    in a change in behavior for `platform_settings` left unspecified. For
+    example, see [crbug.com/946558](https://crbug.com/946558#c5).
 
   * `platform_settings.danger_level`: (required) Controls how files should be
     handled by the UI in the absence of a better signal from the Safe Browsing
@@ -138,6 +180,10 @@ See `download_file_types.proto` for all fields.
       the user selected "Save link as ..." from the context menu), or if the
       navigation that resulted in the download was initiated using the Omnibox.
 
+    If the `SafeBrowsingForTrustedSourcesEnabled` policy is set and the download
+    originates from a Trusted source, no warnings will be shown even for types
+    with a `danger_level` of `DANGEROUS` or `ALLOW_ON_USER_GESTURE`.
+
   * `platform_settings.auto_open_hint`: (required).
     * `ALLOW_AUTO_OPEN`: File type can be opened automatically if the user
       selected that option from the download tray on a previous download
@@ -154,6 +200,10 @@ See `download_file_types.proto` for all fields.
       potentially dangerous changes in behavior for other programs. We
       allow automatically opening these file types, but always warn when
       they are downloaded.
+  * `platform_settings.max_file_size_to_analyze`: (optional).
+      Size in bytes of the largest file that the analyzer is willing to inspect;
+      for instance, a zip file larger than the threshold will not be unpacked
+      to allow scanning of the files within.
 
   * TODO(nparker): Support this: `platform_settings.unpacker`:
      optional. Specifies which archive unpacker internal to Chrome

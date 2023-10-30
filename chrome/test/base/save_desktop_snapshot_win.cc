@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 
 #include "base/files/file.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
@@ -22,10 +21,12 @@
 
 namespace {
 
-// A callback that holds the last frame catpured by a webrtc::DesktopCapturer.
+// A callback that holds the last frame captured by a webrtc::DesktopCapturer.
 class FrameHolder : public webrtc::DesktopCapturer::Callback {
  public:
   FrameHolder() = default;
+  FrameHolder(const FrameHolder&) = delete;
+  FrameHolder& operator=(const FrameHolder&) = delete;
 
   // Returns the frame that was captured or null in case of failure.
   std::unique_ptr<webrtc::DesktopFrame> TakeFrame() {
@@ -41,7 +42,6 @@ class FrameHolder : public webrtc::DesktopCapturer::Callback {
   }
 
   std::unique_ptr<webrtc::DesktopFrame> frame_;
-  DISALLOW_COPY_AND_ASSIGN(FrameHolder);
 };
 
 // Captures and returns a snapshot of the screen, or an empty bitmap in case of
@@ -87,7 +87,7 @@ base::FilePath SaveDesktopSnapshot(const base::FilePath& output_dir) {
           exploded.second, exploded.millisecond))));
   base::File file(output_path, base::File::FLAG_CREATE |
                                    base::File::FLAG_WRITE |
-                                   base::File::FLAG_SHARE_DELETE |
+                                   base::File::FLAG_WIN_SHARE_DELETE |
                                    base::File::FLAG_CAN_DELETE_ON_CLOSE);
   if (!file.IsValid()) {
     if (file.error_details() == base::File::FILE_ERROR_EXISTS) {

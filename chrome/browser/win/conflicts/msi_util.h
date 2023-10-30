@@ -1,14 +1,14 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_WIN_CONFLICTS_MSI_UTIL_H_
 #define CHROME_BROWSER_WIN_CONFLICTS_MSI_UTIL_H_
 
+#include <string>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/strings/string16.h"
 
 class MsiUtil {
  public:
@@ -24,9 +24,9 @@ class MsiUtil {
   //
   // Note: Marked virtual to allow mocking.
   virtual bool GetMsiComponentPaths(
-      const base::string16& product_guid,
-      const base::string16& user_sid,
-      std::vector<base::string16>* component_paths) const;
+      const std::wstring& product_guid,
+      const std::wstring& user_sid,
+      std::vector<std::wstring>* component_paths) const;
 };
 
 #endif  // CHROME_BROWSER_WIN_CONFLICTS_MSI_UTIL_H_

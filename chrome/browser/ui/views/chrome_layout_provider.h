@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,9 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "chrome/browser/ui/views/chrome_typography_provider.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_provider.h"
 
 enum ChromeInsetsMetric {
@@ -19,9 +17,10 @@ enum ChromeInsetsMetric {
   INSETS_BOOKMARKS_BAR_BUTTON = views::VIEWS_INSETS_END,
   // Margins used by toasts.
   INSETS_TOAST,
-  // Margins around the title of a tab group header, that form the bounds of the
-  // title chip.
-  INSETS_TAB_GROUP_TITLE_CHIP,
+  // Padding used in an omnibox pill button.
+  INSETS_OMNIBOX_PILL_BUTTON,
+  // Padding used in an page info hover button.
+  INSETS_PAGE_INFO_HOVER_BUTTON,
 };
 
 enum ChromeDistanceMetric {
@@ -40,6 +39,17 @@ enum ChromeDistanceMetric {
   // Width of the horizontal padding in a dropdown button between the down arrow
   // and the button's border.
   DISTANCE_DROPDOWN_BUTTON_RIGHT_MARGIN,
+  // Width and height of a button's icon in the extensions menu.
+  DISTANCE_EXTENSIONS_MENU_BUTTON_ICON_SIZE,
+  // Width and height of an extension's icon in the extensions menu. This are
+  // larger than menu button's icons because it contains internal padding to
+  // provide space for badging.
+  DISTANCE_EXTENSIONS_MENU_EXTENSION_ICON_SIZE,
+  // Size difference between the two types of icons in the menu. This is used as
+  // horizontal and vertical margins to align extensions menu rows.
+  DISTANCE_EXTENSIONS_MENU_ICON_SPACING,
+  // Vertical and horizontal margin for menu buttons.
+  DISTANCE_EXTENSIONS_MENU_BUTTON_MARGIN,
   // Smaller horizontal spacing between other controls that are logically
   // related.
   DISTANCE_RELATED_CONTROL_HORIZONTAL_SMALL,
@@ -61,21 +71,34 @@ enum ChromeDistanceMetric {
   DISTANCE_UNRELATED_CONTROL_HORIZONTAL_LARGE,
   // Larger vertical spacing between unrelated controls.
   DISTANCE_UNRELATED_CONTROL_VERTICAL_LARGE,
-  // Width of modal dialogs unless the content is too wide to make that
-  // feasible.
-  DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH,
   // Width of larger modal dialogs that require extra width.
   DISTANCE_LARGE_MODAL_DIALOG_PREFERRED_WIDTH,
-  // Width of a bubble unless the content is too wide to make that
-  // feasible.
-  DISTANCE_BUBBLE_PREFERRED_WIDTH,
+  // Width and height of a vector icon in a bubble's header (i.e. the one
+  // returned from GetWindowIcon).
+  DISTANCE_BUBBLE_HEADER_VECTOR_ICON_SIZE,
+  // Width of a bubble that appears mid-screen (like a standalone dialog)
+  // instead of being anchored.
+  DISTANCE_STANDALONE_BUBBLE_PREFERRED_WIDTH,
   // Horizontal spacing between value and description in the row.
-  DISTANCE_BETWEEN_PRIMARY_AND_SECONDARY_LABELS_HORIZONTAL
+  DISTANCE_BETWEEN_PRIMARY_AND_SECONDARY_LABELS_HORIZONTAL,
+  // Vertical padding at the top and bottom of the an omnibox match row.
+  DISTANCE_OMNIBOX_CELL_VERTICAL_PADDING,
+  // Vertical padding at the top and bottom of the an omnibox match row for two
+  // line layout.
+  DISTANCE_OMNIBOX_TWO_LINE_CELL_VERTICAL_PADDING,
+  // Width and Height of a vector icon in the side panel header.
+  DISTANCE_SIDE_PANEL_HEADER_VECTOR_ICON_SIZE,
+  // Horizontal spacing for separating side panel header border from controls.
+  DISTANCE_SIDE_PANEL_HEADER_INTERIOR_MARGIN_HORIZONTAL
 };
 
 class ChromeLayoutProvider : public views::LayoutProvider {
  public:
   ChromeLayoutProvider();
+
+  ChromeLayoutProvider(const ChromeLayoutProvider&) = delete;
+  ChromeLayoutProvider& operator=(const ChromeLayoutProvider&) = delete;
+
   ~ChromeLayoutProvider() override;
 
   static ChromeLayoutProvider* Get();
@@ -87,22 +110,11 @@ class ChromeLayoutProvider : public views::LayoutProvider {
   int GetSnappedDialogWidth(int min_width) const override;
   const views::TypographyProvider& GetTypographyProvider() const override;
 
-  // Returns the alignment used for control labels in a GridLayout; for example,
-  // in this GridLayout:
-  //   ---------------------------
-  //   | Label 1      Checkbox 1 |
-  //   | Label 2      Checkbox 2 |
-  //   ---------------------------
-  // This value controls the alignment used for "Label 1" and "Label 2".
-  virtual views::GridLayout::Alignment GetControlLabelGridAlignment() const;
-
   // Returns whether to show the icon next to the title text on a dialog.
   virtual bool ShouldShowWindowIcon() const;
 
  private:
   const ChromeTypographyProvider typography_provider_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeLayoutProvider);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_CHROME_LAYOUT_PROVIDER_H_

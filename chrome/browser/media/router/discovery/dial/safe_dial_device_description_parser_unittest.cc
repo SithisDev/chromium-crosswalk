@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "chrome/browser/media/router/discovery/dial/safe_dial_device_description_parser.h"
@@ -6,15 +6,10 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
-#include "chrome/browser/media/router/data_decoder_util.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "services/data_decoder/data_decoder_service.h"
-#include "services/data_decoder/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
+#include "content/public/test/browser_task_environment.h"
+#include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace media_router {
@@ -80,9 +75,12 @@ std::string& Replace(std::string& input,
 
 class SafeDialDeviceDescriptionParserTest : public testing::Test {
  public:
-  SafeDialDeviceDescriptionParserTest()
-      : data_decoder_service_(connector_factory_.RegisterInstance(
-            data_decoder::mojom::kServiceName)) {}
+  SafeDialDeviceDescriptionParserTest() = default;
+
+  SafeDialDeviceDescriptionParserTest(
+      const SafeDialDeviceDescriptionParserTest&) = delete;
+  SafeDialDeviceDescriptionParserTest& operator=(
+      const SafeDialDeviceDescriptionParserTest&) = delete;
 
   ParsedDialDeviceDescription Parse(
       const std::string& xml,
@@ -91,12 +89,11 @@ class SafeDialDeviceDescriptionParserTest : public testing::Test {
     ParsedDialDeviceDescription device_description;
     SafeDialDeviceDescriptionParser::ParsingError error;
     base::RunLoop run_loop;
-    DataDecoder data_decoder(connector_factory_.GetDefaultConnector());
-    SafeDialDeviceDescriptionParser parser(&data_decoder);
+    SafeDialDeviceDescriptionParser parser;
     parser.Parse(
         xml, app_url,
         base::BindOnce(
-            [](base::Closure quit_loop,
+            [](base::RepeatingClosure quit_loop,
                ParsedDialDeviceDescription* out_device_description,
                SafeDialDeviceDescriptionParser::ParsingError* out_error,
                const ParsedDialDeviceDescription& device_description,
@@ -112,11 +109,8 @@ class SafeDialDeviceDescriptionParserTest : public testing::Test {
   }
 
  private:
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
-  service_manager::TestConnectorFactory connector_factory_;
-  data_decoder::DataDecoderService data_decoder_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(SafeDialDeviceDescriptionParserTest);
+  content::BrowserTaskEnvironment task_environment_;
+  data_decoder::test::InProcessDataDecoder in_process_data_decoder_;
 };
 
 TEST_F(SafeDialDeviceDescriptionParserTest, TestInvalidXml) {

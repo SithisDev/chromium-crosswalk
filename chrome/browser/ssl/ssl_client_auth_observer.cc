@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,9 +21,17 @@ SSLClientAuthObserver::SSLClientAuthObserver(
     std::unique_ptr<content::ClientCertificateDelegate> delegate)
     : browser_context_(browser_context),
       cert_request_info_(cert_request_info),
-      delegate_(std::move(delegate)) {}
+      delegate_(std::move(delegate)) {
+  DCHECK(delegate_);
+}
 
 SSLClientAuthObserver::~SSLClientAuthObserver() {
+  // The caller is required to explicitly stop observing, but call
+  // StopObserving() anyway to avoid a dangling pointer. (StopObserving() is
+  // idempotent, so it may be called multiple times.)
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK_EQ(0u, GetActiveObservers().count(this));
+  StopObserving();
 }
 
 void SSLClientAuthObserver::CertificateSelected(

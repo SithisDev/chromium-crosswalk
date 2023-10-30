@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "base/posix/eintr_wrapper.h"
 #include "base/process/launch.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/common/chrome_paths.h"
 
 namespace extensions {
@@ -79,9 +80,17 @@ bool NativeProcessLauncher::LaunchNativeProcess(
 
   options.current_directory = command_line.GetProgram().DirName();
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   // Don't use no_new_privs mode, e.g. in case the host needs to use sudo.
   options.allow_new_privs = true;
+#endif
+
+#if BUILDFLAG(IS_MAC)
+  // This is executing a third-party binary, so do not associate any system
+  // private data requests with Chrome.
+  options.disclaim_responsibility = true;
 #endif
 
   base::Process local_process = base::LaunchProcess(command_line, options);
@@ -95,8 +104,8 @@ bool NativeProcessLauncher::LaunchNativeProcess(
   read_pipe_write_fd.reset();
 
   *process = std::move(local_process);
-  *read_file = base::File(read_pipe_read_fd.release());
-  *write_file = base::File(write_pipe_write_fd.release());
+  *read_file = base::File(std::move(read_pipe_read_fd));
+  *write_file = base::File(std::move(write_pipe_write_fd));
 
   return true;
 }

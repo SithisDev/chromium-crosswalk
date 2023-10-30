@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,10 +15,10 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
-#include "base/sequenced_task_runner.h"
-#include "base/stl_util.h"
+#include "base/task/sequenced_task_runner.h"
+#include "build/build_config.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -59,7 +59,7 @@ static void FlushTaskRunner(base::SequencedTaskRunner* task_runner) {
 class WebRtcRtpDumpWriterTest : public testing::Test {
  public:
   WebRtcRtpDumpWriterTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
         temp_dir_(new base::ScopedTempDir()) {}
 
   void SetUp() override {
@@ -67,12 +67,10 @@ class WebRtcRtpDumpWriterTest : public testing::Test {
 
     incoming_dump_path_ = temp_dir_->GetPath().AppendASCII("rtpdump_recv");
     outgoing_dump_path_ = temp_dir_->GetPath().AppendASCII("rtpdump_send");
-    writer_.reset(new WebRtcRtpDumpWriter(
-        incoming_dump_path_,
-        outgoing_dump_path_,
-        4 * 1024 * 1024,
-        base::Bind(&WebRtcRtpDumpWriterTest::OnMaxSizeReached,
-                   base::Unretained(this))));
+    writer_ = std::make_unique<WebRtcRtpDumpWriter>(
+        incoming_dump_path_, outgoing_dump_path_, 4 * 1024 * 1024,
+        base::BindRepeating(&WebRtcRtpDumpWriterTest::OnMaxSizeReached,
+                            base::Unretained(this)));
   }
 
   // Verifies that the dump contains records of |rtp_packet| repeated
@@ -149,9 +147,9 @@ class WebRtcRtpDumpWriterTest : public testing::Test {
     size_t dump_pos = 0;
 
     // Verifies the first line.
-    EXPECT_EQ(memcmp(&dump[0], kFirstLine, base::size(kFirstLine) - 1), 0);
+    EXPECT_EQ(memcmp(&dump[0], kFirstLine, std::size(kFirstLine) - 1), 0);
 
-    dump_pos += base::size(kFirstLine) - 1;
+    dump_pos += std::size(kFirstLine) - 1;
     EXPECT_GT(dump.size(), dump_pos);
 
     // Skips the file header.
@@ -160,7 +158,7 @@ class WebRtcRtpDumpWriterTest : public testing::Test {
 
     // Reads each packet dump.
     while (dump_pos < dump.size()) {
-      size_t packet_dump_length = 0;
+      uint16_t packet_dump_length = 0;
       if (!VerifyPacketDump(&dump[dump_pos],
                             dump.size() - dump_pos,
                             &packet_dump_length)) {
@@ -182,12 +180,11 @@ class WebRtcRtpDumpWriterTest : public testing::Test {
   // the packet dump.
   bool VerifyPacketDump(const uint8_t* dump,
                         size_t dump_length,
-                        size_t* packet_dump_length) {
+                        uint16_t* packet_dump_length) {
     static const size_t kDumpHeaderLength = 8;
 
     size_t dump_pos = 0;
-    base::ReadBigEndian(reinterpret_cast<const char*>(dump + dump_pos),
-                        reinterpret_cast<uint16_t*>(packet_dump_length));
+    base::ReadBigEndian(dump + dump_pos, packet_dump_length);
     if (*packet_dump_length < kDumpHeaderLength + kMinimumRtpHeaderLength)
       return false;
 
@@ -195,8 +192,7 @@ class WebRtcRtpDumpWriterTest : public testing::Test {
     dump_pos += sizeof(uint16_t);
 
     uint16_t rtp_packet_length = 0;
-    base::ReadBigEndian(reinterpret_cast<const char*>(dump + dump_pos),
-                        &rtp_packet_length);
+    base::ReadBigEndian(dump + dump_pos, &rtp_packet_length);
     if (rtp_packet_length < kMinimumRtpHeaderLength)
       return false;
 
@@ -221,9 +217,8 @@ class WebRtcRtpDumpWriterTest : public testing::Test {
       return false;
 
     uint16_t extension_count = 0;
-    base::ReadBigEndian(
-        reinterpret_cast<const char*>(header + header_length_without_extn + 2),
-        &extension_count);
+    base::ReadBigEndian(header + header_length_without_extn + 2,
+                        &extension_count);
 
     if (length < (extension_count + 1) * 4 + header_length_without_extn)
       return false;
@@ -231,7 +226,7 @@ class WebRtcRtpDumpWriterTest : public testing::Test {
     return true;
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<base::ScopedTempDir> temp_dir_;
   base::FilePath incoming_dump_path_;
   base::FilePath outgoing_dump_path_;
@@ -245,8 +240,8 @@ TEST_F(WebRtcRtpDumpWriterTest, NoDumpFileIfNoPacketDumped) {
     EXPECT_CALL(*this, OnEndDumpDone(false, false));
 
     writer_->EndDump(RTP_DUMP_BOTH,
-                     base::Bind(&WebRtcRtpDumpWriterTest::OnEndDumpDone,
-                                base::Unretained(this)));
+                     base::BindOnce(&WebRtcRtpDumpWriterTest::OnEndDumpDone,
+                                    base::Unretained(this)));
 
     FlushTaskRunner(writer_->background_task_runner().get());
     base::RunLoop().RunUntilIdle();
@@ -272,8 +267,8 @@ TEST_F(WebRtcRtpDumpWriterTest, WriteAndFlushSmallSizeDump) {
     EXPECT_CALL(*this, OnEndDumpDone(true, true));
 
     writer_->EndDump(RTP_DUMP_BOTH,
-                     base::Bind(&WebRtcRtpDumpWriterTest::OnEndDumpDone,
-                                base::Unretained(this)));
+                     base::BindOnce(&WebRtcRtpDumpWriterTest::OnEndDumpDone,
+                                    base::Unretained(this)));
 
     FlushTaskRunner(writer_->background_task_runner().get());
     base::RunLoop().RunUntilIdle();
@@ -284,14 +279,18 @@ TEST_F(WebRtcRtpDumpWriterTest, WriteAndFlushSmallSizeDump) {
   VerifyDumps(1, 1);
 }
 
-TEST_F(WebRtcRtpDumpWriterTest, WriteOverMaxLimit) {
+// Flaky test disabled on Windows (https://crbug.com/1044271).
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_WriteOverMaxLimit DISABLED_WriteOverMaxLimit
+#else
+#define MAYBE_WriteOverMaxLimit WriteOverMaxLimit
+#endif
+TEST_F(WebRtcRtpDumpWriterTest, MAYBE_WriteOverMaxLimit) {
   // Reset the writer with a small max size limit.
-  writer_.reset(new WebRtcRtpDumpWriter(
-      incoming_dump_path_,
-      outgoing_dump_path_,
-      100,
-      base::Bind(&WebRtcRtpDumpWriterTest::OnMaxSizeReached,
-                 base::Unretained(this))));
+  writer_ = std::make_unique<WebRtcRtpDumpWriter>(
+      incoming_dump_path_, outgoing_dump_path_, 100,
+      base::BindRepeating(&WebRtcRtpDumpWriterTest::OnMaxSizeReached,
+                          base::Unretained(this)));
 
   std::vector<uint8_t> packet_header;
   CreateFakeRtpPacketHeader(3, 4, &packet_header);
@@ -314,8 +313,8 @@ TEST_F(WebRtcRtpDumpWriterTest, WriteOverMaxLimit) {
     EXPECT_CALL(*this, OnEndDumpDone(true, true));
 
     writer_->EndDump(RTP_DUMP_BOTH,
-                     base::Bind(&WebRtcRtpDumpWriterTest::OnEndDumpDone,
-                                base::Unretained(this)));
+                     base::BindOnce(&WebRtcRtpDumpWriterTest::OnEndDumpDone,
+                                    base::Unretained(this)));
 
     FlushTaskRunner(writer_->background_task_runner().get());
     base::RunLoop().RunUntilIdle();
@@ -329,8 +328,8 @@ TEST_F(WebRtcRtpDumpWriterTest, DestroyWriterBeforeEndDumpCallback) {
   EXPECT_CALL(*this, OnEndDumpDone(testing::_, testing::_)).Times(0);
 
   writer_->EndDump(RTP_DUMP_BOTH,
-                   base::Bind(&WebRtcRtpDumpWriterTest::OnEndDumpDone,
-                              base::Unretained(this)));
+                   base::BindOnce(&WebRtcRtpDumpWriterTest::OnEndDumpDone,
+                                  base::Unretained(this)));
 
   writer_.reset();
 
@@ -358,12 +357,12 @@ TEST_F(WebRtcRtpDumpWriterTest, EndDumpsSeparately) {
     EXPECT_CALL(*this, OnEndDumpDone(false, true));
 
     writer_->EndDump(RTP_DUMP_INCOMING,
-                     base::Bind(&WebRtcRtpDumpWriterTest::OnEndDumpDone,
-                                base::Unretained(this)));
+                     base::BindOnce(&WebRtcRtpDumpWriterTest::OnEndDumpDone,
+                                    base::Unretained(this)));
 
     writer_->EndDump(RTP_DUMP_OUTGOING,
-                     base::Bind(&WebRtcRtpDumpWriterTest::OnEndDumpDone,
-                                base::Unretained(this)));
+                     base::BindOnce(&WebRtcRtpDumpWriterTest::OnEndDumpDone,
+                                    base::Unretained(this)));
 
     FlushTaskRunner(writer_->background_task_runner().get());
     base::RunLoop().RunUntilIdle();

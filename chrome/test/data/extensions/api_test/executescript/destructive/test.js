@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -197,7 +197,7 @@ function testRemoveSelf(page, pattern) {
   var kDefaultPattern = /</;
 
   if (page.includes('start')) {
-    pattern = pattern || /^<html><\/html>$/;
+    pattern = pattern || /^<\s*html[^>]*><\/html>$/;
     pattern = TEST_HOST === 'synchronous' ? pattern : kDefaultPattern;
   } else if (page.includes('end')) {
     pattern = pattern || kDefaultPattern;

@@ -1,13 +1,13 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.accessibility;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -15,15 +15,21 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.ContextUtils;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.accessibility.FontSizePrefs.FontSizePrefsObserver;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.test.ChromeBrowserTestRule;
+import org.chromium.components.browser_ui.accessibility.FontSizePrefs;
+import org.chromium.components.browser_ui.accessibility.FontSizePrefs.FontSizePrefsObserver;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 /**
  * Tests for {@link FontSizePrefs}.
+ *
+ * TODO(crbug.com/1296642): This tests the class in //components/browser_ui, but we don't have a
+ * good way of testing with native code there.
  */
 @RunWith(BaseJUnit4ClassRunner.class)
 public class FontSizePrefsTest {
@@ -34,7 +40,7 @@ public class FontSizePrefsTest {
     private FontSizePrefs mFontSizePrefs;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         resetSharedPrefs();
         Context context = InstrumentationRegistry.getTargetContext();
         mFontSizePrefs = getFontSizePrefs(context);
@@ -42,10 +48,9 @@ public class FontSizePrefsTest {
     }
 
     private void resetSharedPrefs() {
-        SharedPreferences.Editor editor = ContextUtils.getAppSharedPreferences().edit();
-        editor.remove(FontSizePrefs.PREF_USER_SET_FORCE_ENABLE_ZOOM);
-        editor.remove(FontSizePrefs.PREF_USER_FONT_SCALE_FACTOR);
-        editor.apply();
+        SharedPreferencesManager prefs = SharedPreferencesManager.getInstance();
+        prefs.removeKey(ChromePreferenceKeys.FONT_USER_SET_FORCE_ENABLE_ZOOM);
+        prefs.removeKey(ChromePreferenceKeys.FONT_USER_FONT_SCALE_FACTOR);
     }
 
     @Test
@@ -148,8 +153,8 @@ public class FontSizePrefsTest {
 
         // Delete PREF_USER_FONT_SCALE_FACTOR. This simulates the condition just after upgrading to
         // M51, when userFontScaleFactor was added.
-        SharedPreferences.Editor editor = ContextUtils.getAppSharedPreferences().edit();
-        editor.remove(FontSizePrefs.PREF_USER_FONT_SCALE_FACTOR).apply();
+        SharedPreferencesManager prefs = SharedPreferencesManager.getInstance();
+        prefs.removeKey(ChromePreferenceKeys.FONT_USER_FONT_SCALE_FACTOR);
 
         // Intial userFontScaleFactor should be set to fontScaleFactor / systemFontScale.
         Assert.assertEquals(1.5f, getUserFontScaleFactor(), EPSILON);
@@ -182,7 +187,8 @@ public class FontSizePrefsTest {
     }
 
     private FontSizePrefs getFontSizePrefs(final Context context) {
-        return TestThreadUtils.runOnUiThreadBlockingNoException(() -> FontSizePrefs.getInstance());
+        return TestThreadUtils.runOnUiThreadBlockingNoException(
+                () -> FontSizePrefs.getInstance(Profile.getLastUsedRegularProfile()));
     }
 
     private TestingObserver createAndAddFontSizePrefsObserver() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright 2009 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,7 +79,7 @@ void FirefoxProfileLock::Unlock() {
     return;
   close(lock_fd_);
   lock_fd_ = base::kInvalidFd;
-  base::DeleteFile(old_lock_file_, false);
+  base::DeleteFile(old_lock_file_);
 }
 
 bool FirefoxProfileLock::HasAcquired() {

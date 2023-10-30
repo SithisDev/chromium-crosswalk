@@ -1,18 +1,18 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
 
-#include "chrome/browser/prerender/prerender_contents.h"
-#include "chrome/browser/prerender/prerender_histograms.h"
-#include "chrome/browser/previews/previews_lite_page_decider.h"
+#include "chrome/browser/preloading/prefetch/no_state_prefetch/chrome_no_state_prefetch_contents_delegate.h"
+#include "components/no_state_prefetch/browser/no_state_prefetch_contents.h"
+#include "components/no_state_prefetch/browser/prerender_histograms.h"
 #include "content/public/browser/navigation_handle.h"
 #include "extensions/buildflags/buildflags.h"
 #include "ui/base/window_open_disposition.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "chrome/browser/extensions/chrome_extension_api_frame_id_map_helper.h"
+#include "extensions/browser/extensions_browser_client.h"
 #include "extensions/common/constants.h"
 #endif
 
@@ -26,22 +26,24 @@ ChromeNavigationUIData::ChromeNavigationUIData(
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   int tab_id = extension_misc::kUnknownTabId;
   int window_id = extension_misc::kUnknownWindowId;
-  extensions::ChromeExtensionApiFrameIdMapHelper::PopulateTabData(
-      web_contents, &tab_id, &window_id);
+  // The browser client can be null in unittests.
+  if (extensions::ExtensionsBrowserClient::Get()) {
+    extensions::ExtensionsBrowserClient::Get()->GetTabAndWindowIdForWebContents(
+        web_contents, &tab_id, &window_id);
+  }
   extension_data_ = std::make_unique<extensions::ExtensionNavigationUIData>(
       navigation_handle, tab_id, window_id);
 #endif
 
-  auto* prerender_contents =
-      prerender::PrerenderContents::FromWebContents(web_contents);
-  if (prerender_contents) {
-    prerender_mode_ = prerender_contents->prerender_mode();
+  auto* no_state_prefetch_contents =
+      prerender::ChromeNoStatePrefetchContentsDelegate::FromWebContents(
+          web_contents);
+  if (no_state_prefetch_contents) {
+    is_no_state_prefetching_ = true;
     prerender_histogram_prefix_ =
         prerender::PrerenderHistograms::GetHistogramPrefix(
-            prerender_contents->origin());
+            no_state_prefetch_contents->origin());
   }
-  data_reduction_proxy_page_id_ =
-      PreviewsLitePageDecider::GeneratePageIdForWebContents(web_contents);
 }
 
 ChromeNavigationUIData::~ChromeNavigationUIData() {}
@@ -51,17 +53,20 @@ std::unique_ptr<ChromeNavigationUIData>
 ChromeNavigationUIData::CreateForMainFrameNavigation(
     content::WebContents* web_contents,
     WindowOpenDisposition disposition,
-    int64_t data_reduction_proxy_page_id) {
+    bool is_using_https_as_default_scheme) {
   auto navigation_ui_data = std::make_unique<ChromeNavigationUIData>();
   navigation_ui_data->disposition_ = disposition;
-  navigation_ui_data->data_reduction_proxy_page_id_ =
-      data_reduction_proxy_page_id;
+  navigation_ui_data->is_using_https_as_default_scheme_ =
+      is_using_https_as_default_scheme;
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   int tab_id = extension_misc::kUnknownTabId;
   int window_id = extension_misc::kUnknownWindowId;
-  extensions::ChromeExtensionApiFrameIdMapHelper::PopulateTabData(
-      web_contents, &tab_id, &window_id);
+  // The browser client can be null in unittests.
+  if (extensions::ExtensionsBrowserClient::Get()) {
+    extensions::ExtensionsBrowserClient::Get()->GetTabAndWindowIdForWebContents(
+        web_contents, &tab_id, &window_id);
+  }
 
   navigation_ui_data->extension_data_ =
       extensions::ExtensionNavigationUIData::CreateForMainFrameNavigation(
@@ -75,7 +80,7 @@ std::unique_ptr<content::NavigationUIData> ChromeNavigationUIData::Clone() {
   auto copy = std::make_unique<ChromeNavigationUIData>();
 
   copy->disposition_ = disposition_;
-  copy->data_reduction_proxy_page_id_ = data_reduction_proxy_page_id_;
+  copy->is_using_https_as_default_scheme_ = is_using_https_as_default_scheme_;
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   if (extension_data_)
@@ -87,8 +92,9 @@ std::unique_ptr<content::NavigationUIData> ChromeNavigationUIData::Clone() {
     copy->SetOfflinePageNavigationUIData(offline_page_data_->DeepCopy());
 #endif
 
-  copy->prerender_mode_ = prerender_mode_;
+  copy->is_no_state_prefetching_ = is_no_state_prefetching_;
   copy->prerender_histogram_prefix_ = prerender_histogram_prefix_;
+  copy->bookmark_id_ = bookmark_id_;
 
   return std::move(copy);
 }

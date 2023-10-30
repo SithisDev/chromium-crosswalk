@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,12 @@
 #import <Cocoa/Cocoa.h>
 
 #import "ui/base/test/cocoa_helper.h"
+
+class CocoaTestHelper : public ui::CocoaTestHelper {
+ public:
+  CocoaTestHelper();
+  ~CocoaTestHelper() override;
+};
 
 // A test class that all tests that depend on AppKit should inherit from.
 // Sets up paths correctly, and makes sure that any windows created in the test

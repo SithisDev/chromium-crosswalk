@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,35 +11,32 @@
 #include <string>
 #include <vector>
 
-#include "chrome/browser/extensions/chrome_extension_function.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/common/extensions/api/debugger.h"
 #include "content/public/browser/devtools_agent_host.h"
+#include "extensions/browser/extension_function.h"
 
 using extensions::api::debugger::Debuggee;
 
 // Base debugger function.
 
-namespace base {
-class DictionaryValue;
-}
-
 namespace extensions {
 class ExtensionDevToolsClientHost;
 
-class DebuggerFunction : public ChromeAsyncExtensionFunction {
+class DebuggerFunction : public ExtensionFunction {
  protected:
   DebuggerFunction();
   ~DebuggerFunction() override;
 
-  void FormatErrorMessage(const std::string& format);
+  std::string FormatErrorMessage(const std::string& format);
 
-  bool InitAgentHost();
-  bool InitClientHost();
+  bool InitAgentHost(std::string* error);
+  bool InitClientHost(std::string* error);
   ExtensionDevToolsClientHost* FindClientHost();
 
   Debuggee debuggee_;
   scoped_refptr<content::DevToolsAgentHost> agent_host_;
-  ExtensionDevToolsClientHost* client_host_;
+  raw_ptr<ExtensionDevToolsClientHost> client_host_;
 };
 
 // Implements the debugger.attach() extension function.
@@ -53,7 +50,7 @@ class DebuggerAttachFunction : public DebuggerFunction {
   ~DebuggerAttachFunction() override;
 
   // ExtensionFunction:
-  bool RunAsync() override;
+  ResponseAction Run() override;
 };
 
 // Implements the debugger.detach() extension function.
@@ -67,7 +64,7 @@ class DebuggerDetachFunction : public DebuggerFunction {
   ~DebuggerDetachFunction() override;
 
   // ExtensionFunction:
-  bool RunAsync() override;
+  ResponseAction Run() override;
 };
 
 // Implements the debugger.sendCommand() extension function.
@@ -76,14 +73,14 @@ class DebuggerSendCommandFunction : public DebuggerFunction {
   DECLARE_EXTENSION_FUNCTION("debugger.sendCommand", DEBUGGER_SENDCOMMAND)
 
   DebuggerSendCommandFunction();
-  void SendResponseBody(base::DictionaryValue* result);
+  void SendResponseBody(base::Value result);
   void SendDetachedError();
 
  protected:
   ~DebuggerSendCommandFunction() override;
 
   // ExtensionFunction:
-  bool RunAsync() override;
+  ResponseAction Run() override;
 };
 
 // Implements the debugger.getTargets() extension function.
@@ -97,10 +94,7 @@ class DebuggerGetTargetsFunction : public DebuggerFunction {
   ~DebuggerGetTargetsFunction() override;
 
   // ExtensionFunction:
-  bool RunAsync() override;
-
- private:
-  void SendTargetList(const content::DevToolsAgentHost::List& target_list);
+  ResponseAction Run() override;
 };
 
 }  // namespace extensions

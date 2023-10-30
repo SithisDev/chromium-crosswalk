@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,22 @@
 
 #include <stdint.h>
 
+#include "components/prefs/pref_change_registrar.h"
+#include "components/sync/base/model_type.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "base/files/file_path.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/values.h"
+#include "chrome/browser/sync/test/integration/fake_server_match_status_checker.h"
+#include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/status_change_checker.h"
 #include "components/prefs/json_pref_store.h"
+#include "components/sync/protocol/preference_specifics.pb.h"
+#include "components/sync/test/fake_server.h"
 
 class PrefChangeRegistrar;
 class PrefService;
@@ -30,98 +37,75 @@ namespace preferences_helper {
 // Used to access the preferences within a particular sync profile.
 PrefService* GetPrefs(int index);
 
-// Used to access the preferences within the verifier sync profile.
-PrefService* GetVerifierPrefs();
-
 // Provides access to the syncable pref registy of a profile.
 user_prefs::PrefRegistrySyncable* GetRegistry(Profile* profile);
 
 // Inverts the value of the boolean preference with name |pref_name| in the
-// profile with index |index|. Also inverts its value in |verifier| if
-// DisableVerifier() hasn't been called.
+// profile with index |index|.
 void ChangeBooleanPref(int index, const char* pref_name);
 
 // Changes the value of the integer preference with name |pref_name| in the
-// profile with index |index| to |new_value|. Also changes its value in
-// |verifier| if DisableVerifier() hasn't been called.
+// profile with index |index| to |new_value|.
 void ChangeIntegerPref(int index, const char* pref_name, int new_value);
 
-// Changes the value of the int64_t preference with name |pref_name| in the
-// profile with index |index| to |new_value|. Also changes its value in
-// |verifier| if DisableVerifier() hasn't been called.
-void ChangeInt64Pref(int index, const char* pref_name, int64_t new_value);
-
-// Changes the value of the double preference with name |pref_name| in the
-// profile with index |index| to |new_value|. Also changes its value in
-// |verifier| if DisableVerifier() hasn't been called.
-void ChangeDoublePref(int index, const char* pref_name, double new_value);
-
 // Changes the value of the string preference with name |pref_name| in the
-// profile with index |index| to |new_value|. Also changes its value in
-// |verifier| if DisableVerifier() hasn't been called.
+// profile with index |index| to |new_value|.
 void ChangeStringPref(int index,
                       const char* pref_name,
                       const std::string& new_value);
 
 // Clears the value of the preference with name |pref_name| in the profile with
-// index |index|. Also changes its value in |verifier| if DisableVerifier()
-// hasn't been called.
+// index |index|.
 void ClearPref(int index, const char* pref_name);
 
-// Changes the value of the file path preference with name |pref_name| in the
-// profile with index |index| to |new_value|. Also changes its value in
-// |verifier| if DisableVerifier() hasn't been called.
-void ChangeFilePathPref(int index,
-                        const char* pref_name,
-                        const base::FilePath& new_value);
-
 // Changes the value of the list preference with name |pref_name| in the
-// profile with index |index| to |new_value|. Also changes its value in
-// |verifier| if DisableVerifier() hasn't been called.
+// profile with index |index| to |new_value|.
 void ChangeListPref(int index,
                     const char* pref_name,
                     const base::ListValue& new_value);
 
-// Reads preferences from a given profile's pref file (after flushing) and loads
-// them into a new created pref store.
-scoped_refptr<PrefStore> BuildPrefStoreFromPrefsFile(Profile* profile);
-
 // Used to verify that the boolean preference with name |pref_name| has the
-// same value across all profiles. Also checks |verifier| if DisableVerifier()
-// hasn't been called.
-bool BooleanPrefMatches(const char* pref_name) WARN_UNUSED_RESULT;
+// same value across all profiles.
+[[nodiscard]] bool BooleanPrefMatches(const char* pref_name);
 
 // Used to verify that the integer preference with name |pref_name| has the
-// same value across all profiles. Also checks |verifier| if DisableVerifier()
-// hasn't been called.
-bool IntegerPrefMatches(const char* pref_name) WARN_UNUSED_RESULT;
-
-// Used to verify that the int64_t preference with name |pref_name| has the
-// same value across all profiles. Also checks |verifier| if DisableVerifier()
-// hasn't been called.
-bool Int64PrefMatches(const char* pref_name) WARN_UNUSED_RESULT;
-
-// Used to verify that the double preference with name |pref_name| has the
-// same value across all profiles. Also checks |verifier| if DisableVerifier()
-// hasn't been called.
-bool DoublePrefMatches(const char* pref_name) WARN_UNUSED_RESULT;
+// same value across all profiles.
+[[nodiscard]] bool IntegerPrefMatches(const char* pref_name);
 
 // Used to verify that the string preference with name |pref_name| has the
-// same value across all profiles. Also checks |verifier| if DisableVerifier()
-// hasn't been called.
-bool StringPrefMatches(const char* pref_name) WARN_UNUSED_RESULT;
-
-// Used to verify that the file path preference with name |pref_name| has the
-// same value across all profiles. Also checks |verifier| if DisableVerifier()
-// hasn't been called.
-bool FilePathPrefMatches(const char* pref_name) WARN_UNUSED_RESULT;
+// same value across all profiles.
+[[nodiscard]] bool StringPrefMatches(const char* pref_name);
 
 // Used to verify that the list preference with name |pref_name| has the
-// same value across all profiles. Also checks |verifier| if DisableVerifier()
-// hasn't been called.
-bool ListPrefMatches(const char* pref_name) WARN_UNUSED_RESULT;
+// same value across all profiles.
+[[nodiscard]] bool ListPrefMatches(const char* pref_name);
+
+// Returns a server-side preference in FakeServer for |pref_name| or nullopt if
+// no preference exists.
+absl::optional<sync_pb::PreferenceSpecifics> GetPreferenceInFakeServer(
+    syncer::ModelType model_type,
+    const std::string& pref_name,
+    fake_server::FakeServer* fake_server);
 
 }  // namespace preferences_helper
+
+// Checker that blocks until pref has the specified value.
+class BooleanPrefValueChecker : public StatusChangeChecker {
+ public:
+  BooleanPrefValueChecker(PrefService* pref_service,
+                          const char* path,
+                          bool expected_value);
+  ~BooleanPrefValueChecker() override;
+
+  bool IsExitConditionSatisfied(std::ostream* os) override;
+
+ private:
+  const char* path_;
+  const bool expected_value_;
+
+  const base::raw_ptr<PrefService> pref_service_;
+  PrefChangeRegistrar pref_change_registrar_;
+};
 
 // Abstract checker that takes care of registering for preference changes.
 class PrefMatchChecker : public StatusChangeChecker {
@@ -130,8 +114,7 @@ class PrefMatchChecker : public StatusChangeChecker {
   ~PrefMatchChecker() override;
 
   // StatusChangeChecker implementation.
-  bool IsExitConditionSatisfied() override = 0;
-  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied(std::ostream* os) override = 0;
 
  protected:
   const char* GetPath() const;
@@ -149,7 +132,7 @@ class ListPrefMatchChecker : public PrefMatchChecker {
   explicit ListPrefMatchChecker(const char* path);
 
   // PrefMatchChecker implementation.
-  bool IsExitConditionSatisfied() override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 };
 
 // Matcher that blocks until the specified boolean pref matches on all clients.
@@ -158,7 +141,7 @@ class BooleanPrefMatchChecker : public PrefMatchChecker {
   explicit BooleanPrefMatchChecker(const char* path);
 
   // PrefMatchChecker implementation.
-  bool IsExitConditionSatisfied() override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 };
 
 // Matcher that blocks until the specified integer pref matches on all clients.
@@ -167,7 +150,7 @@ class IntegerPrefMatchChecker : public PrefMatchChecker {
   explicit IntegerPrefMatchChecker(const char* path);
 
   // PrefMatchChecker implementation.
-  bool IsExitConditionSatisfied() override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 };
 
 // Matcher that blocks until the specified string pref matches on all clients.
@@ -176,7 +159,7 @@ class StringPrefMatchChecker : public PrefMatchChecker {
   explicit StringPrefMatchChecker(const char* path);
 
   // PrefMatchChecker implementation.
-  bool IsExitConditionSatisfied() override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 };
 
 // Matcher that blocks until the specified pref is cleared on all clients.
@@ -185,7 +168,25 @@ class ClearedPrefMatchChecker : public PrefMatchChecker {
   explicit ClearedPrefMatchChecker(const char* path);
 
   // PrefMatchChecker implementation.
-  bool IsExitConditionSatisfied() override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
+};
+
+// Waits until GetPreferenceInFakeServer() returns an expected value.
+class FakeServerPrefMatchesValueChecker
+    : public fake_server::FakeServerMatchStatusChecker {
+ public:
+  FakeServerPrefMatchesValueChecker(syncer::ModelType model_type,
+                                    const std::string& pref_name,
+                                    const std::string& expected_value);
+
+ protected:
+  // StatusChangeChecker overrides.
+  bool IsExitConditionSatisfied(std::ostream* os) override;
+
+ private:
+  const syncer::ModelType model_type_;
+  const std::string pref_name_;
+  const std::string expected_value_;
 };
 
 #endif  // CHROME_BROWSER_SYNC_TEST_INTEGRATION_PREFERENCES_HELPER_H_

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,11 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/time/time.h"
-#include "chrome/services/media_gallery_util/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "chrome/services/media_gallery_util/public/mojom/media_parser.mojom.h"
 
-SafeAudioVideoChecker::SafeAudioVideoChecker(
-    base::File file,
-    ResultCallback callback,
-    std::unique_ptr<service_manager::Connector> connector)
-    : file_(std::move(file)),
-      connector_(std::move(connector)),
-      callback_(std::move(callback)) {
+SafeAudioVideoChecker::SafeAudioVideoChecker(base::File file,
+                                             ResultCallback callback)
+    : file_(std::move(file)), callback_(std::move(callback)) {
   DCHECK(callback_);
 }
 
@@ -28,12 +23,11 @@ void SafeAudioVideoChecker::Start() {
     return;
   }
 
-  RetrieveMediaParser(connector_.get());
+  RetrieveMediaParser();
 }
 
 void SafeAudioVideoChecker::OnMediaParserCreated() {
-  static constexpr auto kFileDecodeTime =
-      base::TimeDelta::FromMilliseconds(250);
+  static constexpr auto kFileDecodeTime = base::Milliseconds(250);
 
   media_parser()->CheckMediaFile(
       kFileDecodeTime, std::move(file_),

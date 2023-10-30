@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,11 @@ import java.util.concurrent.Callable;
  * the XrTestRule interface.
  */
 public class XrTestRuleUtils {
+    /**
+     * Essentially a Runnable that can throw exceptions.
+     */
+    public interface ChromeLaunchMethod { public void launch() throws Throwable; }
+
     /**
      * Creates the list of XrTestRules that are currently supported for use in test
      * parameterization.

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,6 @@ var NOT_OPTIONAL_ERROR =
 
 var REQUIRED_ERROR =
     "You cannot remove required permissions.";
-
-var NOT_ALLOWLISTED_ERROR =
-    "The optional permissions API does not support '*'.";
 
 var UNKNOWN_PERMISSIONS_ERROR =
     "'*' is not a recognized permission.";
@@ -56,29 +53,32 @@ function checkPermSetsEq(set1, set2) {
          checkEqualSets(set1.origins, set2.origins);
 }
 
+function checkResponse(response) {
+  if (response.ok) {
+    assertEq(200, response.status);
+    return response;
+  }
+  var error = new Error(response.statusText);
+  error.response = response;
+  throw error;
+}
+
 chrome.test.getConfig(function(config) {
 
   function doReq(domain, callback) {
-    var req = new XMLHttpRequest();
     var url = domain + ":PORT/extensions/test_file.txt";
     url = url.replace(/PORT/, config.testServer.port);
 
     chrome.test.log("Requesting url: " + url);
-    req.open("GET", url, true);
-
-    req.onload = function() {
-      assertEq(200, req.status);
-      assertEq("Hello!", req.responseText);
-      callback(true);
-    };
-
-    req.onerror = function() {
-      chrome.test.log("status: " + req.status);
-      chrome.test.log("text: " + req.responseText);
-      callback(false);
-    };
-
-    req.send(null);
+    fetch(url, {mode: 'no-cors'}).then(checkResponse)
+        .then(function(response) {
+          return response.text();
+        }).then(function(responseText) {
+          assertEq("Hello!", responseText);
+          callback(true);
+        }).catch(function(error) {
+          callback(false);
+        });
   }
 
   chrome.test.runTests([
@@ -179,13 +179,9 @@ chrome.test.getConfig(function(config) {
             }));
             assertTrue(typeof chrome.bookmarks == 'object' &&
                        chrome.bookmarks != null);
-            var nativeBindingsError =
-                "'bookmarks.getTree' is not available in this context.";
-            var jsBindingsError =
-                "'bookmarks' requires a different Feature that is not present.";
-            var regexp =
-                new RegExp(nativeBindingsError + '|' + jsBindingsError);
-            assertThrows(chrome.bookmarks.getTree, [function(){}], regexp);
+            assertThrows(
+                chrome.bookmarks.getTree, [function(){}],
+                `'bookmarks.getTree' is not available in this context.`);
           }
       ));
     },
@@ -204,16 +200,6 @@ chrome.test.getConfig(function(config) {
       }));
     },
 
-    // Make sure you can only access the allowlisted permissions.
-    function allowlist() {
-      const kPermission = 'fontSettings';
-      var error_msg = NOT_ALLOWLISTED_ERROR.replace('*', kPermission);
-      chrome.permissions.request(
-          {permissions: [kPermission]}, fail(error_msg));
-      chrome.permissions.remove(
-          {permissions: [kPermission]}, fail(error_msg));
-    },
-
     function unknownPermission() {
       var error_msg = UNKNOWN_PERMISSIONS_ERROR.replace('*', 'asdf');
       chrome.permissions.request(
@@ -221,58 +207,72 @@ chrome.test.getConfig(function(config) {
     },
 
     function requestOrigin() {
-      doReq('http://c.com', pass(function(success) { assertFalse(success); }));
+      doReq('http://c.com', pass(function(success) {
+        assertFalse(success);
 
-      chrome.permissions.getAll(pass(function(permissions) {
-        assertTrue(checkPermSetsEq(initialPermissions, permissions));
-      }));
-
-      listenOnce(chrome.permissions.onAdded,
-                 function(permissions) {
-        assertTrue(permissions.permissions.length == 0);
-        assertTrue(permissions.origins.length == 1);
-        assertTrue(permissions.origins[0] == 'http://*.c.com/*');
-      });
-      chrome.permissions.request(
-          {origins: ['http://*.c.com/*']},
-          pass(function(granted) {
-        assertTrue(granted);
         chrome.permissions.getAll(pass(function(permissions) {
-          assertTrue(checkPermSetsEq(permissionsWithOrigin, permissions));
+          assertTrue(checkPermSetsEq(initialPermissions, permissions));
         }));
-        chrome.permissions.contains(
-            {origins:['http://*.c.com/*']},
-            pass(function(result) { assertTrue(result); }));
-        doReq('http://c.com', pass(function(result) { assertTrue(result); }));
+
+        listenOnce(chrome.permissions.onAdded,
+                   function(permissions) {
+          assertTrue(permissions.permissions.length == 0);
+          assertTrue(permissions.origins.length == 1);
+          assertTrue(permissions.origins[0] == 'http://*.c.com/*');
+        });
+        chrome.permissions.request(
+            {origins: ['http://*.c.com/*']},
+            pass(function(granted) {
+          assertTrue(granted);
+          chrome.permissions.getAll(pass(function(permissions) {
+            assertTrue(checkPermSetsEq(permissionsWithOrigin, permissions));
+          }));
+          chrome.permissions.contains(
+              {origins:['http://*.c.com/*']},
+              pass(function(result) { assertTrue(result); }));
+          doReq('http://c.com', pass(function(result) { assertTrue(result); }));
+        }));
       }));
     },
 
     function removeOrigin() {
-      doReq('http://c.com', pass(function(result) { assertTrue(result); }));
-
-      listenOnce(chrome.permissions.onRemoved,
-                 function(permissions) {
-        assertTrue(permissions.permissions.length == 0);
-        assertTrue(permissions.origins.length == 1);
-        assertTrue(permissions.origins[0] == 'http://*.c.com/*');
-      });
-      chrome.permissions.remove(
-          {origins: ['http://*.c.com/*']},
-          pass(function(removed) {
-        assertTrue(removed);
-        chrome.permissions.getAll(pass(function(permissions) {
-          assertTrue(checkPermSetsEq(initialPermissions, permissions));
+      doReq('http://c.com', pass(function(result) {
+        assertTrue(result);
+        listenOnce(chrome.permissions.onRemoved,
+                   function(permissions) {
+          assertTrue(permissions.permissions.length == 0);
+          assertTrue(permissions.origins.length == 1);
+          assertTrue(permissions.origins[0] == 'http://*.c.com/*');
+        });
+        chrome.permissions.remove(
+            {origins: ['http://*.c.com/*']},
+            pass(function(removed) {
+          assertTrue(removed);
+          chrome.permissions.getAll(pass(function(permissions) {
+            assertTrue(checkPermSetsEq(initialPermissions, permissions));
+          }));
+          chrome.permissions.contains(
+              {origins:['http://*.c.com/*']},
+              pass(function(result) { assertFalse(result); }));
+          doReq('http://c.com',
+                pass(function(result) { assertFalse(result); }));
         }));
-        chrome.permissions.contains(
-            {origins:['http://*.c.com/*']},
-            pass(function(result) { assertFalse(result); }));
-        doReq('http://c.com', pass(function(result) { assertFalse(result); }));
       }));
     },
 
     // Tests that the changed permissions have taken effect from inside the
     // onAdded and onRemoved event listeners.
     function eventListenerPermissions() {
+      var isInstanceOfServiceWorkerGlobalScope =
+          ('ServiceWorkerGlobalScope' in self) &&
+          (self instanceof ServiceWorkerGlobalScope);
+      if (isInstanceOfServiceWorkerGlobalScope) {
+        // TODO(crbug.com/1146623): Fix event dispatch ordering for SWs so that
+        // permissions.onAdded listener is guaranteed to run *after*
+        // chrome.permissions.remove API request below.
+        chrome.test.succeed();
+        return;
+      }
       listenOnce(chrome.permissions.onAdded,
                  function(permissions) {
         chrome.bookmarks.getTree(pass(function() {
@@ -283,12 +283,8 @@ chrome.test.getConfig(function(config) {
                  function(permissions) {
         assertTrue(typeof chrome.bookmarks == 'object' &&
                    chrome.bookmarks != null);
-        var nativeBindingsError =
-            "'bookmarks.getTree' is not available in this context.";
-        var jsBindingsError =
-            "'bookmarks' requires a different Feature that is not present.";
-        var regexp = new RegExp(nativeBindingsError + '|' + jsBindingsError);
-        assertThrows(chrome.bookmarks.getTree, [function(){}], regexp);
+        assertThrows(chrome.bookmarks.getTree, [function(){}],
+                     `'bookmarks.getTree' is not available in this context.`);
       });
 
       chrome.permissions.request(

@@ -1,18 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/macros.h"
-#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/themes_helper.h"
+#include "content/public/test/browser_test.h"
 
 namespace {
 
 using themes_helper::GetCustomTheme;
 using themes_helper::GetThemeID;
-using themes_helper::UseCustomTheme;
 using themes_helper::UseDefaultTheme;
 using themes_helper::UseSystemTheme;
 using themes_helper::UsingCustomTheme;
@@ -23,13 +21,10 @@ class TwoClientThemesSyncTest : public SyncTest {
  public:
   TwoClientThemesSyncTest() : SyncTest(TWO_CLIENT) {}
 
-  ~TwoClientThemesSyncTest() override {}
+  TwoClientThemesSyncTest(const TwoClientThemesSyncTest&) = delete;
+  TwoClientThemesSyncTest& operator=(const TwoClientThemesSyncTest&) = delete;
 
-  // Needed for AwaitQuiescence().
-  bool TestUsesSelfNotifications() override { return true; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TwoClientThemesSyncTest);
+  ~TwoClientThemesSyncTest() override = default;
 };
 
 // Starts with default themes, then sets up sync and uses it to set all
@@ -37,9 +32,8 @@ class TwoClientThemesSyncTest : public SyncTest {
 // instead verifies the custom theme is pending for install.
 IN_PROC_BROWSER_TEST_F(TwoClientThemesSyncTest,
                        E2E_ENABLED(DefaultThenSyncCustom)) {
+  ResetSyncForPrimaryAccount();
   ASSERT_TRUE(SetupSync());
-  // Wait until sync settles before we override the theme below.
-  AwaitQuiescence();
 
   ASSERT_FALSE(UsingCustomTheme(GetProfile(0)));
   ASSERT_FALSE(UsingCustomTheme(GetProfile(1)));
@@ -61,14 +55,13 @@ IN_PROC_BROWSER_TEST_F(TwoClientThemesSyncTest,
 // to the system theme.
 IN_PROC_BROWSER_TEST_F(TwoClientThemesSyncTest,
                        E2E_ENABLED(CustomThenSyncNative)) {
+  ResetSyncForPrimaryAccount();
   ASSERT_TRUE(SetupClients());
 
   SetCustomTheme(GetProfile(0));
   SetCustomTheme(GetProfile(1));
 
   ASSERT_TRUE(SetupSync());
-  // Wait until sync settles before we override the theme below.
-  AwaitQuiescence();
 
   UseSystemTheme(GetProfile(0));
   ASSERT_TRUE(UsingSystemTheme(GetProfile(0)));
@@ -83,14 +76,13 @@ IN_PROC_BROWSER_TEST_F(TwoClientThemesSyncTest,
 // to the default theme.
 IN_PROC_BROWSER_TEST_F(TwoClientThemesSyncTest,
                        E2E_ENABLED(CustomThenSyncDefault)) {
+  ResetSyncForPrimaryAccount();
   ASSERT_TRUE(SetupClients());
 
   SetCustomTheme(GetProfile(0));
   SetCustomTheme(GetProfile(1));
 
   ASSERT_TRUE(SetupSync());
-  // Wait until sync settles before we override the theme below.
-  AwaitQuiescence();
 
   UseDefaultTheme(GetProfile(0));
   EXPECT_TRUE(UsingDefaultTheme(GetProfile(0)));
@@ -105,9 +97,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientThemesSyncTest,
 // Most other tests have significant coverage of model association.  This test
 // is intended to test steady-state scenarios.
 IN_PROC_BROWSER_TEST_F(TwoClientThemesSyncTest, E2E_ENABLED(CycleOptions)) {
+  ResetSyncForPrimaryAccount();
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-  // Wait until sync settles before we override the theme below.
-  AwaitQuiescence();
 
   SetCustomTheme(GetProfile(0));
 

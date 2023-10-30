@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,12 @@
 
 #include <jni.h>
 
+#include <string>
+
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
-#include "base/logging.h"
-#include "base/strings/string16.h"
+#include "base/check.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/android/chrome_jni_headers/ChromeHttpAuthHandler_jni.h"
 
@@ -23,13 +24,14 @@ using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
 
 ChromeHttpAuthHandler::ChromeHttpAuthHandler(
-    const base::string16& authority,
-    const base::string16& explanation,
+    const std::u16string& authority,
+    const std::u16string& explanation,
     LoginHandler::LoginModelData* login_model_data)
     : observer_(nullptr),
       authority_(authority),
       explanation_(explanation),
-      auth_manager_(login_model_data ? login_model_data->model : nullptr) {
+      auth_manager_(login_model_data ? login_model_data->model.get()
+                                     : nullptr) {
   if (login_model_data) {
     auth_manager_->SetObserverAndDeliverCredentials(this,
                                                     login_model_data->form);
@@ -71,8 +73,8 @@ void ChromeHttpAuthHandler::CloseDialog() {
 }
 
 void ChromeHttpAuthHandler::OnAutofillDataAvailable(
-    const base::string16& username,
-    const base::string16& password) {
+    const std::u16string& username,
+    const std::u16string& password) {
   DCHECK(java_chrome_http_auth_handler_.obj() != NULL);
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jstring> j_username =
@@ -93,8 +95,8 @@ void ChromeHttpAuthHandler::SetAuth(JNIEnv* env,
                                     const JavaParamRef<jstring>& username,
                                     const JavaParamRef<jstring>& password) {
   if (observer_) {
-    base::string16 username16 = ConvertJavaStringToUTF16(env, username);
-    base::string16 password16 = ConvertJavaStringToUTF16(env, password);
+    std::u16string username16 = ConvertJavaStringToUTF16(env, username);
+    std::u16string password16 = ConvertJavaStringToUTF16(env, password);
     observer_->SetAuth(username16, password16);
   }
 }
@@ -110,6 +112,5 @@ ScopedJavaLocalRef<jstring> ChromeHttpAuthHandler::GetMessageBody(
     const JavaParamRef<jobject>&) {
   if (explanation_.empty())
     return ConvertUTF16ToJavaString(env, authority_);
-  return ConvertUTF16ToJavaString(
-      env, authority_ + base::ASCIIToUTF16(" ") + explanation_);
+  return ConvertUTF16ToJavaString(env, authority_ + u" " + explanation_);
 }

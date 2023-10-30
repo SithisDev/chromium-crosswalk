@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,13 @@
 #include "chrome/browser/predictors/predictor_database.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "sql/statement.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
-using base::TimeDelta;
 using predictors::AutocompleteActionPredictorTable;
 
 namespace predictors {
@@ -54,7 +53,7 @@ class AutocompleteActionPredictorTableTest : public testing::Test {
   AutocompleteActionPredictorTable::Rows test_db_;
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile_;
   std::unique_ptr<PredictorDatabase> db_;
 };
@@ -82,17 +81,14 @@ void AutocompleteActionPredictorTableTest::SetUp() {
   content::RunAllTasksUntilIdle();
 
   test_db_.push_back(AutocompleteActionPredictorTable::Row(
-      "BD85DBA2-8C29-49F9-84AE-48E1E90880DF",
-      base::ASCIIToUTF16("goog"), GURL("http://www.google.com/"),
-      1, 0));
+      "BD85DBA2-8C29-49F9-84AE-48E1E90880DF", u"goog",
+      GURL("http://www.google.com/"), 1, 0));
   test_db_.push_back(AutocompleteActionPredictorTable::Row(
-      "BD85DBA2-8C29-49F9-84AE-48E1E90880E0",
-      base::ASCIIToUTF16("slash"), GURL("http://slashdot.org/"),
-      3, 2));
+      "BD85DBA2-8C29-49F9-84AE-48E1E90880E0", u"slash",
+      GURL("http://slashdot.org/"), 3, 2));
   test_db_.push_back(AutocompleteActionPredictorTable::Row(
-      "BD85DBA2-8C29-49F9-84AE-48E1E90880E1",
-      base::ASCIIToUTF16("news"), GURL("http://slashdot.org/"),
-      0, 1));
+      "BD85DBA2-8C29-49F9-84AE-48E1E90880E1", u"news",
+      GURL("http://slashdot.org/"), 0, 1));
 }
 
 void AutocompleteActionPredictorTableTest::TearDown() {

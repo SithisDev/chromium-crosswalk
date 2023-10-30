@@ -1,14 +1,18 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_AUTOFILL_PAYMENTS_MANAGE_MIGRATION_UI_CONTROLLER_H_
 #define CHROME_BROWSER_UI_AUTOFILL_PAYMENTS_MANAGE_MIGRATION_UI_CONTROLLER_H_
 
-#include "base/macros.h"
+#include <string>
+#include <vector>
+
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/autofill/payments/local_card_migration_bubble_controller_impl.h"
 #include "chrome/browser/ui/autofill/payments/local_card_migration_controller_observer.h"
 #include "chrome/browser/ui/autofill/payments/local_card_migration_dialog_controller_impl.h"
+#include "components/autofill/core/browser/payments/legal_message_line.h"
 #include "content/public/browser/web_contents_user_data.h"
 
 namespace autofill {
@@ -50,12 +54,15 @@ class ManageMigrationUiController
     : public LocalCardMigrationControllerObserver,
       public content::WebContentsUserData<ManageMigrationUiController> {
  public:
+  ManageMigrationUiController(const ManageMigrationUiController&) = delete;
+  ManageMigrationUiController& operator=(const ManageMigrationUiController&) =
+      delete;
   ~ManageMigrationUiController() override;
 
   void ShowBubble(base::OnceClosure show_migration_dialog_closure);
 
   void ShowOfferDialog(
-      std::unique_ptr<base::DictionaryValue> legal_message,
+      const LegalMessageLines& legal_message_lines,
       const std::string& user_email,
       const std::vector<MigratableCreditCard>& migratable_credit_cards,
       AutofillClient::LocalCardMigrationCallback
@@ -63,7 +70,7 @@ class ManageMigrationUiController
 
   void UpdateCreditCardIcon(
       const bool has_server_error,
-      const base::string16& tip_message,
+      const std::u16string& tip_message,
       const std::vector<MigratableCreditCard>& migratable_credit_cards,
       AutofillClient::MigrationDeleteCardCallback delete_local_card_callback);
 
@@ -73,7 +80,7 @@ class ManageMigrationUiController
 
   bool IsIconVisible() const;
 
-  LocalCardMigrationBubble* GetBubbleView() const;
+  AutofillBubbleBase* GetBubbleView() const;
 
   LocalCardMigrationDialog* GetDialogView() const;
 
@@ -93,8 +100,8 @@ class ManageMigrationUiController
 
   void ShowFeedbackDialog();
 
-  LocalCardMigrationBubbleControllerImpl* bubble_controller_ = nullptr;
-  LocalCardMigrationDialogControllerImpl* dialog_controller_ = nullptr;
+  raw_ptr<LocalCardMigrationBubbleControllerImpl> bubble_controller_ = nullptr;
+  raw_ptr<LocalCardMigrationDialogControllerImpl> dialog_controller_ = nullptr;
 
   // This indicates what step the migration flow is currently in and
   // what should be shown next.
@@ -105,8 +112,6 @@ class ManageMigrationUiController
   bool show_error_dialog_ = false;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
-
-  DISALLOW_COPY_AND_ASSIGN(ManageMigrationUiController);
 };
 
 }  // namespace autofill

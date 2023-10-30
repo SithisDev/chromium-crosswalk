@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,20 @@
 
 #include <string>
 
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/memory/raw_ptr.h"
+#include "base/task/single_thread_task_runner.h"
+#include "build/chromeos_buildflags.h"
+#include "build/config/chromebox_for_meetings/buildflags.h"
 #include "components/feedback/feedback_uploader.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
+
+#if BUILDFLAG(PLATFORM_CFM)
+#include "components/invalidation/public/identity_provider.h"
+#endif
+
+namespace content {
+class BrowserContext;
+}  // namespace content
 
 namespace signin {
 class PrimaryAccountAccessTokenFetcher;
@@ -22,10 +32,11 @@ namespace feedback {
 
 class FeedbackUploaderChrome : public FeedbackUploader {
  public:
-  FeedbackUploaderChrome(
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-      content::BrowserContext* context,
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+  explicit FeedbackUploaderChrome(content::BrowserContext* context);
+
+  FeedbackUploaderChrome(const FeedbackUploaderChrome&) = delete;
+  FeedbackUploaderChrome& operator=(const FeedbackUploaderChrome&) = delete;
+
   ~FeedbackUploaderChrome() override;
 
   class Delegate {
@@ -47,16 +58,28 @@ class FeedbackUploaderChrome : public FeedbackUploader {
   void AppendExtraHeadersToUploadRequest(
       network::ResourceRequest* resource_request) override;
 
-  void AccessTokenAvailable(GoogleServiceAuthError error,
-                            signin::AccessTokenInfo access_token_info);
+  void PrimaryAccountAccessTokenAvailable(
+      GoogleServiceAuthError error,
+      signin::AccessTokenInfo access_token_info);
 
-  std::unique_ptr<signin::PrimaryAccountAccessTokenFetcher> token_fetcher_;
+  void AccessTokenAvailable(GoogleServiceAuthError error, std::string token);
+
+#if BUILDFLAG(PLATFORM_CFM)
+  void ActiveAccountAccessTokenAvailable(GoogleServiceAuthError error,
+                                         std::string token);
+
+  std::unique_ptr<invalidation::ActiveAccountAccessTokenFetcher>
+      active_account_token_fetcher_;
+#endif  // BUILDFLAG(PLATFORM_CFM)
+
+  std::unique_ptr<signin::PrimaryAccountAccessTokenFetcher>
+      primary_account_token_fetcher_;
 
   std::string access_token_;
 
-  Delegate* delegate_ = nullptr;  // Not owned.
+  raw_ptr<Delegate> delegate_ = nullptr;  // Not owned.
 
-  DISALLOW_COPY_AND_ASSIGN(FeedbackUploaderChrome);
+  raw_ptr<content::BrowserContext> context_ = nullptr;
 };
 
 }  // namespace feedback

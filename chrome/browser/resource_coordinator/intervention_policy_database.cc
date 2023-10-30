@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include "base/bind.h"
 #include "base/files/file_util.h"
-#include "base/task/post_task.h"
-#include "base/task_runner_util.h"
+#include "base/logging.h"
+#include "base/task/thread_pool.h"
 #include "base/values.h"
 #include "chrome/browser/resource_coordinator/utils.h"
 
@@ -41,9 +41,9 @@ InterventionPolicyDatabase::GetFreezingPolicy(const url::Origin& origin) const {
 void InterventionPolicyDatabase::InitializeDatabaseWithProtoFile(
     const base::FilePath& proto_location,
     const base::Version& version,
-    std::unique_ptr<base::DictionaryValue> manifest) {
+    base::Value manifest) {
   // TODO(sebmarchand): Validate the version and the manifest?
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE,
       {base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN, base::MayBlock()},

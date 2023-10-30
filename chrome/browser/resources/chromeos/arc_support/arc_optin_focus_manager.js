@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,12 @@ ArcOptInFocusManager.prototype = {
   __proto__: cr.ui.FocusManager.prototype,
 
   /** @override */
-  getFocusParent: function() {
+  getFocusParent() {
     var overlay = $('overlay-container');
     if (overlay.hidden) {
       return document.body;
     } else {
       return $('overlay-page');
     }
-  }
+  },
 };

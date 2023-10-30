@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@ var EXAMPLE_URL_2 = 'http://shmlexample.com';
 GEN('#include "chrome/browser/media/media_engagement_service.h"');
 GEN('#include "chrome/browser/media/media_engagement_service_factory.h"');
 GEN('#include "chrome/browser/ui/browser.h"');
+GEN('#include "content/public/test/browser_test.h"');
 GEN('#include "media/base/media_switches.h"');
 
 function MediaEngagementWebUIBrowserTest() {}
@@ -21,8 +22,6 @@ MediaEngagementWebUIBrowserTest.prototype = {
   browsePreload: 'chrome://media-engagement',
 
   featureList: {enabled: ['media::kRecordMediaEngagementScores']},
-
-  runAccessibilityChecks: false,
 
   isAsync: true,
 
@@ -48,7 +47,8 @@ MediaEngagementWebUIBrowserTest.prototype = {
   ],
 };
 
-TEST_F('MediaEngagementWebUIBrowserTest', 'All', function() {
+TEST_F('MediaEngagementWebUIBrowserTest', 'All', async function() {
+  await import('chrome://webui-test/mojo_webui_test_support.js');
   suiteSetup(function() {
     return whenPageIsPopulatedForTest();
   });

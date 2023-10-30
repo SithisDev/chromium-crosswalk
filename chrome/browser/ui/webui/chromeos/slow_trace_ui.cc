@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
-#include "components/feedback/tracing_manager.h"
+#include "components/feedback/content/content_tracing_manager.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_ui.h"
 
@@ -33,34 +33,35 @@ std::string SlowTraceSource::GetSource() {
 }
 
 void SlowTraceSource::StartDataRequest(
-    const std::string& path,
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-    const content::URLDataSource::GotDataCallback& callback) {
+    const GURL& url,
+    const content::WebContents::Getter& wc_getter,
+    content::URLDataSource::GotDataCallback callback) {
   int trace_id = 0;
+  // TODO(crbug/1009127): Simplify usages of |path| since |url| is available.
+  const std::string path = content::URLDataSource::URLToRequestPath(url);
   size_t pos = path.find('#');
-  TracingManager* manager = TracingManager::Get();
+  ContentTracingManager* manager = ContentTracingManager::Get();
   if (!manager ||
       pos == std::string::npos ||
       !base::StringToInt(path.substr(pos + 1), &trace_id)) {
-    callback.Run(NULL);
+    std::move(callback).Run(nullptr);
     return;
   }
-  manager->GetTraceData(trace_id,
-                        base::Bind(&SlowTraceSource::OnGetTraceData,
-                                   base::Unretained(this),
-                                   callback));
+  manager->GetTraceData(
+      trace_id, base::BindOnce(&SlowTraceSource::OnGetTraceData,
+                               base::Unretained(this), std::move(callback)));
 }
 
-std::string SlowTraceSource::GetMimeType(const std::string& path) {
+std::string SlowTraceSource::GetMimeType(const GURL& url) {
   return "application/zip";
 }
 
 SlowTraceSource::~SlowTraceSource() {}
 
 void SlowTraceSource::OnGetTraceData(
-    const content::URLDataSource::GotDataCallback& callback,
+    content::URLDataSource::GotDataCallback callback,
     scoped_refptr<base::RefCountedString> trace_data) {
-  callback.Run(trace_data.get());
+  std::move(callback).Run(trace_data.get());
 }
 
 bool SlowTraceSource::AllowCaching() {

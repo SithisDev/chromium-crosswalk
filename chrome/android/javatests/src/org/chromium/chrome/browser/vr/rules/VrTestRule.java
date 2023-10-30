@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,4 @@ public interface VrTestRule extends XrTestRule {
      * @return True if the DON flow is enabled, false otherwise.
      */
     public boolean isDonEnabled();
-
-    /**
-     * Sets whether the currently applied settings result in the DON flow being enabled.
-     */
-    public void setDonEnabled(boolean isEnabled);
 }

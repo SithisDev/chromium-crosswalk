@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,12 @@
 
 #include "base/bind.h"
 #include "base/memory/ref_counted_memory.h"
-#include "chrome/browser/search/instant_io_context.h"
-#include "chrome/grit/local_ntp_resources.h"
+#include "chrome/browser/search/instant_service.h"
+#include "chrome/browser/search/instant_service_factory.h"
+#include "chrome/grit/new_tab_page_instant_resources.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/resource_request_info.h"
-#include "content/public/common/previews_state.h"
-#include "content/public/test/mock_resource_context.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "ipc/ipc_message.h"
 #include "net/base/request_priority.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
@@ -47,15 +46,14 @@ class TestMostVisitedIframeSource : public MostVisitedIframeSource {
   }
 
   void StartDataRequest(
-      const std::string& path,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      const content::URLDataSource::GotDataCallback& callback) override {}
+      const GURL& url,
+      const content::WebContents::Getter& wc_getter,
+      content::URLDataSource::GotDataCallback callback) override {}
 
   // RenderFrameHost is hard to mock in concert with everything else, so stub
   // this method out for testing.
-  bool GetOrigin(
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      std::string* origin) const override {
+  bool GetOrigin(const content::WebContents::Getter& wc_getter,
+                 std::string* origin) const override {
     if (origin_.empty())
       return false;
     *origin = origin_;
@@ -69,13 +67,9 @@ class TestMostVisitedIframeSource : public MostVisitedIframeSource {
 class MostVisitedIframeSourceTest : public testing::Test {
  public:
   // net::URLRequest wants to be executed with a message loop that has TYPE_IO.
-  // InstantIOContext needs to be created on the UI thread and have everything
-  // else happen on the IO thread. This setup is a hacky way to satisfy all
-  // those constraints.
   MostVisitedIframeSourceTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
-        instant_io_context_(NULL),
-        response_(NULL) {}
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
+        response_(nullptr) {}
 
   TestMostVisitedIframeSource* source() { return source_.get(); }
 
@@ -87,31 +81,29 @@ class MostVisitedIframeSourceTest : public testing::Test {
   }
 
   void SendResource(int resource_id) {
-    source()->SendResource(resource_id, callback_);
+    source()->SendResource(
+        resource_id, base::BindOnce(&MostVisitedIframeSourceTest::SaveResponse,
+                                    base::Unretained(this)));
   }
 
   void SendJSWithOrigin(int resource_id) {
     source()->SendJSWithOrigin(
-        resource_id, content::ResourceRequestInfo::WebContentsGetter(),
-        callback_);
+        resource_id, content::WebContents::Getter(),
+        base::BindOnce(&MostVisitedIframeSourceTest::SaveResponse,
+                       base::Unretained(this)));
   }
 
   bool ShouldService(const std::string& path, int process_id) {
-    return source()->ShouldServiceRequest(GURL(path), &resource_context_,
-                                          process_id);
+    return source()->ShouldServiceRequest(GURL(path), &profile_, process_id);
   }
 
  private:
   void SetUp() override {
     source_ = std::make_unique<TestMostVisitedIframeSource>();
-    callback_ = base::Bind(&MostVisitedIframeSourceTest::SaveResponse,
-                           base::Unretained(this));
-    instant_io_context_ = new InstantIOContext;
-    InstantIOContext::SetUserDataOnIO(&resource_context_, instant_io_context_);
     source_->set_origin(kInstantOrigin);
-    InstantIOContext::AddInstantProcessOnIO(instant_io_context_,
-                                            kInstantRendererPID);
-    response_ = NULL;
+    auto* instant_service = InstantServiceFactory::GetForProfile(&profile_);
+    instant_service->AddInstantProcess(kInstantRendererPID);
+    response_ = nullptr;
   }
 
   void TearDown() override { source_.reset(); }
@@ -120,13 +112,10 @@ class MostVisitedIframeSourceTest : public testing::Test {
     response_ = data;
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
-  net::TestURLRequestContext test_url_request_context_;
-  content::MockResourceContext resource_context_;
+  TestingProfile profile_;
   std::unique_ptr<TestMostVisitedIframeSource> source_;
-  content::URLDataSource::GotDataCallback callback_;
-  scoped_refptr<InstantIOContext> instant_io_context_;
   scoped_refptr<base::RefCountedMemory> response_;
 };
 
@@ -152,26 +141,28 @@ TEST_F(MostVisitedIframeSourceTest, ShouldServiceRequest) {
 
 TEST_F(MostVisitedIframeSourceTest, GetMimeType) {
   // URLDataManagerBackend does not include / in path_and_query.
-  EXPECT_EQ("text/html", source()->GetMimeType("foo.html"));
-  EXPECT_EQ("application/javascript", source()->GetMimeType("foo.js"));
-  EXPECT_EQ("text/css", source()->GetMimeType("foo.css"));
-  EXPECT_EQ("image/png", source()->GetMimeType("foo.png"));
-  EXPECT_EQ("", source()->GetMimeType("bogus"));
+  EXPECT_EQ("text/html",
+            source()->GetMimeType(GURL("chrome-search://test/foo.html")));
+  EXPECT_EQ("application/javascript",
+            source()->GetMimeType(GURL("chrome-search://test/foo.js")));
+  EXPECT_EQ("text/css",
+            source()->GetMimeType(GURL("chrome-search://test/foo.css")));
+  EXPECT_EQ("", source()->GetMimeType(GURL("chrome-search://test/bogus")));
 }
 
 TEST_F(MostVisitedIframeSourceTest, SendResource) {
-  SendResource(IDR_MOST_VISITED_TITLE_HTML);
+  SendResource(IDR_NEW_TAB_PAGE_INSTANT_MOST_VISITED_TITLE_HTML);
   EXPECT_FALSE(response_string().empty());
 }
 
 TEST_F(MostVisitedIframeSourceTest, SendJSWithOrigin) {
   source()->set_origin(kInstantOrigin);
-  SendJSWithOrigin(IDR_MOST_VISITED_TITLE_JS);
+  SendJSWithOrigin(IDR_NEW_TAB_PAGE_INSTANT_MOST_VISITED_TITLE_JS);
   EXPECT_FALSE(response_string().empty());
   source()->set_origin(kNonInstantOrigin);
-  SendJSWithOrigin(IDR_MOST_VISITED_TITLE_JS);
+  SendJSWithOrigin(IDR_NEW_TAB_PAGE_INSTANT_MOST_VISITED_TITLE_JS);
   EXPECT_FALSE(response_string().empty());
   source()->set_origin(std::string());
-  SendJSWithOrigin(IDR_MOST_VISITED_TITLE_JS);
+  SendJSWithOrigin(IDR_NEW_TAB_PAGE_INSTANT_MOST_VISITED_TITLE_JS);
   EXPECT_TRUE(response_string().empty());
 }

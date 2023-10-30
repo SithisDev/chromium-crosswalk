@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,7 @@ std::string GetVersionSync(sql::Database* db) {
 
 GetVersionTask::GetVersionTask(ExploreSitesStore* store,
                                base::OnceCallback<void(std::string)> callback)
-    : store_(store), callback_(std::move(callback)), weak_ptr_factory_(this) {}
+    : store_(store), callback_(std::move(callback)) {}
 
 GetVersionTask::~GetVersionTask() = default;
 

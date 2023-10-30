@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,17 @@
 namespace extensions {
 
 ExtensionTokenKey::ExtensionTokenKey(const std::string& extension_id,
-                                     const std::string& account_id,
+                                     const CoreAccountInfo& account_info,
                                      const std::set<std::string>& scopes)
-    : extension_id(extension_id), account_id(account_id), scopes(scopes) {}
+    : extension_id(extension_id), account_info(account_info), scopes(scopes) {}
 
 ExtensionTokenKey::ExtensionTokenKey(const ExtensionTokenKey& other) = default;
 
 ExtensionTokenKey::~ExtensionTokenKey() {}
 
 bool ExtensionTokenKey::operator<(const ExtensionTokenKey& rhs) const {
-  return std::tie(extension_id, account_id, scopes) <
-    std::tie(rhs.extension_id, rhs.account_id, rhs.scopes);
+  return std::tie(extension_id, account_info.account_id, scopes) <
+         std::tie(rhs.extension_id, rhs.account_info.account_id, rhs.scopes);
 }
 
 }  // namespace extensions

@@ -1,17 +1,17 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/background/background_mode_manager.h"
 
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 
 void BackgroundModeManager::EnableLaunchOnStartup(bool should_launch) {
   NOTREACHED();
 }
 
 void BackgroundModeManager::DisplayClientInstalledNotification(
-    const base::string16& name) {
+    const std::u16string& name) {
   // No need to display anything on ChromeOS because all extensions run all
   // the time anyway.
 }

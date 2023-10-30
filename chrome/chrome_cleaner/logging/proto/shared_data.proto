@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -143,6 +143,8 @@ message MatchedScheduledTask {
 }
 
 // Next tag: 4
+// TODO(crbug.com/981388): Deprecate and remove this message. There is no
+// version of the Chrome Cleanup Tool that fills it in.
 message MatchedExtension {
   // The extension ID that the extension was installed with.
   optional string extension_id = 1;

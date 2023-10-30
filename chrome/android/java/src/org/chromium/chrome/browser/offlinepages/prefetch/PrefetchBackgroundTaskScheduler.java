@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,6 @@ public class PrefetchBackgroundTaskScheduler {
                 + additionalDelaySeconds;
         TaskInfo.Builder taskInfoBuilder =
                 TaskInfo.createOneOffTask(TaskIds.OFFLINE_PAGES_PREFETCH_JOB_ID,
-                                PrefetchBackgroundTask.class,
                                 // Minimum time to wait
                                 DateUtils.SECOND_IN_MILLIS * minimumTimeSeconds,
                                 // Maximum time to wait.  After this interval the event will fire

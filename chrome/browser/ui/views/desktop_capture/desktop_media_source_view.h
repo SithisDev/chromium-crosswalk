@@ -1,12 +1,17 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_DESKTOP_CAPTURE_DESKTOP_MEDIA_SOURCE_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_DESKTOP_CAPTURE_DESKTOP_MEDIA_SOURCE_VIEW_H_
 
+#include "base/memory/raw_ptr.h"
 #include "content/public/browser/desktop_media_id.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/text_constants.h"
+#include "ui/views/controls/focus_ring.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
 #include "ui/views/view.h"
 
 namespace views {
@@ -25,7 +30,6 @@ struct DesktopMediaSourceViewStyle {
                               const gfx::Rect& label_rect,
                               gfx::HorizontalAlignment text_alignment,
                               const gfx::Rect& image_rect,
-                              int selection_border_thickness,
                               int focus_rectangle_inset);
 
   // This parameter controls how many source items can be displayed in a row.
@@ -42,10 +46,6 @@ struct DesktopMediaSourceViewStyle {
   gfx::HorizontalAlignment text_alignment;
   gfx::Rect image_rect;
 
-  // When a source item is selected, we paint the border to show it. This
-  // parameter controls how thick the border would be.
-  int selection_border_thickness;
-
   // When a source item is focused, we paint dotted line. This parameter
   // controls the distance between dotted line and the source view boundary.
   int focus_rectangle_inset;
@@ -55,16 +55,19 @@ struct DesktopMediaSourceViewStyle {
 // source as a thumbnail with the title under it.
 class DesktopMediaSourceView : public views::View {
  public:
+  METADATA_HEADER(DesktopMediaSourceView);
   DesktopMediaSourceView(DesktopMediaListView* parent,
                          content::DesktopMediaID source_id,
                          DesktopMediaSourceViewStyle style);
+  DesktopMediaSourceView(const DesktopMediaSourceView&) = delete;
+  DesktopMediaSourceView& operator=(const DesktopMediaSourceView&) = delete;
   ~DesktopMediaSourceView() override;
 
   // Used to update the style when the number of available items changes.
   void SetStyle(DesktopMediaSourceViewStyle style);
 
   // Updates thumbnail and title from |source|.
-  void SetName(const base::string16& name);
+  void SetName(const std::u16string& name);
   void SetThumbnail(const gfx::ImageSkia& thumbnail);
   void SetIcon(const gfx::ImageSkia& icon);
 
@@ -72,20 +75,18 @@ class DesktopMediaSourceView : public views::View {
   const content::DesktopMediaID& source_id() const { return source_id_; }
 
   // Returns true if the source is selected.
-  bool is_selected() const { return selected_; }
+  bool GetSelected() const;
+
+  // Clears selection from this item, or no-ops if it is not selected.
+  void ClearSelection();
 
   // views::View interface.
-  const char* GetClassName() const override;
   views::View* GetSelectedViewForGroup(int group) override;
   bool IsGroupFocusTraversable() const override;
-  void OnPaint(gfx::Canvas* canvas) override;
   void OnFocus() override;
-  void OnBlur() override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
-
-  static const char kDesktopMediaSourceViewClassName[];
 
  private:
   // Updates selection state of the element. If |selected| is true then also
@@ -93,20 +94,14 @@ class DesktopMediaSourceView : public views::View {
   // (if any).
   void SetSelected(bool selected);
 
-  // Updates hover state of the element, and the appearance.
-  void SetHovered(bool hovered);
-
-  DesktopMediaListView* parent_;
+  raw_ptr<DesktopMediaListView> parent_;
   content::DesktopMediaID source_id_;
 
-  DesktopMediaSourceViewStyle style_;
-  views::ImageView* icon_view_;
-  views::ImageView* image_view_;
-  views::Label* label_;
+  raw_ptr<views::ImageView> icon_view_ = new views::ImageView;
+  raw_ptr<views::ImageView> image_view_ = new views::ImageView;
+  raw_ptr<views::Label> label_ = new views::Label;
 
   bool selected_;
-
-  DISALLOW_COPY_AND_ASSIGN(DesktopMediaSourceView);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_DESKTOP_CAPTURE_DESKTOP_MEDIA_SOURCE_VIEW_H_

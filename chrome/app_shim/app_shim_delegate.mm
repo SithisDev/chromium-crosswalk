@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,86 +6,59 @@
 
 #include "base/mac/foundation_util.h"
 #include "chrome/app_shim/app_shim_controller.h"
+#include "net/base/mac/url_conversions.h"
 
 @implementation AppShimDelegate
 
-- (BOOL)getFilesToOpenAtStartup:(std::vector<base::FilePath>*)out {
-  if (filesToOpenAtStartup_.empty())
-    return NO;
-
-  out->insert(out->end(), filesToOpenAtStartup_.begin(),
-              filesToOpenAtStartup_.end());
-  filesToOpenAtStartup_.clear();
-  return YES;
+- (instancetype)initWithController:(AppShimController*)controller {
+  if (self = [super init])
+    _appShimController = controller;
+  return self;
 }
 
-- (void)setController:(AppShimController*)controller {
-  appShimController_ = controller;
-}
-
-- (void)openFiles:(NSArray*)filenames {
-  std::vector<base::FilePath> filePaths;
-  for (NSString* filename in filenames)
-    filePaths.push_back(base::mac::NSStringToFilePath(filename));
-
-  // If the AppShimController is ready, try to send a FocusApp. If that fails,
-  // (e.g. if launching has not finished), enqueue the files.
-  if (appShimController_ && appShimController_->SendFocusApp(
-                                apps::APP_SHIM_FOCUS_OPEN_FILES, filePaths)) {
-    return;
-  }
-
-  filesToOpenAtStartup_.insert(filesToOpenAtStartup_.end(), filePaths.begin(),
-                               filePaths.end());
+- (void)applicationDidFinishLaunching:(NSNotification*)notification {
+  _appShimController->OnAppFinishedLaunching();
 }
 
 - (BOOL)application:(NSApplication*)app openFile:(NSString*)filename {
-  [self openFiles:@[ filename ]];
+  std::vector<base::FilePath> filePaths = {
+      base::mac::NSStringToFilePath(filename)};
+  _appShimController->OpenFiles(filePaths);
   return YES;
 }
 
 - (void)application:(NSApplication*)app openFiles:(NSArray*)filenames {
-  [self openFiles:filenames];
+  std::vector<base::FilePath> filePaths;
+  for (NSString* filename in filenames)
+    filePaths.push_back(base::mac::NSStringToFilePath(filename));
+  _appShimController->OpenFiles(filePaths);
   [app replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
 }
 
-- (BOOL)applicationOpenUntitledFile:(NSApplication*)app {
-  if (appShimController_) {
-    return appShimController_->SendFocusApp(apps::APP_SHIM_FOCUS_REOPEN,
-                                            std::vector<base::FilePath>());
-  }
-
-  return NO;
+- (void)application:(NSApplication*)app openURLs:(NSArray<NSURL*>*)urls {
+  std::vector<GURL> urls_to_open;
+  for (NSURL* url in urls)
+    urls_to_open.push_back(net::GURLWithNSURL(url));
+  _appShimController->OpenUrls(urls_to_open);
+  [app replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
 }
 
 - (void)applicationWillBecomeActive:(NSNotification*)notification {
-  if (appShimController_) {
-    appShimController_->SendFocusApp(apps::APP_SHIM_FOCUS_NORMAL,
-                                     std::vector<base::FilePath>());
-  }
+  return _appShimController->host()->FocusApp();
 }
 
-- (NSApplicationTerminateReply)applicationShouldTerminate:
-    (NSApplication*)sender {
-  // Send a last message to the host indicating that the host should close all
-  // associated browser windows.
-  if (appShimController_)
-    appShimController_->host()->QuitApp();
-  return NSTerminateNow;
-}
-
-- (void)applicationWillHide:(NSNotification*)notification {
-  if (appShimController_)
-    appShimController_->host()->SetAppHidden(true);
-}
-
-- (void)applicationWillUnhide:(NSNotification*)notification {
-  if (appShimController_)
-    appShimController_->host()->SetAppHidden(false);
+- (BOOL)applicationShouldHandleReopen:(NSApplication*)sender
+                    hasVisibleWindows:(BOOL)flag {
+  _appShimController->host()->ReopenApp();
+  return YES;
 }
 
 - (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
   return NO;
+}
+
+- (NSMenu*)applicationDockMenu:(NSApplication*)sender {
+  return _appShimController->GetApplicationDockMenu();
 }
 
 @end

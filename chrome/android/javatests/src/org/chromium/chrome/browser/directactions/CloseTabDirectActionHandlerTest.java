@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,22 +10,27 @@ import static org.junit.Assert.assertTrue;
 
 import android.os.Build;
 import android.os.Bundle;
-import android.support.test.filters.MediumTest;
+
+import androidx.test.filters.MediumTest;
 
 import org.hamcrest.Matchers;
 import org.junit.Before;
+import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
+import org.chromium.chrome.test.batch.BlankCTATabInitialStateRule;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.ArrayList;
@@ -35,9 +40,15 @@ import java.util.List;
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @MinAndroidSdkLevel(Build.VERSION_CODES.N)
+@Batch(Batch.PER_CLASS)
 public class CloseTabDirectActionHandlerTest {
+    @ClassRule
+    public static ChromeTabbedActivityTestRule sActivityTestRule =
+            new ChromeTabbedActivityTestRule();
+
     @Rule
-    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
+    public BlankCTATabInitialStateRule mBlankCTATabInitialStateRule =
+            new BlankCTATabInitialStateRule(sActivityTestRule, false);
 
     private TabModelSelector mSelector;
     private CloseTabDirectActionHandler mHandler;
@@ -45,27 +56,27 @@ public class CloseTabDirectActionHandlerTest {
     @Before
     public void setUp() throws Exception {
         // Setup an activity with two blank tabs.
-        mActivityTestRule.startMainActivityOnBlankPage();
-        mActivityTestRule.loadUrlInNewTab("about:blank");
+        sActivityTestRule.loadUrlInNewTab(
+                "about:blank", false /* incognito */, TabLaunchType.FROM_CHROME_UI);
 
-        mSelector = mActivityTestRule.getActivity().getTabModelSelector();
+        mSelector = sActivityTestRule.getActivity().getTabModelSelector();
         mHandler = new CloseTabDirectActionHandler(mSelector);
     }
 
     @Test
     @MediumTest
     @Feature({"DirectActions"})
-    public void testCloseTabs() throws Exception {
+    public void testCloseTabs() {
         // Actions are available
         assertThat(getDirectActions(), Matchers.containsInAnyOrder("close_tab"));
 
         // Close current tab
         Tab initiallyCurrent = mSelector.getCurrentTab();
         performAction("close_tab");
-        assertEquals(1, mSelector.getTotalTabCount());
         assertThat(
                 mSelector.getCurrentTab(), Matchers.not(Matchers.sameInstance(initiallyCurrent)));
 
+        assertEquals(1, mSelector.getTotalTabCount());
         // Close last tab
         performAction("close_tab");
 

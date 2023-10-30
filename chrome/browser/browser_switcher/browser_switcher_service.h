@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 
 #include "base/callback.h"
 #include "base/callback_list.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_switcher/browser_switcher_prefs.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "url/gurl.h"
@@ -91,11 +91,11 @@ class XmlDownloader {
 
   network::mojom::URLLoaderFactory* GetURLLoaderFactoryForURL(const GURL& url);
 
-  std::unique_ptr<network::mojom::URLLoaderFactory> file_url_factory_;
+  mojo::Remote<network::mojom::URLLoaderFactory> file_url_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> other_url_factory_;
 
   // This |BrowserSwitcherService| owns this object.
-  BrowserSwitcherService* service_;
+  raw_ptr<BrowserSwitcherService> service_;
 
   std::vector<RulesetSource> sources_;
 
@@ -117,12 +117,18 @@ class BrowserSwitcherService : public KeyedService {
   using AllRulesetsParsedCallbackSignature = void(BrowserSwitcherService*);
   using AllRulesetsParsedCallback =
       base::RepeatingCallback<AllRulesetsParsedCallbackSignature>;
-  using CallbackSubscription =
-      base::CallbackList<AllRulesetsParsedCallbackSignature>::Subscription;
 
  public:
+  BrowserSwitcherService() = delete;
+
   explicit BrowserSwitcherService(Profile* profile);
+
+  BrowserSwitcherService(const BrowserSwitcherService&) = delete;
+  BrowserSwitcherService& operator=(const BrowserSwitcherService&) = delete;
+
   ~BrowserSwitcherService() override;
+
+  virtual void Init();
 
   // KeyedService:
   void Shutdown() override;
@@ -130,6 +136,7 @@ class BrowserSwitcherService : public KeyedService {
   AlternativeBrowserDriver* driver();
   BrowserSwitcherSitelist* sitelist();
   BrowserSwitcherPrefs& prefs();
+  Profile* profile();
 
   base::TimeDelta fetch_delay();
   base::TimeDelta refresh_delay();
@@ -148,6 +155,11 @@ class BrowserSwitcherService : public KeyedService {
   // happens.
   virtual void LoadRulesFromPrefs();
 
+  // Called after all XML rulesets finished downloading, and the rules are
+  // applied. The XML is downloaded asynchronously, so browser tests use this
+  // event to check that they applied correctly.
+  void OnAllRulesetsLoadedForTesting(base::OnceCallback<void()> callback);
+
  protected:
   virtual void OnAllRulesetsParsed();
   virtual void OnBrowserSwitcherPrefsChanged(
@@ -162,8 +174,6 @@ class BrowserSwitcherService : public KeyedService {
   // implementation-specific methods to query this object's state, listen for
   // events and trigger a re-download immediately.
   friend class ::BrowserSwitchHandler;
-
-  void Init();
 
   void OnExternalSitelistParsed(ParsedXml xml);
   void OnExternalGreylistParsed(ParsedXml xml);
@@ -180,27 +190,26 @@ class BrowserSwitcherService : public KeyedService {
 
   // Registers a callback that triggers after the sitelists are done downloading
   // and all rules are applied.
-  std::unique_ptr<CallbackSubscription> RegisterAllRulesetsParsedCallback(
+  base::CallbackListSubscription RegisterAllRulesetsParsedCallback(
       AllRulesetsParsedCallback callback);
 
   std::unique_ptr<XmlDownloader> sitelist_downloader_;
 
-  Profile* profile_;
+  raw_ptr<Profile> profile_;
   BrowserSwitcherPrefs prefs_;
-  std::unique_ptr<BrowserSwitcherPrefs::CallbackSubscription>
-      prefs_subscription_;
+  base::CallbackListSubscription prefs_subscription_;
 
   // CallbackList for OnAllRulesetsParsed() listeners.
-  base::CallbackList<AllRulesetsParsedCallbackSignature> callback_list_;
+  base::RepeatingCallbackList<AllRulesetsParsedCallbackSignature>
+      callback_list_;
+
+  base::OnceCallback<void()> all_rulesets_loaded_callback_for_testing_;
 
   // Per-profile helpers.
   std::unique_ptr<AlternativeBrowserDriver> driver_;
   std::unique_ptr<BrowserSwitcherSitelist> sitelist_;
 
   base::WeakPtrFactory<BrowserSwitcherService> weak_ptr_factory_{this};
-
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(BrowserSwitcherService);
 };
 
 }  // namespace browser_switcher

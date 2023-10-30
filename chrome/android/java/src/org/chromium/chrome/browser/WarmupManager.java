@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,29 +8,31 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.net.Uri;
 import android.os.SystemClock;
-import android.support.annotation.IntDef;
 import android.view.ContextThemeWrapper;
 import android.view.InflateException;
-import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewStub;
 import android.widget.FrameLayout;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.Log;
-import org.chromium.base.StrictModeContext;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
-import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.crash.ChromePureJavaExceptionReporter;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.util.UrlConstants;
-import org.chromium.chrome.browser.widget.ControlContainer;
+import org.chromium.chrome.browser.toolbar.ControlContainer;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
+import org.chromium.ui.LayoutInflaterUtils;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -80,7 +82,7 @@ public class WarmupManager {
      */
     private class RenderProcessGoneObserver extends WebContentsObserver {
         @Override
-        public void renderProcessGone(boolean wasOomProtected) {
+        public void renderProcessGone() {
             long elapsed = SystemClock.elapsedRealtime() - mWebContentsCreationTimeMs;
             RecordHistogram.recordLongTimesHistogram(
                     "CustomTabs.SpareWebContents.TimeBeforeDeath", elapsed);
@@ -140,17 +142,13 @@ public class WarmupManager {
      */
     public static ViewGroup inflateViewHierarchy(
             Context baseContext, int toolbarContainerId, int toolbarId) {
-        // Inflating the view hierarchy causes StrictMode violations on some
-        // devices. Since layout inflation should happen on the UI thread, allow
-        // the disk reads. crbug.com/644243.
-        try (TraceEvent e = TraceEvent.scoped("WarmupManager.inflateViewHierarchy");
-                StrictModeContext c = StrictModeContext.allowDiskReads()) {
+        try (TraceEvent e = TraceEvent.scoped("WarmupManager.inflateViewHierarchy")) {
             ContextThemeWrapper context =
-                    new ContextThemeWrapper(baseContext, ChromeActivity.getThemeId());
+                    new ContextThemeWrapper(baseContext, ActivityUtils.getThemeId());
             FrameLayout contentHolder = new FrameLayout(context);
             ViewGroup mainView =
-                    (ViewGroup) LayoutInflater.from(context).inflate(R.layout.main, contentHolder);
-            if (toolbarContainerId != ChromeActivity.NO_CONTROL_CONTAINER) {
+                    (ViewGroup) LayoutInflaterUtils.inflate(context, R.layout.main, contentHolder);
+            if (toolbarContainerId != ActivityUtils.NO_RESOURCE_ID) {
                 ViewStub stub = (ViewStub) mainView.findViewById(R.id.control_container_stub);
                 stub.setLayoutResource(toolbarContainerId);
                 stub.inflate();
@@ -160,13 +158,20 @@ public class WarmupManager {
             ControlContainer controlContainer =
                     (ControlContainer) mainView.findViewById(R.id.control_container);
 
-            if (toolbarId != ChromeActivity.NO_TOOLBAR_LAYOUT && controlContainer != null) {
+            if (toolbarId != ActivityUtils.NO_RESOURCE_ID && controlContainer != null) {
                 controlContainer.initWithToolbar(toolbarId);
             }
             return mainView;
         } catch (InflateException e) {
-            // See https://crbug.com/606715.
+            // Warmup manager is only a performance improvement. If inflation failed, it will be
+            // redone when the CCT is actually launched using an activity context. So, swallow
+            // exceptions here to improve resilience. See https://crbug.com/606715.
             Log.e(TAG, "Inflation exception.", e);
+            // An exception caught here may indicate a real bug in production code. We report the
+            // exceptions to monitor any spikes or stacks that point to Chrome code.
+            Throwable throwable = new Throwable(
+                    "This is not a crash. See https://crbug.com/1259276 for details.", e);
+            ChromePureJavaExceptionReporter.postReportJavaException(throwable);
             return null;
         }
     }
@@ -269,7 +274,7 @@ public class WarmupManager {
      */
     public static void startPreconnectPredictorInitialization(Profile profile) {
         ThreadUtils.assertOnUiThread();
-        nativeStartPreconnectPredictorInitialization(profile);
+        WarmupManagerJni.get().startPreconnectPredictorInitialization(profile);
     }
 
     /** Asynchronously preconnects to a given URL if the data reduction proxy is not in use.
@@ -300,29 +305,7 @@ public class WarmupManager {
             // one will win.
             mPendingPreconnectWithProfile.put(url, profile);
         } else {
-            nativePreconnectUrlAndSubresources(profile, url);
-        }
-    }
-
-    /**
-     * Warms up a spare, empty RenderProcessHost that may be used for subsequent navigations.
-     *
-     * The spare RenderProcessHost will be used automatically in subsequent navigations.
-     * There is nothing further the WarmupManager needs to do to enable that use.
-     *
-     * This uses a different mechanism than createSpareWebContents, below, and is subject
-     * to fewer restrictions.
-     *
-     * This must be called from the UI thread.
-     */
-    public void createSpareRenderProcessHost(Profile profile) {
-        ThreadUtils.assertOnUiThread();
-        if (!LibraryLoader.getInstance().isInitialized()) return;
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.OMNIBOX_SPARE_RENDERER)) {
-            // Spare WebContents should not be used with spare RenderProcessHosts, but if one
-            // has been created, destroy it in order not to consume too many processes.
-            destroySpareWebContents();
-            nativeWarmupSpareRenderer(profile);
+            WarmupManagerJni.get().preconnectUrlAndSubresources(profile, url);
         }
     }
 
@@ -340,7 +323,7 @@ public class WarmupManager {
 
         mWebContentsCreatedForCCT = forCCT;
         mSpareWebContents = new WebContentsFactory().createWebContentsWithWarmRenderer(
-                false /* incognito */, true /* initiallyHidden */);
+                Profile.getLastUsedRegularProfile(), true /* initiallyHidden */);
         mObserver = new RenderProcessGoneObserver();
         mSpareWebContents.addObserver(mObserver);
         mWebContentsCreationTimeMs = SystemClock.elapsedRealtime();
@@ -400,7 +383,9 @@ public class WarmupManager {
                 WEBCONTENTS_STATUS_HISTOGRAM, status, WebContentsStatus.NUM_ENTRIES);
     }
 
-    private static native void nativeStartPreconnectPredictorInitialization(Profile profile);
-    private static native void nativePreconnectUrlAndSubresources(Profile profile, String url);
-    private static native void nativeWarmupSpareRenderer(Profile profile);
+    @NativeMethods
+    interface Natives {
+        void startPreconnectPredictorInitialization(Profile profile);
+        void preconnectUrlAndSubresources(Profile profile, String url);
+    }
 }

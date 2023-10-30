@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "net/base/net_errors.h"
-#include "storage/browser/fileapi/file_stream_reader.h"
+#include "storage/browser/file_system/file_stream_reader.h"
 
 namespace drive {
 namespace util {
@@ -42,8 +42,7 @@ void FileStreamMd5Digester::GetMd5Digest(
 void FileStreamMd5Digester::ReadNextChunk() {
   const int result =
       reader_->Read(buffer_.get(), kMd5DigestBufferSize,
-                    base::BindOnce(&FileStreamMd5Digester::OnChunkRead,
-                                   base::Unretained(this)));
+                    base::BindOnce(&FileStreamMd5Digester::OnChunkRead, this));
   if (result != net::ERR_IO_PENDING)
     OnChunkRead(result);
 }

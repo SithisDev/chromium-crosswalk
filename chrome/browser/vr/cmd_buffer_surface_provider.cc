@@ -1,17 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/vr/cmd_buffer_surface_provider.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/skia_bindings/gl_bindings_skia_cmd_buffer.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
-#include "third_party/skia/include/gpu/GrContext.h"
+#include "third_party/skia/include/gpu/GrDirectContext.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -24,7 +24,7 @@ CmdBufferSurfaceProvider::CmdBufferSurfaceProvider() {
   sk_sp<const GrGLInterface> gr_interface =
       skia_bindings::CreateGLES2InterfaceBindings(gles2_implementation,
                                                   gles2_implementation);
-  gr_context_ = GrContext::MakeGL(std::move(gr_interface));
+  gr_context_ = GrDirectContext::MakeGL(std::move(gr_interface));
   DCHECK(gr_context_);
   glGetIntegerv(GL_FRAMEBUFFER_BINDING, &main_fbo_);
 }
@@ -49,7 +49,7 @@ GLuint CmdBufferSurfaceProvider::FlushSurface(SkSurface* surface,
   DCHECK(result);
   GLuint texture_id = info.fID;
   DCHECK_NE(texture_id, 0u);
-  surface->getCanvas()->getGrContext()->resetContext();
+  gr_context_->resetContext();
   glBindFramebuffer(GL_FRAMEBUFFER, main_fbo_);
 
   return texture_id;

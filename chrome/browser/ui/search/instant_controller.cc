@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,14 @@
 
 class InstantController::TabObserver : public content::WebContentsObserver {
  public:
-  TabObserver(content::WebContents* web_contents, const base::Closure& callback)
-      : content::WebContentsObserver(web_contents), callback_(callback) {}
+  TabObserver(content::WebContents* web_contents,
+              base::RepeatingClosure callback)
+      : content::WebContentsObserver(web_contents),
+        callback_(std::move(callback)) {}
+
+  TabObserver(const TabObserver&) = delete;
+  TabObserver& operator=(const TabObserver&) = delete;
+
   ~TabObserver() override = default;
 
  private:
@@ -34,15 +40,13 @@ class InstantController::TabObserver : public content::WebContentsObserver {
     }
   }
 
-  base::Closure callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabObserver);
+  base::RepeatingClosure callback_;
 };
 
 InstantController::InstantController(Profile* profile,
                                      TabStripModel* tab_strip_model)
-    : profile_(profile), tab_strip_observer_(this) {
-  tab_strip_observer_.Add(tab_strip_model);
+    : profile_(profile) {
+  tab_strip_model->AddObserver(this);
 }
 
 InstantController::~InstantController() = default;
@@ -64,8 +68,9 @@ void InstantController::OnTabStripModelChanged(
 void InstantController::StartWatchingTab(content::WebContents* web_contents) {
   if (!tab_observer_ || tab_observer_->web_contents() != web_contents) {
     tab_observer_ = std::make_unique<TabObserver>(
-        web_contents, base::Bind(&InstantController::UpdateInfoForInstantTab,
-                                 base::Unretained(this)));
+        web_contents,
+        base::BindRepeating(&InstantController::UpdateInfoForInstantTab,
+                            base::Unretained(this)));
     // If this tab is an NTP, immediately send it the required info.
     if (search::IsInstantNTP(web_contents)) {
       UpdateInfoForInstantTab();
@@ -83,7 +88,7 @@ void InstantController::UpdateInfoForInstantTab() {
   InstantService* instant_service =
       InstantServiceFactory::GetForProfile(profile_);
   if (instant_service) {
-    instant_service->UpdateThemeInfo();
+    instant_service->UpdateNtpTheme();
     instant_service->UpdateMostVisitedInfo();
   }
 }

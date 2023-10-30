@@ -1,30 +1,25 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.suggestions.mostvisited;
 
-import android.text.TextUtils;
-
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNIAdditionalImport;
-import org.chromium.chrome.browser.ntp.NewTabPage;
-import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.suggestions.SiteSuggestion;
 import org.chromium.chrome.browser.suggestions.tile.Tile;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.url.GURL;
 
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 
 /**
  * Methods to bridge into native history to provide most recent urls, titles and thumbnails.
  */
 @JNIAdditionalImport(MostVisitedSites.class) // Needed for the Observer usage in the native calls.
-public class MostVisitedSitesBridge
-        implements MostVisitedSites, HomepageManager.HomepageStateListener {
+public class MostVisitedSitesBridge implements MostVisitedSites {
     /**
      * Maximum number of tiles that is explicitly supported. UMA relies on this value, so even if
      * the UI supports it, getting more can raise unexpected issues.
@@ -41,26 +36,8 @@ public class MostVisitedSitesBridge
      * @param profile The profile for which to fetch most visited sites.
      */
     public MostVisitedSitesBridge(Profile profile) {
-        mNativeMostVisitedSitesBridge = nativeInit(profile);
-        // The first tile replaces is replaced with homepage tile if NTPButton is enabled. Setting
-        // a homepage client to provide Java side information.
-        if (FeatureUtilities.isNewTabPageButtonEnabled()
-                && FeatureUtilities.isHomepageTileEnabled()) {
-            nativeSetHomepageClient(mNativeMostVisitedSitesBridge, new HomepageClient() {
-                @Override
-                public boolean isHomepageTileEnabled() {
-                    return HomepageManager.isHomepageEnabled()
-                            && !NewTabPage.isNTPUrl(getHomepageUrl())
-                            && !TextUtils.isEmpty(HomepageManager.getHomepageUri());
-                }
-
-                @Override
-                public String getHomepageUrl() {
-                    return HomepageManager.getHomepageUri();
-                }
-            });
-            HomepageManager.getInstance().addListener(this);
-        }
+        mNativeMostVisitedSitesBridge =
+                MostVisitedSitesBridgeJni.get().init(MostVisitedSitesBridge.this, profile);
     }
 
     /**
@@ -69,10 +46,11 @@ public class MostVisitedSitesBridge
     @Override
     public void destroy() {
         // Stop listening even if it was not started in the first place. (Handled without errors.)
-        HomepageManager.getInstance().removeListener(this);
         assert mNativeMostVisitedSitesBridge != 0;
-        nativeDestroy(mNativeMostVisitedSitesBridge);
+        MostVisitedSitesBridgeJni.get().destroy(
+                mNativeMostVisitedSitesBridge, MostVisitedSitesBridge.this);
         mNativeMostVisitedSitesBridge = 0;
+        mWrappedObserver = null;
     }
 
     @Override
@@ -80,64 +58,57 @@ public class MostVisitedSitesBridge
         assert numSites <= MAX_TILE_COUNT;
         mWrappedObserver = observer;
 
-        nativeSetObserver(mNativeMostVisitedSitesBridge, this, numSites);
+        MostVisitedSitesBridgeJni.get().setObserver(
+                mNativeMostVisitedSitesBridge, MostVisitedSitesBridge.this, this, numSites);
     }
 
     @Override
-    public void addBlacklistedUrl(String url) {
+    public void addBlocklistedUrl(GURL url) {
         if (mNativeMostVisitedSitesBridge == 0) return;
-        nativeAddOrRemoveBlacklistedUrl(mNativeMostVisitedSitesBridge, url, true);
+        MostVisitedSitesBridgeJni.get().addOrRemoveBlockedUrl(
+                mNativeMostVisitedSitesBridge, MostVisitedSitesBridge.this, url, true);
     }
 
     @Override
-    public void removeBlacklistedUrl(String url) {
+    public void removeBlocklistedUrl(GURL url) {
         if (mNativeMostVisitedSitesBridge == 0) return;
-        nativeAddOrRemoveBlacklistedUrl(mNativeMostVisitedSitesBridge, url, false);
+        MostVisitedSitesBridgeJni.get().addOrRemoveBlockedUrl(
+                mNativeMostVisitedSitesBridge, MostVisitedSitesBridge.this, url, false);
     }
 
     @Override
     public void recordPageImpression(int tilesCount) {
         if (mNativeMostVisitedSitesBridge == 0) return;
-        nativeRecordPageImpression(mNativeMostVisitedSitesBridge, tilesCount);
+        MostVisitedSitesBridgeJni.get().recordPageImpression(
+                mNativeMostVisitedSitesBridge, MostVisitedSitesBridge.this, tilesCount);
     }
 
     @Override
     public void recordTileImpression(Tile tile) {
         if (mNativeMostVisitedSitesBridge == 0) return;
-        nativeRecordTileImpression(mNativeMostVisitedSitesBridge, tile.getIndex(), tile.getType(),
-                tile.getIconType(), tile.getTitleSource(), tile.getSource(),
-                tile.getData().dataGenerationTime.getTime(), tile.getUrl());
+        MostVisitedSitesBridgeJni.get().recordTileImpression(mNativeMostVisitedSitesBridge,
+                MostVisitedSitesBridge.this, tile.getIndex(), tile.getType(), tile.getIconType(),
+                tile.getTitleSource(), tile.getSource(), tile.getUrl());
     }
 
     @Override
     public void recordOpenedMostVisitedItem(Tile tile) {
         if (mNativeMostVisitedSitesBridge == 0) return;
-        nativeRecordOpenedMostVisitedItem(mNativeMostVisitedSitesBridge, tile.getIndex(),
-                tile.getType(), tile.getTitleSource(), tile.getSource(),
-                tile.getData().dataGenerationTime.getTime());
-    }
-
-    @Override
-    public void onHomepageStateUpdated() {
-        assert mNativeMostVisitedSitesBridge != 0;
-        // Ensure even a blacklisted homepage can be set as tile when (re-)enabling it.
-        if (HomepageManager.isHomepageEnabled()) {
-            removeBlacklistedUrl(HomepageManager.getHomepageUri());
-        }
-        nativeOnHomepageStateChanged(mNativeMostVisitedSitesBridge);
+        MostVisitedSitesBridgeJni.get().recordOpenedMostVisitedItem(mNativeMostVisitedSitesBridge,
+                MostVisitedSitesBridge.this, tile.getIndex(), tile.getType(), tile.getTitleSource(),
+                tile.getSource());
     }
 
     /**
      * Utility function to convert JNI friendly site suggestion data to a Java friendly list of
      * {@link SiteSuggestion}s.
      */
-    public static List<SiteSuggestion> buildSiteSuggestions(String[] titles, String[] urls,
-            int[] sections, String[] whitelistIconPaths, int[] titleSources, int[] sources,
-            long[] dataGenerationTimesMs) {
+    public static List<SiteSuggestion> buildSiteSuggestions(
+            String[] titles, GURL[] urls, int[] sections, int[] titleSources, int[] sources) {
         List<SiteSuggestion> siteSuggestions = new ArrayList<>(titles.length);
         for (int i = 0; i < titles.length; ++i) {
-            siteSuggestions.add(new SiteSuggestion(titles[i], urls[i], whitelistIconPaths[i],
-                    titleSources[i], sources[i], sections[i], new Date(dataGenerationTimesMs[i])));
+            siteSuggestions.add(new SiteSuggestion(
+                    titles[i], urls[i], titleSources[i], sources[i], sections[i]));
         }
         return siteSuggestions;
     }
@@ -150,21 +121,17 @@ public class MostVisitedSitesBridge
      * @param urls Array of most visited URLs, including popular URLs if
      *             available and necessary (i.e. there aren't enough most
      *             visited URLs).
-     * @param whitelistIconPaths The paths to the icon image files for whitelisted tiles, empty
-     *                           strings otherwise.
      * @param sources For each tile, the {@code TileSource} that generated the tile.
      */
     @CalledByNative
-    private void onURLsAvailable(String[] titles, String[] urls, int[] sections,
-            String[] whitelistIconPaths, int[] titleSources, int[] sources,
-            long[] dataGenerationTimesMs) {
+    private void onURLsAvailable(
+            String[] titles, GURL[] urls, int[] sections, int[] titleSources, int[] sources) {
         // Don't notify observer if we've already been destroyed.
         if (mNativeMostVisitedSitesBridge == 0) return;
 
         List<SiteSuggestion> suggestions = new ArrayList<>();
 
-        suggestions.addAll(buildSiteSuggestions(titles, urls, sections, whitelistIconPaths,
-                titleSources, sources, dataGenerationTimesMs));
+        suggestions.addAll(buildSiteSuggestions(titles, urls, sections, titleSources, sources));
 
         mWrappedObserver.onSiteSuggestionsAvailable(suggestions);
     }
@@ -176,27 +143,31 @@ public class MostVisitedSitesBridge
      * @param siteUrl URL of site with newly-cached icon.
      */
     @CalledByNative
-    private void onIconMadeAvailable(String siteUrl) {
+    private void onIconMadeAvailable(GURL siteUrl) {
         // Don't notify observer if we've already been destroyed.
         if (mNativeMostVisitedSitesBridge != 0) {
             mWrappedObserver.onIconMadeAvailable(siteUrl);
         }
     }
 
-    private native long nativeInit(Profile profile);
-    private native void nativeDestroy(long nativeMostVisitedSitesBridge);
-    private native void nativeOnHomepageStateChanged(long nativeMostVisitedSitesBridge);
-    private native void nativeSetHomepageClient(
-            long nativeMostVisitedSitesBridge, MostVisitedSites.HomepageClient homePageClient);
-    private native void nativeSetObserver(
-            long nativeMostVisitedSitesBridge, MostVisitedSitesBridge observer, int numSites);
-    private native void nativeAddOrRemoveBlacklistedUrl(
-            long nativeMostVisitedSitesBridge, String url, boolean addUrl);
-    private native void nativeRecordPageImpression(
-            long nativeMostVisitedSitesBridge, int tilesCount);
-    private native void nativeRecordTileImpression(long nativeMostVisitedSitesBridge, int index,
-            int type, int iconType, int titleSource, int source, long dataGenerationTimeMs,
-            String url);
-    private native void nativeRecordOpenedMostVisitedItem(long nativeMostVisitedSitesBridge,
-            int index, int tileType, int titleSource, int source, long dataGenerationTimeMs);
+    @NativeMethods
+    interface Natives {
+        long init(MostVisitedSitesBridge caller, Profile profile);
+        void destroy(long nativeMostVisitedSitesBridge, MostVisitedSitesBridge caller);
+        void onHomepageStateChanged(
+                long nativeMostVisitedSitesBridge, MostVisitedSitesBridge caller);
+        void setHomepageClient(long nativeMostVisitedSitesBridge, MostVisitedSitesBridge caller,
+                MostVisitedSites.HomepageClient homePageClient);
+        void setObserver(long nativeMostVisitedSitesBridge, MostVisitedSitesBridge caller,
+                MostVisitedSitesBridge observer, int numSites);
+        void addOrRemoveBlockedUrl(long nativeMostVisitedSitesBridge, MostVisitedSitesBridge caller,
+                GURL url, boolean addUrl);
+        void recordPageImpression(
+                long nativeMostVisitedSitesBridge, MostVisitedSitesBridge caller, int tilesCount);
+        void recordTileImpression(long nativeMostVisitedSitesBridge, MostVisitedSitesBridge caller,
+                int index, int type, int iconType, int titleSource, int source, GURL url);
+        void recordOpenedMostVisitedItem(long nativeMostVisitedSitesBridge,
+                MostVisitedSitesBridge caller, int index, int tileType, int titleSource,
+                int source);
+    }
 }

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,17 @@
 
 #include <algorithm>
 #include <iterator>
+#include <string>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/sequenced_task_runner.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/win/registry.h"
 #include "chrome/browser/win/conflicts/module_info_util.h"
@@ -62,9 +62,9 @@ bool IsMicrosoftIme(const wchar_t* ime_guid) {
 // Returns the path to the in-proc server DLL for |guid|, or an empty path if
 // none is found.
 base::FilePath GetInprocServerDllPath(const wchar_t* guid) {
-  base::string16 key_name = base::StringPrintf(kClassIdRegistryKeyFormat, guid);
+  std::wstring key_name = base::StringPrintf(kClassIdRegistryKeyFormat, guid);
   base::win::RegKey registry_key;
-  base::string16 value;
+  std::wstring value;
   if (registry_key.Open(HKEY_CLASSES_ROOT, key_name.c_str(), KEY_QUERY_VALUE) ==
           ERROR_SUCCESS &&
       registry_key.ReadValue(L"", &value) == ERROR_SUCCESS) {
@@ -99,9 +99,9 @@ void EnumerateImesOnBlockingSequence(
     }
 
     nb_imes++;
-    task_runner->PostTask(FROM_HERE,
-                          base::BindRepeating(on_ime_enumerated, dll_path,
-                                              size_of_image, time_date_stamp));
+    task_runner->PostTask(
+        FROM_HERE, base::BindOnce(on_ime_enumerated, dll_path, size_of_image,
+                                  time_date_stamp));
   }
 
   task_runner->PostTask(FROM_HERE, std::move(on_enumeration_finished));
@@ -116,7 +116,7 @@ const wchar_t kImeRegistryKey[] = L"SOFTWARE\\Microsoft\\CTF\\TIP";
 
 void EnumerateInputMethodEditors(OnImeEnumeratedCallback on_ime_enumerated,
                                  base::OnceClosure on_enumeration_finished) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},

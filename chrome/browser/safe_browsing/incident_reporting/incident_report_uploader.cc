@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,7 @@ namespace safe_browsing {
 IncidentReportUploader::~IncidentReportUploader() {
 }
 
-IncidentReportUploader::IncidentReportUploader(const OnResultCallback& callback)
-    : callback_(callback) {
-}
+IncidentReportUploader::IncidentReportUploader(OnResultCallback callback)
+    : callback_(std::move(callback)) {}
 
 }  // namespace safe_browsing

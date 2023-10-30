@@ -1,19 +1,15 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.suggestions;
 
-import android.content.res.Resources;
-import android.support.annotation.IntDef;
 import android.text.TextUtils;
 
-import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.util.AccessibilityUtil;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
+import androidx.annotation.IntDef;
+
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.components.browser_ui.widget.displaystyle.UiConfig;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -40,35 +36,9 @@ public final class SuggestionsConfig {
      * It must be kept in sync with //components/ntp_suggestions/features.cc
      */
     private static final String DEFAULT_CONTENT_SUGGESTIONS_REFERRER_URL =
-            "https://www.googleapis.com/auth/chrome-content-suggestions";
+            "https://www.google.com/";
 
     private SuggestionsConfig() {}
-
-    /**
-     * @return Whether scrolling to the bottom of suggestions triggers a load.
-     */
-    public static boolean scrollToLoad() {
-        // The scroll to load feature does not work well for users who require accessibility mode.
-        if (AccessibilityUtil.isAccessibilityEnabled()) return false;
-
-        return ChromeFeatureList.isEnabled(ChromeFeatureList.CONTENT_SUGGESTIONS_SCROLL_TO_LOAD);
-    }
-
-    /**
-     * @return Whether currently running in touchless mode/device. When in touchless, some features
-     *         or UI elements may want to change to better support this configuration.
-     */
-    public static boolean isTouchless() {
-        return !FeatureUtilities.isNoTouchModeEnabled();
-    }
-
-    /**
-     * @param resources The resources to fetch the color from.
-     * @return The background color for the suggestions sheet content.
-     */
-    public static int getBackgroundColor(Resources resources) {
-        return ApiCompatibilityUtils.getColor(resources, R.color.suggestions_modern_bg);
-    }
 
     /**
      * Returns the current tile style, that depends on the enabled features and the screen size.
@@ -91,8 +61,8 @@ public final class SuggestionsConfig {
      * @return The value of referrer URL to use with content suggestions.
      */
     public static String getReferrerUrl(String featureName) {
-        assert ChromeFeatureList.NTP_ARTICLE_SUGGESTIONS.equals(featureName)
-                || ChromeFeatureList.INTEREST_FEED_CONTENT_SUGGESTIONS.equals(featureName);
+        assert ChromeFeatureList.INTEREST_FEED_CONTENT_SUGGESTIONS.equals(featureName)
+                || ChromeFeatureList.INTEREST_FEED_V2.equals(featureName);
 
         return getReferrerUrlParamOrDefault(featureName, DEFAULT_CONTENT_SUGGESTIONS_REFERRER_URL);
     }

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,11 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
-#include "chrome/android/chrome_jni_headers/ConsentAuditorBridge_jni.h"
+#include "chrome/browser/consent_auditor/android/jni_headers/ConsentAuditorBridge_jni.h"
 #include "chrome/browser/consent_auditor/consent_auditor_factory.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "components/consent_auditor/consent_auditor.h"
+#include "components/signin/public/identity_manager/account_info.h"
 
 using base::android::JavaParamRef;
 
@@ -21,7 +22,7 @@ static void JNI_ConsentAuditorBridge_RecordConsent(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
     const JavaParamRef<jobject>& j_profile,
-    const JavaParamRef<jstring>& j_account_id,
+    const JavaParamRef<jobject>& j_account_id,
     jint j_feature,
     const JavaParamRef<jintArray>& j_consent_description,
     jint j_consent_confirmation) {
@@ -42,5 +43,6 @@ static void JNI_ConsentAuditorBridge_RecordConsent(
   }
   ConsentAuditorFactory::GetForProfile(
       ProfileAndroid::FromProfileAndroid(j_profile))
-      ->RecordSyncConsent(ConvertJavaStringToUTF8(j_account_id), sync_consent);
+      ->RecordSyncConsent(ConvertFromJavaCoreAccountId(env, j_account_id),
+                          sync_consent);
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,21 @@ var workerRegisterAndClaimPromise = function() {
 };
 
 var workerControlsPagePromise = function() {
+  return new Promise((resolve) => {
+    if (navigator.serviceWorker.controller) {
+      resolve();
+      return;
+    }
+    navigator.serviceWorker.oncontrollerchange = function(e) {
+      if (navigator.serviceWorker.controller) {
+        resolve();
+        return;
+      }
+    };
+  });
+};
+
+var fetchWithControlledPagePromise = function() {
   return new Promise(function(resolve, reject) {
     fetch(getTestURL()).then(function(response) {
       return response.text();
@@ -57,6 +72,8 @@ var test = function() {
   }).then(function(registration) {
     serviceWorkerRegistration = registration;
     return workerControlsPagePromise();
+  }).then(function() {
+    return fetchWithControlledPagePromise();
   }).then(function() {
     return serviceWorkerRegistration.unregister();
   }).then(function() {

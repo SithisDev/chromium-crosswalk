@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,24 @@
 
 #include <limits>
 #include <memory>
-#include <string>
 #include <utility>
 #include <vector>
 
 #include "base/cancelable_callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/time/time.h"
 #include "chrome/browser/android/vr/android_vsync_helper.h"
 #include "chrome/browser/android/vr/gvr_graphics_delegate.h"
-#include "chrome/browser/android/vr/web_xr_presentation_state.h"
 #include "chrome/browser/vr/base_scheduler_delegate.h"
+#include "device/vr/android/web_xr_presentation_state.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
 #include "device/vr/util/sliding_average.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "ui/gfx/transform.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace gfx {
 class GpuFence;
@@ -37,10 +40,13 @@ namespace gvr {
 class GvrApi;
 }
 
+namespace device {
+class MailboxToSurfaceBridge;
+}
+
 namespace vr {
 
 class GlBrowserInterface;
-class MailboxToSurfaceBridge;
 class SchedulerUiInterface;
 class ScopedGpuTrace;
 class SlidingTimeDeltaAverage;
@@ -58,9 +64,13 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
                        bool start_in_webxr_mode,
                        bool cardboard_gamepad,
                        size_t sliding_time_size);
+
+  GvrSchedulerDelegate(const GvrSchedulerDelegate&) = delete;
+  GvrSchedulerDelegate& operator=(const GvrSchedulerDelegate&) = delete;
+
   ~GvrSchedulerDelegate() override;
 
-  WebXrPresentationState* webxr() { return &webxr_; }
+  device::WebXrPresentationState* webxr() { return &webxr_; }
 
  private:
   // SchedulerDelegate overrides.
@@ -74,7 +84,6 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
   void SetBrowserRenderer(
       SchedulerBrowserRendererInterface* browser_renderer) override;
   void ConnectPresentingService(
-      device::mojom::VRDisplayInfoPtr display_info,
       device::mojom::XRRuntimeSessionOptionsPtr options) override;
 
   void GvrInit();
@@ -103,7 +112,7 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
   device::mojom::VRPosePtr GetHeadPose(gfx::Transform* head_mat_out);
 
   void WebXrPrepareSharedBuffer();
-  void WebXrCreateOrResizeSharedBufferImage(WebXrSharedBuffer* buffer,
+  void WebXrCreateOrResizeSharedBufferImage(device::WebXrSharedBuffer* buffer,
                                             const gfx::Size& size);
 
   // Checks if we're in a valid state for starting animation of a new frame.
@@ -138,18 +147,18 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
                     device::mojom::XRFrameDataProvider::GetFrameDataCallback
                         callback) override;
   void GetEnvironmentIntegrationProvider(
-      device::mojom::XREnvironmentIntegrationProviderAssociatedRequest
-          environment_provider) override;
+      mojo::PendingAssociatedReceiver<
+          device::mojom::XREnvironmentIntegrationProvider> environment_provider)
+      override;
   void SetInputSourceButtonListener(
-      device::mojom::XRInputSourceButtonListenerAssociatedPtrInfo) override;
+      mojo::PendingAssociatedRemote<device::mojom::XRInputSourceButtonListener>)
+      override;
 
   // XRPresentationProvider
   void SubmitFrameMissing(int16_t frame_index, const gpu::SyncToken&) override;
   void SubmitFrame(int16_t frame_index,
                    const gpu::MailboxHolder& mailbox,
                    base::TimeDelta time_waited) override;
-  void SubmitFrameWithTextureHandle(int16_t frame_index,
-                                    mojo::ScopedHandle texture_handle) override;
   void SubmitFrameDrawnIntoTexture(int16_t frame_index,
                                    const gpu::SyncToken&,
                                    base::TimeDelta time_waited) override;
@@ -174,12 +183,12 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
 
   void AddWebVrRenderTimeEstimate(base::TimeTicks fence_complete_time);
 
-  GlBrowserInterface* browser_;
-  gvr::GvrApi* gvr_api_;
+  raw_ptr<GlBrowserInterface> browser_;
+  raw_ptr<gvr::GvrApi> gvr_api_;
 
-  SchedulerBrowserRendererInterface* browser_renderer_ = nullptr;
+  raw_ptr<SchedulerBrowserRendererInterface> browser_renderer_ = nullptr;
 
-  WebXrPresentationState webxr_;
+  device::WebXrPresentationState webxr_;
   bool showing_vr_dialog_ = false;
   bool cardboard_gamepad_ = false;
 
@@ -190,19 +199,21 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
 
   AndroidVSyncHelper vsync_helper_;
 
-  mojo::Binding<device::mojom::XRPresentationProvider> presentation_binding_;
-  mojo::Binding<device::mojom::XRFrameDataProvider> frame_data_binding_;
+  mojo::Receiver<device::mojom::XRPresentationProvider> presentation_receiver_{
+      this};
+  mojo::Receiver<device::mojom::XRFrameDataProvider> frame_data_receiver_{this};
 
   std::vector<device::mojom::XRInputSourceStatePtr> input_states_;
-  device::mojom::XRPresentationClientPtr submit_client_;
+  mojo::Remote<device::mojom::XRPresentationClient> submit_client_;
   base::queue<uint16_t> pending_frames_;
 
-  base::queue<std::pair<WebXrPresentationState::FrameIndexType, WebVrBounds>>
+  base::queue<
+      std::pair<device::WebXrPresentationState::FrameIndexType, WebVrBounds>>
       pending_bounds_;
 
   int webvr_unstuff_ratelimit_frames_ = 0;
 
-  GvrGraphicsDelegate* graphics_;
+  raw_ptr<GvrGraphicsDelegate> graphics_;
 
   // Attributes tracking WebVR rAF/VSync animation loop state. Blink schedules
   // a callback using the GetFrameData mojo call which is stored in
@@ -228,7 +239,7 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
       void(FrameType, const gfx::Transform&, std::unique_ptr<gl::GLFenceEGL>)>
       webxr_delayed_gvr_submit_;
 
-  std::unique_ptr<MailboxToSurfaceBridge> mailbox_bridge_;
+  std::unique_ptr<device::MailboxToSurfaceBridge> mailbox_bridge_;
   std::unique_ptr<ScopedGpuTrace> gpu_trace_;
 
   device::FPSMeter vr_ui_fps_meter_;
@@ -244,9 +255,7 @@ class GvrSchedulerDelegate : public BaseSchedulerDelegate,
   // rendering, as reported from the Renderer via mojo.
   device::SlidingTimeDeltaAverage webvr_js_wait_time_;
 
-  base::WeakPtrFactory<GvrSchedulerDelegate> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(GvrSchedulerDelegate);
+  base::WeakPtrFactory<GvrSchedulerDelegate> weak_ptr_factory_{this};
 };
 
 }  // namespace vr

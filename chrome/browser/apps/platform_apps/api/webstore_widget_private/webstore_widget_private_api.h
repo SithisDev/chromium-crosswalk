@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "chrome/common/extensions/webstore_install_result.h"
 #include "extensions/browser/extension_function.h"
 
@@ -15,9 +14,13 @@ namespace chrome_apps {
 namespace api {
 
 class WebstoreWidgetPrivateInstallWebstoreItemFunction
-    : public UIThreadExtensionFunction {
+    : public ExtensionFunction {
  public:
   WebstoreWidgetPrivateInstallWebstoreItemFunction();
+  WebstoreWidgetPrivateInstallWebstoreItemFunction(
+      const WebstoreWidgetPrivateInstallWebstoreItemFunction&) = delete;
+  WebstoreWidgetPrivateInstallWebstoreItemFunction& operator=(
+      const WebstoreWidgetPrivateInstallWebstoreItemFunction&) = delete;
 
   DECLARE_EXTENSION_FUNCTION("webstoreWidgetPrivate.installWebstoreItem",
                              WEBSTOREWIDGETPRIVATE_INSTALLWEBSTOREITEM)
@@ -25,15 +28,13 @@ class WebstoreWidgetPrivateInstallWebstoreItemFunction
  protected:
   ~WebstoreWidgetPrivateInstallWebstoreItemFunction() override;
 
-  // UIThreadExtensionFunction overrides.
+  // ExtensionFunction overrides.
   ResponseAction Run() override;
 
  private:
   void OnInstallComplete(bool success,
                          const std::string& error,
                          extensions::webstore_install::Result result);
-
-  DISALLOW_COPY_AND_ASSIGN(WebstoreWidgetPrivateInstallWebstoreItemFunction);
 };
 
 }  // namespace api

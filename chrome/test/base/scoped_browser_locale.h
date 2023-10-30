@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,18 +7,16 @@
 
 #include <string>
 
-#include "base/macros.h"
-
 // Helper class to temporarily set the locale of the browser process.
 class ScopedBrowserLocale {
  public:
   explicit ScopedBrowserLocale(const std::string& new_locale);
+  ScopedBrowserLocale(const ScopedBrowserLocale&) = delete;
+  ScopedBrowserLocale& operator=(const ScopedBrowserLocale&) = delete;
   ~ScopedBrowserLocale();
 
  private:
   const std::string old_locale_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedBrowserLocale);
 };
 
 #endif  // CHROME_TEST_BASE_SCOPED_BROWSER_LOCALE_H_

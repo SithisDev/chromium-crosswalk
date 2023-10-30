@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,10 @@
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/test/base/chrome_ash_test_base.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "chromeos/crosapi/mojom/cros_display_config.mojom.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/display/display.h"
 #include "ui/display/display_observer.h"
@@ -27,56 +30,66 @@ namespace chromeos {
 
 namespace {
 
-class TestCrosDisplayConfig : public ash::mojom::CrosDisplayConfigController {
+class TestCrosDisplayConfig
+    : public crosapi::mojom::CrosDisplayConfigController {
  public:
-  TestCrosDisplayConfig() : binding_(this) {}
+  TestCrosDisplayConfig() = default;
 
-  ash::mojom::CrosDisplayConfigControllerPtr CreateInterfacePtrAndBind() {
-    ash::mojom::CrosDisplayConfigControllerPtr ptr;
-    binding_.Bind(mojo::MakeRequest(&ptr));
-    return ptr;
+  TestCrosDisplayConfig(const TestCrosDisplayConfig&) = delete;
+  TestCrosDisplayConfig& operator=(const TestCrosDisplayConfig&) = delete;
+
+  mojo::PendingRemote<crosapi::mojom::CrosDisplayConfigController>
+  CreateRemoteAndBind() {
+    return receiver_.BindNewPipeAndPassRemote();
   }
 
-  // ash::mojom::CrosDisplayConfigController:
-  void AddObserver(ash::mojom::CrosDisplayConfigObserverAssociatedPtrInfo
-                       observer) override {}
+  // crosapi::mojom::CrosDisplayConfigController:
+  void AddObserver(
+      mojo::PendingAssociatedRemote<crosapi::mojom::CrosDisplayConfigObserver>
+          observer) override {}
   void GetDisplayLayoutInfo(GetDisplayLayoutInfoCallback callback) override {}
-  void SetDisplayLayoutInfo(ash::mojom::DisplayLayoutInfoPtr info,
+  void SetDisplayLayoutInfo(crosapi::mojom::DisplayLayoutInfoPtr info,
                             SetDisplayLayoutInfoCallback callback) override {}
   void GetDisplayUnitInfoList(
       bool single_unified,
       GetDisplayUnitInfoListCallback callback) override {}
-  void SetDisplayProperties(const std::string& id,
-                            ash::mojom::DisplayConfigPropertiesPtr properties,
-                            ash::mojom::DisplayConfigSource source,
-                            SetDisplayPropertiesCallback callback) override {
+  void SetDisplayProperties(
+      const std::string& id,
+      crosapi::mojom::DisplayConfigPropertiesPtr properties,
+      crosapi::mojom::DisplayConfigSource source,
+      SetDisplayPropertiesCallback callback) override {
     if (properties->set_primary) {
       int64_t display_id;
       base::StringToInt64(id, &display_id);
       ash::Shell::Get()->window_tree_host_manager()->SetPrimaryDisplayId(
           display_id);
     }
-    std::move(callback).Run(ash::mojom::DisplayConfigResult::kSuccess);
+    std::move(callback).Run(crosapi::mojom::DisplayConfigResult::kSuccess);
   }
   void SetUnifiedDesktopEnabled(bool enabled) override {}
   void OverscanCalibration(const std::string& display_id,
-                           ash::mojom::DisplayConfigOperation op,
-                           const base::Optional<gfx::Insets>& delta,
+                           crosapi::mojom::DisplayConfigOperation op,
+                           const absl::optional<gfx::Insets>& delta,
                            OverscanCalibrationCallback callback) override {}
   void TouchCalibration(const std::string& display_id,
-                        ash::mojom::DisplayConfigOperation op,
-                        ash::mojom::TouchCalibrationPtr calibration,
+                        crosapi::mojom::DisplayConfigOperation op,
+                        crosapi::mojom::TouchCalibrationPtr calibration,
                         TouchCalibrationCallback callback) override {}
+  void HighlightDisplay(int64_t id) override {}
+  void DragDisplayDelta(int64_t display_id,
+                        int32_t delta_x,
+                        int32_t delta_y) override {}
 
  private:
-  mojo::Binding<ash::mojom::CrosDisplayConfigController> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestCrosDisplayConfig);
+  mojo::Receiver<crosapi::mojom::CrosDisplayConfigController> receiver_{this};
 };
 
 class OobeDisplayChooserTest : public ChromeAshTestBase {
  public:
   OobeDisplayChooserTest() : ChromeAshTestBase() {}
+
+  OobeDisplayChooserTest(const OobeDisplayChooserTest&) = delete;
+  OobeDisplayChooserTest& operator=(const OobeDisplayChooserTest&) = delete;
 
   int64_t GetPrimaryDisplay() {
     return display::Screen::GetScreen()->GetPrimaryDisplay().id();
@@ -88,8 +101,8 @@ class OobeDisplayChooserTest : public ChromeAshTestBase {
 
     cros_display_config_ = std::make_unique<TestCrosDisplayConfig>();
     display_chooser_ = std::make_unique<OobeDisplayChooser>();
-    display_chooser_->set_cros_display_config_ptr_for_test(
-        cros_display_config_->CreateInterfacePtrAndBind());
+    display_chooser_->set_cros_display_config_for_test(
+        cros_display_config_->CreateRemoteAndBind());
 
     ui::DeviceDataManagerTestApi().OnDeviceListsComplete();
   }
@@ -99,11 +112,9 @@ class OobeDisplayChooserTest : public ChromeAshTestBase {
  private:
   std::unique_ptr<TestCrosDisplayConfig> cros_display_config_;
   std::unique_ptr<OobeDisplayChooser> display_chooser_;
-
-  DISALLOW_COPY_AND_ASSIGN(OobeDisplayChooserTest);
 };
 
-const uint16_t kWhitelistedId = 0x266e;
+const uint16_t kAllowlistedId = 0x266e;
 
 }  // namespace
 
@@ -124,7 +135,7 @@ TEST_F(OobeDisplayChooserTest, PreferTouchAsPrimary) {
   ui::TouchscreenDevice touchscreen =
       ui::TouchscreenDevice(1, ui::InputDeviceType::INPUT_DEVICE_USB,
                             "Touchscreen", gfx::Size(800, 600), 1);
-  touchscreen.vendor_id = kWhitelistedId;
+  touchscreen.vendor_id = kAllowlistedId;
   ui::DeviceDataManagerTestApi().SetTouchscreenDevices({touchscreen});
   base::RunLoop().RunUntilIdle();
 
@@ -167,7 +178,7 @@ TEST_F(OobeDisplayChooserTest, DontSwitchFromTouch) {
   ui::TouchscreenDevice touchscreen =
       ui::TouchscreenDevice(1, ui::InputDeviceType::INPUT_DEVICE_USB,
                             "Touchscreen", gfx::Size(800, 600), 1);
-  touchscreen.vendor_id = kWhitelistedId;
+  touchscreen.vendor_id = kAllowlistedId;
   ui::DeviceDataManagerTestApi().SetTouchscreenDevices({touchscreen});
   base::RunLoop().RunUntilIdle();
 

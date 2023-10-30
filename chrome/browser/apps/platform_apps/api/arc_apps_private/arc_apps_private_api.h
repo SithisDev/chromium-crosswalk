@@ -1,12 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_APPS_PLATFORM_APPS_API_ARC_APPS_PRIVATE_ARC_APPS_PRIVATE_API_H_
 #define CHROME_BROWSER_APPS_PLATFORM_APPS_API_ARC_APPS_PRIVATE_ARC_APPS_PRIVATE_API_H_
 
-#include "base/macros.h"
-#include "base/scoped_observer.h"
+#include <string>
+
+#include "base/scoped_observation.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs_factory.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
@@ -24,6 +25,8 @@ class ArcAppsPrivateAPI : public extensions::BrowserContextKeyedAPI,
   GetFactoryInstance();
 
   explicit ArcAppsPrivateAPI(content::BrowserContext* context);
+  ArcAppsPrivateAPI(const ArcAppsPrivateAPI&) = delete;
+  ArcAppsPrivateAPI& operator=(const ArcAppsPrivateAPI&) = delete;
   ~ArcAppsPrivateAPI() override;
 
   // extensions::BrowserContextKeyedAPI:
@@ -47,44 +50,44 @@ class ArcAppsPrivateAPI : public extensions::BrowserContextKeyedAPI,
 
   content::BrowserContext* const context_;
 
-  ScopedObserver<ArcAppListPrefs, ArcAppsPrivateAPI> scoped_prefs_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(ArcAppsPrivateAPI);
+  base::ScopedObservation<ArcAppListPrefs, ArcAppListPrefs::Observer>
+      scoped_prefs_observation_{this};
 };
 
-class ArcAppsPrivateGetLaunchableAppsFunction
-    : public UIThreadExtensionFunction {
+class ArcAppsPrivateGetLaunchableAppsFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("arcAppsPrivate.getLaunchableApps",
                              ARCAPPSPRIVATE_GETLAUNCHABLEAPPS)
 
   ArcAppsPrivateGetLaunchableAppsFunction();
+  ArcAppsPrivateGetLaunchableAppsFunction(
+      const ArcAppsPrivateGetLaunchableAppsFunction&) = delete;
+  ArcAppsPrivateGetLaunchableAppsFunction& operator=(
+      const ArcAppsPrivateGetLaunchableAppsFunction&) = delete;
 
  protected:
   ~ArcAppsPrivateGetLaunchableAppsFunction() override;
 
   // ExtensionFunction:
   ResponseAction Run() override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ArcAppsPrivateGetLaunchableAppsFunction);
 };
 
-class ArcAppsPrivateLaunchAppFunction : public UIThreadExtensionFunction {
+class ArcAppsPrivateLaunchAppFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("arcAppsPrivate.launchApp",
                              ARCAPPSPRIVATE_LAUNCHAPP)
 
   ArcAppsPrivateLaunchAppFunction();
+  ArcAppsPrivateLaunchAppFunction(const ArcAppsPrivateLaunchAppFunction&) =
+      delete;
+  ArcAppsPrivateLaunchAppFunction& operator=(
+      const ArcAppsPrivateLaunchAppFunction&) = delete;
 
  protected:
   ~ArcAppsPrivateLaunchAppFunction() override;
 
   // ExtensionFunction:
   ResponseAction Run() override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ArcAppsPrivateLaunchAppFunction);
 };
 
 }  // namespace api

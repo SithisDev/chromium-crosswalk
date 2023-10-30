@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright 2006-2008 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -165,7 +165,7 @@ bool DicReader::Read(AffReader* aff_reader) {
   // Add words from the .dic_delta file to the word set, if it exists.
   // The first line is the first word to add. Word count line is not present.
   // NOTE: These additional words should be encoded as UTF-8.
-  if (additional_words_file_ != NULL) {
+  if (additional_words_file_) {
     PopulateWordSet(&word_set, additional_words_file_, aff_reader, "dic delta",
                     "UTF-8", false);
   }

@@ -1,14 +1,13 @@
+include_rules = [
+  "+components/live_caption:constants",
+  "+components/profile_metrics",
+]
+
 specific_include_rules = {
-  "profile_impl.cc": [
-    # Profile creates the App Service that manages a profile's installed apps.
-    "+chrome/services/app_service/app_service.h",
-    "+chrome/services/app_service/public/mojom/constants.mojom.h",
-
-    # Profile embeds the Identity Service, but the dependence
-    # should be used *only* for Identity Service creation.
-    "+services/identity/identity_service.h",
-
-    # Profile embeds the image_annotation service.
-    "+services/image_annotation/image_annotation_service.h",
+  "chrome_browser_main_extra_parts_profiles.cc": [
+    # This is required to create the SiteDataCacheFacadeFactory when a profile
+    # is created. This file isn't part of the PerformanceManager public API and
+    # its include should be explicitly allowed.
+    "+chrome/browser/performance_manager/persistence/site_data/site_data_cache_facade_factory.h"
   ],
 }

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,15 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/safe_browsing/download_protection/two_phase_uploader.h"
-#include "components/safe_browsing/proto/csd.pb.h"
+#include "components/safe_browsing/core/common/proto/csd.pb.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/test/test_shared_url_loader_factory.h"
@@ -34,7 +35,7 @@ class FakeUploader : public TwoPhaseUploader {
                const GURL& base_url,
                const std::string& metadata,
                const base::FilePath& file_path,
-               const FinishCallback& finish_callback);
+               FinishCallback finish_callback);
   ~FakeUploader() override {}
 
   void Start() override { start_called_ = true; }
@@ -52,12 +53,12 @@ FakeUploader::FakeUploader(base::TaskRunner* file_task_runner,
                            const GURL& base_url,
                            const std::string& metadata,
                            const base::FilePath& file_path,
-                           const FinishCallback& finish_callback)
+                           FinishCallback finish_callback)
     : file_task_runner_(file_task_runner),
       base_url_(base_url),
       metadata_(metadata),
       file_path_(file_path),
-      finish_callback_(finish_callback),
+      finish_callback_(std::move(finish_callback)),
       start_called_(false) {}
 
 class FakeUploaderFactory : public TwoPhaseUploaderFactory {
@@ -71,10 +72,10 @@ class FakeUploaderFactory : public TwoPhaseUploaderFactory {
       const GURL& base_url,
       const std::string& metadata,
       const base::FilePath& file_path,
-      const TwoPhaseUploader::FinishCallback& finish_callback,
+      TwoPhaseUploader::FinishCallback finish_callback,
       const net::NetworkTrafficAnnotationTag& traffic_annotation) override;
 
-  FakeUploader* uploader_;
+  raw_ptr<FakeUploader> uploader_;
 };
 
 std::unique_ptr<TwoPhaseUploader> FakeUploaderFactory::CreateTwoPhaseUploader(
@@ -83,13 +84,13 @@ std::unique_ptr<TwoPhaseUploader> FakeUploaderFactory::CreateTwoPhaseUploader(
     const GURL& base_url,
     const std::string& metadata,
     const base::FilePath& file_path,
-    const TwoPhaseUploader::FinishCallback& finish_callback,
+    TwoPhaseUploader::FinishCallback finish_callback,
     const net::NetworkTrafficAnnotationTag& traffic_annotation) {
   EXPECT_FALSE(uploader_);
 
   uploader_ = new FakeUploader(file_task_runner, base_url, metadata, file_path,
-                               finish_callback);
-  return base::WrapUnique(uploader_);
+                               std::move(finish_callback));
+  return base::WrapUnique(uploader_.get());
 }
 
 }  // namespace
@@ -97,10 +98,9 @@ std::unique_ptr<TwoPhaseUploader> FakeUploaderFactory::CreateTwoPhaseUploader(
 class DownloadFeedbackTest : public testing::Test {
  public:
   DownloadFeedbackTest()
-      : file_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+      : file_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
             {base::MayBlock(), base::TaskPriority::BEST_EFFORT})),
-        io_task_runner_(base::CreateSingleThreadTaskRunnerWithTraits(
-            {content::BrowserThread::IO})),
+        io_task_runner_(content::GetIOThreadTaskRunner({})),
         feedback_finish_called_(false) {
     EXPECT_NE(io_task_runner_, file_task_runner_);
     shared_url_loader_factory_ =
@@ -132,7 +132,7 @@ class DownloadFeedbackTest : public testing::Test {
   base::ScopedTempDir temp_dir_;
   base::FilePath upload_file_path_;
   std::string upload_file_data_;
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
   FakeUploaderFactory two_phase_uploader_factory_;
@@ -159,8 +159,8 @@ TEST_F(DownloadFeedbackTest, CompleteUpload) {
       ping_request, ping_response);
   EXPECT_FALSE(uploader());
 
-  feedback->Start(base::Bind(&DownloadFeedbackTest::FinishCallback,
-                             base::Unretained(this)));
+  feedback->Start(base::BindOnce(&DownloadFeedbackTest::FinishCallback,
+                                 base::Unretained(this)));
   ASSERT_TRUE(uploader());
   EXPECT_FALSE(feedback_finish_called_);
   EXPECT_TRUE(uploader()->start_called_);
@@ -174,8 +174,8 @@ TEST_F(DownloadFeedbackTest, CompleteUpload) {
   EXPECT_TRUE(base::PathExists(upload_file_path_));
 
   EXPECT_FALSE(feedback_finish_called_);
-  uploader()->finish_callback_.Run(TwoPhaseUploader::STATE_SUCCESS, net::OK, 0,
-                                   "");
+  std::move(uploader()->finish_callback_)
+      .Run(TwoPhaseUploader::STATE_SUCCESS, net::OK, 0, "");
   EXPECT_TRUE(feedback_finish_called_);
   feedback.reset();
   content::RunAllTasksUntilIdle();
@@ -200,8 +200,8 @@ TEST_F(DownloadFeedbackTest, CancelUpload) {
       ping_request, ping_response);
   EXPECT_FALSE(uploader());
 
-  feedback->Start(base::Bind(&DownloadFeedbackTest::FinishCallback,
-                             base::Unretained(this)));
+  feedback->Start(base::BindOnce(&DownloadFeedbackTest::FinishCallback,
+                                 base::Unretained(this)));
   ASSERT_TRUE(uploader());
   EXPECT_FALSE(feedback_finish_called_);
   EXPECT_TRUE(uploader()->start_called_);

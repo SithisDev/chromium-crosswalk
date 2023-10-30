@@ -1,9 +1,9 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/logging.h"
 #include "chrome/browser/extensions/pending_extension_info.h"
+#include "base/check_op.h"
 #include "extensions/common/extension.h"
 
 namespace extensions {
@@ -15,7 +15,7 @@ PendingExtensionInfo::PendingExtensionInfo(
     const base::Version& version,
     ShouldAllowInstallPredicate should_allow_install,
     bool is_from_sync,
-    Manifest::Location install_source,
+    mojom::ManifestLocation install_source,
     int creation_flags,
     bool mark_acknowledged,
     bool remote_install)
@@ -28,21 +28,12 @@ PendingExtensionInfo::PendingExtensionInfo(
       install_source_(install_source),
       creation_flags_(creation_flags),
       mark_acknowledged_(mark_acknowledged),
-      remote_install_(remote_install) {
-}
+      remote_install_(remote_install) {}
 
-PendingExtensionInfo::PendingExtensionInfo()
-    : update_url_(),
-      should_allow_install_(NULL),
-      is_from_sync_(true),
-      install_source_(Manifest::INVALID_LOCATION),
-      creation_flags_(Extension::NO_FLAGS),
-      mark_acknowledged_(false),
-      remote_install_(false) {
-}
-
-PendingExtensionInfo::PendingExtensionInfo(const PendingExtensionInfo& other) =
+PendingExtensionInfo::PendingExtensionInfo(PendingExtensionInfo&& other) =
     default;
+PendingExtensionInfo& PendingExtensionInfo::operator=(
+    PendingExtensionInfo&& other) = default;
 
 PendingExtensionInfo::~PendingExtensionInfo() {}
 
@@ -69,9 +60,9 @@ int PendingExtensionInfo::CompareTo(const PendingExtensionInfo& other) const {
 
   // Different install sources; |this| has higher precedence if
   // |install_source_| is the higher priority source.
-  Manifest::Location higher_priority_source =
-      Manifest::GetHigherPriorityLocation(
-          install_source_, other.install_source_);
+  mojom::ManifestLocation higher_priority_source =
+      Manifest::GetHigherPriorityLocation(install_source_,
+                                          other.install_source_);
 
   return higher_priority_source == install_source_ ? 1 : -1;
 }

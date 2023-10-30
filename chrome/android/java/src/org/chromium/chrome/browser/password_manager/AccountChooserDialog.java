@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,6 @@ import android.content.DialogInterface;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
-import android.support.v7.app.AlertDialog;
-import android.support.v7.content.res.AppCompatResources;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextUtils;
@@ -28,9 +26,13 @@ import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.content.res.AppCompatResources;
+
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.signin.ProfileDataCache;
+import org.chromium.components.browser_ui.util.AvatarGenerator;
 import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.widget.Toast;
@@ -55,8 +57,6 @@ public class AccountChooserDialog
     private final String mOrigin;
     private final String mSigninButtonText;
     private ArrayAdapter<Credential> mAdapter;
-    private boolean mIsDestroyed;
-    private boolean mWasDismissedByNative;
 
     /**
      * Holds the reference to the credentials which were chosen by the user.
@@ -115,6 +115,11 @@ public class AccountChooserDialog
                     convertView =
                             inflater.inflate(R.layout.account_chooser_dialog_item, parent, false);
                 }
+                convertView.setSelected(false);
+                convertView.setOnClickListener(view -> {
+                    mCredential = mCredentials[position];
+                    if (mDialog != null) mDialog.dismiss();
+                });
                 convertView.setTag(position);
 
                 Credential credential = getItem(position);
@@ -177,7 +182,10 @@ public class AccountChooserDialog
             spanableTitle.setSpan(new ClickableSpan() {
                 @Override
                 public void onClick(View view) {
-                    nativeOnLinkClicked(mNativeAccountChooserDialog);
+                    if (mNativeAccountChooserDialog != 0) {
+                        AccountChooserDialogJni.get().onLinkClicked(
+                                mNativeAccountChooserDialog, AccountChooserDialog.this);
+                    }
                     mDialog.dismiss();
                 }
             }, mTitleLinkStart, mTitleLinkEnd, Spanned.SPAN_INCLUSIVE_INCLUSIVE);
@@ -188,7 +196,7 @@ public class AccountChooserDialog
         }
         mAdapter = generateAccountsArrayAdapter(mContext, mCredentials);
         final AlertDialog.Builder builder =
-                new AlertDialog.Builder(mContext, R.style.Theme_Chromium_AlertDialog)
+                new AlertDialog.Builder(mContext, R.style.ThemeOverlay_BrowserUI_AlertDialog)
                         .setCustomTitle(titleView)
                         .setNegativeButton(R.string.cancel, this)
                         .setAdapter(mAdapter, new DialogInterface.OnClickListener() {
@@ -205,6 +213,8 @@ public class AccountChooserDialog
         mDialog.show();
     }
 
+    // status_bar_height is not a public framework resource, so we have to getIdentifier()
+    @SuppressWarnings("DiscouragedApi")
     private void showTooltip(View view, String message, int layoutId) {
         Context context = view.getContext();
         Resources resources = context.getResources();
@@ -213,12 +223,6 @@ public class AccountChooserDialog
         TextView text = (TextView) inflater.inflate(layoutId, null);
         text.setText(message);
         text.announceForAccessibility(message);
-
-        // This is a work-around for a bug on Android versions KitKat and below
-        // (http://crbug.com/693076). The tooltip wouldn't be shown otherwise.
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.LOLLIPOP) {
-            text.setSingleLine(false);
-        }
 
         // The tooltip should be shown above and to the left (right for RTL) of the info button.
         // In order to do so the tooltip's location on the screen is determined. This location is
@@ -258,19 +262,18 @@ public class AccountChooserDialog
         final int xGravity = view.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL ? Gravity.END
                                                                                     : Gravity.START;
 
-        Toast toast = new Toast(context);
+        Toast toast = new Toast(context, text);
         toast.setGravity(Gravity.TOP | xGravity, xOffset, yOffset);
         toast.setDuration(Toast.LENGTH_SHORT);
-        toast.setView(text);
         toast.show();
     }
 
     @CalledByNative
     private void imageFetchComplete(int index, Bitmap avatarBitmap) {
-        if (mIsDestroyed) return;
+        if (mNativeAccountChooserDialog == 0) return;
         assert index >= 0 && index < mCredentials.length;
         assert mCredentials[index] != null;
-        Drawable avatar = ProfileDataCache.makeRoundAvatar(
+        Drawable avatar = AvatarGenerator.makeRoundAvatar(
                 mContext.getResources(), avatarBitmap, avatarBitmap.getHeight());
         mCredentials[index].setAvatar(avatar);
         ListView view = mDialog.getListView();
@@ -283,20 +286,10 @@ public class AccountChooserDialog
         }
     }
 
-    private void destroy() {
-        assert mNativeAccountChooserDialog != 0;
-        assert !mIsDestroyed;
-        mIsDestroyed = true;
-        nativeDestroy(mNativeAccountChooserDialog);
-        mNativeAccountChooserDialog = 0;
-        mDialog = null;
-    }
-
     @CalledByNative
-    private void dismissDialog() {
-        assert !mWasDismissedByNative;
-        mWasDismissedByNative = true;
-        mDialog.dismiss();
+    private void notifyNativeDestroyed() {
+        mNativeAccountChooserDialog = 0;
+        if (mDialog != null) mDialog.dismiss();
     }
 
     @Override
@@ -309,20 +302,22 @@ public class AccountChooserDialog
 
     @Override
     public void onDismiss(DialogInterface dialog) {
-        if (!mWasDismissedByNative) {
-            if (mCredential != null) {
-                nativeOnCredentialClicked(mNativeAccountChooserDialog, mCredential.getIndex(),
-                        mSigninButtonClicked);
-            } else {
-                nativeCancelDialog(mNativeAccountChooserDialog);
-            }
+        mDialog = null;
+        if (mNativeAccountChooserDialog == 0) return;
+        if (mCredential != null) {
+            AccountChooserDialogJni.get().onCredentialClicked(mNativeAccountChooserDialog,
+                    AccountChooserDialog.this, mCredential.getIndex(), mSigninButtonClicked);
+        } else {
+            AccountChooserDialogJni.get().cancelDialog(
+                    mNativeAccountChooserDialog, AccountChooserDialog.this);
         }
-        destroy();
     }
 
-    private native void nativeOnCredentialClicked(long nativeAccountChooserDialogAndroid,
-            int credentialId, boolean signinButtonClicked);
-    private native void nativeCancelDialog(long nativeAccountChooserDialogAndroid);
-    private native void nativeDestroy(long nativeAccountChooserDialogAndroid);
-    private native void nativeOnLinkClicked(long nativeAccountChooserDialogAndroid);
+    @NativeMethods
+    interface Natives {
+        void onCredentialClicked(long nativeAccountChooserDialogAndroid,
+                AccountChooserDialog caller, int credentialId, boolean signinButtonClicked);
+        void cancelDialog(long nativeAccountChooserDialogAndroid, AccountChooserDialog caller);
+        void onLinkClicked(long nativeAccountChooserDialogAndroid, AccountChooserDialog caller);
+    }
 }

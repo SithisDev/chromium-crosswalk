@@ -1,20 +1,24 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/files/file_util.h"
 #include "base/path_service.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/thread_pool.h"
+#include "base/test/task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
+#include "build/build_config.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/services/cups_proxy/fake_cups_proxy_service_delegate.h"
 #include "chrome/services/cups_proxy/public/cpp/type_conversions.h"
 #include "chrome/services/cups_proxy/socket_manager.h"
+#include "chrome/services/cups_proxy/test/paths.h"
 #include "net/base/io_buffer.h"
 #include "net/socket/unix_domain_client_socket_posix.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -22,28 +26,23 @@
 namespace cups_proxy {
 namespace {
 
-// CupsProxy testing data relative path.
-const base::FilePath::CharType kCupsProxyDataDirectory[] =
-    FILE_PATH_LITERAL("cups_proxy");
-
-// Returns base::nullopt on failure.
-base::Optional<std::string> GetTestFile(std::string test_name) {
+// Returns absl::nullopt on failure.
+absl::optional<std::string> GetTestFile(std::string test_name) {
   base::ScopedAllowBlockingForTesting allow_blocking;
 
   // Build file path.
   base::FilePath path;
-  if (!base::PathService::Get(chrome::DIR_TEST_DATA, &path)) {
-    return base::nullopt;
+  if (!base::PathService::Get(Paths::DIR_TEST_DATA, &path)) {
+    return absl::nullopt;
   }
 
-  path = path.Append(kCupsProxyDataDirectory)
-             .Append(FILE_PATH_LITERAL(test_name))
+  path = path.Append(FILE_PATH_LITERAL(test_name))
              .AddExtension(FILE_PATH_LITERAL(".bin"));
 
   // Read in file contents.
   std::string contents;
   if (!base::ReadFileToString(path, &contents)) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   return contents;
@@ -52,8 +51,7 @@ base::Optional<std::string> GetTestFile(std::string test_name) {
 }  // namespace
 
 // Fake delegate granting handle to an IO-thread task runner.
-class FakeServiceDelegate
-    : public chromeos::printing::FakeCupsProxyServiceDelegate {
+class FakeServiceDelegate : public FakeCupsProxyServiceDelegate {
  public:
   FakeServiceDelegate() = default;
   ~FakeServiceDelegate() override = default;
@@ -61,7 +59,7 @@ class FakeServiceDelegate
   // Note: Can't simulate actual IO thread in unit_tests, so we serve an
   // arbitrary SingleThreadTaskRunner.
   scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner() override {
-    return base::CreateSingleThreadTaskRunner({});
+    return base::ThreadPool::CreateSingleThreadTaskRunner({});
   }
 };
 
@@ -179,14 +177,14 @@ class SocketManagerTest : public testing::Test {
     std::unique_ptr<FakeSocket> socket = std::make_unique<FakeSocket>();
     socket_ = socket.get();
 
-    manager_ = SocketManager::CreateForTesting(std::move(socket),
-                                               delegate_->GetWeakPtr());
+    manager_ =
+        SocketManager::CreateForTesting(std::move(socket), delegate_.get());
   }
 
-  base::Optional<std::vector<uint8_t>> ProxyToCups(std::string request) {
+  std::unique_ptr<std::vector<uint8_t>> ProxyToCups(std::string request) {
     std::vector<uint8_t> request_as_bytes =
         ipp_converter::ConvertToByteBuffer(request);
-    base::Optional<std::vector<uint8_t>> response;
+    std::unique_ptr<std::vector<uint8_t>> response;
 
     base::RunLoop run_loop;
     manager_->ProxyToCups(std::move(request_as_bytes),
@@ -199,11 +197,11 @@ class SocketManagerTest : public testing::Test {
 
  protected:
   // Must be first member.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   void OnProxyToCups(base::OnceClosure finish_cb,
-                     base::Optional<std::vector<uint8_t>>* ret,
-                     base::Optional<std::vector<uint8_t>> result) {
+                     std::unique_ptr<std::vector<uint8_t>>* ret,
+                     std::unique_ptr<std::vector<uint8_t>> result) {
     *ret = std::move(result);
     std::move(finish_cb).Run();
   }
@@ -233,7 +231,7 @@ class SocketManagerTest : public testing::Test {
 // All socket accesses are resolved synchronously.
 TEST_F(SocketManagerTest, SyncEverything) {
   // Read request & response
-  base::Optional<std::string> http_handshake = GetTestFile("basic_handshake");
+  absl::optional<std::string> http_handshake = GetTestFile("basic_handshake");
   EXPECT_TRUE(http_handshake);
 
   // Pre-load |socket_| with request/response.

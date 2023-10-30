@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,14 @@
 
 #include <errno.h>
 
+#include <string>
+
 #include "base/files/file_descriptor_watcher_posix.h"
+#include "base/logging.h"
 #include "base/memory/free_deleter.h"
-#include "base/stl_util.h"
 #include "base/system/sys_info.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
 namespace extensions {
 namespace api {
@@ -23,7 +26,7 @@ namespace {
 // TODO(plundblad): Find a way to detect the controlling terminal of the
 // X server.
 static const int kDefaultTtyLinux = 7;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // The GUI is always running on vt1 in Chrome OS.
 static const int kDefaultTtyChromeOS = 1;
 #endif
@@ -33,10 +36,11 @@ class BrlapiConnectionImpl : public BrlapiConnection {
  public:
   explicit BrlapiConnectionImpl(LibBrlapiLoader* loader) :
       libbrlapi_loader_(loader) {}
-
+  BrlapiConnectionImpl(const BrlapiConnectionImpl&) = delete;
+  BrlapiConnectionImpl& operator=(const BrlapiConnectionImpl&) = delete;
   ~BrlapiConnectionImpl() override { Disconnect(); }
 
-  ConnectResult Connect(const OnDataReadyCallback& on_data_ready) override;
+  ConnectResult Connect(OnDataReadyCallback on_data_ready) override;
   void Disconnect() override;
   bool Connected() override { return handle_ != nullptr; }
   brlapi_error_t* BrlapiError() override;
@@ -44,6 +48,7 @@ class BrlapiConnectionImpl : public BrlapiConnection {
   bool GetDisplaySize(unsigned int* rows, unsigned int* columns) override;
   bool WriteDots(const std::vector<unsigned char>& cells) override;
   int ReadKey(brlapi_keyCode_t* keyCode) override;
+  bool GetCellSize(unsigned int* cell_size) override;
 
  private:
   bool CheckConnected();
@@ -52,15 +57,7 @@ class BrlapiConnectionImpl : public BrlapiConnection {
   LibBrlapiLoader* libbrlapi_loader_;
   std::unique_ptr<brlapi_handle_t, base::FreeDeleter> handle_;
   std::unique_ptr<base::FileDescriptorWatcher::Controller> fd_controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(BrlapiConnectionImpl);
 };
-
-BrlapiConnection::BrlapiConnection() {
-}
-
-BrlapiConnection::~BrlapiConnection() {
-}
 
 std::unique_ptr<BrlapiConnection> BrlapiConnection::Create(
     LibBrlapiLoader* loader) {
@@ -69,11 +66,12 @@ std::unique_ptr<BrlapiConnection> BrlapiConnection::Create(
 }
 
 BrlapiConnection::ConnectResult BrlapiConnectionImpl::Connect(
-    const OnDataReadyCallback& on_data_ready) {
+    OnDataReadyCallback on_data_ready) {
   DCHECK(!handle_);
-  handle_.reset((brlapi_handle_t*) malloc(
-      libbrlapi_loader_->brlapi_getHandleSize()));
-  int fd = libbrlapi_loader_->brlapi__openConnection(handle_.get(), NULL, NULL);
+  handle_.reset(reinterpret_cast<brlapi_handle_t*>(
+      malloc(libbrlapi_loader_->brlapi_getHandleSize())));
+  int fd = libbrlapi_loader_->brlapi__openConnection(handle_.get(), nullptr,
+                                                     nullptr);
   if (fd < 0) {
     handle_.reset();
     VLOG(1) << "Error connecting to brlapi: " << BrlapiStrError();
@@ -81,14 +79,14 @@ BrlapiConnection::ConnectResult BrlapiConnectionImpl::Connect(
   }
   int path[2] = {0, 0};
   int pathElements = 0;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (base::SysInfo::IsRunningOnChromeOS())
     path[pathElements++] = kDefaultTtyChromeOS;
 #endif
-  if (pathElements == 0 && getenv("WINDOWPATH") == NULL)
+  if (pathElements == 0 && getenv("WINDOWPATH") == nullptr)
     path[pathElements++] = kDefaultTtyLinux;
   if (libbrlapi_loader_->brlapi__enterTtyModeWithPath(
-          handle_.get(), path, pathElements, NULL) < 0) {
+          handle_.get(), path, pathElements, nullptr) < 0) {
     LOG(ERROR) << "brlapi: couldn't enter tty mode: " << BrlapiStrError();
     Disconnect();
     return CONNECT_ERROR_RETRY;
@@ -119,14 +117,14 @@ BrlapiConnection::ConnectResult BrlapiConnectionImpl::Connect(
   };
   if (libbrlapi_loader_->brlapi__acceptKeys(handle_.get(),
                                             brlapi_rangeType_command, extraKeys,
-                                            base::size(extraKeys)) < 0) {
+                                            std::size(extraKeys)) < 0) {
     LOG(ERROR) << "Couldn't acceptKeys: " << BrlapiStrError();
     Disconnect();
     return CONNECT_ERROR_RETRY;
   }
 
   fd_controller_ =
-      base::FileDescriptorWatcher::WatchReadable(fd, on_data_ready);
+      base::FileDescriptorWatcher::WatchReadable(fd, std::move(on_data_ready));
 
   return CONNECT_SUCCESS;
 }
@@ -178,6 +176,23 @@ int BrlapiConnectionImpl::ReadKey(brlapi_keyCode_t* key_code) {
     return -1;
   return libbrlapi_loader_->brlapi__readKey(
       handle_.get(), 0 /*wait*/, key_code);
+}
+
+bool BrlapiConnectionImpl::GetCellSize(unsigned int* cell_size) {
+  if (!CheckConnected()) {
+    return false;
+  }
+
+  brlapi_param_deviceCellSize_t device_cell_size;
+  ssize_t result = libbrlapi_loader_->brlapi__getParameter(
+      handle_.get(), BRLAPI_PARAM_DEVICE_CELL_SIZE, 0, BRLAPI_PARAMF_GLOBAL,
+      &device_cell_size, sizeof(device_cell_size));
+
+  if (result == -1 || result != sizeof(device_cell_size))
+    return false;
+
+  *cell_size = device_cell_size;
+  return true;
 }
 
 bool BrlapiConnectionImpl::CheckConnected() {

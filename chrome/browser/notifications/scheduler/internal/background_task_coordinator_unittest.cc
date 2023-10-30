@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,13 @@
 
 #include <map>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/memory/raw_ptr.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/notifications/scheduler/internal/notification_entry.h"
 #include "chrome/browser/notifications/scheduler/internal/scheduler_config.h"
 #include "chrome/browser/notifications/scheduler/public/notification_background_task_scheduler.h"
@@ -19,7 +21,7 @@
 #include "chrome/browser/notifications/scheduler/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using testing::_;
+using ::testing::_;
 
 namespace notifications {
 namespace {
@@ -27,26 +29,42 @@ namespace {
 using Notifications = BackgroundTaskCoordinator::Notifications;
 using ClientStates = BackgroundTaskCoordinator::ClientStates;
 
+const char kNow[] = "04/25/1984 06:00:00 AM";
+const char kDeliverTimeWindowStart[] = "04/25/1984 08:00:00 AM";
+const char kDeliverTimeWindowEnd[] = "04/25/1984 08:50:00 AM";
+const char kTommorow[] = "04/26/1984 00:00:00 AM";
+
 const char kGuid[] = "1234";
-const std::vector<test::ImpressionTestData> kSingleClientImpressionTestData = {
-    {SchedulerClientType::kTest1,
-     1 /* current_max_daily_show */,
-     {},
-     base::nullopt /* suppression_info */}};
+const std::vector<test::ImpressionTestData> kSingleClientImpressionTestData = {{
+    SchedulerClientType::kTest1,
+    1 /* current_max_daily_show */,
+    {} /* impressions */,
+    absl::nullopt /* suppression_info */,
+    0 /* negative_events_count */,
+    absl::nullopt /* negative_event_ts */,
+    absl::nullopt /* last_shown_ts */
+}
+
+};
 
 const std::vector<test::ImpressionTestData> kClientsImpressionTestData = {
     {SchedulerClientType::kTest1,
      1 /* current_max_daily_show */,
-     {},
-     base::nullopt /* suppression_info */},
-    {SchedulerClientType::kTest2,
-     2 /* current_max_daily_show */,
-     {},
-     base::nullopt /* suppression_info */}};
+     {} /* impressions */,
+     absl::nullopt /* suppression_info */,
+     0 /* negative_events_count */,
+     absl::nullopt /* negative_event_ts */,
+     absl::nullopt /* last_shown_ts */},
+    {
+        SchedulerClientType::kTest2,
+        2 /* current_max_daily_show */,
+        {} /* impressions */,
+        absl::nullopt /* suppression_info */,
+        0 /* negative_events_count */,
+        absl::nullopt /* negative_event_ts */,
+        absl::nullopt /* last_shown_ts */,
 
-base::TimeDelta NoopTimeRandomizer(const base::TimeDelta& time_window) {
-  return base::TimeDelta();
-}
+    }};
 
 struct TestData {
   // Impression data as the input.
@@ -54,43 +72,49 @@ struct TestData {
 
   // Notification entries as the input.
   std::vector<NotificationEntry> notification_entries;
-
-  // The type of current background task.
-  SchedulerTaskTime task_start_time = SchedulerTaskTime::kMorning;
 };
 
 class BackgroundTaskCoordinatorTest : public testing::Test {
  public:
   BackgroundTaskCoordinatorTest() = default;
+  BackgroundTaskCoordinatorTest(const BackgroundTaskCoordinatorTest&) = delete;
+  BackgroundTaskCoordinatorTest& operator=(
+      const BackgroundTaskCoordinatorTest&) = delete;
   ~BackgroundTaskCoordinatorTest() override = default;
 
  protected:
   void SetUp() override {
     // Setup configuration used by this test.
-    config_.morning_task_hour = 6;
-    config_.evening_task_hour = 18;
     config_.max_daily_shown_all_type = 3;
     config_.max_daily_shown_per_type = 2;
-    config_.suppression_duration = base::TimeDelta::FromDays(3);
+    config_.suppression_duration = base::Days(3);
 
     auto background_task =
         std::make_unique<test::MockNotificationBackgroundTaskScheduler>();
     background_task_ = background_task.get();
-    coordinator_ = std::make_unique<BackgroundTaskCoordinator>(
-        std::move(background_task), &config_,
-        base::BindRepeating(&NoopTimeRandomizer, base::TimeDelta()), &clock_);
+    coordinator_ = BackgroundTaskCoordinator::Create(std::move(background_task),
+                                                     &config_, &clock_);
+    clock_.SetNow(kNow);
   }
 
   test::MockNotificationBackgroundTaskScheduler* background_task() {
     return background_task_;
   }
-
   SchedulerConfig* config() { return &config_; }
-
-  void SetNow(const char* now_str) { clock_.SetNow(now_str); }
+  test::FakeClock* clock() { return &clock_; }
 
   base::Time GetTime(const char* time_str) {
     return test::FakeClock::GetTime(time_str);
+  }
+
+  NotificationEntry CreateNotification(SchedulerClientType type,
+                                       const std::string& guid,
+                                       const char* deliver_window_start,
+                                       const char* deliver_window_end) {
+    NotificationEntry entry(type, guid);
+    entry.schedule_params.deliver_time_start = GetTime(deliver_window_start);
+    entry.schedule_params.deliver_time_end = GetTime(deliver_window_end);
+    return entry;
   }
 
   void ScheduleTask(const TestData& test_data) {
@@ -107,234 +131,168 @@ class BackgroundTaskCoordinatorTest : public testing::Test {
       notifications[entry.type].emplace_back(&entry);
     }
     coordinator_->ScheduleBackgroundTask(std::move(notifications),
-                                         std::move(client_states),
-                                         test_data_.task_start_time);
-  }
-
-  void TestScheduleNewNotification(const char* now,
-                                   const char* expected_task_start_time) {
-    SetNow(now);
-    EXPECT_CALL(*background_task(), Cancel()).Times(0);
-    auto expected_window_start =
-        GetTime(expected_task_start_time) - GetTime(now);
-    EXPECT_CALL(*background_task(),
-                Schedule(_, expected_window_start,
-                         expected_window_start +
-                             config()->background_task_window_duration));
-
-    NotificationEntry entry(SchedulerClientType::kTest1, kGuid);
-    TestData test_data{
-        kSingleClientImpressionTestData, {entry}, SchedulerTaskTime::kUnknown};
-    ScheduleTask(test_data);
+                                         std::move(client_states));
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   test::FakeClock clock_;
   SchedulerConfig config_;
   std::unique_ptr<BackgroundTaskCoordinator> coordinator_;
-  test::MockNotificationBackgroundTaskScheduler* background_task_;
+  raw_ptr<test::MockNotificationBackgroundTaskScheduler> background_task_;
   TestData test_data_;
   std::map<SchedulerClientType, std::unique_ptr<ClientState>> client_states_;
-
-  DISALLOW_COPY_AND_ASSIGN(BackgroundTaskCoordinatorTest);
 };
 
 // No notification persisted, then no background task needs to be scheduled.
 // And current task should be canceled.
 TEST_F(BackgroundTaskCoordinatorTest, NoNotification) {
   EXPECT_CALL(*background_task(), Cancel());
-  EXPECT_CALL(*background_task(), Schedule(_, _, _)).Times(0);
+  EXPECT_CALL(*background_task(), Schedule(_, _)).Times(0);
   TestData test_data;
   test_data.impression_test_data = kSingleClientImpressionTestData;
   ScheduleTask(test_data);
 }
 
-// In a morning task, find one notification and schedule an evening task.
-TEST_F(BackgroundTaskCoordinatorTest, InMorningScheduleEvening) {
-  const char kNow[] = "04/25/20 01:00:00 AM";
-  SetNow(kNow);
-  EXPECT_CALL(*background_task(), Cancel()).Times(0);
-  // Expected to run task this evening.
-  auto expected_window_start = GetTime("04/25/20 18:00:00 PM") - GetTime(kNow);
+// Test to schedule one notification.
+TEST_F(BackgroundTaskCoordinatorTest, OneNotification) {
+  TestData test_data;
+  test_data.impression_test_data = kSingleClientImpressionTestData;
+  test_data.notification_entries = {
+      CreateNotification(SchedulerClientType::kTest1, kGuid,
+                         kDeliverTimeWindowStart, kDeliverTimeWindowEnd)};
   EXPECT_CALL(*background_task(),
-              Schedule(_, expected_window_start,
-                       expected_window_start +
-                           config()->background_task_window_duration));
-
-  NotificationEntry entry(SchedulerClientType::kTest1, kGuid);
-  TestData test_data{
-      kSingleClientImpressionTestData, {entry}, SchedulerTaskTime::kMorning};
+              Schedule(GetTime(kDeliverTimeWindowStart) - GetTime(kNow), _));
+  EXPECT_CALL(*background_task(), Cancel()).Times(0);
   ScheduleTask(test_data);
 }
 
-// In morning task, schedule evening task but throttled, schedule to next
-// morning.
-TEST_F(BackgroundTaskCoordinatorTest, InMorningScheduleEveningThrottled) {
-  const char kNow[] = "04/25/20 02:00:00 PM";
-  SetNow(kNow);
-
+// Verifies that the daily throttle for a particular notification type will
+// block notification to show.
+TEST_F(BackgroundTaskCoordinatorTest, ThrottlePerType) {
+  TestData test_data;
+  test_data.impression_test_data = kSingleClientImpressionTestData;
+  test_data.impression_test_data.front().current_max_daily_show = 0;
+  test_data.notification_entries = {
+      CreateNotification(SchedulerClientType::kTest1, kGuid,
+                         kDeliverTimeWindowStart, kDeliverTimeWindowEnd)};
+  EXPECT_CALL(*background_task(), Schedule(_, _)).Times(0);
   EXPECT_CALL(*background_task(), Cancel()).Times(0);
-  // Expected to run task next morning.
+  ScheduleTask(test_data);
+}
+
+// Verifies that the daily throttle for all notification types will
+// block notification to show.
+TEST_F(BackgroundTaskCoordinatorTest, ThrottleAllType) {
+  TestData test_data;
+  test_data.impression_test_data = kSingleClientImpressionTestData;
+  test_data.impression_test_data.front().current_max_daily_show = 1;
+  config()->max_daily_shown_all_type = 0;
+  test_data.notification_entries = {
+      CreateNotification(SchedulerClientType::kTest1, kGuid,
+                         kDeliverTimeWindowStart, kDeliverTimeWindowEnd)};
+  EXPECT_CALL(*background_task(), Schedule(_, _)).Times(0);
+  EXPECT_CALL(*background_task(), Cancel()).Times(0);
+  ScheduleTask(test_data);
+}
+
+// Verifies that a notification scheduled to show after today will still trigger
+// a background task even if it is throttled today.
+TEST_F(BackgroundTaskCoordinatorTest, ThrottlePerTypeNextDay) {
+  TestData test_data;
+  test_data.impression_test_data = kSingleClientImpressionTestData;
+  test_data.impression_test_data.front().current_max_daily_show = 1;
+  Impression impression_today(SchedulerClientType::kTest1, "guid",
+                              clock()->Now() - base::Minutes(5));
+  test_data.impression_test_data.front().impressions = {impression_today};
+  test_data.notification_entries = {
+      CreateNotification(SchedulerClientType::kTest1, kGuid,
+                         "04/25/1984 23:59:00 PM", "04/26/1984 08:00:00 AM")};
   EXPECT_CALL(*background_task(),
-              Schedule(_, GetTime("04/26/20 06:00:00 AM") - GetTime(kNow), _));
-
-  auto impression_data = kSingleClientImpressionTestData;
-  Impression impression;
-  impression.create_time = GetTime("04/25/20 01:00:00 AM");
-  impression_data.back().impressions.emplace_back(impression);
-
-  NotificationEntry entry(SchedulerClientType::kTest1, kGuid);
-  TestData test_data{impression_data, {entry}, SchedulerTaskTime::kMorning};
-  ScheduleTask(test_data);
-}
-
-// In an evening task, schedule background task to run next morning.
-TEST_F(BackgroundTaskCoordinatorTest, InEveningScheduleNextMorning) {
-  const char kNow[] = "04/25/20 18:00:00 PM";
-  SetNow(kNow);
+              Schedule(GetTime(kTommorow) - GetTime(kNow), _));
   EXPECT_CALL(*background_task(), Cancel()).Times(0);
-  // Expected to run task next morning.
-  auto expected_window_start = GetTime("04/26/20 06:00:00 AM") - GetTime(kNow);
-  EXPECT_CALL(*background_task(), Schedule(_, expected_window_start, _));
-
-  NotificationEntry entry(SchedulerClientType::kTest1, kGuid);
-  TestData test_data{
-      kSingleClientImpressionTestData, {entry}, SchedulerTaskTime::kEvening};
   ScheduleTask(test_data);
 }
 
-// In an evening task, schedule background task to run next morning, even if we
-// reached the daily max.
-TEST_F(BackgroundTaskCoordinatorTest, InEveningScheduleNextMorningThrottled) {
-  const char kNow[] = "04/25/20 18:00:00 PM";
-  SetNow(kNow);
+// Verfies that notification with their deliver window expired will not trigger
+// a background task.
+TEST_F(BackgroundTaskCoordinatorTest, DeliverWindowPassed) {
+  TestData test_data;
+  test_data.impression_test_data = kSingleClientImpressionTestData;
+  test_data.notification_entries = {
+      CreateNotification(SchedulerClientType::kTest1, kGuid,
+                         "04/24/1984 23:59:00 PM", "04/24/1984 08:00:00 AM")};
+  EXPECT_CALL(*background_task(), Schedule(_, _)).Times(0);
   EXPECT_CALL(*background_task(), Cancel()).Times(0);
-  // Expected to run task next morning.
-  auto expected_window_start = GetTime("04/26/20 06:00:00 AM") - GetTime(kNow);
-  EXPECT_CALL(*background_task(), Schedule(_, expected_window_start, _));
-
-  // We have reached daily max.
-  auto impression_data = kSingleClientImpressionTestData;
-  Impression impression;
-  impression.create_time = GetTime("04/25/20 01:00:00 AM");
-  impression_data.back().impressions.emplace_back(impression);
-
-  NotificationEntry entry(SchedulerClientType::kTest1, kGuid);
-  TestData test_data{
-      kSingleClientImpressionTestData, {entry}, SchedulerTaskTime::kEvening};
   ScheduleTask(test_data);
 }
 
-// Suppression will result in background task scheduled after suppression
-// expired.
+// Verfies that notification suppression will block the notification to be
+// shown.
 TEST_F(BackgroundTaskCoordinatorTest, Suppression) {
-  const char kNow[] = "04/25/20 06:00:00 AM";
-  SetNow(kNow);
+  TestData test_data;
+  test_data.impression_test_data = kSingleClientImpressionTestData;
+  test_data.notification_entries = {
+      CreateNotification(SchedulerClientType::kTest1, kGuid,
+                         kDeliverTimeWindowStart, kDeliverTimeWindowEnd)};
+  test_data.impression_test_data.front().suppression_info =
+      SuppressionInfo(clock()->Now() - base::Hours(1), base::Days(7));
+  EXPECT_CALL(*background_task(), Schedule(_, _)).Times(0);
   EXPECT_CALL(*background_task(), Cancel()).Times(0);
-  // Expected to run task in the morning after suppression expired.
-  auto expected_window_start = GetTime("04/28/20 06:00:00 AM") - GetTime(kNow);
-  EXPECT_CALL(*background_task(), Schedule(_, expected_window_start, _));
-
-  auto impression_data = kSingleClientImpressionTestData;
-  impression_data.back().suppression_info = SuppressionInfo(
-      GetTime("04/25/20 00:00:00 AM"), base::TimeDelta::FromDays(3));
-
-  NotificationEntry entry(SchedulerClientType::kTest1, kGuid);
-  TestData test_data{impression_data, {entry}, SchedulerTaskTime::kMorning};
   ScheduleTask(test_data);
 }
 
-// If two different types want to schedule at different times, pick the earilier
-// one.
-TEST_F(BackgroundTaskCoordinatorTest, ScheduleEarlierTime) {
-  const char kNow[] = "04/25/20 01:00:00 AM";
-  SetNow(kNow);
+// Verfies that notification will trigger background task if its deliver time
+// window is after the suppression expiration time.
+TEST_F(BackgroundTaskCoordinatorTest, DeliverTimeAfterSuppressionExpired) {
+  TestData test_data;
+  test_data.impression_test_data = kSingleClientImpressionTestData;
+  test_data.notification_entries = {
+      CreateNotification(SchedulerClientType::kTest1, kGuid,
+                         "04/26/1984 05:00:00 AM", "04/26/1984 23:59:00 PM")};
+  // Suppression will expire at 04/26/1984 06:00:00 AM.
+  test_data.impression_test_data.front().suppression_info =
+      SuppressionInfo(clock()->Now() - base::Days(1), base::Days(2));
+  EXPECT_CALL(*background_task(),
+              Schedule(GetTime("04/26/1984 06:00:00 AM") - GetTime(kNow), _));
   EXPECT_CALL(*background_task(), Cancel()).Times(0);
-  // kTest1 type will run this evening, kTest2 will run task 3 days later.
-  // Expected to run the earilier task.
-  auto expected_window_start = GetTime("04/25/20 18:00:00 PM") - GetTime(kNow);
-  EXPECT_CALL(*background_task(), Schedule(_, expected_window_start, _));
-
-  NotificationEntry entry1(SchedulerClientType::kTest1, kGuid);
-  NotificationEntry entry2(SchedulerClientType::kTest2, "guid_entry2");
-  auto impression_data = kClientsImpressionTestData;
-  impression_data[0].suppression_info = SuppressionInfo(
-      GetTime("04/25/20 00:00:00 AM"), base::TimeDelta::FromDays(3));
-  TestData test_data{
-      impression_data, {entry1, entry2}, SchedulerTaskTime::kMorning};
   ScheduleTask(test_data);
 }
 
-// If reached |max_daily_shown_all_type|, background task should run tomorrow.
-TEST_F(BackgroundTaskCoordinatorTest, InMorningThrottledAllTypes) {
-  const char kNow[] = "04/25/20 05:00:00 AM";
-  SetNow(kNow);
+// Test to schedule multiple notifications from multiple clients.
+TEST_F(BackgroundTaskCoordinatorTest, MutipleNotifications) {
+  TestData test_data;
+  test_data.impression_test_data = kClientsImpressionTestData;
+  NotificationEntry entry0 =
+      CreateNotification(SchedulerClientType::kTest1, "guid0",
+                         kDeliverTimeWindowStart, kDeliverTimeWindowEnd);
+  NotificationEntry entry1 =
+      CreateNotification(SchedulerClientType::kTest2, "guid1",
+                         "04/27/1984 05:00:00 AM", "04/27/1984 23:59:00 PM");
+
+  test_data.notification_entries = {entry0, entry1};
+  EXPECT_CALL(*background_task(),
+              Schedule(GetTime(kDeliverTimeWindowStart) - GetTime(kNow), _));
   EXPECT_CALL(*background_task(), Cancel()).Times(0);
-  // Expected to run task next morning.
-  auto expected_window_start = GetTime("04/26/20 06:00:00 AM") - GetTime(kNow);
-  EXPECT_CALL(*background_task(), Schedule(_, expected_window_start, _));
-
-  auto impression_data = kClientsImpressionTestData;
-  Impression impression;
-  impression.create_time = GetTime("04/25/20 01:00:00 AM");
-
-  // Make sure we reach daily max for all types.
-  for (int i = 0; i < config()->max_daily_shown_all_type; i++)
-    impression_data.back().impressions.emplace_back(impression);
-
-  NotificationEntry entry(SchedulerClientType::kTest1, kGuid);
-  TestData test_data{impression_data, {entry}, SchedulerTaskTime::kMorning};
   ScheduleTask(test_data);
 }
 
-// If reached |max_daily_shown_all_type| and all types have suppression,
-// background task should run after one suppression expired.
-TEST_F(BackgroundTaskCoordinatorTest, ThrottledAllTypesAndSuppression) {
-  const char kNow[] = "04/25/20 05:00:00 AM";
-  SetNow(kNow);
+// Verifies that the notification with NoThrottle priority will always trigger
+// background task.
+TEST_F(BackgroundTaskCoordinatorTest, NoThrottleNotifications) {
+  TestData test_data;
+  test_data.impression_test_data = kSingleClientImpressionTestData;
+  test_data.impression_test_data.front().current_max_daily_show = 1;
+  config()->max_daily_shown_all_type = 0;
+  auto entry =
+      CreateNotification(SchedulerClientType::kTest1, kGuid,
+                         kDeliverTimeWindowStart, kDeliverTimeWindowEnd);
+  entry.schedule_params.priority = ScheduleParams::Priority::kNoThrottle;
+  test_data.notification_entries = {entry};
+  EXPECT_CALL(*background_task(),
+              Schedule(GetTime(kDeliverTimeWindowStart) - GetTime(kNow), _));
   EXPECT_CALL(*background_task(), Cancel()).Times(0);
-  // Expected to run after 3 days suppression ends.
-  auto expected_window_start = GetTime("04/28/20 06:00:00 AM") - GetTime(kNow);
-  EXPECT_CALL(*background_task(), Schedule(_, expected_window_start, _));
-
-  auto impression_data = kClientsImpressionTestData;
-  Impression impression;
-  impression.create_time = GetTime("04/25/20 01:00:00 AM");
-
-  // Make sure we reach daily max for all types.
-  for (int i = 0; i < config()->max_daily_shown_all_type; i++)
-    impression_data[1].impressions.emplace_back(impression);
-
-  // Suppression for both types.
-  impression_data[0].suppression_info = SuppressionInfo(
-      GetTime("04/25/20 00:00:00 AM"), base::TimeDelta::FromDays(3));
-  impression_data[1].suppression_info = SuppressionInfo(
-      GetTime("04/25/20 00:00:00 AM"), base::TimeDelta::FromDays(4));
-
-  NotificationEntry entry1(SchedulerClientType::kTest1, "test_guid_1");
-  NotificationEntry entry2(SchedulerClientType::kTest2, "test_guid_2");
-  TestData test_data{
-      impression_data, {entry1, entry2}, SchedulerTaskTime::kMorning};
   ScheduleTask(test_data);
-}
-
-// Schedules a new notification when Chrome is not running in a background task
-// at different time of a day.
-TEST_F(BackgroundTaskCoordinatorTest, ScheduleNewNotification) {
-  TestScheduleNewNotification("04/25/20 01:00:00 AM", "04/25/20 06:00:00 AM");
-  TestScheduleNewNotification("04/25/20 07:00:00 AM", "04/25/20 18:00:00 PM");
-  TestScheduleNewNotification("04/25/20 18:30:00 PM", "04/26/20 06:00:00 AM");
-}
-
-// Test to verify the default time randomizer.
-TEST_F(BackgroundTaskCoordinatorTest, DefaultTimeRandomizer) {
-  EXPECT_EQ(BackgroundTaskCoordinator::DefaultTimeRandomizer(base::TimeDelta()),
-            base::TimeDelta());
-  auto time_window = base::TimeDelta::FromHours(1);
-  auto delta = BackgroundTaskCoordinator::DefaultTimeRandomizer(time_window);
-  EXPECT_LT(delta, time_window);
-  EXPECT_GE(delta, base::TimeDelta());
 }
 
 }  // namespace

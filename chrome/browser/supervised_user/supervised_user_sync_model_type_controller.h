@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,14 @@
 #define CHROME_BROWSER_SUPERVISED_USER_SUPERVISED_USER_SYNC_MODEL_TYPE_CONTROLLER_H_
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/sync/driver/syncable_service_based_model_type_controller.h"
 
 class Profile;
 
-namespace browser_sync {
-class BrowserSyncClient;
-}  // namespace browser_sync
-
 // A DataTypeController for supervised user sync datatypes, which enables or
-// disables these types based on the profile's IsSupervised state.
+// disables these types based on the profile's IsSupervised state. Runs in
+// sync transport mode.
 class SupervisedUserSyncModelTypeController
     : public syncer::SyncableServiceBasedModelTypeController {
  public:
@@ -25,16 +22,21 @@ class SupervisedUserSyncModelTypeController
       syncer::ModelType type,
       const Profile* profile,
       const base::RepeatingClosure& dump_stack,
-      browser_sync::BrowserSyncClient* sync_client);
+      syncer::OnceModelTypeStoreFactory store_factory,
+      base::WeakPtr<syncer::SyncableService> syncable_service);
+
+  SupervisedUserSyncModelTypeController(
+      const SupervisedUserSyncModelTypeController&) = delete;
+  SupervisedUserSyncModelTypeController& operator=(
+      const SupervisedUserSyncModelTypeController&) = delete;
+
   ~SupervisedUserSyncModelTypeController() override;
 
   // DataTypeController override.
-  bool ReadyForStart() const override;
+  PreconditionState GetPreconditionState() const override;
 
  private:
-  const Profile* const profile_;
-
-  DISALLOW_COPY_AND_ASSIGN(SupervisedUserSyncModelTypeController);
+  const raw_ptr<const Profile> profile_;
 };
 
 #endif  // CHROME_BROWSER_SUPERVISED_USER_SUPERVISED_USER_SYNC_MODEL_TYPE_CONTROLLER_H_

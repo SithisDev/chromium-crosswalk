@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@ var tabProps = [];
 var createTabUtil = function(urlToLoad, createdCallback) {
   try {
     chrome.tabs.create({url: urlToLoad}, function(tab) {
-      createdCallback({id: tab.id, url: tab.url});
+      createdCallback({id: tab.id, url: tab.pendingUrl});
     });
   } catch (e) {
     chrome.test.fail(e);
@@ -17,7 +17,7 @@ var createTabUtil = function(urlToLoad, createdCallback) {
 var getTabUtil = function(tabId, getCallback) {
   try {
     chrome.tabs.get(tabId, function(tab) {
-      getCallback({id: tab.id, url: tab.url});
+      getCallback({id: tab.id, url: tab.pendingUrl || tab.url});
     });
   } catch (e) {
     chrome.test.fail(e);
@@ -122,8 +122,10 @@ chrome.test.runTests([
       // This loop works because tab IDs are unique.
       for (var i = 0; i < tabs.length; ++i) {
         for (var j = 0; j < tabProps.length; ++j) {
+          // Get the URL of the tab, which may still be pending.
+          var tabUrl = tabs[i].pendingUrl || tabs[i].url;
           if (tabs[i].id === tabProps[j].id &&
-              tabs[i].url === tabProps[j].url) {
+              tabUrl === tabProps[j].url) {
             ++countFound;
             break;
           }
@@ -152,8 +154,30 @@ chrome.test.runTests([
   function testTabQuery3() {
     queryTabUtil({currentWindow: true}, function(tabs) {
       chrome.test.assertEq(1, tabs.length);
-      chrome.test.assertEq(tabs[0].id, tabProps[0].id);
-      chrome.test.assertEq(tabs[0].url, tabProps[0].url);
+      chrome.test.assertEq(tabProps[0].id, tabs[0].id);
+      chrome.test.assertEq(tabProps[0].url, tabs[0].url);
+      chrome.test.succeed();
+    });
+  },
+  // Reload the remaining tab.
+  function testTabReload() {
+    chrome.tabs.onUpdated.addListener(function localListener(tabId,
+                                                             changeInfo,
+                                                             tab) {
+      if (changeInfo.status == 'complete') {
+        chrome.tabs.onUpdated.removeListener(localListener);
+        chrome.test.assertEq(tabProps[0].id, tabId);
+        chrome.test.assertEq(tabProps[0].url, tab.url);
+        chrome.test.succeed();
+      }
+    });
+    chrome.tabs.reload(tabProps[0].id, {bypassCache: true});
+  },
+  // Update the remaining tab.
+  function testTabUpdate() {
+    chrome.tabs.update(tabProps[0].id, {url: tabProps[1].url}, function(tab) {
+      chrome.test.assertEq(tabProps[0].id, tab.id);
+      chrome.test.assertEq(tabProps[1].url, tab.pendingUrl);
       chrome.test.succeed();
     });
   },

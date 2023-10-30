@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,16 @@
 
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/strings/string16.h"
 #include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
+#include "ppapi/buildflags/buildflags.h"
+
+#if !BUILDFLAG(ENABLE_PLUGINS)
+#error "Plugins should be enabled"
+#endif
 
 class Profile;
 
@@ -25,12 +29,6 @@ struct WebPluginInfo;
 // Except where otherwise noted, it can be used on every thread.
 class PluginPrefs : public RefcountedKeyedService {
  public:
-  enum PolicyStatus {
-    NO_POLICY = 0,  // Neither enabled or disabled by policy.
-    POLICY_ENABLED,
-    POLICY_DISABLED,
-  };
-
   // Returns the instance associated with |profile|, creating it if necessary.
   static scoped_refptr<PluginPrefs> GetForProfile(Profile* profile);
 
@@ -39,6 +37,9 @@ class PluginPrefs : public RefcountedKeyedService {
   // created PluginPrefs object.
   static scoped_refptr<PluginPrefs> GetForTestingProfile(Profile* profile);
 
+  PluginPrefs(const PluginPrefs&) = delete;
+  PluginPrefs& operator=(const PluginPrefs&) = delete;
+
   // Creates a new instance. This method should only be used for testing.
   PluginPrefs();
 
@@ -46,10 +47,6 @@ class PluginPrefs : public RefcountedKeyedService {
   // plugin groups as defined by the user's preferences.
   // This method should only be called on the UI thread.
   void SetPrefs(PrefService* prefs);
-
-  // Returns whether there is a policy enabling or disabling plugins of the
-  // given name.
-  PolicyStatus PolicyStatusForPlugin(const base::string16& name) const;
 
   // Returns whether the plugin is enabled or not.
   bool IsPluginEnabled(const content::WebPluginInfo& plugin) const;
@@ -62,6 +59,7 @@ class PluginPrefs : public RefcountedKeyedService {
  private:
   friend class base::RefCountedThreadSafe<PluginPrefs>;
   friend class PDFIFrameNavigationThrottleTest;
+  friend class PluginInfoHostImplTest;
   friend class PluginPrefsTest;
   friend class PrintPreviewDialogControllerBrowserTest;
 
@@ -75,14 +73,12 @@ class PluginPrefs : public RefcountedKeyedService {
 
   bool always_open_pdf_externally_ = false;
 
-  Profile* profile_ = nullptr;
+  raw_ptr<Profile> profile_ = nullptr;
 
   // Weak pointer, owned by the profile.
-  PrefService* prefs_ = nullptr;
+  raw_ptr<PrefService> prefs_ = nullptr;
 
   PrefChangeRegistrar registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(PluginPrefs);
 };
 
 #endif  // CHROME_BROWSER_PLUGINS_PLUGIN_PREFS_H_

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,7 +57,7 @@ void AutoFetchCancellationComplete() {
   Java_AutoFetchNotifier_cancellationComplete(env);
 }
 
-void ShowAutoFetchCompleteNotification(const base::string16& pageTitle,
+void ShowAutoFetchCompleteNotification(const std::u16string& pageTitle,
                                        const std::string& original_url,
                                        const std::string& final_url,
                                        int android_tab_id,

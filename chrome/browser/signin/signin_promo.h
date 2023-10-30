@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,15 @@
 #include <string>
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/signin/public/base/signin_metrics.h"
 
 class GURL;
+
+namespace content {
+class BrowserContext;
+class StoragePartition;
+}  // namespace content
 
 namespace user_prefs {
 class PrefRegistrySyncable;
@@ -20,11 +26,12 @@ class PrefRegistrySyncable;
 namespace signin {
 
 extern const char kSignInPromoQueryKeyAccessPoint[];
+// TODO(https://crbug.com/1205147): Auto close is unused. Remove it.
 extern const char kSignInPromoQueryKeyAutoClose[];
 extern const char kSignInPromoQueryKeyForceKeepData[];
 extern const char kSignInPromoQueryKeyReason[];
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 // These functions are only used to unlock the profile from the desktop user
 // manager and the windows credential provider.
 
@@ -42,7 +49,7 @@ GURL GetEmbeddedPromoURL(signin_metrics::AccessPoint access_point,
 GURL GetEmbeddedReauthURLWithEmail(signin_metrics::AccessPoint access_point,
                                    signin_metrics::Reason reason,
                                    const std::string& email);
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 // Returns the URL to be used to signin and turn on Sync when DICE is enabled.
 // If email is not empty, then it will pass email as hint to the page so that it
@@ -58,17 +65,15 @@ GURL GetChromeSyncURLForDice(const std::string& email,
 GURL GetAddAccountURLForDice(const std::string& email,
                              const std::string& continue_url);
 
-// Gets the partition URL for the embedded sign in frame/webview.
-GURL GetSigninPartitionURL();
+// Gets the partition for the embedded sign in frame/webview.
+content::StoragePartition* GetSigninPartition(
+    content::BrowserContext* browser_context);
 
 // Gets the access point from the query portion of the sign in promo URL.
 signin_metrics::AccessPoint GetAccessPointForEmbeddedPromoURL(const GURL& url);
 
 // Gets the sign in reason from the query portion of the sign in promo URL.
 signin_metrics::Reason GetSigninReasonForEmbeddedPromoURL(const GURL& url);
-
-// Returns true if the auto_close parameter in the given URL is set to true.
-bool IsAutoCloseEnabledInEmbeddedURL(const GURL& url);
 
 // Registers the preferences the Sign In Promo needs.
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);

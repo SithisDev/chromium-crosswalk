@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ class DesktopCaptureChooseDesktopMediaFunction
   ~DesktopCaptureChooseDesktopMediaFunction() override;
 
   // ExtensionFunction overrides.
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
   // Returns the target name to show in the picker when capture is requested for
   // an extension.  Currently this is the same as the application name.

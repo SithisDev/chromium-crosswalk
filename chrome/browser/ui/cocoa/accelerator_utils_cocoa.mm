@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,20 +6,21 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/global_keyboard_shortcuts_mac.h"
 #include "chrome/browser/ui/cocoa/accelerators_cocoa.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "ui/base/accelerators/accelerator.h"
 #import "ui/base/accelerators/platform_accelerator_cocoa.h"
 #import "ui/events/keycodes/keyboard_code_conversion_mac.h"
 
 namespace chrome {
 
-bool IsChromeAccelerator(const ui::Accelerator& accelerator, Profile* profile) {
-  NSUInteger modifiers = (accelerator.IsCtrlDown() ? NSControlKeyMask : 0) |
-                         (accelerator.IsCmdDown() ? NSCommandKeyMask : 0) |
-                         (accelerator.IsAltDown() ? NSAlternateKeyMask : 0) |
-                         (accelerator.IsShiftDown() ? NSShiftKeyMask : 0);
+bool IsChromeAccelerator(const ui::Accelerator& accelerator) {
+  NSUInteger modifiers =
+      (accelerator.IsCtrlDown() ? NSEventModifierFlagControl : 0) |
+      (accelerator.IsCmdDown() ? NSEventModifierFlagCommand : 0) |
+      (accelerator.IsAltDown() ? NSEventModifierFlagOption : 0) |
+      (accelerator.IsShiftDown() ? NSEventModifierFlagShift : 0);
 
   // The |accelerator| passed in contains a Windows key code but no platform
   // accelerator info. The Accelerator list is the opposite: It has accelerators
@@ -38,7 +39,7 @@ bool IsChromeAccelerator(const ui::Accelerator& accelerator, Profile* profile) {
   NSString* charactersIgnoringModifiers =
       [NSString stringWithFormat:@"%C", shifted_character];
 
-  NSEvent* event = [NSEvent keyEventWithType:NSKeyDown
+  NSEvent* event = [NSEvent keyEventWithType:NSEventTypeKeyDown
                                     location:NSZeroPoint
                                modifierFlags:modifiers
                                    timestamp:0
@@ -52,12 +53,8 @@ bool IsChromeAccelerator(const ui::Accelerator& accelerator, Profile* profile) {
   return CommandForKeyEvent(event).found();
 }
 
-ui::Accelerator GetPrimaryChromeAcceleratorForBookmarkPage() {
-  const ui::Accelerator* accelerator =
-      AcceleratorsCocoa::GetInstance()->GetAcceleratorForCommand(
-          IDC_BOOKMARK_PAGE);
-
-  return accelerator ? *accelerator : ui::Accelerator();
+ui::AcceleratorProvider* AcceleratorProviderForBrowser(Browser* browser) {
+  return BrowserView::GetBrowserViewForBrowser(browser);
 }
 
 }  // namespace chrome

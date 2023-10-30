@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,11 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_weak_ref.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/android/shortcut_info.h"
+#include "components/webapps/browser/android/shortcut_info.h"
+#include "components/webapps/browser/android/webapk/webapk_icon_hasher.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace content {
@@ -18,7 +19,10 @@ class WebContents;
 }
 
 class GURL;
+
+namespace webapps {
 struct InstallableData;
+}
 
 // WebApkUpdateDataFetcher is the C++ counterpart of
 // org.chromium.chrome.browser's WebApkUpdateDataFetcher in Java. It is created
@@ -27,8 +31,13 @@ class WebApkUpdateDataFetcher : public content::WebContentsObserver {
  public:
   WebApkUpdateDataFetcher(JNIEnv* env,
                           jobject obj,
+                          const GURL& start_url,
                           const GURL& scope,
-                          const GURL& web_manifest_url);
+                          const GURL& web_manifest_url,
+                          const GURL& web_manifest_id);
+
+  WebApkUpdateDataFetcher(const WebApkUpdateDataFetcher&) = delete;
+  WebApkUpdateDataFetcher& operator=(const WebApkUpdateDataFetcher&) = delete;
 
   // Replaces the WebContents that is being observed.
   void ReplaceWebContents(
@@ -54,14 +63,13 @@ class WebApkUpdateDataFetcher : public content::WebContentsObserver {
   void FetchInstallableData();
 
   // Called once the installable data has been fetched.
-  void OnDidGetInstallableData(const InstallableData& installable_data);
+  void OnDidGetInstallableData(
+      const webapps::InstallableData& installable_data);
 
-  // Called with the computed Murmur2 hash for the primary icon.
-  void OnGotPrimaryIconMurmur2Hash(const std::string& primary_icon_hash);
-
-  void OnDataAvailable(const std::string& primary_icon_murmur2_hash,
-                       bool did_fetch_badge_icon,
-                       const std::string& badge_icon_murmur2_hash);
+  // Called with the computed Murmur2 hashes for the icons.
+  void OnGotIconMurmur2Hashes(
+      absl::optional<std::map<std::string, webapps::WebApkIconHasher::Icon>>
+          hashes);
 
   // Called when a page has no Web Manifest or the Web Manifest is not WebAPK
   // compatible.
@@ -70,25 +78,30 @@ class WebApkUpdateDataFetcher : public content::WebContentsObserver {
   // Points to the Java object.
   base::android::ScopedJavaGlobalRef<jobject> java_ref_;
 
+  // The WebAPK's current start url. Used for recording UMA.
+  const GURL start_url_;
+
   // The detector will only fetch the URL within the scope of the WebAPK.
   const GURL scope_;
 
   // The WebAPK's Web Manifest URL that the detector is looking for.
   const GURL web_manifest_url_;
 
+  // The WebAPK's Web Manifest ID that the detector is looking for.
+  const GURL web_manifest_id_;
+
   // The URL for which the installable data is being fetched / was last fetched.
   GURL last_fetched_url_;
 
   // Downloaded data for |web_manifest_url_|.
-  ShortcutInfo info_;
+  webapps::ShortcutInfo info_;
   SkBitmap primary_icon_;
   bool is_primary_icon_maskable_;
 
-  SkBitmap badge_icon_;
+  SkBitmap splash_icon_;
+  bool is_splash_icon_maskable_;
 
-  base::WeakPtrFactory<WebApkUpdateDataFetcher> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebApkUpdateDataFetcher);
+  base::WeakPtrFactory<WebApkUpdateDataFetcher> weak_ptr_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_ANDROID_WEBAPK_WEBAPK_UPDATE_DATA_FETCHER_H_

@@ -1,11 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_BASE_INTERACTIVE_TEST_UTILS_H_
 #define CHROME_TEST_BASE_INTERACTIVE_TEST_UTILS_H_
 
-#include "base/macros.h"
+#include <utility>
+
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser_list_observer.h"
@@ -31,7 +33,9 @@ namespace ui_test_utils {
 class BrowserActivationWaiter : public BrowserListObserver {
  public:
   explicit BrowserActivationWaiter(const Browser* browser);
-  ~BrowserActivationWaiter() override;
+  BrowserActivationWaiter(const BrowserActivationWaiter&) = delete;
+  BrowserActivationWaiter& operator=(const BrowserActivationWaiter&) = delete;
+  ~BrowserActivationWaiter() override = default;
 
   // Runs a message loop until the |browser_| supplied to the constructor is
   // activated, or returns immediately if |browser_| has already become active.
@@ -42,11 +46,9 @@ class BrowserActivationWaiter : public BrowserListObserver {
   // BrowserListObserver:
   void OnBrowserSetLastActive(Browser* browser) override;
 
-  const Browser* const browser_;
-  bool observed_;
+  const raw_ptr<const Browser> browser_;
+  bool observed_ = false;
   base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserActivationWaiter);
 };
 
 // Use in browser interactive uitests to wait until a browser is deactivated.
@@ -54,6 +56,9 @@ class BrowserActivationWaiter : public BrowserListObserver {
 class BrowserDeactivationWaiter : public BrowserListObserver {
  public:
   explicit BrowserDeactivationWaiter(const Browser* browser);
+  BrowserDeactivationWaiter(const BrowserDeactivationWaiter&) = delete;
+  BrowserDeactivationWaiter& operator=(const BrowserDeactivationWaiter&) =
+      delete;
   ~BrowserDeactivationWaiter() override;
 
   // Runs a message loop until the |browser_| supplied to the constructor is
@@ -66,21 +71,20 @@ class BrowserDeactivationWaiter : public BrowserListObserver {
   // BrowserListObserver:
   void OnBrowserNoLongerActive(Browser* browser) override;
 
-  const Browser* const browser_;
-  bool observed_;
+  const raw_ptr<const Browser> browser_;
+  bool observed_ = false;
   base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserDeactivationWaiter);
 };
 
 // Brings the native window for |browser| to the foreground and waits until the
 // browser is active.
-bool BringBrowserWindowToFront(const Browser* browser) WARN_UNUSED_RESULT;
+[[nodiscard]] bool BringBrowserWindowToFront(const Browser* browser);
 
 // Returns true if the View is focused.
 bool IsViewFocused(const Browser* browser, ViewID vid);
 
 // Simulates a mouse click on a View in the browser.
+void ClickOnView(views::View* view);
 void ClickOnView(const Browser* browser, ViewID vid);
 
 // Makes focus shift to the given View without clicking it.
@@ -94,34 +98,34 @@ void FocusView(const Browser* browser, ViewID vid);
 void HideNativeWindow(gfx::NativeWindow window);
 
 // Show and focus a native window. Returns true on success.
-bool ShowAndFocusNativeWindow(gfx::NativeWindow window) WARN_UNUSED_RESULT;
+[[nodiscard]] bool ShowAndFocusNativeWindow(gfx::NativeWindow window);
 
 // Sends a key press, blocking until the key press is received or the test times
 // out. This uses ui_controls::SendKeyPress, see it for details. Returns true
 // if the event was successfully sent and received.
-bool SendKeyPressSync(const Browser* browser,
-                      ui::KeyboardCode key,
-                      bool control,
-                      bool shift,
-                      bool alt,
-                      bool command) WARN_UNUSED_RESULT;
+[[nodiscard]] bool SendKeyPressSync(const Browser* browser,
+                                    ui::KeyboardCode key,
+                                    bool control,
+                                    bool shift,
+                                    bool alt,
+                                    bool command);
 
 // Sends a key press, blocking until the key press is received or the test times
 // out. This uses ui_controls::SendKeyPress, see it for details. Returns true
 // if the event was successfully sent and received.
-bool SendKeyPressToWindowSync(const gfx::NativeWindow window,
-                              ui::KeyboardCode key,
-                              bool control,
-                              bool shift,
-                              bool alt,
-                              bool command) WARN_UNUSED_RESULT;
+[[nodiscard]] bool SendKeyPressToWindowSync(const gfx::NativeWindow window,
+                                            ui::KeyboardCode key,
+                                            bool control,
+                                            bool shift,
+                                            bool alt,
+                                            bool command);
 
 // Sends a move event blocking until received. Returns true if the event was
 // successfully received. This uses ui_controls::SendMouse***NotifyWhenDone,
 // see it for details.
-bool SendMouseMoveSync(const gfx::Point& location) WARN_UNUSED_RESULT;
-bool SendMouseEventsSync(ui_controls::MouseButton type,
-                         int button_state) WARN_UNUSED_RESULT;
+[[nodiscard]] bool SendMouseMoveSync(const gfx::Point& location);
+[[nodiscard]] bool SendMouseEventsSync(ui_controls::MouseButton type,
+                                       int button_state);
 
 // A combination of SendMouseMove to the middle of the view followed by
 // SendMouseEvents. Only exposed for toolkit-views.
@@ -140,9 +144,10 @@ gfx::Point GetCenterInScreenCoordinates(const views::View* view);
 // Blocks until the given view is focused (or not focused, depending on
 // |focused|). Returns immediately if the state is already correct.
 void WaitForViewFocus(Browser* browser, ViewID vid, bool focused);
+void WaitForViewFocus(Browser* browser, views::View* view, bool focused);
 #endif
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 // Send press and release events for |key_code| with selected modifiers and wait
 // until the last event arrives to our NSApp. Events will be sent as CGEvents
 // through HID event tap. |key_code| must be a virtual key code (reference can

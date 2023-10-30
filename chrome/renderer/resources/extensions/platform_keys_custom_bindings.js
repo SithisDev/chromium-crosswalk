@@ -1,12 +1,14 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Custom binding for the platformKeys API.
 
 var SubtleCrypto = require('platformKeys.SubtleCrypto').SubtleCrypto;
-var getPublicKey = require('platformKeys.getPublicKey').getPublicKey;
-var internalAPI = require('platformKeys.internalAPI');
+var publicKeyUtil = require('platformKeys.getPublicKeyUtil');
+var getPublicKey = publicKeyUtil.getPublicKey;
+var getPublicKeyBySpki = publicKeyUtil.getPublicKeyBySpki;
+var internalAPI = getInternalApi('platformKeysInternal');
 
 var keyModule = require('platformKeys.Key');
 var Key = keyModule.Key;
@@ -59,5 +61,19 @@ apiBridge.registerCustomHook(function(api) {
           callback(createPublicKey(publicKey, algorithm),
                    createPrivateKey(publicKey, algorithm));
         });
+      });
+
+  apiFunctions.setHandleRequest(
+      'getKeyPairBySpki', function(publicKeySpkiDer, params, callback) {
+        getPublicKeyBySpki(
+            publicKeySpkiDer, params, function(publicKey, algorithm) {
+              if (bindingUtil.hasLastError()) {
+                callback();
+                return;
+              }
+              callback(
+                  createPublicKey(publicKey, algorithm),
+                  createPrivateKey(publicKey, algorithm));
+            });
       });
 });

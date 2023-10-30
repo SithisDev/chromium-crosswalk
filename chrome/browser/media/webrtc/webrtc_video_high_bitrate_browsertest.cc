@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "chrome/browser/media/webrtc/webrtc_browsertest_common.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "media/base/media_switches.h"
 #include "testing/perf/perf_test.h"
 #include "ui/gl/gl_switches.h"
@@ -66,7 +67,6 @@ class WebRtcVideoHighBitrateBrowserTest : public WebRtcTestBase {
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kUseFakeCodecForPeerConnection);
-    command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
     command_line->AppendSwitch(switches::kUseFakeUIForMediaStream);
     command_line->AppendSwitch(switches::kUseGpuInTests);
   }
@@ -84,9 +84,16 @@ class WebRtcVideoHighBitrateBrowserTest : public WebRtcTestBase {
 IN_PROC_BROWSER_TEST_F(WebRtcVideoHighBitrateBrowserTest,
                        MANUAL_HighBitrateEncodeDecode) {
   ASSERT_TRUE(embedded_test_server()->Start());
+  ASSERT_GE(TestTimeouts::test_launcher_timeout().InSeconds(), 30)
+      << "This is a long-running test; you must specify "
+         "--test-launcher-timeout to have a value of at least 30000.";
   ASSERT_GE(TestTimeouts::action_max_timeout().InSeconds(), 30)
       << "This is a long-running test; you must specify "
          "--ui-test-action-max-timeout to have a value of at least 30000.";
+  ASSERT_LT(TestTimeouts::action_max_timeout(),
+            TestTimeouts::test_launcher_timeout())
+      << "action_max_timeout needs to be strictly-less-than "
+         "test_launcher_timeout";
 
   content::WebContents* left_tab =
       OpenPageAndGetUserMediaInNewTabWithConstraints(

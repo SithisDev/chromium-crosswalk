@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,8 @@ import android.widget.RemoteViews;
 import com.google.android.apps.chrome.appwidget.bookmarks.BookmarkThumbnailWidgetProvider;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.IntentUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.util.IntentUtils;
 
 /**
  * Widget that shows a preview of the user's bookmarks.
@@ -66,7 +66,7 @@ public class BookmarkWidgetProvider extends AppWidgetProvider {
     public void onDeleted(Context context, int[] appWidgetIds) {
         super.onDeleted(context, appWidgetIds);
         for (int widgetId : appWidgetIds) {
-            BookmarkWidgetService.deleteWidgetState(widgetId);
+            BookmarkWidgetServiceImpl.deleteWidgetState(widgetId);
         }
         removeOrphanedStates(context);
     }
@@ -100,7 +100,7 @@ public class BookmarkWidgetProvider extends AppWidgetProvider {
         AppWidgetManager wm = AppWidgetManager.getInstance(context);
         int[] ids = wm.getAppWidgetIds(getComponentName(context));
         for (int id : ids) {
-            BookmarkWidgetService.deleteWidgetState(id);
+            BookmarkWidgetServiceImpl.deleteWidgetState(id);
         }
     }
 
@@ -119,9 +119,12 @@ public class BookmarkWidgetProvider extends AppWidgetProvider {
 
             appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.bookmarks_list);
             Intent ic = new Intent(context, BookmarkWidgetProxy.class);
+            IntentUtils.addTrustedIntentExtras(ic);
+            ic.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             views.setPendingIntentTemplate(R.id.bookmarks_list,
-                    PendingIntent.getBroadcast(context, 0, ic,
-                    PendingIntent.FLAG_UPDATE_CURRENT));
+                    PendingIntent.getActivity(context, 0, ic,
+                            PendingIntent.FLAG_UPDATE_CURRENT
+                                    | IntentUtils.getPendingIntentMutabilityFlag(true)));
             appWidgetManager.updateAppWidget(appWidgetId, views);
         }
     }

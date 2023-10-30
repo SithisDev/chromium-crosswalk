@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,10 +30,10 @@ ChromeUpdateQueryParamsDelegate::GetInstance() {
 }
 
 std::string ChromeUpdateQueryParamsDelegate::GetExtraParams() {
-  return base::StringPrintf("&prodchannel=%s&prodversion=%s&lang=%s",
-                            chrome::GetChannelName().c_str(),
-                            version_info::GetVersionNumber().c_str(),
-                            GetLang());
+  return base::StringPrintf(
+      "&prodchannel=%s&prodversion=%s&lang=%s",
+      chrome::GetChannelName(chrome::WithExtendedStable(true)).c_str(),
+      version_info::GetVersionNumber().c_str(), GetLang());
 }
 
 // static

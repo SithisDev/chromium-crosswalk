@@ -1,8 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/navigation_observer.h"
+
+#include <memory>
 
 #include "base/bind.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -12,7 +14,6 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "extensions/browser/extension_prefs.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 
 using content::NavigationController;
@@ -25,10 +26,9 @@ namespace {
 bool g_repeat_prompting = false;
 }
 
-NavigationObserver::NavigationObserver(Profile* profile)
-    : profile_(profile), extension_registry_observer_(this) {
+NavigationObserver::NavigationObserver(Profile* profile) : profile_(profile) {
   RegisterForNotifications();
-  extension_registry_observer_.Add(ExtensionRegistry::Get(profile));
+  extension_registry_observation_.Observe(ExtensionRegistry::Get(profile));
 }
 
 NavigationObserver::~NavigationObserver() {}
@@ -40,7 +40,7 @@ void NavigationObserver::Observe(int type,
 
   NavigationController* controller =
       content::Source<NavigationController>(source).ptr();
-  if (!profile_->IsSameProfile(
+  if (!profile_->IsSameOrParent(
           Profile::FromBrowserContext(controller->GetBrowserContext())))
     return;
 
@@ -101,14 +101,14 @@ void NavigationObserver::PromptToEnableExtensionIfNecessary(
     in_progress_prompt_extension_id_ = extension->id();
     in_progress_prompt_navigation_controller_ = nav_controller;
 
-    extension_install_prompt_.reset(
-        new ExtensionInstallPrompt(nav_controller->GetWebContents()));
+    extension_install_prompt_ = std::make_unique<ExtensionInstallPrompt>(
+        nav_controller->DeprecatedGetWebContents());
     ExtensionInstallPrompt::PromptType type =
         ExtensionInstallPrompt::GetReEnablePromptTypeForExtension(profile_,
                                                                   extension);
     extension_install_prompt_->ShowDialog(
-        base::Bind(&NavigationObserver::OnInstallPromptDone,
-                   weak_factory_.GetWeakPtr()),
+        base::BindRepeating(&NavigationObserver::OnInstallPromptDone,
+                            weak_factory_.GetWeakPtr()),
         extension, nullptr,
         std::make_unique<ExtensionInstallPrompt::Prompt>(type),
         ExtensionInstallPrompt::GetDefaultShowDialogCallback());
@@ -116,39 +116,29 @@ void NavigationObserver::PromptToEnableExtensionIfNecessary(
 }
 
 void NavigationObserver::OnInstallPromptDone(
-    ExtensionInstallPrompt::Result result) {
+    ExtensionInstallPrompt::DoneCallbackPayload payload) {
   // The extension was already uninstalled.
   if (in_progress_prompt_extension_id_.empty())
     return;
 
-  ExtensionService* extension_service =
-      extensions::ExtensionSystem::Get(profile_)->extension_service();
-  const Extension* extension = extension_service->GetExtensionById(
-      in_progress_prompt_extension_id_, true);
+  ExtensionRegistry* extension_registry = ExtensionRegistry::Get(profile_);
+  const Extension* extension = extension_registry->GetExtensionById(
+      in_progress_prompt_extension_id_, ExtensionRegistry::EVERYTHING);
   CHECK(extension);
 
-  if (result == ExtensionInstallPrompt::Result::ACCEPTED) {
+  if (payload.result == ExtensionInstallPrompt::Result::ACCEPTED) {
     NavigationController* nav_controller =
         in_progress_prompt_navigation_controller_;
     CHECK(nav_controller);
 
+    ExtensionService* extension_service =
+        ExtensionSystem::Get(profile_)->extension_service();
     // Grant permissions, re-enable the extension, and then reload the tab.
     extension_service->GrantPermissionsAndEnableExtension(extension);
     nav_controller->Reload(content::ReloadType::NORMAL, true);
-  } else {
-    // TODO(devlin): These metrics aren't very useful, since they're lumped in
-    // with the same for re-enabling/canceling when the extension first gets
-    // disabled, which is likely significantly more common (though impossible to
-    // tell). We need to separate these.
-    std::string histogram_name =
-       result == ExtensionInstallPrompt::Result::USER_CANCELED
-            ? "ReEnableCancel"
-            : "ReEnableAbort";
-    ExtensionService::RecordPermissionMessagesHistogram(extension,
-                                                        histogram_name.c_str());
   }
 
-  in_progress_prompt_extension_id_ = std::string();
+  in_progress_prompt_extension_id_.clear();
   in_progress_prompt_navigation_controller_ = nullptr;
   extension_install_prompt_.reset();
 }

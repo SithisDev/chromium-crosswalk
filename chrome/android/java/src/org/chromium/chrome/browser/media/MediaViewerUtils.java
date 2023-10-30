@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,19 +17,21 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Browser;
-import android.support.customtabs.CustomTabsIntent;
 import android.text.TextUtils;
 
-import org.chromium.base.ApiCompatibilityUtils;
+import androidx.browser.customtabs.CustomTabsIntent;
+
 import org.chromium.base.ContextUtils;
+import org.chromium.base.IntentUtils;
+import org.chromium.base.SysUtils;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.IntentHandler;
+import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider.CustomTabsUiType;
 import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.ui.util.ColorUtils;
 
 import java.util.Locale;
 
@@ -53,10 +55,8 @@ public class MediaViewerUtils {
      *                                 app.
      * @return Intent that can be fired to open the file.
      */
-    public static Intent getMediaViewerIntent(
-            Uri displayUri, Uri contentUri, String mimeType, boolean allowExternalAppHandlers) {
-        Context context = ContextUtils.getApplicationContext();
-
+    public static Intent getMediaViewerIntent(Uri displayUri, Uri contentUri, String mimeType,
+            boolean allowExternalAppHandlers, Context context) {
         Bitmap closeIcon = BitmapFactory.decodeResource(
                 context.getResources(), R.drawable.ic_arrow_back_white_24dp);
         Bitmap shareIcon = BitmapFactory.decodeResource(
@@ -66,6 +66,9 @@ public class MediaViewerUtils {
         builder.setToolbarColor(Color.BLACK);
         builder.setCloseButtonIcon(closeIcon);
         builder.setShowTitle(true);
+        builder.setColorScheme(ColorUtils.inNightMode(context)
+                        ? CustomTabsIntent.COLOR_SCHEME_DARK
+                        : CustomTabsIntent.COLOR_SCHEME_LIGHT);
 
         if (allowExternalAppHandlers && !willExposeFileUri(contentUri)) {
             // Create a PendingIntent that can be used to view the file externally.
@@ -76,8 +79,9 @@ public class MediaViewerUtils {
             Intent chooserIntent = Intent.createChooser(viewIntent, null);
             chooserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             String openWithStr = context.getString(R.string.download_manager_open_with);
-            PendingIntent pendingViewIntent = PendingIntent.getActivity(
-                    context, 0, chooserIntent, PendingIntent.FLAG_CANCEL_CURRENT);
+            PendingIntent pendingViewIntent = PendingIntent.getActivity(context, 0, chooserIntent,
+                    PendingIntent.FLAG_CANCEL_CURRENT
+                            | IntentUtils.getPendingIntentMutabilityFlag(true));
             builder.addMenuItem(openWithStr, pendingViewIntent);
         }
 
@@ -85,8 +89,10 @@ public class MediaViewerUtils {
         // If the URI is a file URI and the Android version is N or later, this will throw a
         // FileUriExposedException. In this case, we just don't add the share button.
         if (!willExposeFileUri(contentUri)) {
-            PendingIntent pendingShareIntent = PendingIntent.getActivity(context, 0,
-                    createShareIntent(contentUri, mimeType), PendingIntent.FLAG_CANCEL_CURRENT);
+            PendingIntent pendingShareIntent =
+                    PendingIntent.getActivity(context, 0, createShareIntent(contentUri, mimeType),
+                            PendingIntent.FLAG_CANCEL_CURRENT
+                                    | IntentUtils.getPendingIntentMutabilityFlag(true));
             builder.setActionButton(
                     shareIcon, context.getString(R.string.share), pendingShareIntent, true);
         }
@@ -98,20 +104,19 @@ public class MediaViewerUtils {
         } else {
             backgroundRes = R.color.media_viewer_bg;
         }
-        int mediaColor = ApiCompatibilityUtils.getColor(context.getResources(), backgroundRes);
+        int mediaColor = context.getColor(backgroundRes);
 
         // Build up the Intent further.
         Intent intent = builder.build().intent;
         intent.setPackage(context.getPackageName());
         intent.setData(contentUri);
-        intent.putExtra(CustomTabIntentDataProvider.EXTRA_UI_TYPE,
-                CustomTabIntentDataProvider.CustomTabsUiType.MEDIA_VIEWER);
+        intent.putExtra(CustomTabIntentDataProvider.EXTRA_UI_TYPE, CustomTabsUiType.MEDIA_VIEWER);
         intent.putExtra(CustomTabIntentDataProvider.EXTRA_MEDIA_VIEWER_URL, displayUri.toString());
         intent.putExtra(CustomTabIntentDataProvider.EXTRA_ENABLE_EMBEDDED_MEDIA_EXPERIENCE, true);
         intent.putExtra(CustomTabIntentDataProvider.EXTRA_INITIAL_BACKGROUND_COLOR, mediaColor);
         intent.putExtra(CustomTabsIntent.EXTRA_TOOLBAR_COLOR, mediaColor);
         intent.putExtra(Browser.EXTRA_APPLICATION_ID, context.getPackageName());
-        IntentHandler.addTrustedIntentExtras(intent);
+        IntentUtils.addTrustedIntentExtras(intent);
 
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.setClass(context, ChromeLauncherActivity.class);
@@ -153,7 +158,7 @@ public class MediaViewerUtils {
         if (originalUrl != null) {
             intent.putExtra(Intent.EXTRA_ORIGINATING_URI, Uri.parse(originalUrl));
         }
-        if (referrer != null) intent.putExtra(Intent.EXTRA_REFERRER, Uri.parse(originalUrl));
+        if (referrer != null) intent.putExtra(Intent.EXTRA_REFERRER, Uri.parse(referrer));
     }
 
     /**
@@ -232,16 +237,15 @@ public class MediaViewerUtils {
 
     private static boolean shouldEnableMediaLauncherActivity() {
         return sIsMediaLauncherActivityForceEnabledForTest
-                || ((FeatureUtilities.isAndroidGo() || isEnterpriseManaged())
+                || ((SysUtils.isAndroidGo() || isEnterpriseManaged())
                         && ChromeFeatureList.isEnabled(ChromeFeatureList.HANDLE_MEDIA_INTENTS));
     }
 
     private static boolean shouldEnableAudioLauncherActivity() {
-        return shouldEnableMediaLauncherActivity() && !FeatureUtilities.isAndroidGo();
+        return shouldEnableMediaLauncherActivity() && !SysUtils.isAndroidGo();
     }
 
     private static boolean isEnterpriseManaged() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return false;
 
         RestrictionsManager restrictionsManager =
                 (RestrictionsManager) ContextUtils.getApplicationContext().getSystemService(
@@ -271,6 +275,8 @@ public class MediaViewerUtils {
     }
 
     private static boolean willExposeFileUri(Uri uri) {
+        assert uri != null && !uri.equals(Uri.EMPTY) : "URI is not successfully generated.";
+
         // On Android N and later, an Exception is thrown if we try to expose a file:// URI.
         return uri.getScheme().equals(ContentResolver.SCHEME_FILE)
                 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N;

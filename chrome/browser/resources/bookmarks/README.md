@@ -23,11 +23,11 @@ of the code:
   and between two different BMM instances from different Chrome profiles.
 * **Policy support**: Several policies are respected:
 
-  - [EditBookmarksEnabled](https://www.chromium.org/administrators/policy-list-3#EditBookmarksEnabled):
+  - [EditBookmarksEnabled](https://cloud.google.com/docs/chrome-enterprise/policies/?policy=EditBookmarksEnabled):
     Prevents all editing operations
-  - [ManagedBookmarks](https://www.chromium.org/administrators/policy-list-3#ManagedBookmarks):
+  - [ManagedBookmarks](https://cloud.google.com/docs/chrome-enterprise/policies/?policy=ManagedBookmarks):
     Defines a folder of immutable bookmarks.
-  - [IncognitoModeAvailability](https://www.chromium.org/administrators/policy-list-3#IncognitoModeAvailability):
+  - [IncognitoModeAvailability](https://cloud.google.com/docs/chrome-enterprise/policies/?policy=IncognitoModeAvailability):
     Disables/force-enables opening bookmarks in Incognito
 
 ## Data-flow model
@@ -54,9 +54,9 @@ the backend BookmarkModel in C++.
 a read-only state tree for the entire page (`store.data`).
 
 Any Polymer UI element which wants to be able to data-bind values from the
-global state should add the behavior `bookmarks.StoreClient` (in
-`store_client.js`). This behavior allows elements to `watch` particular values
-in the store, and be automatically updated when they change.
+global state should add the mixin `bookmarks.StoreClient` (in
+`store_client_mixin.ts`). This mixin allows elements to `watch` particular
+values in the store, and be automatically updated when they change.
 
 ### Actions
 

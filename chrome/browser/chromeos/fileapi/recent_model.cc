@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,16 +13,15 @@
 #include "base/files/file_path.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "chrome/browser/chromeos/file_manager/path_util.h"
+#include "chrome/browser/ash/file_manager/path_util.h"
 #include "chrome/browser/chromeos/fileapi/recent_arc_media_source.h"
 #include "chrome/browser/chromeos/fileapi/recent_disk_source.h"
 #include "chrome/browser/chromeos/fileapi/recent_drive_source.h"
 #include "chrome/browser/chromeos/fileapi/recent_file.h"
 #include "chrome/browser/chromeos/fileapi/recent_model_factory.h"
 #include "content/public/browser/browser_thread.h"
-#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/file_system/file_system_context.h"
 
 using content::BrowserThread;
 
@@ -31,12 +30,12 @@ namespace chromeos {
 namespace {
 
 // Cut-off time. Files older than this are filtered out.
-constexpr base::TimeDelta kCutoffTimeDelta = base::TimeDelta::FromDays(30);
+constexpr base::TimeDelta kCutoffTimeDelta = base::Days(30);
 
 // Recent file cache will be cleared this duration after it is built.
 // Note: Do not make this value large. When cache is used, cut-off criteria is
 // not strictly honored.
-constexpr base::TimeDelta kCacheExpiration = base::TimeDelta::FromSeconds(10);
+constexpr base::TimeDelta kCacheExpiration = base::Seconds(10);
 
 std::vector<std::unique_ptr<RecentSource>> CreateDefaultSources(
     Profile* profile) {
@@ -50,7 +49,7 @@ std::vector<std::unique_ptr<RecentSource>> CreateDefaultSources(
   // Downloads / MyFiles.
   sources.emplace_back(std::make_unique<RecentDiskSource>(
       file_manager::util::GetDownloadsMountPointName(profile),
-      false /* ignore_dotfiles */, 0 /* max_depth unlimited */,
+      true /* ignore_dotfiles */, 0 /* max_depth unlimited */,
       "FileBrowser.Recent.LoadDownloads"));
   sources.emplace_back(std::make_unique<RecentDriveSource>(profile));
   return sources;
@@ -75,7 +74,7 @@ RecentModel::RecentModel(Profile* profile)
     : RecentModel(CreateDefaultSources(profile)) {}
 
 RecentModel::RecentModel(std::vector<std::unique_ptr<RecentSource>> sources)
-    : sources_(std::move(sources)), weak_ptr_factory_(this) {
+    : sources_(std::move(sources)) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
@@ -87,13 +86,24 @@ RecentModel::~RecentModel() {
 void RecentModel::GetRecentFiles(
     storage::FileSystemContext* file_system_context,
     const GURL& origin,
+    FileType file_type,
+    bool invalidate_cache,
     GetRecentFilesCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  // Use cache if available.
+  /**
+   * Use cache only if:
+   *  * cache has value.
+   *  * invalidate_cache = false.
+   *  * cached file type matches the query file type.
+   * Otherwise clear cache if it has values.
+   */
   if (cached_files_.has_value()) {
-    std::move(callback).Run(cached_files_.value());
-    return;
+    if (!invalidate_cache && cached_files_type_ == file_type) {
+      std::move(callback).Run(cached_files_.value());
+      return;
+    }
+    cached_files_.reset();
   }
 
   bool builder_already_running = !pending_callbacks_.empty();
@@ -112,7 +122,7 @@ void RecentModel::GetRecentFiles(
 
   num_inflight_sources_ = sources_.size();
   if (sources_.empty()) {
-    OnGetRecentFilesCompleted();
+    OnGetRecentFilesCompleted(file_type);
     return;
   }
 
@@ -122,10 +132,10 @@ void RecentModel::GetRecentFiles(
 
   for (const auto& source : sources_) {
     source->GetRecentFiles(RecentSource::Params(
-        file_system_context, origin, max_files_, cutoff_time,
+        file_system_context, origin, max_files_, cutoff_time, file_type,
         base::BindOnce(&RecentModel::OnGetRecentFiles,
-                       weak_ptr_factory_.GetWeakPtr(), max_files_,
-                       cutoff_time)));
+                       weak_ptr_factory_.GetWeakPtr(), max_files_, cutoff_time,
+                       file_type)));
   }
 }
 
@@ -139,6 +149,7 @@ void RecentModel::Shutdown() {
 
 void RecentModel::OnGetRecentFiles(size_t max_files,
                                    const base::Time& cutoff_time,
+                                   FileType file_type,
                                    std::vector<RecentFile> files) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -154,10 +165,10 @@ void RecentModel::OnGetRecentFiles(size_t max_files,
 
   --num_inflight_sources_;
   if (num_inflight_sources_ == 0)
-    OnGetRecentFilesCompleted();
+    OnGetRecentFilesCompleted(file_type);
 }
 
-void RecentModel::OnGetRecentFilesCompleted() {
+void RecentModel::OnGetRecentFilesCompleted(FileType file_type) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   DCHECK_EQ(0, num_inflight_sources_);
@@ -171,6 +182,7 @@ void RecentModel::OnGetRecentFilesCompleted() {
   }
   std::reverse(files.begin(), files.end());
   cached_files_ = std::move(files);
+  cached_files_type_ = file_type;
 
   DCHECK(cached_files_.has_value());
   DCHECK(intermediate_files_.empty());
@@ -182,7 +194,7 @@ void RecentModel::OnGetRecentFilesCompleted() {
   // Starts a timer to clear cache.
   cache_clear_timer_.Start(
       FROM_HERE, kCacheExpiration,
-      base::Bind(&RecentModel::ClearCache, weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&RecentModel::ClearCache, weak_ptr_factory_.GetWeakPtr()));
 
   // Invoke all pending callbacks.
   std::vector<GetRecentFilesCallback> callbacks_to_call;

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,7 @@ void LoggingServiceAPI::SetInstanceForTesting(
   logging_service_for_testing_ = logging_service;
 }
 
-void LoggingServiceAPI::MaybeSaveLogsToFile(const base::string16& tag) {
+void LoggingServiceAPI::MaybeSaveLogsToFile(const std::wstring& tag) {
 #if !defined(NDEBUG)
   // Always dump the raw logs in debug builds.
   const bool dump_raw_logs = true;

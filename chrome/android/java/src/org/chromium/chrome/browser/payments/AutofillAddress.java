@@ -1,22 +1,24 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.payments;
 
 import android.content.Context;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
 import android.telephony.PhoneNumberUtils;
 import android.text.TextUtils;
 import android.util.Pair;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+
+import org.chromium.base.StrictModeContext;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
-import org.chromium.chrome.browser.preferences.autofill.AutofillProfileBridge;
-import org.chromium.chrome.browser.preferences.autofill.AutofillProfileBridge.AddressField;
-import org.chromium.chrome.browser.widget.prefeditor.EditableOption;
+import org.chromium.chrome.browser.autofill.settings.AutofillProfileBridge;
+import org.chromium.chrome.browser.autofill.settings.AutofillProfileBridge.AddressField;
+import org.chromium.components.autofill.EditableOption;
 import org.chromium.payments.mojom.PaymentAddress;
 
 import java.lang.annotation.Retention;
@@ -65,23 +67,38 @@ public class AutofillAddress extends EditableOption {
 
     @Nullable private static Pattern sRegionCodePattern;
 
-    private Context mContext;
+    private final Context mContext;
     private AutofillProfile mProfile;
     @Nullable private String mShippingLabelWithCountry;
     @Nullable private String mShippingLabelWithoutCountry;
     @Nullable private String mBillingLabel;
+    private final @CompletenessCheckType int mCheckType;
 
     /**
      * Builds the autofill address.
      *
+     * @param context The context where this address was created.
      * @param profile The autofill profile containing the address information.
      */
     public AutofillAddress(Context context, AutofillProfile profile) {
+        this(context, profile, CompletenessCheckType.NORMAL);
+    }
+
+    /**
+     * Builds the autofill address.
+     *
+     * @param context The context where this address was created.
+     * @param profile The autofill profile containing the address information.
+     * @param checkType The type of completeness to check.
+     */
+    public AutofillAddress(
+            Context context, AutofillProfile profile, @CompletenessCheckType int checkType) {
         super(profile.getGUID(), profile.getFullName(), profile.getLabel(),
                 profile.getPhoneNumber(), null);
         mContext = context;
         mProfile = profile;
         mIsEditable = true;
+        mCheckType = checkType;
         checkAndUpdateAddressCompleteness();
     }
 
@@ -91,12 +108,25 @@ public class AutofillAddress extends EditableOption {
     }
 
     /**
-     * Updates the address and marks it "complete." Called after the user has edited this address.
+     * Updates the address and marks it "complete".
+     * Called after the user has edited this address.
      * Updates the identifier and labels.
      *
      * @param profile The new profile to use.
      */
     public void completeAddress(AutofillProfile profile) {
+        updateAddress(profile);
+        assert mIsComplete;
+    }
+
+    /**
+     * Updates the address and its completeness if needed.
+     * Called after the user has edited this address.
+     * Updates the identifier and labels.
+     *
+     * @param profile The new profile to use.
+     */
+    public void updateAddress(AutofillProfile profile) {
         // Since the profile changed, our cached labels are now out of date. Set them to null so the
         // labels are recomputed next time they are needed.
         mShippingLabelWithCountry = null;
@@ -107,7 +137,6 @@ public class AutofillAddress extends EditableOption {
         updateIdentifierAndLabels(mProfile.getGUID(), mProfile.getFullName(), mProfile.getLabel(),
                 mProfile.getPhoneNumber());
         checkAndUpdateAddressCompleteness();
-        assert mIsComplete;
     }
 
     /**
@@ -166,8 +195,8 @@ public class AutofillAddress extends EditableOption {
      * status.
      */
     private void checkAndUpdateAddressCompleteness() {
-        Pair<Integer, Integer> messageResIds = getEditMessageAndTitleResIds(
-                checkAddressCompletionStatus(mProfile, CompletenessCheckType.NORMAL));
+        Pair<Integer, Integer> messageResIds =
+                getEditMessageAndTitleResIds(checkAddressCompletionStatus(mProfile, mCheckType));
 
         mEditMessage = messageResIds.first.intValue() == 0
                 ? null
@@ -225,8 +254,9 @@ public class AutofillAddress extends EditableOption {
      * will use the default locale to fill in a blank country code before sending the address to the
      * renderer.
      *
-     * @param  profile The autofill profile containing the address information.
-     * @return int     The completion status.
+     * @param profile   The autofill profile containing the address information.
+     * @param checkType The type of completeness to check.
+     * @return int      The completion status.
      */
     @CompletionStatus
     public static int checkAddressCompletionStatus(
@@ -238,10 +268,14 @@ public class AutofillAddress extends EditableOption {
             completionStatus |= CompletionStatus.INVALID_RECIPIENT;
         }
 
-        if (checkType != CompletenessCheckType.IGNORE_PHONE
-                && !PhoneNumberUtils.isGlobalPhoneNumber(
-                           PhoneNumberUtils.stripSeparators(profile.getPhoneNumber().toString()))) {
-            completionStatus |= CompletionStatus.INVALID_PHONE_NUMBER;
+        // TODO(crbug.com/999286): PhoneNumberUtils internally trigger disk reads for certain
+        //                         devices/configurations.
+        try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
+            if (checkType != CompletenessCheckType.IGNORE_PHONE
+                    && !PhoneNumberUtils.isGlobalPhoneNumber(PhoneNumberUtils.stripSeparators(
+                            profile.getPhoneNumber().toString()))) {
+                completionStatus |= CompletionStatus.INVALID_PHONE_NUMBER;
+            }
         }
 
         List<Integer> requiredFields = AutofillProfileBridge.getRequiredAddressFields(
@@ -314,11 +348,11 @@ public class AutofillAddress extends EditableOption {
 
     /** @return The missing fields of the shipping profile. */
     public int getMissingFieldsOfShippingProfile() {
-        return checkAddressCompletionStatus(mProfile, CompletenessCheckType.NORMAL);
+        return checkAddressCompletionStatus(mProfile, mCheckType);
     }
 
     private int calculateCompletenessScore() {
-        int missingFields = checkAddressCompletionStatus(mProfile, CompletenessCheckType.NORMAL);
+        int missingFields = checkAddressCompletionStatus(mProfile, mCheckType);
 
         // Count how many are set. The completeness of the address is weighted so as
         // to dominate the other fields.

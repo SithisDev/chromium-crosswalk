@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@ var protocolVersion = "1.3";
 
 chrome.test.runTests([
 
-  function attachToWebUI() {
-    chrome.tabs.create({url:"chrome://version"}, function(tab) {
-      var debuggee = {tabId: tab.id};
-      chrome.debugger.attach(debuggee, protocolVersion,
-          fail("Cannot attach to this target."));
-      chrome.tabs.remove(tab.id);
-    });
+  async function attachToWebUI() {
+    const {openTab} = await import('/_test_resources/test_util/tabs_util.js');
+    const tab = await openTab('chrome://version');
+    const debuggee = {tabId: tab.id};
+    chrome.debugger.attach(debuggee, protocolVersion,
+                           fail("Cannot attach to this target."));
+    chrome.tabs.remove(tab.id);
   },
 
   function attach() {

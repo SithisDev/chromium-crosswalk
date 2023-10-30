@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,9 @@
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
 
-#include "base/logging.h"
+#include <memory>
+
+#include "base/check.h"
 #include "base/numerics/safe_math.h"
 
 namespace safe_browsing {
@@ -97,7 +99,7 @@ bool MachOImageReader::Initialize(const uint8_t* image, size_t image_size) {
   if (!image)
     return false;
 
-  data_.reset(new ByteSlice(image, image_size));
+  data_ = std::make_unique<ByteSlice>(image, image_size);
 
   const uint32_t* magic = data_->GetPointerAt<uint32_t>(0);
   if (!magic)

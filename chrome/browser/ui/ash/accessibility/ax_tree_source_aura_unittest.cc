@@ -1,12 +1,12 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 
+#include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/test/views/chrome_views_test_base.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -32,8 +32,7 @@ using views::Textfield;
 using views::View;
 using views::Widget;
 
-using AuraAXTreeSerializer = ui::
-    AXTreeSerializer<views::AXAuraObjWrapper*, ui::AXNodeData, ui::AXTreeData>;
+using AuraAXTreeSerializer = ui::AXTreeSerializer<views::AXAuraObjWrapper*>;
 
 // Helper to count the number of nodes in a tree.
 size_t GetSize(AXAuraObjWrapper* tree) {
@@ -54,6 +53,10 @@ size_t GetSize(AXAuraObjWrapper* tree) {
 class AXTreeSourceAuraTest : public ChromeViewsTestBase {
  public:
   AXTreeSourceAuraTest() {}
+
+  AXTreeSourceAuraTest(const AXTreeSourceAuraTest&) = delete;
+  AXTreeSourceAuraTest& operator=(const AXTreeSourceAuraTest&) = delete;
+
   ~AXTreeSourceAuraTest() override {}
 
   void SetUp() override {
@@ -62,13 +65,12 @@ class AXTreeSourceAuraTest : public ChromeViewsTestBase {
     widget_ = new Widget();
     Widget::InitParams init_params(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
     init_params.context = GetContext();
-    widget_->Init(init_params);
+    widget_->Init(std::move(init_params));
 
-    content_ = new View();
-    widget_->SetContentsView(content_);
+    content_ = widget_->SetContentsView(std::make_unique<View>());
 
     textfield_ = new Textfield();
-    textfield_->SetText(base::ASCIIToUTF16("Value"));
+    textfield_->SetText(u"Value");
     content_->AddChildView(textfield_);
     widget_->Show();
   }
@@ -86,9 +88,6 @@ class AXTreeSourceAuraTest : public ChromeViewsTestBase {
   AXAuraObjCache cache_;
   // A simulated desktop root with no delegate.
   AXRootObjWrapper root_wrapper_{nullptr, &cache_};
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AXTreeSourceAuraTest);
 };
 
 TEST_F(AXTreeSourceAuraTest, Accessors) {
@@ -114,16 +113,14 @@ TEST_F(AXTreeSourceAuraTest, Accessors) {
   ASSERT_EQ(cached_textfield, textfield);
   std::vector<AXAuraObjWrapper*> textfield_children;
   ax_tree.GetChildren(textfield, &textfield_children);
-  // The textfield has an extra child in Harmony, the focus ring.
-  const size_t expected_children = 2;
-  ASSERT_EQ(expected_children, textfield_children.size());
+  ASSERT_EQ(0u, textfield_children.size());
 
   ASSERT_EQ(content, textfield->GetParent());
 
   ASSERT_NE(textfield->GetUniqueId(), ax_tree.GetRoot()->GetUniqueId());
 
   // Try walking up the tree to the root.
-  AXAuraObjWrapper* test_root = NULL;
+  AXAuraObjWrapper* test_root = nullptr;
   for (AXAuraObjWrapper* root_finder = ax_tree.GetParent(content); root_finder;
        root_finder = ax_tree.GetParent(root_finder))
     test_root = root_finder;
@@ -171,11 +168,11 @@ TEST_F(AXTreeSourceAuraTest, Serialize) {
   // This is the initial serialization.
   ax_serializer.SerializeChanges(ax_tree.GetRoot(), &out_update);
 
-  // The update should just be the desktop node.
+  // The update should be the desktop node.
   ASSERT_EQ(1U, out_update.nodes.size());
 
   // Try removing some child views and re-adding which should fire some events.
-  content_->RemoveAllChildViews(false /* delete_children */);
+  content_->RemoveAllChildViewsWithoutDeleting();
   content_->AddChildView(textfield_);
 
   // Grab the textfield since serialization only walks up the tree (not down
@@ -189,7 +186,7 @@ TEST_F(AXTreeSourceAuraTest, Serialize) {
   size_t node_count = out_update2.nodes.size();
 
   // We should have far more updates this time around.
-  ASSERT_GE(node_count, 8U);
+  EXPECT_GE(node_count, 7U);
 
   int text_field_update_index = -1;
   for (size_t i = 0; i < node_count; ++i) {

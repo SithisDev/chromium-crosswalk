@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include "base/callback_forward.h"
 #include "base/files/file.h"
-#include "base/macros.h"
 #include "base/process/process.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -35,10 +34,10 @@ class NativeProcessLauncher {
   // Callback that's called after the process has been launched. |result| is set
   // to false in case of a failure. Handler must take ownership of the IO
   // handles.
-  typedef base::Callback<void(LaunchResult result,
-                              base::Process process,
-                              base::File read_file,
-                              base::File write_file)> LaunchedCallback;
+  using LaunchedCallback = base::OnceCallback<void(LaunchResult result,
+                                                   base::Process process,
+                                                   base::File read_file,
+                                                   base::File write_file)>;
 
   // Creates default launcher for the current OS. |native_view| refers to the
   // window that contains calling page. Can be nullptr, e.g. for background
@@ -47,14 +46,22 @@ class NativeProcessLauncher {
   // the host. If |require_native_initiated_connections| is true, the connection
   // will be allowed only if the native messaging host sets
   // "supports_native_initiated_connections" to true in its manifest.
+  // If |error_arg| is non-empty, the reconnect args are omitted, and instead
+  // the error value is passed as a command line argument to the host.
   static std::unique_ptr<NativeProcessLauncher> CreateDefault(
       bool allow_user_level_hosts,
       gfx::NativeView native_view,
       const base::FilePath& profile_directory,
-      bool require_native_initiated_connections);
+      bool require_native_initiated_connections,
+      const std::string& connect_id,
+      const std::string& error_arg);
 
-  NativeProcessLauncher() {}
-  virtual ~NativeProcessLauncher() {}
+  NativeProcessLauncher() = default;
+
+  NativeProcessLauncher(const NativeProcessLauncher&) = delete;
+  NativeProcessLauncher& operator=(const NativeProcessLauncher&) = delete;
+
+  virtual ~NativeProcessLauncher() = default;
 
   // Finds native messaging host with the specified name and launches it
   // asynchronously. Also checks that the specified |origin| is permitted to
@@ -64,7 +71,7 @@ class NativeProcessLauncher {
   // closing IO pipes).
   virtual void Launch(const GURL& origin,
                       const std::string& native_host_name,
-                      const LaunchedCallback& callback) const = 0;
+                      LaunchedCallback callback) const = 0;
 
  protected:
   // The following two methods are platform specific and are implemented in
@@ -82,9 +89,6 @@ class NativeProcessLauncher {
                                   base::Process* process,
                                   base::File* read_file,
                                   base::File* write_file);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NativeProcessLauncher);
 };
 
 }  // namespace extensions

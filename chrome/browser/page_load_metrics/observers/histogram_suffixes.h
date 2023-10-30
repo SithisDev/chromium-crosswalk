@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,9 @@ extern const char kHistogramDOMContentLoadedEventFiredSuffix[];
 extern const char kHistogramFirstContentfulPaintSuffix[];
 extern const char kHistogramFirstImagePaintSuffix[];
 extern const char kHistogramFirstInputDelaySuffix[];
-extern const char kHistogramFirstLayoutSuffix[];
 extern const char kHistogramFirstMeaningfulPaintSuffix[];
 extern const char kHistogramFirstPaintSuffix[];
 extern const char kHistogramForegroundToFirstContentfulPaintSuffix[];
-extern const char kHistogramForegroundToFirstMeaningfulPaintSuffix[];
 extern const char kHistogramLoadEventFiredBackgroundSuffix[];
 extern const char kHistogramLoadEventFiredSuffix[];
 extern const char kHistogramParseBlockedOnScriptLoadSuffix[];

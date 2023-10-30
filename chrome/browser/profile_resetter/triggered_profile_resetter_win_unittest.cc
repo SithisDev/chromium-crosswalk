@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 
 #include "base/bit_cast.h"
 #include "base/metrics/field_trial.h"
+#include "base/strings/string_util.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -17,9 +18,10 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/prefs/pref_service.h"
-#include "components/variations/entropy_provider.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#include <windows.h>
 
 using base::win::RegKey;
 
@@ -27,24 +29,21 @@ class TriggeredProfileResetterTest : public testing::Test {
  protected:
   void SetUp() override {
     TestingProfile::Builder profile_builder;
-    profile_builder.OverrideIsNewProfile(false);
     profile_ = profile_builder.Build();
 
     ASSERT_NO_FATAL_FAILURE(
         override_manager_.OverrideRegistry(HKEY_CURRENT_USER));
 
     // Activate the triggered reset field trial for these tests.
-    field_trial_list_.reset(new base::FieldTrialList(
-        std::make_unique<variations::SHA1EntropyProvider>("foo")));
     base::FieldTrial* trial = base::FieldTrialList::CreateFieldTrial(
         "TriggeredResetFieldTrial", "On");
     trial->group();
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
 
-  void SetRegTimestampAndToolName(const base::string16& toolname,
+  void SetRegTimestampAndToolName(const std::wstring& toolname,
                                   FILETIME* file_time) {
     RegKey trigger_key(HKEY_CURRENT_USER, kTriggeredResetRegistryPath,
                        KEY_ALL_ACCESS);
@@ -61,11 +60,10 @@ class TriggeredProfileResetterTest : public testing::Test {
 
  private:
   registry_util::RegistryOverrideManager override_manager_;
-  std::unique_ptr<base::FieldTrialList> field_trial_list_;
 };
 
 TEST_F(TriggeredProfileResetterTest, HasResetTriggerAndClear) {
-  SetRegTimestampAndToolName(base::string16(), nullptr);
+  SetRegTimestampAndToolName(std::wstring(), nullptr);
   TriggeredProfileResetter triggered_profile_resetter(profile_.get());
   triggered_profile_resetter.Activate();
   EXPECT_TRUE(triggered_profile_resetter.HasResetTrigger());
@@ -75,9 +73,9 @@ TEST_F(TriggeredProfileResetterTest, HasResetTriggerAndClear) {
 
 TEST_F(TriggeredProfileResetterTest, HasDuplicateResetTrigger) {
   FILETIME ft = {};
-  SetRegTimestampAndToolName(base::string16(), &ft);
+  SetRegTimestampAndToolName(std::wstring(), &ft);
   profile_->GetPrefs()->SetInt64(prefs::kLastProfileResetTimestamp,
-                                 bit_cast<int64_t, FILETIME>(ft));
+                                 base::bit_cast<int64_t, FILETIME>(ft));
 
   TriggeredProfileResetter triggered_profile_resetter(profile_.get());
   triggered_profile_resetter.Activate();
@@ -90,8 +88,8 @@ TEST_F(TriggeredProfileResetterTest, HasToolName) {
   TriggeredProfileResetter triggered_profile_resetter(profile_.get());
   triggered_profile_resetter.Activate();
   EXPECT_TRUE(triggered_profile_resetter.HasResetTrigger());
-  EXPECT_STREQ(kToolName,
-               triggered_profile_resetter.GetResetToolName().c_str());
+  EXPECT_EQ(base::as_u16cstr(kToolName),
+            triggered_profile_resetter.GetResetToolName());
 }
 
 TEST_F(TriggeredProfileResetterTest, HasLongToolName) {
@@ -99,13 +97,12 @@ TEST_F(TriggeredProfileResetterTest, HasLongToolName) {
       L"ToolMcToolToolMcToolToolMcToolToolMcToolToolMcToolToolMcToolToolMcTool"
       L"ToolMcToolToolMcToolToolMcToolThisIsTheToolThatNeverEndsYesItGoesOnAnd"
       L"OnMyFriend";
-  const wchar_t kExpectedToolName[] =
-      L"ToolMcToolToolMcToolToolMcToolToolMcToolToolMcToolToolMcToolToolMcTool"
-      L"ToolMcToolToolMcToolToolMcTool";
+  const char16_t kExpectedToolName[] =
+      u"ToolMcToolToolMcToolToolMcToolToolMcToolToolMcToolToolMcToolToolMcTool"
+      u"ToolMcToolToolMcToolToolMcTool";
   SetRegTimestampAndToolName(kLongToolName, nullptr);
   TriggeredProfileResetter triggered_profile_resetter(profile_.get());
   triggered_profile_resetter.Activate();
   EXPECT_TRUE(triggered_profile_resetter.HasResetTrigger());
-  EXPECT_STREQ(kExpectedToolName,
-               triggered_profile_resetter.GetResetToolName().c_str());
+  EXPECT_EQ(kExpectedToolName, triggered_profile_resetter.GetResetToolName());
 }

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,8 @@
 #define CHROME_BROWSER_PAGE_LOAD_METRICS_OBSERVERS_THIRD_PARTY_METRICS_OBSERVER_H_
 
 #include <map>
-#include <string>
 
-#include "base/macros.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
-#include "net/cookies/canonical_cookie.h"
+#include "components/page_load_metrics/browser/page_load_metrics_observer.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -18,15 +15,42 @@
 class ThirdPartyMetricsObserver
     : public page_load_metrics::PageLoadMetricsObserver {
  public:
+  // TODO(crbug.com/1115657): kUnknown is mostly unused except for passing it as
+  // a "dummy" type to RecordUseCounters.  After we factor out AccessType from
+  // that method (see other TODOs), we should be able to remove it.
+  enum class AccessType {
+    kCookieRead,
+    kCookieWrite,
+    kLocalStorage,
+    kSessionStorage,
+    kFileSystem,
+    kIndexedDb,
+    kCacheStorage,
+    kUnknown,
+    kMaxValue = kUnknown
+  };
+
   ThirdPartyMetricsObserver();
+
+  ThirdPartyMetricsObserver(const ThirdPartyMetricsObserver&) = delete;
+  ThirdPartyMetricsObserver& operator=(const ThirdPartyMetricsObserver&) =
+      delete;
+
   ~ThirdPartyMetricsObserver() override;
 
   // page_load_metrics::PageLoadMetricsObserver:
+  const char* GetObserverName() const override;
+  ObservePolicy OnFencedFramesStart(
+      content::NavigationHandle* navigation_handle,
+      const GURL& currently_committed_url) override;
   ObservePolicy FlushMetricsOnAppEnterBackground(
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
-  void OnComplete(const page_load_metrics::mojom::PageLoadTiming& timing,
-                  const page_load_metrics::PageLoadExtraInfo& info) override;
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
+  void FrameReceivedUserActivation(
+      content::RenderFrameHost* render_frame_host) override;
+  void OnComplete(
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
+  void OnLoadedResource(const page_load_metrics::ExtraRequestCompleteInfo&
+                            extra_request_complete_info) override;
   void OnCookiesRead(const GURL& url,
                      const GURL& first_party_url,
                      const net::CookieList& cookie_list,
@@ -35,36 +59,71 @@ class ThirdPartyMetricsObserver
                       const GURL& first_party_url,
                       const net::CanonicalCookie& cookie,
                       bool blocked_by_policy) override;
+  void OnStorageAccessed(const GURL& url,
+                         const GURL& first_party_url,
+                         bool blocked_by_policy,
+                         page_load_metrics::StorageType storage_type) override;
+  void OnDidFinishSubFrameNavigation(
+      content::NavigationHandle* navigation_handle) override;
+  void OnRenderFrameDeleted(
+      content::RenderFrameHost* render_frame_host) override;
+  void OnTimingUpdate(
+      content::RenderFrameHost* subframe_rfh,
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
 
  private:
-  enum class AccessType { kRead, kWrite };
-
-  struct CookieAccessTypes {
-    explicit CookieAccessTypes(AccessType access_type);
-    bool read = false;
-    bool write = false;
+  // The info about the types of activities for a third party.
+  struct ThirdPartyInfo {
+    ThirdPartyInfo();
+    ThirdPartyInfo(const ThirdPartyInfo&);
+    std::bitset<static_cast<size_t>(AccessType::kMaxValue)> access_types;
+    bool activation = false;
   };
 
-  void OnCookieAccess(const GURL& url,
-                      const GURL& first_party_url,
-                      bool blocked_by_policy,
-                      AccessType access_type);
-  void RecordMetrics();
+  // Returns a pointer to the ThirdPartyInfo in all_third_party_info_ for |url|
+  // and |first_party_url|, adding an entry as necessary. The out parameter
+  // |is_third_party| indicates whether the two inputs are third party one
+  // another and may be true with a nullptr return if the map is full.
+  ThirdPartyInfo* GetThirdPartyInfo(const GURL& url,
+                                    const GURL& first_party_url,
+                                    bool& is_third_party);
 
-  // A map of third parties that have read or written cookies on this page. A
-  // third party document.cookie access happens when the context's registrable
-  // domain differs from the main frame's. A third party resource request
-  // happens when the URL request's registrable domain differs from the main
-  // frame's. URLs which have no registrable domain are not considered third
-  // party.
-  std::map<std::string, CookieAccessTypes> third_party_access_types_;
+  void OnCookieOrStorageAccess(const GURL& url,
+                               const GURL& first_party_url,
+                               bool blocked_by_policy,
+                               AccessType access_type);
+  void RecordMetrics(
+      const page_load_metrics::mojom::PageLoadTiming& main_frame_timing);
 
-  // If the page has any blocked_by_policy cookie reads or writes (e.g., block
-  // third-party cookies is enabled) then we don't want to record any cookie
+  // Records feature usage for teh |access_type|, and also, when present, for
+  // generic access and activation for the |third_party_info|.
+  void RecordUseCounters(AccessType access_type,
+                         const ThirdPartyInfo* third_party_info);
+
+  AccessType StorageTypeToAccessType(
+      page_load_metrics::StorageType storage_type);
+
+  // A map of third parties and the types of activities they have performed.
+  //
+  // A third party document.cookie / window.localStorage /
+  // window.sessionStorage happens when the context's scheme://eTLD+1
+  // differs from the main frame's. A third party resource request happens
+  // when the URL request's scheme://eTLD+1 differs from the main frame's.
+  // For URLs which have no registrable domain, the hostname is used
+  // instead.
+  std::map<GURL, ThirdPartyInfo> all_third_party_info_;
+
+  // A set of RenderFrameHosts that we've recorded timing data for. The
+  // RenderFrameHosts are later removed when they navigate again or are deleted.
+  std::set<content::RenderFrameHost*> recorded_frames_;
+
+  // If the page has any blocked_by_policy cookie or DOM storage access (e.g.,
+  // block third-party cookies is enabled) then we don't want to record any
   // metrics for the page.
-  bool page_has_blocked_cookies_ = false;
+  bool should_record_metrics_ = true;
 
-  DISALLOW_COPY_AND_ASSIGN(ThirdPartyMetricsObserver);
+  // True if this page loaded a third-party font.
+  bool third_party_font_loaded_ = false;
 };
 
 #endif  // CHROME_BROWSER_PAGE_LOAD_METRICS_OBSERVERS_THIRD_PARTY_METRICS_OBSERVER_H_

@@ -1,12 +1,14 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.policy;
 
 import android.content.Context;
-import android.support.annotation.IntDef;
 
+import androidx.annotation.IntDef;
+
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.content_public.browser.WebContents;
 
 import java.lang.annotation.Retention;
@@ -31,7 +33,7 @@ public class PolicyAuditor {
     }
 
     /**
-     * Make it non-obvious to accidentally instantiate this outside of ChromeApplication.
+     * Make it non-obvious to accidentally instantiate this outside of ChromeApplicationImpl.
      */
     protected PolicyAuditor() {}
 
@@ -40,5 +42,8 @@ public class PolicyAuditor {
 
     public void notifyCertificateFailure(int certificateFailure, Context context) {}
 
-    public static native int nativeGetCertificateFailure(WebContents webContents);
+    @NativeMethods
+    public interface Natives {
+        int getCertificateFailure(WebContents webContents);
+    }
 }

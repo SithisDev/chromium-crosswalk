@@ -11,8 +11,9 @@ function unwrap(value, opt_cache) {
   return jsonDeserialize(value, [], opt_cache);
 }
 
+var initialCache = getPageCache().cache_;
 function clearCache() {
-  getPageCache().cache_ = {};
+  getPageCache().cache_ = Object.create(initialCache);
 }
 
 function isValidUUID(uuid) {
@@ -167,34 +168,6 @@ function testCacheUnwrapThrows() {
   }
 }
 
-function testClearStale() {
-  clearCache();
-
-  var doc = document;
-  var div = doc.querySelector('div');
-  var span = doc.querySelector('span');
-
-  var wrappedDoc = wrap(doc);
-  var wrappedDiv = wrap(div);
-  var wrappedSpan = wrap(span);
-
-  var cache = getPageCache();
-  cache.clearStale();
-  assertEquals(doc, unwrap(wrappedDoc, cache));
-  assertEquals(div, unwrap(wrappedDiv, cache));
-  assertEquals(span, unwrap(wrappedSpan, cache));
-
-  div.removeChild(span);
-  cache.clearStale();
-  assertEquals(doc, unwrap(wrappedDoc, cache));
-  assertEquals(div, unwrap(wrappedDiv, cache));
-  try {
-    unwrap(wrappedSpan, cache);
-    assert(false);
-  } catch (e) {
-  }
-}
-
 function testCacheQuerySelector() {
   clearCache();
 
@@ -213,7 +186,6 @@ function testCacheStaleRef() {
   document.body.appendChild(img);
   var wrappedImg = wrap(img);
   document.body.removeChild(img);
-  cache.clearStale();
   try {
     unwrap(wrappedImg, cache);
     assert(false);
@@ -283,7 +255,6 @@ function testCacheWithShadowDomAttached() {
   
   // Test with attached element in shadow DOM.
   var wrappedDiv = wrap(shadowDiv);
-  pageCache.clearStale();
   var unwrappedDiv = unwrap(wrappedDiv, pageCache);
   assertEquals(shadowDiv, unwrappedDiv);
   
@@ -302,7 +273,6 @@ function testCacheWithShadowDomDetachedChild() {
   var wrappedDiv = wrap(shadowDiv);
   root.removeChild(shadowDiv);
   var rootCache = getPageCache();
-  rootCache.clearStale();
   try {
     unwrap(wrappedDiv, rootCache);
     assert(false);
@@ -349,6 +319,26 @@ function testCallWithArrayToJSON(runner) {
   runner.waitForAsync();
 }
 
+function testCallWithModifiedObjectProto(runner) {
+  var callCount = 0;
+  Object.defineProperty(Object.prototype, 'f', {
+    enumerable: true,
+    configurable: true,
+    get: function() {
+      callCount += 1;
+    }
+  });
+
+  callFunction(function() {}, []).then(() => {
+    try {
+      assertEquals(callCount, 0);
+      runner.continueTesting();
+    } finally {
+      delete Object.prototype.f;
+    }
+  });
+  runner.waitForAsync();
+}
 </script>
 <body>
 <div><span></span></div>

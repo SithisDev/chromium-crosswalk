@@ -1,12 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.login;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.MediumTest;
 
+import androidx.test.filters.MediumTest;
+
+import org.hamcrest.Matchers;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -16,15 +18,18 @@ import org.junit.runner.RunWith;
 import org.chromium.base.Callback;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Restriction;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.customtabs.CustomTabActivityTestRule;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.SadTab;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -39,6 +44,10 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ChromeHttpAuthHandlerTest {
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
+
+    @Rule
+    public CustomTabActivityTestRule mCustomTabActivityTestRule = new CustomTabActivityTestRule();
+
     private EmbeddedTestServer mTestServer;
 
     @Before
@@ -48,7 +57,7 @@ public class ChromeHttpAuthHandlerTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (mTestServer != null) mTestServer.stopAndDestroyServer();
     }
 
@@ -74,8 +83,10 @@ public class ChromeHttpAuthHandlerTest {
     public void authDialogDismissOnTabSwitched() throws Exception {
         ChromeHttpAuthHandler handler = triggerAuth();
         verifyAuthDialogVisibility(handler, true);
-        ChromeTabUtils.newTabFromMenu(
-                InstrumentationRegistry.getInstrumentation(), mActivityTestRule.getActivity());
+        TestThreadUtils.runOnUiThreadBlocking(
+                ()
+                        -> mActivityTestRule.getActivity().getTabCreator(false).launchUrl(
+                                "about:blank", TabLaunchType.FROM_CHROME_UI));
         verifyAuthDialogVisibility(handler, false);
     }
 
@@ -92,6 +103,7 @@ public class ChromeHttpAuthHandlerTest {
     @Test
     @MediumTest
     @Restriction(Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE)
+    @DisabledTest(message = "https://crbug.com/1218039")
     public void authDialogSuppressedOnBackgroundTab() throws Exception {
         Tab firstTab = mActivityTestRule.getActivity().getActivityTab();
         ChromeTabUtils.newTabFromMenu(
@@ -121,7 +133,7 @@ public class ChromeHttpAuthHandlerTest {
 
         String url = mTestServer.getURL("/auth-basic");
         ChromeTabUtils.loadUrlOnUiThread(tab, url);
-        handlerCallback.waitForCallback();
+        handlerCallback.waitForFirst();
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { ChromeHttpAuthHandler.setTestCreationCallback(null); });
         return handlerRef.get();
@@ -129,6 +141,6 @@ public class ChromeHttpAuthHandlerTest {
 
     private void verifyAuthDialogVisibility(ChromeHttpAuthHandler handler, boolean isVisible) {
         CriteriaHelper.pollUiThread(
-                Criteria.equals(isVisible, () -> handler.isShowingAuthDialog()));
+                () -> Criteria.checkThat(handler.isShowingAuthDialog(), Matchers.is(isVisible)));
     }
 }

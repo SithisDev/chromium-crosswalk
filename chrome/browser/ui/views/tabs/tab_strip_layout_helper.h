@@ -1,23 +1,31 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_TAB_STRIP_LAYOUT_HELPER_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_STRIP_LAYOUT_HELPER_H_
 
-#include <map>
 #include <vector>
 
-#include "base/optional.h"
-#include "chrome/browser/ui/views/tabs/tab_animation_state.h"
-#include "chrome/browser/ui/views/tabs/tab_strip_animator.h"
+#include "base/callback.h"
+#include "base/callback_forward.h"
+#include "base/memory/raw_ref.h"
+#include "chrome/browser/ui/tabs/tab_types.h"
+#include "chrome/browser/ui/views/tabs/tab_layout_state.h"
+#include "chrome/browser/ui/views/tabs/tab_slot_view.h"
+#include "chrome/browser/ui/views/tabs/tab_strip_layout.h"
+#include "chrome/browser/ui/views/tabs/tab_width_constraints.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/view_model.h"
 
 class Tab;
 class TabGroupHeader;
+class TabContainerController;
+
+namespace tab_groups {
 class TabGroupId;
-class TabStripController;
+}
 
 // Helper class for TabStrip, that is responsible for calculating and assigning
 // layouts for tabs and group headers. It tracks animations and changes to the
@@ -25,17 +33,20 @@ class TabStripController;
 class TabStripLayoutHelper {
  public:
   using GetTabsCallback = base::RepeatingCallback<views::ViewModelT<Tab>*()>;
-  using GetGroupHeadersCallback =
-      base::RepeatingCallback<std::map<TabGroupId, TabGroupHeader*>()>;
 
-  TabStripLayoutHelper(const TabStripController* controller,
-                       GetTabsCallback get_tabs_callback,
-                       GetGroupHeadersCallback get_group_headers_callback,
-                       base::RepeatingClosure on_animation_progressed);
+  TabStripLayoutHelper(const TabContainerController& controller,
+                       GetTabsCallback get_tabs_callback);
+  TabStripLayoutHelper(const TabStripLayoutHelper&) = delete;
+  TabStripLayoutHelper& operator=(const TabStripLayoutHelper&) = delete;
   ~TabStripLayoutHelper();
 
-  // Returns whether any animations for tabs or group headers are in progress.
-  bool IsAnimating() const;
+  // Returns a vector of all tabs in the strip, including both closing tabs
+  // and tabs still in the model.
+  std::vector<Tab*> GetTabs() const;
+
+  // Get all tab slot views in visual order, including all tabs from
+  // GetTabs() and all tab group headers.
+  std::vector<TabSlotView*> GetTabSlotViews() const;
 
   int active_tab_width() { return active_tab_width_; }
   int inactive_tab_width() { return inactive_tab_width_; }
@@ -43,85 +54,91 @@ class TabStripLayoutHelper {
   int first_non_pinned_tab_x() { return first_non_pinned_tab_x_; }
 
   // Returns the number of pinned tabs in the tabstrip.
-  int GetPinnedTabCount() const;
+  size_t GetPinnedTabCount() const;
 
-  // Inserts a new tab at |index|, without animation. |tab_removed_callback|
-  // will be invoked if the tab is removed at the end of a remove animation.
-  void InsertTabAtNoAnimation(int index,
-                              base::OnceClosure tab_removed_callback,
-                              TabAnimationState::TabActiveness active,
-                              TabAnimationState::TabPinnedness pinned);
+  // Returns a map of all tab groups and their bounds.
+  const std::map<tab_groups::TabGroupId, gfx::Rect>& group_header_ideal_bounds()
+      const {
+    return group_header_ideal_bounds_;
+  }
 
-  // Inserts a new tab at |index|, with animation. |tab_removed_callback| will
-  // be invoked if the tab is removed at the end of a remove animation.
-  void InsertTabAt(int index,
-                   base::OnceClosure tab_removed_callback,
-                   TabAnimationState::TabActiveness active,
-                   TabAnimationState::TabPinnedness pinned);
+  // Inserts a new tab at |index|.
+  void InsertTabAt(int model_index, Tab* tab, TabPinned pinned);
 
-  // Removes the tab at |index|. TODO(958173): This should invoke the associated
-  // |tab_removed_callback| but currently does not, as it would duplicate
-  // TabStrip::RemoveTabDelegate::AnimationEnded.
-  void RemoveTabAt(int index);
+  // Marks the tab at |model_index| as closing, but does not remove it from
+  // |slots_|.
+  void MarkTabAsClosing(int model_index, Tab* tab);
 
-  // Moves the tab at |prev_index| with group |group_at_prev_index| to
-  // |new_index|. Also updates the group header's location if necessary.
-  void MoveTab(base::Optional<TabGroupId> group_at_prev_index,
+  // Removes `tab` from `slots_`.
+  void RemoveTab(Tab* tab);
+
+  // Moves the tab at |prev_index| with group |moving_tab_group| to |new_index|.
+  // Also updates the group header's location if necessary.
+  void MoveTab(absl::optional<tab_groups::TabGroupId> moving_tab_group,
                int prev_index,
                int new_index);
 
-  // Sets the tab at |index|'s pinnedness to |pinnedness|.
-  void SetTabPinnedness(int index, TabAnimationState::TabPinnedness pinnedness);
+  // Sets the tab at |index|'s pinned state to |pinned|.
+  void SetTabPinned(int model_index, TabPinned pinned);
 
-  // Inserts a new group header for |group|. |header_removed_callback| will be
-  // invoked if the group is removed at the end of a remove animation.
-  void InsertGroupHeader(TabGroupId group,
-                         base::OnceClosure header_removed_callback);
+  // Inserts a new group header for |group|.
+  void InsertGroupHeader(tab_groups::TabGroupId group, TabGroupHeader* header);
 
-  // Removes the group header for |group|. TODO(958173): This should invoke the
-  // associated |header_removed_callback| but currently does not because
-  // RemoveTabAt also does not, and they share codepaths.
-  void RemoveGroupHeader(TabGroupId group);
+  // Removes the group header for |group|.
+  void RemoveGroupHeader(tab_groups::TabGroupId group);
+
+  // Ensures the group header for |group| is at the correct index. Should be
+  // called externally when group membership changes but nothing else about the
+  // layout does.
+  void UpdateGroupHeaderIndex(tab_groups::TabGroupId group);
 
   // Changes the active tab from |prev_active_index| to |new_active_index|.
-  void SetActiveTab(int prev_active_index, int new_active_index);
+  void SetActiveTab(absl::optional<size_t> prev_active_index,
+                    absl::optional<size_t> new_active_index);
 
-  // Finishes all in-progress animations.
-  void CompleteAnimations();
+  // Calculates the smallest width the tabs can occupy.
+  int CalculateMinimumWidth();
 
-  // TODO(958173): Temporary method. Like CompleteAnimations, but does not call
-  // any associated |tab_removed_callback| or |header_removed_callback|. See
-  // comment on TabStripAnimator::CompleteAnimationsWithoutDestroyingTabs.
-  void CompleteAnimationsWithoutDestroyingTabs();
+  // Calculates the width the tabs would occupy if they have enough space.
+  int CalculatePreferredWidth();
 
   // Generates and sets the ideal bounds for the views in |tabs| and
   // |group_headers|. Updates the cached widths in |active_tab_width_| and
-  // |inactive_tab_width_|.
-  // TODO(958173): The notion of ideal bounds is going away. Delete this.
-  void UpdateIdealBounds(int available_width);
-
-  // Generates and sets the ideal bounds for |tabs|. Updates
-  // the cached values in |first_non_pinned_tab_index_| and
-  // |first_non_pinned_tab_x_|.
-  // TODO(958173): The notion of ideal bounds is going away. Delete this.
-  void UpdateIdealBoundsForPinnedTabs();
-
-  // Lays out tabs and group headers to their current bounds. Returns the
-  // x-coordinate of the trailing edge of the trailing-most tab.
-  int LayoutTabs(int available_width);
+  // |inactive_tab_width_|. Returns the total width occupied by the new ideal
+  // bounds.
+  int UpdateIdealBounds(int available_width);
 
  private:
   struct TabSlot;
 
-  // Recalculate |cached_slots_|, called whenever state changes.
-  void UpdateCachedTabSlots();
+  // Calculates the bounds each tab should occupy, subject to the provided
+  // width constraint.
+  std::vector<gfx::Rect> CalculateIdealBounds(
+      absl::optional<int> available_width);
 
-  // Finds the index of the TabAnimation in |animator_| for the tab at
-  // |tab_model_index|.
-  int AnimatorIndexForTab(int tab_model_index) const;
+  // Given |model_index| for a tab already present in |slots_|, return
+  // the corresponding index in |slots_|.
+  int GetSlotIndexForExistingTab(int model_index) const;
 
-  // Finds the index of the TabAnimation in |animator_| for |group|.
-  int AnimatorIndexForGroupHeader(TabGroupId group) const;
+  // For a new tab at |new_model_index|, get the insertion index in
+  // |slots_|. |group| is the new tab's group.
+  int GetSlotInsertionIndexForNewTab(
+      int new_model_index,
+      absl::optional<tab_groups::TabGroupId> group) const;
+
+  // Used internally in the above two functions. For a tabstrip with N
+  // tabs, this takes 0 <= |model_index| <= N and returns the first
+  // possible slot corresponding to this model index.
+  //
+  // This means that if |model_index| is the first tab in a group, the
+  // returned slot index will point to the group header. For other tabs,
+  // the slot index corresponding to that tab will be returned. Finally,
+  // if |model_index| = N, slots_.size() will be returned.
+  int GetFirstSlotIndexForTabModelIndex(int model_index) const;
+
+  // Given a group ID, returns the index of its header's corresponding TabSlot
+  // in |slots_|.
+  int GetSlotIndexForGroupHeader(tab_groups::TabGroupId group) const;
 
   // Compares |cached_slots_| to the TabAnimations in |animator_| and DCHECKs if
   // the TabAnimation::ViewType do not match. Prevents bugs that could cause the
@@ -132,19 +149,21 @@ class TabStripLayoutHelper {
   // as appropriate.
   void UpdateCachedTabWidth(int tab_index, int tab_width, bool active);
 
-  // The owning tabstrip's controller.
-  const TabStripController* const controller_;
+  // True iff the slot at index |i| is a tab that is in a collapsed group.
+  bool SlotIsCollapsedTab(int i) const;
 
-  // Callbacks to get the necessary View objects from the owning tabstrip.
+  // The owning TabContainer's controller.
+  const raw_ref<const TabContainerController> controller_;
+
+  // Callback to get the necessary View objects from the owning tabstrip.
   GetTabsCallback get_tabs_callback_;
-  GetGroupHeadersCallback get_group_headers_callback_;
 
-  // Responsible for tracking the animations of tabs and group headers.
-  TabStripAnimator animator_;
+  // Current collation of tabs and group headers, along with necessary data to
+  // run layout and animations for those Views.
+  std::vector<TabSlot> slots_;
 
-  // Tracks changes to the tab strip in order to properly collate group headers
-  // with tabs.
-  std::vector<TabSlot> cached_slots_;
+  // Contains the ideal bounds of tab group headers.
+  std::map<tab_groups::TabGroupId, gfx::Rect> group_header_ideal_bounds_;
 
   // The current widths of tabs. If the space for tabs is not evenly divisible
   // into these widths, the initial tabs in the strip will be 1 px larger.
@@ -153,8 +172,6 @@ class TabStripLayoutHelper {
 
   int first_non_pinned_tab_index_;
   int first_non_pinned_tab_x_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabStripLayoutHelper);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TABS_TAB_STRIP_LAYOUT_HELPER_H_

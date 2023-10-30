@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/common/content_features.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/manifest_handlers/content_capabilities_handler.h"
@@ -40,7 +41,7 @@ class ContentCapabilitiesTest : public extensions::ExtensionApiTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     extensions::ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
-        extensions::switches::kWhitelistedExtensionID,
+        extensions::switches::kAllowlistedExtensionID,
         crx_file::id_util::GenerateIdForPath(
             base::MakeAbsoluteFilePath(test_extension_dir_.UnpackedPath())));
   }
@@ -56,7 +57,7 @@ class ContentCapabilitiesTest : public extensions::ExtensionApiTest {
   }
 
   // Builds an extension manifest with the given content_capabilities matches
-  // and permissions. The extension always has the same (whitelisted) ID.
+  // and permissions. The extension always has the same (allowlisted) ID.
   scoped_refptr<const Extension> LoadExtensionWithCapabilities(
       const std::string& matches,
       const std::string& permissions,
@@ -114,7 +115,7 @@ class ContentCapabilitiesTest : public extensions::ExtensionApiTest {
   testing::AssertionResult TestScriptResult(const Extension* extension,
                                             const GURL& url,
                                             const char* code) {
-    ui_test_utils::NavigateToURL(browser(), url);
+    EXPECT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
     bool result = false;
     if (!content::ExecuteScriptAndExtractBool(web_contents(), code, &result))
       return testing::AssertionFailure() << "Could not execute test script.";
@@ -202,8 +203,7 @@ IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, ClipboardWrite) {
   // script without a user gesture.
   EXPECT_TRUE(
       CanWriteClipboard(extension.get(), GetTestURLFor("bar.example.com")));
-  if (!base::FeatureList::IsEnabled(features::kUserActivationV2) ||
-      base::FeatureList::IsEnabled(
+  if (base::FeatureList::IsEnabled(
           features::kUserActivationSameOriginVisibility)) {
     EXPECT_TRUE(CanWriteClipboardInAboutBlankFrame(
         extension.get(), GetTestURLFor("bar.example.com")));

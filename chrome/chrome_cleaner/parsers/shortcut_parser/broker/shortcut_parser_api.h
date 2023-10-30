@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,9 +23,11 @@ struct ShortcutInformation {
   ~ShortcutInformation();
 
   base::FilePath lnk_path;
-  base::string16 target_path;
-  base::string16 command_line_arguments;
-  base::string16 icon_location;
+  std::wstring target_path;
+  std::wstring working_dir;
+  std::wstring command_line_arguments;
+  std::wstring icon_location;
+  int32_t icon_index;
 };
 
 typedef base::OnceCallback<void(std::vector<ShortcutInformation>)>

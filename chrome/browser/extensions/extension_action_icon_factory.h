@@ -1,21 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_ACTION_ICON_FACTORY_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_ACTION_ICON_FACTORY_H_
 
-#include <memory>
-
-#include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "extensions/browser/extension_icon_image.h"
 
-class ExtensionAction;
 class Profile;
 
 namespace extensions {
 class Extension;
+class ExtensionAction;
 }
 
 // Used to get an icon to be used in the UI for an extension action.
@@ -35,8 +33,13 @@ class ExtensionActionIconFactory : public extensions::IconImage::Observer {
   // Observer should outlive this.
   ExtensionActionIconFactory(Profile* profile,
                              const extensions::Extension* extension,
-                             ExtensionAction* action,
+                             extensions::ExtensionAction* action,
                              Observer* observer);
+
+  ExtensionActionIconFactory(const ExtensionActionIconFactory&) = delete;
+  ExtensionActionIconFactory& operator=(const ExtensionActionIconFactory&) =
+      delete;
+
   ~ExtensionActionIconFactory() override;
 
   // Controls whether invisible icons will be returned by GetIcon().
@@ -57,16 +60,15 @@ class ExtensionActionIconFactory : public extensions::IconImage::Observer {
   gfx::Image GetIcon(int tab_id);
 
  private:
-  Profile* profile_;
-  const ExtensionAction* action_;
-  Observer* observer_;
+  raw_ptr<Profile> profile_;
+  raw_ptr<const extensions::ExtensionAction> action_;
+  raw_ptr<Observer> observer_;
   const bool should_check_icons_;
   gfx::Image cached_default_icon_image_;
 
-  ScopedObserver<extensions::IconImage, extensions::IconImage::Observer>
-      icon_image_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionActionIconFactory);
+  base::ScopedObservation<extensions::IconImage,
+                          extensions::IconImage::Observer>
+      icon_image_observation_{this};
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_ACTION_ICON_FACTORY_H_

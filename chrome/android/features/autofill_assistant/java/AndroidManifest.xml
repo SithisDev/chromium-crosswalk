@@ -3,9 +3,16 @@
     featureSplit="autofill_assistant">
 
     <dist:module
-        dist:onDemand="true"
         dist:title="@string/autofill_assistant_module_title">
-        <dist:fusing dist:include="false" />
+        <dist:fusing dist:include="true" />
+        <dist:delivery>
+          <dist:on-demand/>
+          <dist:install-time>
+            <dist:conditions>
+              <dist:min-sdk dist:value="26"/>
+            </dist:conditions>
+          </dist:install-time>
+        </dist:delivery>
     </dist:module>
 
     <application>

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,10 @@
 
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop/message_loop.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "chrome/utility/image_writer/error_messages.h"
+#include "base/test/task_environment.h"
+#include "chrome/utility/image_writer/error_message_strings.h"
 #include "chrome/utility/image_writer/image_writer.h"
 #include "chrome/utility/image_writer/image_writer_handler.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -55,7 +56,7 @@ class ImageWriterUtilityTest : public testing::Test {
   base::FilePath device_path_;
 
  private:
-  base::MessageLoop message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   base::ScopedTempDir temp_dir_;
 };
 
@@ -70,7 +71,7 @@ class MockHandler : public ImageWriterHandler {
 // the write completes.
 class VerifyingHandler : public MockHandler {
  public:
-  VerifyingHandler() : image_writer_(NULL), verified_(false) {}
+  VerifyingHandler() : image_writer_(nullptr), verified_(false) {}
 
   void SendSucceeded() override {
     MockHandler::SendSucceeded();
@@ -79,7 +80,7 @@ class VerifyingHandler : public MockHandler {
       verified_ = true;
     }
   }
-  ImageWriter* image_writer_;
+  raw_ptr<ImageWriter> image_writer_;
 
  private:
   bool verified_;
@@ -118,7 +119,7 @@ TEST_F(ImageWriterUtilityTest, WriteInvalidImageFile) {
   EXPECT_CALL(mock_handler, SendSucceeded()).Times(0);
   EXPECT_CALL(mock_handler, SendFailed(error::kOpenImage)).Times(1);
 
-  ASSERT_TRUE(base::DeleteFile(image_path_, false));
+  ASSERT_TRUE(base::DeleteFile(image_path_));
   image_writer.Write();
   base::RunLoop().RunUntilIdle();
 }
@@ -131,7 +132,7 @@ TEST_F(ImageWriterUtilityTest, WriteInvalidDeviceFile) {
   EXPECT_CALL(mock_handler, SendSucceeded()).Times(0);
   EXPECT_CALL(mock_handler, SendFailed(error::kOpenDevice)).Times(1);
 
-  ASSERT_TRUE(base::DeleteFile(device_path_, false));
+  ASSERT_TRUE(base::DeleteFile(device_path_));
   image_writer.Write();
   base::RunLoop().RunUntilIdle();
 }
@@ -162,7 +163,7 @@ TEST_F(ImageWriterUtilityTest, VerifyInvalidImageFile) {
   EXPECT_CALL(mock_handler, SendSucceeded()).Times(0);
   EXPECT_CALL(mock_handler, SendFailed(error::kOpenImage)).Times(1);
 
-  ASSERT_TRUE(base::DeleteFile(image_path_, false));
+  ASSERT_TRUE(base::DeleteFile(image_path_));
 
   image_writer.Verify();
 
@@ -177,7 +178,7 @@ TEST_F(ImageWriterUtilityTest, VerifyInvalidDeviceFile) {
   EXPECT_CALL(mock_handler, SendSucceeded()).Times(0);
   EXPECT_CALL(mock_handler, SendFailed(error::kOpenDevice)).Times(1);
 
-  ASSERT_TRUE(base::DeleteFile(device_path_, false));
+  ASSERT_TRUE(base::DeleteFile(device_path_));
 
   image_writer.Verify();
 

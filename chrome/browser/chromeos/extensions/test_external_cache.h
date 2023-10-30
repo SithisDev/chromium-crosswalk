@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/extensions/external_cache.h"
 
@@ -26,6 +25,10 @@ class TestExternalCache : public ExternalCache {
  public:
   TestExternalCache(ExternalCacheDelegate* delegate,
                     bool always_check_for_updates);
+
+  TestExternalCache(const TestExternalCache&) = delete;
+  TestExternalCache& operator=(const TestExternalCache&) = delete;
+
   ~TestExternalCache() override;
 
   // ExternalCache:
@@ -100,8 +103,6 @@ class TestExternalCache : public ExternalCache {
 
   std::set<std::string> pending_downloads_;
   std::map<std::string, CrxCacheEntry> crx_cache_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestExternalCache);
 };
 
 }  // namespace chromeos

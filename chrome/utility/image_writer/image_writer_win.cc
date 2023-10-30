@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include <stddef.h>
 #include <winioctl.h>
 
-#include "chrome/utility/image_writer/error_messages.h"
+#include "base/logging.h"
+#include "chrome/utility/image_writer/error_message_strings.h"
 #include "chrome/utility/image_writer/image_writer.h"
 
 namespace image_writer {
@@ -71,7 +72,7 @@ bool ImageWriter::OpenDevice() {
   return device_file_.IsValid();
 }
 
-void ImageWriter::UnmountVolumes(const base::Closure& continuation) {
+void ImageWriter::UnmountVolumes(base::OnceClosure continuation) {
   if (!InitializeFiles()) {
     return;
   }
@@ -194,7 +195,7 @@ void ImageWriter::UnmountVolumes(const base::Closure& continuation) {
   }
 
   if (success)
-    continuation.Run();
+    std::move(continuation).Run();
 }
 
 }  // namespace image_writer

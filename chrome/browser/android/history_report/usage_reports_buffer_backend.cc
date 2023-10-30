@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,9 +42,6 @@ bool UsageReportsBufferBackend::Init() {
   options.write_buffer_size = 500 * 1024;
   std::string path = db_file_name_.value();
   leveldb::Status status = leveldb_env::OpenDB(options, path, &db_);
-  UMA_HISTOGRAM_ENUMERATION("LevelDB.Open.UsageReportsBufferBackend",
-                            leveldb_env::GetLevelDBStatusUMAValue(status),
-                            leveldb_env::LEVELDB_STATUS_MAX);
   if (status.IsCorruption()) {
     LOG(ERROR) << "Deleting corrupt database";
     status = leveldb_chrome::DeleteDB(db_file_name_, options);

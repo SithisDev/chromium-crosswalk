@@ -1,18 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/fileicon_source.h"
 
 #include "base/memory/ref_counted_memory.h"
-#include "base/stl_util.h"
+#include "base/strings/strcat.h"
 #include "build/build_config.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/layout.h"
 
 namespace {
 
@@ -20,11 +21,18 @@ class TestFileIconSource : public FileIconSource {
  public:
   TestFileIconSource() {}
 
-  MOCK_METHOD4(FetchFileIcon,
+  void FetchFileIcon(
+      const base::FilePath& path,
+      float scale_factor,
+      IconLoader::IconSize icon_size,
+      content::URLDataSource::GotDataCallback callback) override {
+    FetchFileIcon_(path, scale_factor, icon_size, callback);
+  }
+  MOCK_METHOD4(FetchFileIcon_,
                void(const base::FilePath& path,
                     float scale_factor,
                     IconLoader::IconSize icon_size,
-                    const content::URLDataSource::GotDataCallback& callback));
+                    content::URLDataSource::GotDataCallback& callback));
 
   ~TestFileIconSource() override {}
 };
@@ -34,7 +42,7 @@ class FileIconSourceTest : public testing::Test {
   FileIconSourceTest() = default;
 
  private:
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 };
 
 const struct FetchFileIconExpectation {
@@ -64,7 +72,7 @@ const struct FetchFileIconExpectation {
      FILE_PATH_LITERAL("a?iconsize=small"), 1.0f, IconLoader::LARGE},
     {"?path=o%40%23%24%25%26*()%20%2B%3D%3F%2C%3A%3B%22.jpg",
      FILE_PATH_LITERAL("o@#$%&*() +=?,:;\".jpg"), 1.0f, IconLoader::NORMAL},
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     {"?path=c%3A%2Ffoo%2Fbar%2Fbaz", FILE_PATH_LITERAL("c:\\foo\\bar\\baz"),
      1.0f, IconLoader::NORMAL},
     {"?path=%2Ffoo&bar=asdf&asdf", FILE_PATH_LITERAL("\\foo"), 1.0f,
@@ -104,23 +112,23 @@ MATCHER(CallbackIsNull, "") {
 }  // namespace
 
 TEST_F(FileIconSourceTest, FileIconSource_Parse) {
-  std::vector<ui::ScaleFactor> supported_scale_factors;
-  supported_scale_factors.push_back(ui::SCALE_FACTOR_100P);
-  supported_scale_factors.push_back(ui::SCALE_FACTOR_200P);
-  ui::test::ScopedSetSupportedScaleFactors scoped_supported(
+  std::vector<ui::ResourceScaleFactor> supported_scale_factors;
+  supported_scale_factors.push_back(ui::k100Percent);
+  supported_scale_factors.push_back(ui::k200Percent);
+  ui::test::ScopedSetSupportedResourceScaleFactors scoped_supported(
       supported_scale_factors);
 
-  for (unsigned i = 0; i < base::size(kBasicExpectations); i++) {
+  for (unsigned i = 0; i < std::size(kBasicExpectations); i++) {
     auto source = std::make_unique<TestFileIconSource>();
     content::URLDataSource::GotDataCallback callback;
-    EXPECT_CALL(*source.get(),
-                FetchFileIcon(
-                    base::FilePath(kBasicExpectations[i].unescaped_path),
-                    kBasicExpectations[i].scale_factor,
-                    kBasicExpectations[i].size, CallbackIsNull()));
+    EXPECT_CALL(
+        *source.get(),
+        FetchFileIcon_(base::FilePath(kBasicExpectations[i].unescaped_path),
+                       kBasicExpectations[i].scale_factor,
+                       kBasicExpectations[i].size, CallbackIsNull()));
     source->StartDataRequest(
-        kBasicExpectations[i].request_path,
-        content::ResourceRequestInfo::WebContentsGetter(),
-        callback);
+        GURL(base::StrCat(
+            {"chrome://any-host/", kBasicExpectations[i].request_path})),
+        content::WebContents::Getter(), std::move(callback));
   }
 }

@@ -1,161 +1,144 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/toolbar/home_button.h"
 
-#include "base/macros.h"
+#include "base/bind.h"
+#include "base/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_prefs/user_prefs.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/metadata/metadata_header_macros.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
 #include "ui/views/controls/styled_label.h"
-#include "ui/views/controls/styled_label_listener.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 
-// HomePageUndoBubble --------------------------------------------------------
+// HomePageUndoBubble ---------------------------------------------------------
 
 namespace {
 
-class HomePageUndoBubble : public views::BubbleDialogDelegateView,
-                           public views::StyledLabelListener {
+class HomePageUndoBubble : public views::BubbleDialogDelegateView {
  public:
-  static void ShowBubble(Browser* browser,
-                         bool undo_value_is_ntp,
-                         const GURL& undo_url,
-                         views::View* anchor_view);
-  static void HideBubble();
+  METADATA_HEADER(HomePageUndoBubble);
+  HomePageUndoBubble(views::View* anchor_view,
+                     PrefService* prefs,
+                     const GURL& undo_url,
+                     bool undo_value_is_ntp);
+  HomePageUndoBubble(const HomePageUndoBubble&) = delete;
+  HomePageUndoBubble& operator=(const HomePageUndoBubble&) = delete;
+  ~HomePageUndoBubble() override = default;
 
  private:
-  HomePageUndoBubble(Browser* browser, bool undo_value_is_ntp,
-                     const GURL& undo_url, views::View* anchor_view);
-  ~HomePageUndoBubble() override;
-
   // views::BubbleDialogDelegateView:
-  int GetDialogButtons() const override;
   void Init() override;
-  void WindowClosing() override;
 
-  // views::StyledLabelListener:
-  void StyledLabelLinkClicked(views::StyledLabel* label,
-                              const gfx::Range& range,
-                              int event_flags) override;
+  // Called when the "undo" link is clicked.
+  void UndoClicked();
 
-  static HomePageUndoBubble* home_page_undo_bubble_;
-
-  Browser* browser_;
-  bool undo_value_is_ntp_;
+  raw_ptr<PrefService> prefs_;
   GURL undo_url_;
-
-  DISALLOW_COPY_AND_ASSIGN(HomePageUndoBubble);
+  bool undo_value_is_ntp_;
 };
 
-// static
-HomePageUndoBubble* HomePageUndoBubble::home_page_undo_bubble_ = nullptr;
-
-void HomePageUndoBubble::ShowBubble(Browser* browser,
-                                    bool undo_value_is_ntp,
-                                    const GURL& undo_url,
-                                    views::View* anchor_view) {
-  HideBubble();
-  home_page_undo_bubble_ = new HomePageUndoBubble(browser,
-                                                  undo_value_is_ntp,
-                                                  undo_url,
-                                                  anchor_view);
-  views::BubbleDialogDelegateView::CreateBubble(home_page_undo_bubble_)->Show();
-}
-
-void HomePageUndoBubble::HideBubble() {
-  if (home_page_undo_bubble_)
-    home_page_undo_bubble_->GetWidget()->Close();
-}
-
-HomePageUndoBubble::HomePageUndoBubble(
-    Browser* browser,
-    bool undo_value_is_ntp,
-    const GURL& undo_url,
-    views::View* anchor_view)
+HomePageUndoBubble::HomePageUndoBubble(views::View* anchor_view,
+                                       PrefService* prefs,
+                                       const GURL& undo_url,
+                                       bool undo_value_is_ntp)
     : BubbleDialogDelegateView(anchor_view, views::BubbleBorder::TOP_LEFT),
-      browser_(browser),
-      undo_value_is_ntp_(undo_value_is_ntp),
-      undo_url_(undo_url) {
+      prefs_(prefs),
+      undo_url_(undo_url),
+      undo_value_is_ntp_(undo_value_is_ntp) {
+  DCHECK(prefs_);
+  SetButtons(ui::DIALOG_BUTTON_NONE);
   set_margins(
       ChromeLayoutProvider::Get()->GetInsetsMetric(views::INSETS_DIALOG));
-  chrome::RecordDialogCreation(chrome::DialogIdentifier::HOME_PAGE_UNDO);
-}
-
-HomePageUndoBubble::~HomePageUndoBubble() {
-}
-
-int HomePageUndoBubble::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_NONE;
 }
 
 void HomePageUndoBubble::Init() {
   SetLayoutManager(std::make_unique<views::FillLayout>());
 
-  base::string16 undo_string =
+  std::u16string undo_string =
       l10n_util::GetStringUTF16(IDS_ONE_CLICK_BUBBLE_UNDO);
-  std::vector<base::string16> message = {
+  std::vector<std::u16string> message = {
       l10n_util::GetStringUTF16(IDS_TOOLBAR_INFORM_SET_HOME_PAGE), undo_string};
-  views::StyledLabel* label = new views::StyledLabel(
-      base::JoinString(message, base::StringPiece16(base::ASCIIToUTF16(" "))),
-      this);
+  views::StyledLabel* label =
+      AddChildView(std::make_unique<views::StyledLabel>());
+  label->SetText(base::JoinString(message, base::StringPiece16(u" ")));
 
   gfx::Range undo_range(label->GetText().length() - undo_string.length(),
                         label->GetText().length());
-  label->AddStyleRange(undo_range,
-                       views::StyledLabel::RangeStyleInfo::CreateForLink());
+  label->AddStyleRange(
+      undo_range,
+      views::StyledLabel::RangeStyleInfo::CreateForLink(base::BindRepeating(
+          &HomePageUndoBubble::UndoClicked, base::Unretained(this))));
 
   // Ensure StyledLabel has a cached size to return in GetPreferredSize().
   label->SizeToFit(0);
-  AddChildView(label);
 }
 
-void HomePageUndoBubble::StyledLabelLinkClicked(views::StyledLabel* label,
-                                                const gfx::Range& range,
-                                                int event_flags) {
-  PrefService* prefs = user_prefs::UserPrefs::Get(browser_->profile());
-  prefs->SetBoolean(prefs::kHomePageIsNewTabPage, undo_value_is_ntp_);
-  prefs->SetString(prefs::kHomePage, undo_url_.spec());
+void HomePageUndoBubble::UndoClicked() {
+  prefs_->SetString(prefs::kHomePage, undo_url_.spec());
+  prefs_->SetBoolean(prefs::kHomePageIsNewTabPage, undo_value_is_ntp_);
 
-  HideBubble();
+  GetWidget()->Close();
 }
 
-void HomePageUndoBubble::WindowClosing() {
-  // We have to reset |home_page_undo_bubble_| here, not in our destructor,
-  // because we'll be hidden first, then destroyed asynchronously.  If we wait
-  // to reset this, and the user triggers a call to ShowBubble() while the
-  // window is hidden but not destroyed, GetWidget()->Close() would be
-  // called twice.
-  DCHECK_EQ(this, home_page_undo_bubble_);
-  home_page_undo_bubble_ = nullptr;
-}
+BEGIN_METADATA(HomePageUndoBubble, views::BubbleDialogDelegateView)
+END_METADATA
 
 }  // namespace
 
+// HomePageUndoBubbleCoordinator ----------------------------------------------
 
-// HomeButton -----------------------------------------------------------
+HomePageUndoBubbleCoordinator::HomePageUndoBubbleCoordinator(
+    views::View* anchor_view,
+    PrefService* prefs)
+    : anchor_view_(anchor_view), prefs_(prefs) {}
 
-HomeButton::HomeButton(views::ButtonListener* listener, Browser* browser)
-    : ToolbarButton(listener), browser_(browser) {}
+HomePageUndoBubbleCoordinator::~HomePageUndoBubbleCoordinator() = default;
 
-HomeButton::~HomeButton() {
+void HomePageUndoBubbleCoordinator::Show(const GURL& undo_url,
+                                         bool undo_value_is_ntp) {
+  if (tracker_.view())
+    tracker_.view()->GetWidget()->Close();
+
+  auto undo_bubble = std::make_unique<HomePageUndoBubble>(
+      anchor_view_, prefs_, undo_url, undo_value_is_ntp);
+  tracker_.SetView(undo_bubble.get());
+  views::BubbleDialogDelegateView::CreateBubble(std::move(undo_bubble))->Show();
 }
 
-const char* HomeButton::GetClassName() const {
-  return "HomeButton";
+// HomeButton -----------------------------------------------------------------
+
+HomeButton::HomeButton(PressedCallback callback, PrefService* prefs)
+    : ToolbarButton(std::move(callback)),
+      prefs_(prefs),
+      coordinator_(this, prefs) {
+  SetTriggerableEventFlags(ui::EF_LEFT_MOUSE_BUTTON |
+                           ui::EF_MIDDLE_MOUSE_BUTTON);
+  SetVectorIcons(kNavigateHomeIcon, kNavigateHomeTouchIcon);
+  SetTooltipText(l10n_util::GetStringUTF16(IDS_TOOLTIP_HOME));
+  SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_HOME));
+  SetID(VIEW_ID_HOME_BUTTON);
+  SizeToPreferredSize();
 }
+
+HomeButton::~HomeButton() = default;
 
 bool HomeButton::GetDropFormats(
     int* formats,
@@ -165,27 +148,36 @@ bool HomeButton::GetDropFormats(
 }
 
 bool HomeButton::CanDrop(const OSExchangeData& data) {
-  return data.HasURL(ui::OSExchangeData::CONVERT_FILENAMES);
+  return data.HasURL(ui::FilenameToURLPolicy::CONVERT_FILENAMES);
 }
 
 int HomeButton::OnDragUpdated(const ui::DropTargetEvent& event) {
   return event.source_operations();
 }
 
-int HomeButton::OnPerformDrop(const ui::DropTargetEvent& event) {
-  GURL new_homepage_url;
-  base::string16 title;
-  if (event.data().GetURLAndTitle(
-          ui::OSExchangeData::CONVERT_FILENAMES, &new_homepage_url, &title) &&
-      new_homepage_url.is_valid()) {
-    PrefService* prefs = browser_->profile()->GetPrefs();
-    bool old_is_ntp = prefs->GetBoolean(prefs::kHomePageIsNewTabPage);
-    GURL old_homepage(prefs->GetString(prefs::kHomePage));
-
-    prefs->SetBoolean(prefs::kHomePageIsNewTabPage, false);
-    prefs->SetString(prefs::kHomePage, new_homepage_url.spec());
-
-    HomePageUndoBubble::ShowBubble(browser_, old_is_ntp, old_homepage, this);
-  }
-  return ui::DragDropTypes::DRAG_NONE;
+views::View::DropCallback HomeButton::GetDropCallback(
+    const ui::DropTargetEvent& event) {
+  return base::BindOnce(&HomeButton::UpdateHomePage,
+                        weak_ptr_factory_.GetWeakPtr());
 }
+
+void HomeButton::UpdateHomePage(const ui::DropTargetEvent& event,
+                                ui::mojom::DragOperation& output_drag_op) {
+  GURL new_homepage_url;
+  std::u16string title;
+  if (event.data().GetURLAndTitle(ui::FilenameToURLPolicy::CONVERT_FILENAMES,
+                                  &new_homepage_url, &title) &&
+      new_homepage_url.is_valid() && prefs_) {
+    GURL old_homepage(prefs_->GetString(prefs::kHomePage));
+    bool old_is_ntp = prefs_->GetBoolean(prefs::kHomePageIsNewTabPage);
+
+    prefs_->SetString(prefs::kHomePage, new_homepage_url.spec());
+    prefs_->SetBoolean(prefs::kHomePageIsNewTabPage, false);
+
+    coordinator_.Show(old_homepage, old_is_ntp);
+  }
+  output_drag_op = ui::mojom::DragOperation::kNone;
+}
+
+BEGIN_METADATA(HomeButton, ToolbarButton)
+END_METADATA

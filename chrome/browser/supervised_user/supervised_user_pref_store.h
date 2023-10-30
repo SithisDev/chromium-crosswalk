@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 
 #include "base/callback_list.h"
 #include "base/observer_list.h"
+#include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/supervised_user/supervised_users.h"
 #include "components/prefs/pref_store.h"
@@ -32,7 +33,7 @@ class SupervisedUserPrefStore : public PrefStore {
   // PrefStore overrides:
   bool GetValue(const std::string& key,
                 const base::Value** value) const override;
-  std::unique_ptr<base::DictionaryValue> GetValues() const override;
+  base::Value::Dict GetValues() const override;
   void AddObserver(PrefStore::Observer* observer) override;
   void RemoveObserver(PrefStore::Observer* observer) override;
   bool HasObservers() const override;
@@ -45,12 +46,9 @@ class SupervisedUserPrefStore : public PrefStore {
 
   void OnSettingsServiceShutdown();
 
-  std::unique_ptr<
-      base::CallbackList<void(const base::DictionaryValue*)>::Subscription>
-      user_settings_subscription_;
+  base::CallbackListSubscription user_settings_subscription_;
 
-  std::unique_ptr<base::CallbackList<void()>::Subscription>
-      shutdown_subscription_;
+  base::CallbackListSubscription shutdown_subscription_;
 
   std::unique_ptr<PrefValueMap> prefs_;
 

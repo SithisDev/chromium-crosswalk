@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,9 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
-import static org.chromium.chrome.browser.tabmodel.TabSelectionType.FROM_NEW;
+import static org.chromium.chrome.browser.tab.TabSelectionType.FROM_NEW;
 
+import android.app.Activity;
 import android.content.Context;
 
 import org.junit.Before;
@@ -25,37 +26,44 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.multidex.ShadowMultiDex;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.snackbar.SnackbarManager;
-import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.Tab.TabHidingType;
+import org.chromium.chrome.browser.tab.TabHidingType;
+import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.tabmodel.TabSelectionType;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarController;
+import org.chromium.ui.base.WindowAndroid;
+import org.chromium.url.GURL;
+import org.chromium.url.JUnitTestGURLs;
+
+import java.lang.ref.WeakReference;
 
 /**
  * Unit tests for OfflinePageUtils.
  */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE, shadows = {ShadowMultiDex.class})
+@Config(manifest = Config.NONE)
 public class OfflinePageTabObserverTest {
     // Using a null tab, as it cannot be mocked. TabHelper will help return proper mocked responses.
     private static final int TAB_ID = 77;
-    private static final String TAB_URL = "mock.com";
-
+    private static final GURL TAB_URL = JUnitTestGURLs.getGURL(JUnitTestGURLs.EXAMPLE_URL);
     @Mock
     private ChromeActivity mActivity;
     @Mock
     private TabModelSelector mTabModelSelector;
     @Mock private SnackbarManager mSnackbarManager;
     @Mock private SnackbarController mSnackbarController;
-    @Mock private Tab mTab;
+    @Mock
+    private Tab mTab;
     @Mock
     private OfflinePageUtils.Internal mOfflinePageUtils;
+    @Mock
+    private WindowAndroid mWindowAndroid;
+    private WeakReference<Activity> mActivityRef;
 
     private OfflinePageTabObserver createObserver() {
         OfflinePageTabObserver observer = spy(new OfflinePageTabObserver(
@@ -71,8 +79,10 @@ public class OfflinePageTabObserverTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         MockitoAnnotations.initMocks(this);
+
+        mActivityRef = new WeakReference<>(mActivity);
 
         // Setting up a mock tab. These are the values common to most tests, but individual
         // tests might easily overwrite them.
@@ -80,7 +90,8 @@ public class OfflinePageTabObserverTest {
         doReturn(TAB_URL).when(mTab).getUrl();
         doReturn(false).when(mTab).isFrozen();
         doReturn(false).when(mTab).isHidden();
-        doReturn(mActivity).when(mTab).getActivity();
+        doReturn(mWindowAndroid).when(mTab).getWindowAndroid();
+        doReturn(mActivityRef).when(mWindowAndroid).getActivity();
 
         // Setting up mock snackbar manager.
         doNothing().when(mSnackbarManager).dismissSnackbars(eq(mSnackbarController));

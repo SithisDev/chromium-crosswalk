@@ -1,20 +1,22 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "build/build_config.h"
-#include "chrome/browser/chrome_content_browser_client.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
+#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
@@ -28,12 +30,14 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/public/test/text_input_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "third_party/blink/public/common/switches.h"
 #include "ui/base/ime/ime_text_span.h"
 #include "ui/base/ime/text_edit_commands.h"
 #include "ui/base/ime/text_input_client.h"
@@ -41,9 +45,10 @@
 #include "ui/base/ime/text_input_type.h"
 #include "url/gurl.h"
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX)
 #include "ui/base/ime/linux/text_edit_command_auralinux.h"
-#include "ui/base/ime/linux/text_edit_key_bindings_delegate_auralinux.h"
+#include "ui/linux/fake_linux_ui.h"
+#include "ui/linux/linux_ui.h"
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -59,119 +64,30 @@
 namespace {
 using IndexVector = std::vector<size_t>;
 
-// TextInputManager Observers
-
-// A base class for observing the TextInputManager owned by the given
-// WebContents. Subclasses could observe the TextInputManager for different
-// changes. The class wraps a public tester which accepts callbacks that
-// are run after specific changes in TextInputManager. Different observers can
-// be subclassed from this by providing their specific callback methods.
-class TextInputManagerObserverBase {
- public:
-  explicit TextInputManagerObserverBase(content::WebContents* web_contents)
-      : tester_(new content::TextInputManagerTester(web_contents)),
-        success_(false) {}
-
-  virtual ~TextInputManagerObserverBase() {}
-
-  // Wait for derived class's definition of success.
-  void Wait() {
-    if (success_)
-      return;
-    message_loop_runner_ = new content::MessageLoopRunner();
-    message_loop_runner_->Run();
-  }
-
-  bool success() const { return success_; }
-
- protected:
-  content::TextInputManagerTester* tester() { return tester_.get(); }
-
-  void OnSuccess() {
-    success_ = true;
-    if (message_loop_runner_)
-      message_loop_runner_->Quit();
-
-    // By deleting |tester_| we make sure that the internal observer used in
-    // content/ is removed from the observer list of TextInputManager.
-    tester_.reset(nullptr);
-  }
-
- private:
-  std::unique_ptr<content::TextInputManagerTester> tester_;
-  bool success_;
-  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextInputManagerObserverBase);
-};
-
-// This class observes TextInputManager for changes in |TextInputState.value|.
-class TextInputManagerValueObserver : public TextInputManagerObserverBase {
- public:
-  TextInputManagerValueObserver(content::WebContents* web_contents,
-                                const std::string& expected_value)
-      : TextInputManagerObserverBase(web_contents),
-        expected_value_(expected_value) {
-    tester()->SetUpdateTextInputStateCalledCallback(base::Bind(
-        &TextInputManagerValueObserver::VerifyValue, base::Unretained(this)));
-  }
-
- private:
-  void VerifyValue() {
-    std::string value;
-    if (tester()->GetTextInputValue(&value) && expected_value_ == value)
-      OnSuccess();
-  }
-
-  const std::string expected_value_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextInputManagerValueObserver);
-};
-
-// This class observes TextInputManager for changes in |TextInputState.type|.
-class TextInputManagerTypeObserver : public TextInputManagerObserverBase {
- public:
-  TextInputManagerTypeObserver(content::WebContents* web_contents,
-                               ui::TextInputType expected_type)
-      : TextInputManagerObserverBase(web_contents),
-        expected_type_(expected_type) {
-    tester()->SetUpdateTextInputStateCalledCallback(base::Bind(
-        &TextInputManagerTypeObserver::VerifyType, base::Unretained(this)));
-  }
-
- private:
-  void VerifyType() {
-    ui::TextInputType type =
-        tester()->GetTextInputType(&type) ? type : ui::TEXT_INPUT_TYPE_NONE;
-    if (expected_type_ == type)
-      OnSuccess();
-  }
-
-  const ui::TextInputType expected_type_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextInputManagerTypeObserver);
-};
-
 // This class observes TextInputManager for the first change in TextInputState.
-class TextInputManagerChangeObserver : public TextInputManagerObserverBase {
+class TextInputManagerChangeObserver
+    : public content::TextInputManagerObserverBase {
  public:
   explicit TextInputManagerChangeObserver(content::WebContents* web_contents)
       : TextInputManagerObserverBase(web_contents) {
-    tester()->SetUpdateTextInputStateCalledCallback(base::Bind(
+    tester()->SetUpdateTextInputStateCalledCallback(base::BindRepeating(
         &TextInputManagerChangeObserver::VerifyChange, base::Unretained(this)));
   }
+
+  TextInputManagerChangeObserver(const TextInputManagerChangeObserver&) =
+      delete;
+  TextInputManagerChangeObserver& operator=(
+      const TextInputManagerChangeObserver&) = delete;
 
  private:
   void VerifyChange() {
     if (tester()->IsTextInputStateChanged())
       OnSuccess();
   }
-
-  DISALLOW_COPY_AND_ASSIGN(TextInputManagerChangeObserver);
 };
 
 // This class observes |TextInputState.type| for a specific RWHV.
-class ViewTextInputTypeObserver : public TextInputManagerObserverBase {
+class ViewTextInputTypeObserver : public content::TextInputManagerObserverBase {
  public:
   explicit ViewTextInputTypeObserver(content::WebContents* web_contents,
                                      content::RenderWidgetHostView* rwhv,
@@ -180,9 +96,13 @@ class ViewTextInputTypeObserver : public TextInputManagerObserverBase {
         web_contents_(web_contents),
         view_(rwhv),
         expected_type_(expected_type) {
-    tester()->SetUpdateTextInputStateCalledCallback(base::Bind(
+    tester()->SetUpdateTextInputStateCalledCallback(base::BindRepeating(
         &ViewTextInputTypeObserver::VerifyType, base::Unretained(this)));
   }
+
+  ViewTextInputTypeObserver(const ViewTextInputTypeObserver&) = delete;
+  ViewTextInputTypeObserver& operator=(const ViewTextInputTypeObserver&) =
+      delete;
 
  private:
   void VerifyType() {
@@ -193,16 +113,15 @@ class ViewTextInputTypeObserver : public TextInputManagerObserverBase {
       OnSuccess();
   }
 
-  content::WebContents* web_contents_;
-  content::RenderWidgetHostView* view_;
+  raw_ptr<content::WebContents> web_contents_;
+  raw_ptr<content::RenderWidgetHostView> view_;
   const ui::TextInputType expected_type_;
-
-  DISALLOW_COPY_AND_ASSIGN(ViewTextInputTypeObserver);
 };
 
 // This class observes the |expected_view| for the first change in its
 // selection bounds.
-class ViewSelectionBoundsChangedObserver : public TextInputManagerObserverBase {
+class ViewSelectionBoundsChangedObserver
+    : public content::TextInputManagerObserverBase {
  public:
   ViewSelectionBoundsChangedObserver(
       content::WebContents* web_contents,
@@ -210,9 +129,14 @@ class ViewSelectionBoundsChangedObserver : public TextInputManagerObserverBase {
       : TextInputManagerObserverBase(web_contents),
         expected_view_(expected_view) {
     tester()->SetOnSelectionBoundsChangedCallback(
-        base::Bind(&ViewSelectionBoundsChangedObserver::VerifyChange,
-                   base::Unretained(this)));
+        base::BindRepeating(&ViewSelectionBoundsChangedObserver::VerifyChange,
+                            base::Unretained(this)));
   }
+
+  ViewSelectionBoundsChangedObserver(
+      const ViewSelectionBoundsChangedObserver&) = delete;
+  ViewSelectionBoundsChangedObserver& operator=(
+      const ViewSelectionBoundsChangedObserver&) = delete;
 
  private:
   void VerifyChange() {
@@ -220,15 +144,13 @@ class ViewSelectionBoundsChangedObserver : public TextInputManagerObserverBase {
       OnSuccess();
   }
 
-  const content::RenderWidgetHostView* const expected_view_;
-
-  DISALLOW_COPY_AND_ASSIGN(ViewSelectionBoundsChangedObserver);
+  const raw_ptr<const content::RenderWidgetHostView> expected_view_;
 };
 
 // This class observes the |expected_view| for the first change in its
 // composition range information.
 class ViewCompositionRangeChangedObserver
-    : public TextInputManagerObserverBase {
+    : public content::TextInputManagerObserverBase {
  public:
   ViewCompositionRangeChangedObserver(
       content::WebContents* web_contents,
@@ -236,9 +158,14 @@ class ViewCompositionRangeChangedObserver
       : TextInputManagerObserverBase(web_contents),
         expected_view_(expected_view) {
     tester()->SetOnImeCompositionRangeChangedCallback(
-        base::Bind(&ViewCompositionRangeChangedObserver::VerifyChange,
-                   base::Unretained(this)));
+        base::BindRepeating(&ViewCompositionRangeChangedObserver::VerifyChange,
+                            base::Unretained(this)));
   }
+
+  ViewCompositionRangeChangedObserver(
+      const ViewCompositionRangeChangedObserver&) = delete;
+  ViewCompositionRangeChangedObserver& operator=(
+      const ViewCompositionRangeChangedObserver&) = delete;
 
  private:
   void VerifyChange() {
@@ -246,13 +173,11 @@ class ViewCompositionRangeChangedObserver
       OnSuccess();
   }
 
-  const content::RenderWidgetHostView* const expected_view_;
-
-  DISALLOW_COPY_AND_ASSIGN(ViewCompositionRangeChangedObserver);
+  const raw_ptr<const content::RenderWidgetHostView> expected_view_;
 };
 
 // This class observes the |expected_view| for a change in the text selection.
-class ViewTextSelectionObserver : public TextInputManagerObserverBase {
+class ViewTextSelectionObserver : public content::TextInputManagerObserverBase {
  public:
   ViewTextSelectionObserver(content::WebContents* web_contents,
                             content::RenderWidgetHostView* expected_view,
@@ -260,9 +185,13 @@ class ViewTextSelectionObserver : public TextInputManagerObserverBase {
       : TextInputManagerObserverBase(web_contents),
         expected_view_(expected_view),
         expected_length_(expected_length) {
-    tester()->SetOnTextSelectionChangedCallback(base::Bind(
+    tester()->SetOnTextSelectionChangedCallback(base::BindRepeating(
         &ViewTextSelectionObserver::VerifyChange, base::Unretained(this)));
   }
+
+  ViewTextSelectionObserver(const ViewTextSelectionObserver&) = delete;
+  ViewTextSelectionObserver& operator=(const ViewTextSelectionObserver&) =
+      delete;
 
  private:
   void VerifyChange() {
@@ -274,20 +203,21 @@ class ViewTextSelectionObserver : public TextInputManagerObserverBase {
     }
   }
 
-  const content::RenderWidgetHostView* const expected_view_;
+  const raw_ptr<const content::RenderWidgetHostView> expected_view_;
   const size_t expected_length_;
-
-  DISALLOW_COPY_AND_ASSIGN(ViewTextSelectionObserver);
 };
 
 // This class observes all the text selection updates within a WebContents.
-class TextSelectionObserver : public TextInputManagerObserverBase {
+class TextSelectionObserver : public content::TextInputManagerObserverBase {
  public:
   explicit TextSelectionObserver(content::WebContents* web_contents)
       : TextInputManagerObserverBase(web_contents) {
-    tester()->SetOnTextSelectionChangedCallback(base::Bind(
+    tester()->SetOnTextSelectionChangedCallback(base::BindRepeating(
         &TextSelectionObserver::VerifyChange, base::Unretained(this)));
   }
+
+  TextSelectionObserver(const TextSelectionObserver&) = delete;
+  TextSelectionObserver& operator=(const TextSelectionObserver&) = delete;
 
   void WaitForSelectedText(const std::string& text) {
     selected_text_ = text;
@@ -303,8 +233,6 @@ class TextSelectionObserver : public TextInputManagerObserverBase {
   }
 
   std::string selected_text_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextSelectionObserver);
 };
 
 // This class monitors all the changes in TextInputState and keeps a record of
@@ -314,9 +242,13 @@ class RecordActiveViewsObserver {
  public:
   explicit RecordActiveViewsObserver(content::WebContents* web_contents)
       : tester_(new content::TextInputManagerTester(web_contents)) {
-    tester_->SetUpdateTextInputStateCalledCallback(base::Bind(
+    tester_->SetUpdateTextInputStateCalledCallback(base::BindRepeating(
         &RecordActiveViewsObserver::RecordActiveView, base::Unretained(this)));
   }
+
+  RecordActiveViewsObserver(const RecordActiveViewsObserver&) = delete;
+  RecordActiveViewsObserver& operator=(const RecordActiveViewsObserver&) =
+      delete;
 
   const std::vector<const content::RenderWidgetHostView*>* active_views()
       const {
@@ -332,8 +264,6 @@ class RecordActiveViewsObserver {
 
   std::unique_ptr<content::TextInputManagerTester> tester_;
   std::vector<const content::RenderWidgetHostView*> active_views_;
-
-  DISALLOW_COPY_AND_ASSIGN(RecordActiveViewsObserver);
 };
 
 }  // namespace
@@ -342,10 +272,20 @@ class RecordActiveViewsObserver {
 class SitePerProcessTextInputManagerTest : public InProcessBrowserTest {
  public:
   SitePerProcessTextInputManagerTest() {}
+
+  SitePerProcessTextInputManagerTest(
+      const SitePerProcessTextInputManagerTest&) = delete;
+  SitePerProcessTextInputManagerTest& operator=(
+      const SitePerProcessTextInputManagerTest&) = delete;
+
   ~SitePerProcessTextInputManagerTest() override {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     content::IsolateAllSitesForTesting(command_line);
+    // Some builders are flaky due to slower loading interacting with
+    // deferred commits, and this test suite sometimes uses content
+    // that paints nothing upon load.
+    command_line->AppendSwitch(blink::switches::kAllowPreCommitInput);
   }
 
   void SetUpOnMainThread() override {
@@ -417,21 +357,19 @@ class SitePerProcessTextInputManagerTest : public InProcessBrowserTest {
     std::string path = base::StringPrintf("/cross_site_iframe_factory.html?%s",
                                           structure.c_str());
     GURL main_url(embedded_test_server()->GetURL("a.com", path));
-    ui_test_utils::NavigateToURL(browser(), main_url);
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), main_url));
   }
 
   // Iteratively uses ChildFrameAt(frame, i) to get the i-th child frame
   // inside frame. For example, for 'a(b(c, d(e)))', [0] returns b, and
   // [0, 1, 0] returns e;
   content::RenderFrameHost* GetFrame(const IndexVector& indices) {
-    content::RenderFrameHost* current = active_contents()->GetMainFrame();
+    content::RenderFrameHost* current =
+        active_contents()->GetPrimaryMainFrame();
     for (size_t index : indices)
       current = ChildFrameAt(current, index);
     return current;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SitePerProcessTextInputManagerTest);
 };
 
 // The following test loads a page with multiple nested <iframe> elements which
@@ -440,16 +378,9 @@ class SitePerProcessTextInputManagerTest : public InProcessBrowserTest {
 // creates a sequence of tab presses and verifies that after each key press, the
 // TextInputState.value reflects that of the focused input, i.e., the
 // TextInputManager is correctly tracking TextInputState across frames.
-// Flaky on chromeOS; https://crbug.com/704994.
-#if defined(OS_CHROMEOS)
-#define MAYBE_TrackStateWhenSwitchingFocusedFrames \
-  DISABLED_TrackStateWhenSwitchingFocusedFrames
-#else
-#define MAYBE_TrackStateWhenSwitchingFocusedFrames \
-  TrackStateWhenSwitchingFocusedFrames
-#endif
+// Flaky on ChromeOS, Linux, Mac, and Windows; https://crbug.com/704994.
 IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
-                       MAYBE_TrackStateWhenSwitchingFocusedFrames) {
+                       DISABLED_TrackStateWhenSwitchingFocusedFrames) {
   CreateIframePage("a(a,b,c(a,b,d(e, f)),g)");
   std::vector<std::string> values{
       "main",     "node_a",   "node_b",     "node_c",     "node_c_a",
@@ -469,7 +400,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
     AddInputFieldToFrame(frames[i], "text", values[i], true);
 
   for (size_t i = 0; i < frames.size(); ++i) {
-    TextInputManagerValueObserver observer(active_contents(), values[i]);
+    content::TextInputManagerValueObserver observer(active_contents(),
+                                                    values[i]);
     SimulateKeyPress(active_contents(), ui::DomKey::TAB, ui::DomCode::TAB,
                      ui::VKEY_TAB, false, false, false, false);
     observer.Wait();
@@ -500,7 +432,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
       active_contents(), frames[0]->GetView(), ui::TEXT_INPUT_TYPE_NONE);
 
   for (size_t i = 0; i < frames.size(); ++i) {
-    TextInputManagerValueObserver observer(active_contents(), values[i]);
+    content::TextInputManagerValueObserver observer(active_contents(),
+                                                    values[i]);
     SimulateKeyPress(active_contents(), ui::DomKey::TAB, ui::DomCode::TAB,
                      ui::VKEY_TAB, false, false, false, false);
     observer.Wait();
@@ -540,9 +473,10 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
       content::GetRegisteredViewsCountFromTextInputManager(active_contents()));
 
   // Now crash the second <iframe> which has an active view.
-  destruction_observer.reset(
-      new content::TestRenderWidgetHostViewDestructionObserver(
-          frames[1]->GetView()));
+  destruction_observer =
+      std::make_unique<content::TestRenderWidgetHostViewDestructionObserver>(
+
+          frames[1]->GetView());
   {
     content::ScopedAllowRendererCrashes allow_renderer_crashes(frames[1]);
     frames[1]->GetProcess()->Shutdown(0);
@@ -570,8 +504,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
     AddInputFieldToFrame(frames[i], "text", "", true);
 
   // Press tab key to focus the <input> in the first frame.
-  TextInputManagerTypeObserver type_observer_text_a(active_contents(),
-                                                    ui::TEXT_INPUT_TYPE_TEXT);
+  content::TextInputManagerTypeObserver type_observer_text_a(
+      active_contents(), ui::TEXT_INPUT_TYPE_TEXT);
   SimulateKeyPress(active_contents(), ui::DomKey::TAB, ui::DomCode::TAB,
                    ui::VKEY_TAB, false, false, false, false);
   type_observer_text_a.Wait();
@@ -581,22 +515,22 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
       "frame.parentNode.removeChild(frame);";
   // Detach first frame and observe |TextInputState.type| resetting to
   // ui::TEXT_INPUT_TYPE_NONE.
-  TextInputManagerTypeObserver type_observer_none_a(active_contents(),
-                                                    ui::TEXT_INPUT_TYPE_NONE);
+  content::TextInputManagerTypeObserver type_observer_none_a(
+      active_contents(), ui::TEXT_INPUT_TYPE_NONE);
   EXPECT_TRUE(ExecuteScript(active_contents(), remove_first_iframe_script));
   type_observer_none_a.Wait();
 
   // Press tab to focus the <input> in the second frame.
-  TextInputManagerTypeObserver type_observer_text_b(active_contents(),
-                                                    ui::TEXT_INPUT_TYPE_TEXT);
+  content::TextInputManagerTypeObserver type_observer_text_b(
+      active_contents(), ui::TEXT_INPUT_TYPE_TEXT);
   SimulateKeyPress(active_contents(), ui::DomKey::TAB, ui::DomCode::TAB,
                    ui::VKEY_TAB, false, false, false, false);
   type_observer_text_b.Wait();
 
   // Detach first frame and observe |TextInputState.type| resetting to
   // ui::TEXT_INPUT_TYPE_NONE.
-  TextInputManagerTypeObserver type_observer_none_b(active_contents(),
-                                                    ui::TEXT_INPUT_TYPE_NONE);
+  content::TextInputManagerTypeObserver type_observer_none_b(
+      active_contents(), ui::TEXT_INPUT_TYPE_NONE);
   EXPECT_TRUE(ExecuteScript(active_contents(), remove_first_iframe_script));
   type_observer_none_b.Wait();
 }
@@ -614,15 +548,15 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   AddInputFieldToFrame(child_frame, "text", "child", false);
 
   // Focus <input> in child frame and verify the |TextInputState.value|.
-  TextInputManagerValueObserver child_set_state_observer(active_contents(),
-                                                         "child");
+  content::TextInputManagerValueObserver child_set_state_observer(
+      active_contents(), "child");
   SimulateKeyPress(active_contents(), ui::DomKey::TAB, ui::DomCode::TAB,
                    ui::VKEY_TAB, false, false, false, false);
   child_set_state_observer.Wait();
 
   // Navigate the child frame to about:blank and verify that TextInputManager
   // correctly sets its |TextInputState.type| to ui::TEXT_INPUT_TYPE_NONE.
-  TextInputManagerTypeObserver child_reset_state_observer(
+  content::TextInputManagerTypeObserver child_reset_state_observer(
       active_contents(), ui::TEXT_INPUT_TYPE_NONE);
   EXPECT_TRUE(ExecuteScript(
       main_frame, "document.querySelector('iframe').src = 'about:blank'"));
@@ -639,15 +573,15 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   content::RenderFrameHost* main_frame = GetFrame(IndexVector{});
   AddInputFieldToFrame(main_frame, "text", "", false);
 
-  TextInputManagerTypeObserver set_state_observer(active_contents(),
-                                                  ui::TEXT_INPUT_TYPE_TEXT);
+  content::TextInputManagerTypeObserver set_state_observer(
+      active_contents(), ui::TEXT_INPUT_TYPE_TEXT);
   SimulateKeyPress(active_contents(), ui::DomKey::TAB, ui::DomCode::TAB,
                    ui::VKEY_TAB, false, false, false, false);
   set_state_observer.Wait();
 
-  TextInputManagerTypeObserver reset_state_observer(active_contents(),
-                                                    ui::TEXT_INPUT_TYPE_NONE);
-  ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
+  content::TextInputManagerTypeObserver reset_state_observer(
+      active_contents(), ui::TEXT_INPUT_TYPE_NONE);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), GURL("about:blank")));
   reset_state_observer.Wait();
 }
 
@@ -696,15 +630,15 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   AddInputFieldToFrame(main_frame, "text", "", false);
 
   // Focus the input and wait for state update.
-  TextInputManagerTypeObserver observer(active_contents(),
-                                        ui::TEXT_INPUT_TYPE_TEXT);
+  content::TextInputManagerTypeObserver observer(active_contents(),
+                                                 ui::TEXT_INPUT_TYPE_TEXT);
   SimulateKeyPress(active_contents(), ui::DomKey::TAB, ui::DomCode::TAB,
                    ui::VKEY_TAB, false, false, false, false);
   observer.Wait();
 
   // Now destroy the tab. We should exit without crashing.
   browser()->tab_strip_model()->CloseWebContentsAt(
-      0, TabStripModel::CLOSE_USER_GESTURE);
+      0, TabCloseTypes::CLOSE_USER_GESTURE);
 }
 
 // The following test verifies that when the active widget changes value, it is
@@ -727,7 +661,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
 
   auto send_tab_and_wait_for_value =
       [&web_contents](const std::string& expected_value) {
-        TextInputManagerValueObserver observer(web_contents, expected_value);
+        content::TextInputManagerValueObserver observer(web_contents,
+                                                        expected_value);
         SimulateKeyPress(web_contents, ui::DomKey::TAB, ui::DomCode::TAB,
                          ui::VKEY_TAB, false, false, false, false);
         observer.Wait();
@@ -793,7 +728,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
 }
 
 // Failing on Mac - http://crbug.com/852452
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 #define MAYBE_TrackTextSelectionForAllFrames \
   DISABLED_TrackTextSelectionForAllFrames
 #else
@@ -822,7 +757,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   content::WebContents* web_contents = active_contents();
 
   auto send_tab_and_wait_for_value = [&web_contents](const std::string& value) {
-    TextInputManagerValueObserver observer(web_contents, value);
+    content::TextInputManagerValueObserver observer(web_contents, value);
     SimulateKeyPress(web_contents, ui::DomKey::TAB, ui::DomCode::TAB,
                      ui::VKEY_TAB, false, false, false, false);
     observer.Wait();
@@ -856,7 +791,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
 // Then, it verifies that the <input>'s value matches the committed text
 // (https://crbug.com/688842).
 // Flaky on Android and Linux http://crbug.com/852274
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 #define MAYBE_ImeCommitTextForAllFrames DISABLED_ImeCommitTextForAllFrames
 #else
 #define MAYBE_ImeCommitTextForAllFrames ImeCommitTextForAllFrames
@@ -904,7 +839,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
 // TODO(ekaramad): Some of the following tests should be active on Android as
 // well. Enable them when the corresponding feature is implemented for Android
 // (https://crbug.com/602723).
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 // This test creates a page with multiple child frames and adds an <input> to
 // each frame. Then, sequentially, each <input> is focused by sending a tab key.
 // Then, after |TextInputState.type| for a view is changed to text, another key
@@ -947,7 +882,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
 // This test makes sure browser correctly tracks focused editable element inside
 // each RenderFrameHost.
 // Test is flaky on chromeOS; https://crbug.com/705203.
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #define MAYBE_TrackingFocusedElementForAllFrames \
   DISABLED_TrackingFocusedElementForAllFrames
 #else
@@ -996,7 +931,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
 // in both cases the test verifies that WebContents is aware whether or not a
 // focused editable element exists on the page.
 // Test is flaky on ChromeOS. crbug.com/705289
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #define MAYBE_TrackPageFocusEditableElement \
   DISABLED_TrackPageFocusEditableElement
 #else
@@ -1038,7 +973,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
 // WebContents to clear focused element and verifies that there is no longer
 // a focused editable element on the page.
 // Test is flaky on ChromeOS; https://crbug.com/705203.
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #define MAYBE_ClearFocusedElementOnPage DISABLED_ClearFocusedElementOnPage
 #else
 #define MAYBE_ClearFocusedElementOnPage ClearFocusedElementOnPage
@@ -1089,6 +1024,9 @@ class InputMethodObserverBase {
         test_observer_(content::TestInputMethodObserver::Create(web_contents)) {
   }
 
+  InputMethodObserverBase(const InputMethodObserverBase&) = delete;
+  InputMethodObserverBase& operator=(const InputMethodObserverBase&) = delete;
+
   void Wait() {
     if (success_)
       return;
@@ -1103,9 +1041,13 @@ class InputMethodObserverBase {
     return test_observer_.get();
   }
 
-  const base::Closure success_closure() {
-    return base::Bind(&InputMethodObserverBase::OnSuccess,
-                      base::Unretained(this));
+  const base::RepeatingCallback<void(bool)> success_closure() {
+    return base::BindRepeating(
+        [](InputMethodObserverBase* self, bool should_show) {
+          if (should_show)
+            self->OnSuccess();
+        },
+        base::Unretained(this));
   }
 
  private:
@@ -1118,20 +1060,19 @@ class InputMethodObserverBase {
   bool success_;
   std::unique_ptr<content::TestInputMethodObserver> test_observer_;
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(InputMethodObserverBase);
 };
 
 class InputMethodObserverForShowIme : public InputMethodObserverBase {
  public:
   explicit InputMethodObserverForShowIme(content::WebContents* web_contents)
       : InputMethodObserverBase(web_contents) {
-    test_observer()->SetOnShowVirtualKeyboardIfEnabledCallback(
+    test_observer()->SetOnVirtualKeyboardVisibilityChangedIfEnabledCallback(
         success_closure());
   }
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(InputMethodObserverForShowIme);
+  InputMethodObserverForShowIme(const InputMethodObserverForShowIme&) = delete;
+  InputMethodObserverForShowIme& operator=(
+      const InputMethodObserverForShowIme&) = delete;
 };
 
 // TODO(ekaramad): This test is actually a unit test and should be moved to
@@ -1141,6 +1082,14 @@ class InputMethodObserverForShowIme : public InputMethodObserverBase {
 // |TextInputState.show_ime_if_needed| is true. This should happen even when
 // the TextInputState has not changed (according to the platform), e.g., in
 // aura when receiving two consecutive updates with same |TextInputState.type|.
+
+// This test is disabled on Windows because we have removed TryShow/TryHide API
+// calls and replaced it with TSF input pane policy which is a policy applied by
+// text service framework on Windows based on whether TSF edit control has focus
+// or not. On Windows we have implemented TSF1 on Chromium that takes care of
+// IME compositions, handwriting panels, SIP visibility etc. Please see
+// (https://crbug.com/1007958) for more details.
+#if !BUILDFLAG(IS_WIN)
 IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
                        CorrectlyShowVirtualKeyboardIfEnabled) {
   // We only need the <iframe> page to create RWHV.
@@ -1166,9 +1115,6 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
 
   // Set |TextInputState.show_ime_if_needed| to true. Expect IME.
   sender.SetShowVirtualKeyboardIfEnabled(true);
-#if defined(OS_WIN)
-  sender.SetLastPointerType(ui::EventPointerType::POINTER_TYPE_TOUCH);
-#endif
   EXPECT_TRUE(send_and_check_show_ime());
 
   // Send the same message. Expect IME (no change).
@@ -1186,27 +1132,23 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   sender.SetShowVirtualKeyboardIfEnabled(true);
   EXPECT_TRUE(send_and_check_show_ime());
 
-#if defined(OS_WIN)
-  // Set input type to mouse. Expect no IME.
-  sender.SetLastPointerType(ui::EventPointerType::POINTER_TYPE_MOUSE);
-  EXPECT_FALSE(send_and_check_show_ime());
-#endif
-
   // Set |TextInputState.type| to ui::TEXT_INPUT_TYPE_NONE. Expect no IME.
   sender.SetType(ui::TEXT_INPUT_TYPE_NONE);
   EXPECT_FALSE(send_and_check_show_ime());
 }
+#endif  // !BUILDFLAG(IS_WIN)
+
 #endif  // USE_AURA
 
 // Ensure that a cross-process subframe can utilize keyboard edit commands.
 // See https://crbug.com/640706.  This test is Linux-specific, as it relies on
-// overriding TextEditKeyBindingsDelegateAuraLinux, which only exists on Linux.
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// overriding ui::LinuxUi.
+#if BUILDFLAG(IS_LINUX)
 IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
                        SubframeKeyboardEditCommands) {
   GURL main_url(embedded_test_server()->GetURL(
       "a.com", "/frame_tree/page_with_one_frame.html"));
-  ui_test_utils::NavigateToURL(browser(), main_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), main_url));
   content::WebContents* web_contents = active_contents();
 
   GURL frame_url(
@@ -1216,7 +1158,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   // Focus the subframe and then its input field.  The return value
   // "input-focus" will be sent once the input field's focus event fires.
   content::RenderFrameHost* child =
-      ChildFrameAt(web_contents->GetMainFrame(), 0);
+      ChildFrameAt(web_contents->GetPrimaryMainFrame(), 0);
   std::string result;
   std::string script =
       "function onInput(e) {"
@@ -1231,7 +1173,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   EXPECT_EQ(child, web_contents->GetFocusedFrame());
 
   // Generate a couple of keystrokes, which will be routed to the subframe.
-  content::DOMMessageQueue msg_queue;
+  content::DOMMessageQueue msg_queue(web_contents);
   std::string reply;
   SimulateKeyPress(web_contents, ui::DomKey::FromCharacter('1'),
                    ui::DomCode::DIGIT1, ui::VKEY_1, false, false, false, false);
@@ -1249,12 +1191,16 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   // Define and install a test delegate that translates any keystroke to a
   // command to delete all text from current cursor position to the beginning
   // of the line.
-  class TextDeleteDelegate : public ui::TextEditKeyBindingsDelegateAuraLinux {
+  class TextDeleteDelegate : public ui::FakeLinuxUi {
    public:
-    TextDeleteDelegate() {}
-    ~TextDeleteDelegate() override {}
+    TextDeleteDelegate() = default;
 
-    bool MatchEvent(
+    TextDeleteDelegate(const TextDeleteDelegate&) = delete;
+    TextDeleteDelegate& operator=(const TextDeleteDelegate&) = delete;
+
+    ~TextDeleteDelegate() override = default;
+
+    bool GetTextEditCommandsForEvent(
         const ui::Event& event,
         std::vector<ui::TextEditCommandAuraLinux>* commands) override {
       if (commands) {
@@ -1263,15 +1209,10 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
       }
       return true;
     }
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(TextDeleteDelegate);
   };
 
-  TextDeleteDelegate delegate;
-  ui::TextEditKeyBindingsDelegateAuraLinux* old_delegate =
-      ui::GetTextEditKeyBindingsDelegate();
-  ui::SetTextEditKeyBindingsDelegate(&delegate);
+  auto test_delete_delegate = std::make_unique<TextDeleteDelegate>();
+  auto* old_linux_ui = ui::LinuxUi::SetInstance(test_delete_delegate.get());
 
   // Press ctrl-alt-shift-D.  The test's delegate will pretend that this
   // corresponds to the command to delete everyting to the beginning of the
@@ -1281,7 +1222,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   // commands logic that's tested here.
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(browser(), ui::VKEY_D, true, true,
                                               true, false));
-  ui::SetTextEditKeyBindingsDelegate(old_delegate);
+  ui::LinuxUi::SetInstance(old_linux_ui);
 
   // Verify that the input field in the subframe is erased.
   EXPECT_TRUE(ExecuteScriptAndExtractString(
@@ -1298,12 +1239,16 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
 // cannot have two instances of ShellContentBrowserClient (due to a DCHECK in
 // the ctor). Therefore, we put the test here to use ChromeContentBrowserClient
 // which does not have the same singleton constraint.
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 class ShowDefinitionForWordObserver
     : content::RenderWidgetHostViewCocoaObserver {
  public:
   explicit ShowDefinitionForWordObserver(content::WebContents* web_contents)
       : content::RenderWidgetHostViewCocoaObserver(web_contents) {}
+
+  ShowDefinitionForWordObserver(const ShowDefinitionForWordObserver&) = delete;
+  ShowDefinitionForWordObserver& operator=(
+      const ShowDefinitionForWordObserver&) = delete;
 
   ~ShowDefinitionForWordObserver() override {}
 
@@ -1311,7 +1256,7 @@ class ShowDefinitionForWordObserver
     if (did_receive_string_)
       return word_;
 
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
     return word_;
   }
@@ -1328,8 +1273,6 @@ class ShowDefinitionForWordObserver
   bool did_receive_string_ = false;
   std::string word_;
   std::unique_ptr<base::RunLoop> run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShowDefinitionForWordObserver);
 };
 
 // Flakey (https:://crbug.com/874417).
@@ -1360,98 +1303,19 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   }
 }
 
-// The original TextInputClientMessageFilter is added during the initialization
-// phase of RenderProcessHost. The only chance we have to add the test filter
-// (so that it can receive the TextInputClientMac incoming IPC messages) is
-// during the call to RenderProcessWillLaunch() on ContentBrowserClient. This
-// class provides that for testing.
-class TestBrowserClient : public ChromeContentBrowserClient {
- public:
-  TestBrowserClient() {
-    old_client_ = content::SetBrowserClientForTesting(this);
-  }
-
-  ~TestBrowserClient() override {
-    content::SetBrowserClientForTesting(old_client_);
-  }
-
-  // ContentBrowserClient overrides.
-  void RenderProcessWillLaunch(
-      content::RenderProcessHost* process_host,
-      service_manager::mojom::ServiceRequest* service_request) override {
-    ChromeContentBrowserClient::RenderProcessWillLaunch(process_host,
-                                                        service_request);
-    filters_.push_back(
-        new content::TestTextInputClientMessageFilter(process_host));
-  }
-
-  // Retrieves the registered filter for the given RenderProcessHost. It will
-  // return false if the RenderProcessHost was initialized while a different
-  // instance of ContentBrowserClient was in action.
-  scoped_refptr<content::TestTextInputClientMessageFilter>
-  GetTextInputClientMessageFilterForProcess(
-      content::RenderProcessHost* process_host) const {
-    for (auto filter : filters_) {
-      if (filter->process() == process_host)
-        return filter;
-    }
-    return nullptr;
-  }
-
- private:
-  content::ContentBrowserClient* old_client_ = nullptr;
-  std::vector<scoped_refptr<content::TestTextInputClientMessageFilter>>
-      filters_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestBrowserClient);
-};
-
-// Earlier injection of TestBrowserClient (a ContentBrowserClient) is needed to
-// make sure it is active during creation of the first spare RenderProcessHost.
-// Without this change, the tests would be surprised that they cannot find an
-// injected message filter via GetTextInputClientMessageFilterForProcess.
-class SitePerProcessCustomTextInputManagerFilteringTest
-    : public SitePerProcessTextInputManagerTest {
- public:
-  SitePerProcessCustomTextInputManagerFilteringTest() {}
-  ~SitePerProcessCustomTextInputManagerFilteringTest() override {}
-
-  void CreatedBrowserMainParts(content::BrowserMainParts* parts) override {
-    SitePerProcessTextInputManagerTest::CreatedBrowserMainParts(parts);
-    browser_client_ = std::make_unique<TestBrowserClient>();
-  }
-
-  void TearDown() override {
-    browser_client_.reset();
-    SitePerProcessTextInputManagerTest::TearDown();
-  }
-
-  scoped_refptr<content::TestTextInputClientMessageFilter>
-  GetTextInputClientMessageFilterForProcess(
-      content::RenderProcessHost* process_host) const {
-    return browser_client_->GetTextInputClientMessageFilterForProcess(
-        process_host);
-  }
-
- private:
-  std::unique_ptr<TestBrowserClient> browser_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(SitePerProcessCustomTextInputManagerFilteringTest);
-};
-
 // This test verifies that when a word lookup result comes from the renderer
 // after the target RenderWidgetHost has been deleted, the browser will not
 // crash. This test covers the case where the target RenderWidgetHost is that of
 // an OOPIF.
 IN_PROC_BROWSER_TEST_F(
-    SitePerProcessCustomTextInputManagerFilteringTest,
+    SitePerProcessTextInputManagerTest,
     DoNotCrashBrowserInWordLookUpForDestroyedWidget_ChildFrame) {
   std::unique_ptr<content::WebContents> new_contents =
       content::WebContents::Create(content::WebContents::CreateParams(
           active_contents()->GetBrowserContext(), nullptr));
   content::WebContents* raw_new_contents = new_contents.get();
   browser()->tab_strip_model()->InsertWebContentsAt(1, std::move(new_contents),
-                                                    TabStripModel::ADD_ACTIVE);
+                                                    AddTabTypes::ADD_ACTIVE);
   EXPECT_EQ(active_contents(), raw_new_contents);
 
   // Simple page with 1 cross origin (out-of-process) <iframe>.
@@ -1465,33 +1329,30 @@ IN_PROC_BROWSER_TEST_F(
                             "document.querySelector('input').focus();"
                             "document.querySelector('input').select();"));
 
-  content::RenderWidgetHostView* child_view = child_frame->GetView();
-  scoped_refptr<content::TestTextInputClientMessageFilter>
-      child_message_filter = GetTextInputClientMessageFilterForProcess(
-          child_view->GetRenderWidgetHost()->GetProcess());
-  DCHECK(child_message_filter);
+  content::TextInputTestLocalFrame text_input_local_frame;
+  text_input_local_frame.SetUp(child_frame);
 
   // We need to wait for test scenario to complete before leaving this block.
   base::RunLoop test_complete_waiter;
 
   // Destroy the RenderWidgetHost from the browser side right after the
-  // dictionary IPC is received. The destruction is post tasked to UI thread.
-  int32_t child_process_id =
-      child_view->GetRenderWidgetHost()->GetProcess()->GetID();
+  // dictionary message is received. The destruction is post tasked to UI
+  // thread.
+  int32_t child_process_id = child_frame->GetProcess()->GetID();
   int32_t child_frame_routing_id = child_frame->GetRoutingID();
-  child_message_filter->SetStringForRangeCallback(base::Bind(
+
+  text_input_local_frame.SetStringForRangeCallback(base::BindRepeating(
       [](int32_t process_id, int32_t routing_id,
-         const base::Closure& callback_on_io) {
-        // This runs before TextInputClientMac gets to handle the IPC. Then,
-        // by the time TextInputClientMac calls back into UI to show the
+         const base::RepeatingClosure& callback_on_io) {
+        // This runs before TextInputClientMac gets to handle the mojo message.
+        // Then, by the time TextInputClientMac calls back into UI to show the
         // dictionary, the target RWH is already destroyed which will be a
         // close enough repro for the crash in https://crbug.com/737032.
         ASSERT_TRUE(content::DestroyRenderWidgetHost(process_id, routing_id));
 
         // Quit the run loop on IO to make sure the message handler of
         // TextInputClientMac has successfully run on UI thread.
-        base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::IO},
-                                 callback_on_io);
+        content::GetIOThreadTaskRunner({})->PostTask(FROM_HERE, callback_on_io);
       },
       child_process_id, child_frame_routing_id,
       test_complete_waiter.QuitClosure()));
@@ -1515,14 +1376,14 @@ IN_PROC_BROWSER_TEST_F(
 // crash. This test covers the case where the target RenderWidgetHost is that of
 // the main frame (no OOPIFs on page).
 IN_PROC_BROWSER_TEST_F(
-    SitePerProcessCustomTextInputManagerFilteringTest,
+    SitePerProcessTextInputManagerTest,
     DoNotCrashBrowserInWordLookUpForDestroyedWidget_MainFrame) {
   std::unique_ptr<content::WebContents> new_contents =
       content::WebContents::Create(content::WebContents::CreateParams(
           active_contents()->GetBrowserContext(), nullptr));
   content::WebContents* raw_new_contents = new_contents.get();
   browser()->tab_strip_model()->InsertWebContentsAt(1, std::move(new_contents),
-                                                    TabStripModel::ADD_ACTIVE);
+                                                    AddTabTypes::ADD_ACTIVE);
   EXPECT_EQ(active_contents(), raw_new_contents);
 
   // Simple page with no <iframe>s.
@@ -1535,33 +1396,31 @@ IN_PROC_BROWSER_TEST_F(
                             "document.querySelector('input').focus();"
                             "document.querySelector('input').select();"));
 
+  content::TextInputTestLocalFrame text_input_local_frame;
+  text_input_local_frame.SetUp(main_frame);
+
   content::RenderWidgetHostView* page_rwhv = main_frame->GetView();
-  scoped_refptr<content::TestTextInputClientMessageFilter> message_filter =
-      GetTextInputClientMessageFilterForProcess(
-          page_rwhv->GetRenderWidgetHost()->GetProcess());
-  DCHECK(message_filter);
 
   // We need to wait for test scenario to complete before leaving this block.
   base::RunLoop test_complete_waiter;
 
   // Destroy the RenderWidgetHost from the browser side right after the
-  // dictionary IPC is received. The destruction is post tasked to UI thread.
-  int32_t main_frame_process_id =
-      page_rwhv->GetRenderWidgetHost()->GetProcess()->GetID();
+  // dictionary message is received. The destruction is post tasked to UI
+  // thread.
+  int32_t main_frame_process_id = main_frame->GetProcess()->GetID();
   int32_t main_frame_routing_id = main_frame->GetRoutingID();
-  message_filter->SetStringForRangeCallback(base::Bind(
+  text_input_local_frame.SetStringForRangeCallback(base::BindRepeating(
       [](int32_t process_id, int32_t routing_id,
-         const base::Closure& callback_on_io) {
-        // This runs before TextInputClientMac gets to handle the IPC. Then,
-        // by the time TextInputClientMac calls back into UI to show the
+         const base::RepeatingClosure& callback_on_io) {
+        // This runs before TextInputClientMac gets to handle the mojo message.
+        // Then, by the time TextInputClientMac calls back into UI to show the
         // dictionary, the target RWH is already destroyed which will be a
         // close enough repro for the crash in https://crbug.com/737032.
         ASSERT_TRUE(content::DestroyRenderWidgetHost(process_id, routing_id));
 
         // Quit the run loop on IO to make sure the message handler of
         // TextInputClientMac has successfully run on UI thread.
-        base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::IO},
-                                 callback_on_io);
+        content::GetIOThreadTaskRunner({})->PostTask(FROM_HERE, callback_on_io);
       },
       main_frame_process_id, main_frame_routing_id,
       test_complete_waiter.QuitClosure()));
@@ -1574,4 +1433,4 @@ IN_PROC_BROWSER_TEST_F(
 }
 #endif  //  defined(MAC_OSX)
 
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)

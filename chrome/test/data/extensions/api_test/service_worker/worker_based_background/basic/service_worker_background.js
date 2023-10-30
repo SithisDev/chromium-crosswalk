@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@ const isInstanceOfServiceWorkerGlobalScope =
 
 chrome.tabs.onCreated.addListener(tab => {
   console.log('onCreated');
-  console.log(tab.url);
-  var url = new URL(tab.url);
+  console.log(tab.pendingUrl);
+  var url = new URL(tab.pendingUrl);
   var isAboutBlank = url.href == 'about:blank';
 
   // Note: Ignore 'about:blank' navigations.

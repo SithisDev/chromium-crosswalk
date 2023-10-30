@@ -1,9 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/signin/signin_promo_util.h"
 
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "components/prefs/pref_service.h"
@@ -15,7 +16,7 @@
 namespace signin {
 
 bool ShouldShowPromo(Profile* profile) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // There's no need to show the sign in promo on cros since cros users are
   // already logged in.
   return false;
@@ -30,8 +31,8 @@ bool ShouldShowPromo(Profile* profile) {
   // primary profile.
   Profile* original_profile = profile->GetOriginalProfile();
 
-  // Don't show for supervised profiles.
-  if (original_profile->IsSupervised())
+  // Don't show for supervised child profiles.
+  if (original_profile->IsChild())
     return false;
 
   // Don't show if sign-in is not allowed.
@@ -41,7 +42,7 @@ bool ShouldShowPromo(Profile* profile) {
   // Display the signin promo if the user is not signed in.
   signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(original_profile);
-  return !identity_manager->HasPrimaryAccount();
+  return !identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSync);
 #endif
 }
 

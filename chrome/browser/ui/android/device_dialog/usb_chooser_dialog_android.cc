@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,8 @@
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/android/chrome_jni_headers/UsbChooserDialog_jni.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/ssl/security_state_tab_helper.h"
 #include "chrome/browser/vr/vr_tab_helper.h"
 #include "chrome/common/url_constants.h"
@@ -28,7 +30,7 @@
 // static
 std::unique_ptr<UsbChooserDialogAndroid> UsbChooserDialogAndroid::Create(
     content::RenderFrameHost* render_frame_host,
-    std::unique_ptr<ChooserController> controller,
+    std::unique_ptr<permissions::ChooserController> controller,
     base::OnceClosure on_close) {
   content::WebContents* web_contents =
       content::WebContents::FromRenderFrameHost(render_frame_host);
@@ -52,11 +54,19 @@ std::unique_ptr<UsbChooserDialogAndroid> UsbChooserDialogAndroid::Create(
       SecurityStateTabHelper::FromWebContents(web_contents);
   DCHECK(helper);
 
+  Profile* profile =
+      Profile::FromBrowserContext(render_frame_host->GetBrowserContext());
+  DCHECK(profile);
+
+  base::android::ScopedJavaLocalRef<jobject> j_profile_android =
+      ProfileAndroid::FromProfile(profile)->GetJavaObject();
+  DCHECK(!j_profile_android.is_null());
+
   auto dialog = std::make_unique<UsbChooserDialogAndroid>(std::move(controller),
                                                           std::move(on_close));
   dialog->java_dialog_.Reset(Java_UsbChooserDialog_create(
       env, window_android, origin_string, helper->GetSecurityLevel(),
-      reinterpret_cast<intptr_t>(dialog.get())));
+      j_profile_android, reinterpret_cast<intptr_t>(dialog.get())));
   if (dialog->java_dialog_.is_null())
     return nullptr;
 
@@ -64,7 +74,7 @@ std::unique_ptr<UsbChooserDialogAndroid> UsbChooserDialogAndroid::Create(
 }
 
 UsbChooserDialogAndroid::UsbChooserDialogAndroid(
-    std::unique_ptr<ChooserController> controller,
+    std::unique_ptr<permissions::ChooserController> controller,
     base::OnceClosure on_close)
     : controller_(std::move(controller)), on_close_(std::move(on_close)) {
   controller_->set_view(this);
@@ -94,7 +104,7 @@ void UsbChooserDialogAndroid::OnOptionAdded(size_t index) {
   std::string item_id_str = base::NumberToString(item_id);
   item_id_map_.insert(item_id_map_.begin() + index, item_id_str);
 
-  base::string16 device_name = controller_->GetOption(index);
+  std::u16string device_name = controller_->GetOption(index);
   Java_UsbChooserDialog_addDevice(
       env, java_dialog_,
       base::android::ConvertUTF8ToJavaString(env, item_id_str),
@@ -126,25 +136,21 @@ void UsbChooserDialogAndroid::OnRefreshStateChanged(bool refreshing) {
 
 void UsbChooserDialogAndroid::OnItemSelected(
     JNIEnv* env,
-    const base::android::JavaParamRef<jobject>& obj,
     const base::android::JavaParamRef<jstring>& item_id_jstring) {
   std::string item_id =
       base::android::ConvertJavaStringToUTF8(env, item_id_jstring);
   auto it = std::find(item_id_map_.begin(), item_id_map_.end(), item_id);
   DCHECK(it != item_id_map_.end());
-  controller_->Select({std::distance(item_id_map_.begin(), it)});
+  controller_->Select(
+      {static_cast<size_t>(std::distance(item_id_map_.begin(), it))});
   std::move(on_close_).Run();
 }
 
-void UsbChooserDialogAndroid::OnDialogCancelled(
-    JNIEnv* env,
-    const base::android::JavaParamRef<jobject>& obj) {
+void UsbChooserDialogAndroid::OnDialogCancelled(JNIEnv* env) {
   Cancel();
 }
 
-void UsbChooserDialogAndroid::LoadUsbHelpPage(
-    JNIEnv* env,
-    const base::android::JavaParamRef<jobject>& obj) {
+void UsbChooserDialogAndroid::LoadUsbHelpPage(JNIEnv* env) {
   controller_->OpenHelpCenterUrl();
   Cancel();
 }

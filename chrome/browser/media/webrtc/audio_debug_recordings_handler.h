@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 
@@ -30,9 +31,10 @@ class AudioDebugRecordingSession;
 class AudioDebugRecordingsHandler
     : public base::RefCountedThreadSafe<AudioDebugRecordingsHandler> {
  public:
-  typedef base::Callback<void(bool, const std::string&)> GenericDoneCallback;
-  typedef base::Callback<void(const std::string&)> RecordingErrorCallback;
-  typedef base::Callback<void(const std::string&, bool, bool)>
+  typedef base::OnceCallback<void(bool, const std::string&)>
+      GenericDoneCallback;
+  typedef base::OnceCallback<void(const std::string&)> RecordingErrorCallback;
+  typedef base::OnceCallback<void(const std::string&, bool, bool)>
       RecordingDoneCallback;
 
   // Key used to attach the handler to the RenderProcessHost
@@ -40,6 +42,10 @@ class AudioDebugRecordingsHandler
 
   explicit AudioDebugRecordingsHandler(
       content::BrowserContext* browser_context);
+
+  AudioDebugRecordingsHandler(const AudioDebugRecordingsHandler&) = delete;
+  AudioDebugRecordingsHandler& operator=(const AudioDebugRecordingsHandler&) =
+      delete;
 
   // Starts an audio debug recording. The recording lasts the given |delay|,
   // unless |delay| is zero, in which case recording will continue until
@@ -50,15 +56,15 @@ class AudioDebugRecordingsHandler
   // of |callback|.
   void StartAudioDebugRecordings(content::RenderProcessHost* host,
                                  base::TimeDelta delay,
-                                 const RecordingDoneCallback& callback,
-                                 const RecordingErrorCallback& error_callback);
+                                 RecordingDoneCallback callback,
+                                 RecordingErrorCallback error_callback);
 
   // Stops an audio debug recording. |callback| is invoked once recording
   // stops. If no recording was in progress, |error_callback| is invoked instead
   // of |callback|.
   void StopAudioDebugRecordings(content::RenderProcessHost* host,
-                                const RecordingDoneCallback& callback,
-                                const RecordingErrorCallback& error_callback);
+                                RecordingDoneCallback callback,
+                                RecordingErrorCallback error_callback);
 
  private:
   friend class base::RefCountedThreadSafe<AudioDebugRecordingsHandler>;
@@ -66,22 +72,22 @@ class AudioDebugRecordingsHandler
   virtual ~AudioDebugRecordingsHandler();
 
   // Helper for starting audio debug recordings.
-  void DoStartAudioDebugRecordings(content::RenderProcessHost* host,
+  void DoStartAudioDebugRecordings(int render_process_host_id,
                                    base::TimeDelta delay,
-                                   const RecordingDoneCallback& callback,
-                                   const RecordingErrorCallback& error_callback,
+                                   RecordingDoneCallback callback,
+                                   RecordingErrorCallback error_callback,
                                    const base::FilePath& log_directory);
 
   // Helper for stopping audio debug recordings.
-  void DoStopAudioDebugRecordings(content::RenderProcessHost* host,
+  void DoStopAudioDebugRecordings(int render_process_host_id,
                                   bool is_manual_stop,
                                   uint64_t audio_debug_recordings_id,
-                                  const RecordingDoneCallback& callback,
-                                  const RecordingErrorCallback& error_callback,
+                                  RecordingDoneCallback callback,
+                                  RecordingErrorCallback error_callback,
                                   const base::FilePath& log_directory);
 
   // The browser context associated with our renderer process.
-  content::BrowserContext* const browser_context_;
+  const raw_ptr<content::BrowserContext> browser_context_;
 
   // This counter allows saving each debug recording in separate files.
   uint64_t current_audio_debug_recordings_id_;
@@ -89,8 +95,6 @@ class AudioDebugRecordingsHandler
   // Used for controlling debug recordings.
   std::unique_ptr<media::AudioDebugRecordingSession>
       audio_debug_recording_session_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioDebugRecordingsHandler);
 };
 
 #endif  // CHROME_BROWSER_MEDIA_WEBRTC_AUDIO_DEBUG_RECORDINGS_HANDLER_H_

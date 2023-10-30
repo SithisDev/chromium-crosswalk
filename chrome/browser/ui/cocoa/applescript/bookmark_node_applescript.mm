@@ -1,10 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/applescript/bookmark_node_applescript.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #import "base/mac/foundation_util.h"
 #import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
@@ -15,6 +15,7 @@
 #import "chrome/browser/ui/cocoa/applescript/bookmark_item_applescript.h"
 #import "chrome/browser/ui/cocoa/applescript/error_applescript.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#import "components/bookmarks/common/bookmark_metrics.h"
 
 using bookmarks::BookmarkModel;
 using bookmarks::BookmarkNode;
@@ -25,9 +26,9 @@ using bookmarks::BookmarkNode;
 
 @implementation BookmarkNodeAppleScript
 
-@synthesize tempTitle = tempTitle_;
+@synthesize tempTitle = _tempTitle;
 
-- (id)init {
+- (instancetype)init {
   if ((self = [super init])) {
     BookmarkModel* model = [self bookmarkModel];
     if (!model) {
@@ -44,12 +45,11 @@ using bookmarks::BookmarkNode;
 }
 
 - (void)dealloc {
-  [tempTitle_ release];
+  [_tempTitle release];
   [super dealloc];
 }
 
-
-- (id)initWithBookmarkNode:(const BookmarkNode*)aBookmarkNode {
+- (instancetype)initWithBookmarkNode:(const BookmarkNode*)aBookmarkNode {
   if (!aBookmarkNode) {
     [self release];
     return nil;
@@ -60,7 +60,7 @@ using bookmarks::BookmarkNode;
     // (eg user deleting a folder) the applescript runtime calls
     // bookmarkFolders/bookmarkItems in BookmarkFolderAppleScript
     // and this particular bookmark item/folder is never returned.
-    bookmarkNode_ = aBookmarkNode;
+    _bookmarkNode = aBookmarkNode;
 
     base::scoped_nsobject<NSNumber> numID(
         [[NSNumber alloc] initWithLongLong:aBookmarkNode->id()]);
@@ -75,7 +75,7 @@ using bookmarks::BookmarkNode;
   // (eg user deleting a folder) the applescript runtime calls
   // bookmarkFolders/bookmarkItems in BookmarkFolderAppleScript
   // and this particular bookmark item/folder is never returned.
-  bookmarkNode_ = aBookmarkNode;
+  _bookmarkNode = aBookmarkNode;
 
   base::scoped_nsobject<NSNumber> numID(
       [[NSNumber alloc] initWithLongLong:aBookmarkNode->id()]);
@@ -85,17 +85,17 @@ using bookmarks::BookmarkNode;
 }
 
 - (NSString*)title {
-  if (!bookmarkNode_)
-    return tempTitle_;
+  if (!_bookmarkNode)
+    return _tempTitle;
 
-  return base::SysUTF16ToNSString(bookmarkNode_->GetTitle());
+  return base::SysUTF16ToNSString(_bookmarkNode->GetTitle());
 }
 
 - (void)setTitle:(NSString*)aTitle {
   // If the scripter enters |make new bookmarks folder with properties
   // {title:"foo"}|, the node has not yet been created so title is stored in the
   // temp title.
-  if (!bookmarkNode_) {
+  if (!_bookmarkNode) {
     [self setTempTitle:aTitle];
     return;
   }
@@ -104,14 +104,15 @@ using bookmarks::BookmarkNode;
   if (!model)
     return;
 
-  model->SetTitle(bookmarkNode_, base::SysNSStringToUTF16(aTitle));
+  model->SetTitle(_bookmarkNode, base::SysNSStringToUTF16(aTitle),
+                  bookmarks::metrics::BookmarkEditSource::kOther);
 }
 
 - (NSNumber*)index {
-  const BookmarkNode* parent = bookmarkNode_->parent();
-  int index = parent->GetIndexOf(bookmarkNode_);
+  const BookmarkNode* parent = _bookmarkNode->parent();
+  size_t index = parent->GetIndexOf(_bookmarkNode).value();
   // NOTE: AppleScript is 1-Based.
-  return [NSNumber numberWithInt:index+1];
+  return @(index + 1);
 }
 
 - (BookmarkModel*)bookmarkModel {

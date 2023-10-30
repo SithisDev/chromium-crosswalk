@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,9 +63,9 @@ var allTests = [
     assertEq(body, cancelButton.parent);
 
     assertEq(undefined, okButton.previousSibling);
-    assertEq(undefined, okButton.firstChild);
+    assertEq({}, okButton.firstChild);
     assertEq(userNameInput, okButton.nextSibling);
-    assertEq(undefined, okButton.lastChild);
+    assertEq({}, okButton.lastChild);
 
     assertEq(okButton, userNameInput.previousSibling);
     assertEq(cancelButton, userNameInput.nextSibling);

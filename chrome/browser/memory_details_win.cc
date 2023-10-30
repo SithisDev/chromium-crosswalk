@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,10 +16,10 @@
 #include "base/bind.h"
 #include "base/file_version_info.h"
 #include "base/files/file_path.h"
+#include "base/logging.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
@@ -31,15 +31,13 @@
 #include "content/public/common/process_type.h"
 #include "ui/base/l10n/l10n_util.h"
 
-using content::BrowserThread;
-
 MemoryDetails::MemoryDetails() {
   base::FilePath browser_process_path;
   base::PathService::Get(base::FILE_EXE, &browser_process_path);
 
   ProcessData process;
   process.name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-  process.process_name = browser_process_path.BaseName().value();
+  process.process_name = browser_process_path.BaseName().AsUTF16Unsafe();
   process_data_.push_back(process);
 }
 
@@ -72,7 +70,7 @@ void MemoryDetails::CollectProcessData(
         PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid));
     if (!process_handle.IsValid())
       continue;
-    if (_wcsicmp(process_data_[0].process_name.c_str(),
+    if (_wcsicmp(base::as_wcstr(process_data_[0].process_name),
                  process_entry.szExeFile) != 0) {
       continue;
     }
@@ -101,7 +99,7 @@ void MemoryDetails::CollectProcessData(
   } while (::Process32Next(snapshot.Get(), &process_entry));
 
   // Finally return to the browser thread.
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&MemoryDetails::CollectChildInfoOnUIThread, this));
 }

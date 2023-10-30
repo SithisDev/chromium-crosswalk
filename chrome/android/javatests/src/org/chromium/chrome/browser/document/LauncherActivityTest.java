@@ -1,10 +1,8 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.document;
-
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
@@ -14,8 +12,10 @@ import android.net.Uri;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 
+import androidx.test.filters.SmallTest;
+
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -25,17 +25,15 @@ import org.junit.runner.RunWith;
 import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -43,17 +41,15 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
-@RetryOnFailure
 public class LauncherActivityTest {
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
+    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
     private Context mContext;
-    private static final long DEVICE_STARTUP_TIMEOUT_MS = scaleTimeout(15000);
+    private static final long DEVICE_STARTUP_TIMEOUT_MS = 15000L;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContext = InstrumentationRegistry.getTargetContext();
     }
 
@@ -103,12 +99,10 @@ public class LauncherActivityTest {
 
         // Could crash after the activity is created, wait for the tab to stop loading.
         final ChromeActivity activity = (ChromeActivity) tryLaunchingChrome(intent);
-        CriteriaHelper.pollUiThread(new Criteria("ChromeActivity does not have a tab.") {
-            @Override
-            public boolean isSatisfied() {
-                Tab tab = activity.getActivityTab();
-                return tab != null && !tab.isLoading();
-            }
+        CriteriaHelper.pollUiThread(() -> {
+            Tab tab = activity.getActivityTab();
+            Criteria.checkThat(tab, Matchers.notNullValue());
+            Criteria.checkThat(tab.isLoading(), Matchers.is(false));
         }, DEVICE_STARTUP_TIMEOUT_MS, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
     }
 
@@ -116,26 +110,19 @@ public class LauncherActivityTest {
         mContext.startActivity(intent);
 
         // Check that ChromeLauncher Activity successfully launched
-        CriteriaHelper.pollInstrumentationThread(
-                Criteria.equals(ApplicationState.HAS_RUNNING_ACTIVITIES, new Callable<Integer>() {
-                    @Override
-                    public Integer call() {
-                        return ApplicationStatus.getStateForApplication();
-                    }
-                }));
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            Criteria.checkThat(ApplicationStatus.getStateForApplication(),
+                    Matchers.is(ApplicationState.HAS_RUNNING_ACTIVITIES));
+        });
 
         // Check that Chrome proper was successfully launched as a follow-up
         final AtomicReference<Activity> launchedActivity = new AtomicReference<>();
-        CriteriaHelper.pollInstrumentationThread(
-                new Criteria("ChromeLauncherActivity did not start Chrome") {
-                    @Override
-                    public boolean isSatisfied() {
-                        final List<Activity> activities = ApplicationStatus.getRunningActivities();
-                        if (activities.size() != 1) return false;
-                        launchedActivity.set(activities.get(0));
-                        return launchedActivity.get() instanceof ChromeActivity;
-                    }
-                }, DEVICE_STARTUP_TIMEOUT_MS, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            final List<Activity> activities = ApplicationStatus.getRunningActivities();
+            Criteria.checkThat(activities.size(), Matchers.is(1));
+            launchedActivity.set(activities.get(0));
+            Criteria.checkThat(launchedActivity.get(), Matchers.instanceOf(ChromeActivity.class));
+        }, DEVICE_STARTUP_TIMEOUT_MS, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
         return launchedActivity.get();
     }
 

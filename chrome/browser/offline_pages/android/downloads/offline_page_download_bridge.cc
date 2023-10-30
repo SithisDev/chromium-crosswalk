@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,18 @@
 
 #include "base/android/jni_string.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/guid.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/android/chrome_jni_headers/OfflinePageDownloadBridge_jni.h"
-#include "chrome/browser/android/download/download_controller_base.h"
 #include "chrome/browser/android/profile_key_util.h"
 #include "chrome/browser/android/tab_android.h"
+#include "chrome/browser/download/android/download_controller_base.h"
+#include "chrome/browser/download/android/download_dialog_utils.h"
+#include "chrome/browser/download/android/duplicate_download_dialog_bridge.h"
+#include "chrome/browser/flags/android/chrome_feature_list.h"
 #include "chrome/browser/image_fetcher/image_decoder_impl.h"
 #include "chrome/browser/offline_items_collection/offline_content_aggregator_factory.h"
 #include "chrome/browser/offline_pages/android/downloads/offline_page_infobar_delegate.h"
@@ -31,6 +35,7 @@
 #include "chrome/browser/offline_pages/visuals_decoder_impl.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/transition_manager/full_browser_transition_manager.h"
 #include "components/download/public/common/download_url_parameters.h"
@@ -70,6 +75,11 @@ namespace android {
 
 namespace {
 
+void OnDuplicateDialogConfirmed(base::OnceClosure callback, bool accepted) {
+  if (accepted)
+    std::move(callback).Run();
+}
+
 void OnShareInfoRetrieved(std::unique_ptr<OfflinePageShareHelper>,
                           ShareCallback share_callback,
                           ShareResult result,
@@ -93,17 +103,16 @@ class DownloadUIAdapterDelegate : public DownloadUIAdapter::Delegate {
   // DownloadUIAdapter::Delegate
   bool IsVisibleInUI(const ClientId& client_id) override;
   void SetUIAdapter(DownloadUIAdapter* ui_adapter) override;
-  void OpenItem(const OfflineItem& item,
-                int64_t offline_id,
-                offline_items_collection::LaunchLocation location) override;
-  bool MaybeSuppressNotification(const std::string& origin,
-                                 const ClientId& id) override;
+  void OpenItem(
+      const OfflineItem& item,
+      int64_t offline_id,
+      const offline_items_collection::OpenParams& open_params) override;
   void GetShareInfoForItem(const ContentId& id,
                            ShareCallback share_callback) override;
 
  private:
   // Not owned, cached service pointer.
-  OfflinePageModel* model_;
+  raw_ptr<OfflinePageModel> model_;
 };
 
 DownloadUIAdapterDelegate::DownloadUIAdapterDelegate(OfflinePageModel* model)
@@ -120,31 +129,21 @@ void DownloadUIAdapterDelegate::SetUIAdapter(DownloadUIAdapter* ui_adapter) {}
 void DownloadUIAdapterDelegate::OpenItem(
     const OfflineItem& item,
     int64_t offline_id,
-    offline_items_collection::LaunchLocation location) {
+    const offline_items_collection::OpenParams& open_params) {
   JNIEnv* env = AttachCurrentThread();
   Java_OfflinePageDownloadBridge_openItem(
-      env, ConvertUTF8ToJavaString(env, item.page_url.spec()), offline_id,
-      static_cast<int>(location),
+      env, ConvertUTF8ToJavaString(env, item.url.spec()), offline_id,
+      static_cast<int>(open_params.launch_location),
+      open_params.open_in_incognito,
       offline_pages::ShouldOfflinePagesInDownloadHomeOpenInCct());
-}
-
-bool DownloadUIAdapterDelegate::MaybeSuppressNotification(
-    const std::string& origin,
-    const ClientId& id) {
-  // Do not suppress notification if chrome.
-  if (origin == "" || !IsOfflinePagesSuppressNotificationsEnabled())
-    return false;
-  JNIEnv* env = AttachCurrentThread();
-  return Java_OfflinePageDownloadBridge_maybeSuppressNotification(
-      env, ConvertUTF8ToJavaString(env, origin),
-      ConvertUTF8ToJavaString(env, id.id));
 }
 
 void DownloadUIAdapterDelegate::GetShareInfoForItem(
     const ContentId& id,
     ShareCallback share_callback) {
   auto share_helper = std::make_unique<OfflinePageShareHelper>(model_);
-  share_helper->GetShareInfo(
+  auto* const share_helper_ptr = share_helper.get();
+  share_helper_ptr->GetShareInfo(
       id, base::BindOnce(&OnShareInfoRetrieved, std::move(share_helper),
                          std::move(share_callback)));
 }
@@ -207,14 +206,9 @@ void SavePageIfNotNavigatedAway(const GURL& url,
   offline_pages::RecentTabHelper* tab_helper =
       RecentTabHelper::FromWebContents(web_contents);
   if (!tab_helper) {
-    if (request_id != OfflinePageModel::kInvalidOfflineId) {
-      offline_pages::RequestCoordinator* request_coordinator =
-          offline_pages::RequestCoordinatorFactory::GetForBrowserContext(
-              web_contents->GetBrowserContext());
-      if (request_coordinator)
-        request_coordinator->EnableForOffliner(request_id, client_id);
-      else
-        DVLOG(1) << "SavePageIfNotNavigatedAway has no valid coordinator.";
+    if (request_id != OfflinePageModel::kInvalidOfflineId &&
+        request_coordinator) {
+      request_coordinator->EnableForOffliner(request_id, client_id);
     }
     return;
   }
@@ -239,10 +233,12 @@ void DuplicateCheckDone(const GURL& url,
 
   bool duplicate_request_exists =
       result == OfflinePageUtils::DuplicateCheckResult::DUPLICATE_REQUEST_FOUND;
-  OfflinePageInfoBarDelegate::Create(
-      base::Bind(&SavePageIfNotNavigatedAway, url, original_url, j_tab_ref,
-                 origin),
-      url, duplicate_request_exists, web_contents);
+  base::OnceClosure callback = base::BindOnce(&SavePageIfNotNavigatedAway, url,
+                                              original_url, j_tab_ref, origin);
+  DuplicateDownloadDialogBridge::GetInstance()->Show(
+      url.spec(), DownloadDialogUtils::GetDisplayURLForPageURL(url),
+      -1 /*total_bytes*/, duplicate_request_exists, web_contents,
+      base::BindOnce(&OnDuplicateDialogConfirmed, std::move(callback)));
 }
 
 
@@ -255,25 +251,27 @@ content::WebContents* GetWebContentsByFrameID(int render_process_id,
   return content::WebContents::FromRenderFrameHost(render_frame_host);
 }
 
-content::ResourceRequestInfo::WebContentsGetter GetWebContentsGetter(
+content::WebContents::Getter GetWebContentsGetter(
     content::WebContents* web_contents) {
-  // PlzNavigate: The FrameTreeNode ID should be used to access the WebContents.
-  int frame_tree_node_id = web_contents->GetMainFrame()->GetFrameTreeNodeId();
-  if (frame_tree_node_id != -1) {
-    return base::Bind(content::WebContents::FromFrameTreeNodeId,
-                      frame_tree_node_id);
+  // The FrameTreeNode ID should be used to access the WebContents.
+  int frame_tree_node_id =
+      web_contents->GetPrimaryMainFrame()->GetFrameTreeNodeId();
+  if (frame_tree_node_id != content::RenderFrameHost::kNoFrameTreeNodeId) {
+    return base::BindRepeating(content::WebContents::FromFrameTreeNodeId,
+                               frame_tree_node_id);
   }
 
   // In other cases, use the RenderProcessHost ID + RenderFrameHost ID to get
   // the WebContents.
-  return base::Bind(&GetWebContentsByFrameID,
-                    web_contents->GetMainFrame()->GetProcess()->GetID(),
-                    web_contents->GetMainFrame()->GetRoutingID());
+  return base::BindRepeating(
+      &GetWebContentsByFrameID,
+      web_contents->GetPrimaryMainFrame()->GetProcess()->GetID(),
+      web_contents->GetPrimaryMainFrame()->GetRoutingID());
 }
 
 void DownloadAsFile(content::WebContents* web_contents, const GURL& url) {
-  content::DownloadManager* dlm = content::BrowserContext::GetDownloadManager(
-      web_contents->GetBrowserContext());
+  content::DownloadManager* dlm =
+      web_contents->GetBrowserContext()->GetDownloadManager();
   std::unique_ptr<download::DownloadUrlParameters> dl_params(
       content::DownloadRequestUtils::CreateDownloadForWebContentsMainFrame(
           web_contents, url,
@@ -295,7 +293,7 @@ void DownloadAsFile(content::WebContents* web_contents, const GURL& url) {
 }
 
 void OnOfflinePageAcquireFileAccessPermissionDone(
-    const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
+    const content::WebContents::Getter& web_contents_getter,
     const ScopedJavaGlobalRef<jobject>& j_tab_ref,
     const std::string& origin,
     bool granted) {
@@ -325,7 +323,8 @@ void OnOfflinePageAcquireFileAccessPermissionDone(
       chrome::GetBrowserContextRedirectedInIncognito(
           web_contents->GetBrowserContext()),
       url,
-      base::Bind(&DuplicateCheckDone, url, original_url, j_tab_ref, origin));
+      base::BindOnce(&DuplicateCheckDone, url, original_url, j_tab_ref,
+                     origin));
 }
 
 void InitializeBackendOnProfileCreated(Profile* profile) {
@@ -387,18 +386,18 @@ void JNI_OfflinePageDownloadBridge_StartDownload(
 
   // Ensure that the storage permission is granted since the target file
   // is going to be placed in the public directory.
-  content::ResourceRequestInfo::WebContentsGetter web_contents_getter =
+  content::WebContents::Getter web_contents_getter =
       GetWebContentsGetter(web_contents);
   DownloadControllerBase::Get()->AcquireFileAccessPermission(
       web_contents_getter,
-      base::Bind(&OnOfflinePageAcquireFileAccessPermissionDone,
-                 web_contents_getter, j_tab_ref, origin));
+      base::BindOnce(&OnOfflinePageAcquireFileAccessPermissionDone,
+                     web_contents_getter, j_tab_ref, origin));
 }
 
 static jlong JNI_OfflinePageDownloadBridge_Init(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
-  ProfileKey* key = ::android::GetLastUsedProfileKey();
+  ProfileKey* key = ::android::GetLastUsedRegularProfileKey();
   FullBrowserTransitionManager::Get()->RegisterCallbackOnProfileCreation(
       key, base::BindOnce(&InitializeBackendOnProfileCreated));
 

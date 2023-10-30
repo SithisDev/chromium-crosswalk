@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time/time.h"
@@ -23,7 +22,7 @@
 
 namespace {
 
-constexpr base::char16 kLogFileExtension[] = L"log";
+constexpr wchar_t kLogFileExtension[] = L"log";
 
 }  // namespace
 
@@ -48,7 +47,7 @@ int main(int, char**) {
       exe_file_path.ReplaceExtension(kLogFileExtension));
   logging::LoggingSettings logging_settings;
   logging_settings.logging_dest = logging::LOG_TO_FILE;
-  logging_settings.log_file = log_file_path.value().c_str();
+  logging_settings.log_file_path = log_file_path.value().c_str();
   success = logging::InitLogging(logging_settings);
   DCHECK(success);
 
@@ -69,7 +68,7 @@ int main(int, char**) {
     int sleep_minutes = 0;
     if (base::StringToInt(value, &sleep_minutes) && sleep_minutes > 0) {
       LOG(INFO) << "Process is sleeping for " << sleep_minutes << " minutes";
-      ::Sleep(base::TimeDelta::FromMinutes(sleep_minutes).InMilliseconds());
+      ::Sleep(base::Minutes(sleep_minutes).InMilliseconds());
     } else {
       LOG(ERROR) << "Invalid sleep delay value " << value;
     }
@@ -80,7 +79,7 @@ int main(int, char**) {
   if (command_line->HasSwitch(chrome_cleaner::kTestEventToSignal)) {
     LOG(INFO) << "Process is signaling event '"
               << chrome_cleaner::kTestEventToSignal << "'";
-    base::string16 event_name =
+    std::wstring event_name =
         command_line->GetSwitchValueNative(chrome_cleaner::kTestEventToSignal);
     base::win::ScopedHandle handle(
         ::OpenEvent(EVENT_ALL_ACCESS, TRUE, event_name.c_str()));

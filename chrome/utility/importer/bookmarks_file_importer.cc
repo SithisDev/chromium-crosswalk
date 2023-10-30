@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/stl_util.h"
 #include "chrome/common/importer/imported_bookmark_entry.h"
 #include "chrome/common/importer/importer_bridge.h"
 #include "chrome/common/importer/importer_data_types.h"
@@ -38,7 +37,7 @@ bool CanImportURL(const GURL& url) {
 
   // Filter out the URLs with unsupported schemes.
   const char* const kInvalidSchemes[] = {"wyciwyg", "place"};
-  for (size_t i = 0; i < base::size(kInvalidSchemes); ++i) {
+  for (size_t i = 0; i < std::size(kInvalidSchemes); ++i) {
     if (url.SchemeIs(kInvalidSchemes[i]))
       return false;
   }
@@ -51,8 +50,7 @@ bool CanImportURL(const GURL& url) {
   // that we support.
   if (url.SchemeIs(content::kChromeUIScheme) ||
       url.SchemeIs(url::kAboutScheme)) {
-    if (url.host_piece() == chrome::kChromeUIUberHost ||
-        url.host_piece() == chrome::kChromeUIAboutHost)
+    if (url.host_piece() == chrome::kChromeUIAboutHost)
       return true;
 
     GURL fixed_url(url_formatter::FixupURL(url.spec(), std::string()));
@@ -98,15 +96,12 @@ void BookmarksFileImporter::StartImport(
   favicon_base::FaviconUsageDataList favicons;
 
   bookmark_html_reader::ImportBookmarksFile(
-      base::Bind(IsImporterCancelled, base::Unretained(this)),
-      base::Bind(internal::CanImportURL),
-      source_profile.source_path,
-      &bookmarks,
-      &search_engines,
-      &favicons);
+      base::BindRepeating(IsImporterCancelled, base::Unretained(this)),
+      base::BindRepeating(internal::CanImportURL), source_profile.source_path,
+      &bookmarks, &search_engines, &favicons);
 
   if (!bookmarks.empty() && !cancelled()) {
-    base::string16 first_folder_name =
+    std::u16string first_folder_name =
         bridge->GetLocalizedString(IDS_BOOKMARK_GROUP);
     bridge->AddBookmarks(bookmarks, first_folder_name);
   }

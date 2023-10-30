@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,21 +10,23 @@
 #include <string>
 #include <utility>
 
+#include "ash/components/arc/mojom/file_system.mojom.h"
 #include "base/bind.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/optional.h"
 #include "base/strings/string_util.h"
-#include "chrome/browser/chromeos/arc/arc_util.h"
-#include "chrome/browser/chromeos/arc/fileapi/arc_documents_provider_root.h"
-#include "chrome/browser/chromeos/arc/fileapi/arc_documents_provider_root_map.h"
-#include "chrome/browser/chromeos/arc/fileapi/arc_documents_provider_util.h"
+#include "chrome/browser/ash/arc/arc_util.h"
+#include "chrome/browser/ash/arc/fileapi/arc_documents_provider_root.h"
+#include "chrome/browser/ash/arc/fileapi/arc_documents_provider_root_map.h"
+#include "chrome/browser/ash/arc/fileapi/arc_documents_provider_util.h"
+#include "chrome/browser/ash/arc/fileapi/arc_media_view_util.h"
 #include "chrome/browser/chromeos/fileapi/recent_file.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/arc/common/file_system.mojom.h"
 #include "content/public/browser/browser_thread.h"
-#include "storage/browser/fileapi/external_mount_points.h"
+#include "storage/browser/file_system/external_mount_points.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
+#include "url/origin.h"
 
 using content::BrowserThread;
 
@@ -33,23 +35,42 @@ namespace chromeos {
 namespace {
 
 const char kAndroidDownloadDirPrefix[] = "/storage/emulated/0/Download/";
+// The path of the MyFiles directory inside Android. The UUID "0000....2019" is
+// defined in ash/components/arc/volume_mounter/arc_volume_mounter_bridge.cc.
+// TODO(crbug.com/929031): Move MyFiles constants to a common place.
+const char kAndroidMyFilesDirPrefix[] =
+    "/storage/0000000000000000000000000000CAFEF00D2019/";
 
-const char kMediaDocumentsProviderAuthority[] =
-    "com.android.providers.media.documents";
+// Android's MediaDocumentsProvider.queryRecentDocuments() doesn't support
+// audio files, http://b/175155820
 const char* kMediaDocumentsProviderRootIds[] = {
-    "images_root", "videos_root",
+    arc::kImagesRootDocumentId,
+    arc::kVideosRootDocumentId,
+    arc::kDocumentsRootDocumentId,
 };
 
 base::FilePath GetRelativeMountPath(const std::string& root_id) {
-  base::FilePath mount_path = arc::GetDocumentsProviderMountPath(
-      kMediaDocumentsProviderAuthority,
-      // In MediaDocumentsProvider, |root_id| and |root_document_id| are
-      // the same.
-      root_id);
+  base::FilePath mount_path =
+      arc::GetDocumentsProviderMountPath(arc::kMediaDocumentsProviderAuthority,
+                                         // In MediaDocumentsProvider, |root_id|
+                                         // and |root_document_id| are the same.
+                                         root_id);
   base::FilePath relative_mount_path;
   base::FilePath(arc::kDocumentsProviderMountPointPath)
       .AppendRelativePath(mount_path, &relative_mount_path);
   return relative_mount_path;
+}
+
+bool IsInsideDownloadsOrMyFiles(const std::string& path) {
+  if (base::StartsWith(path, kAndroidDownloadDirPrefix,
+                       base::CompareCase::SENSITIVE)) {
+    return true;
+  }
+  if (base::StartsWith(path, kAndroidMyFilesDirPrefix,
+                       base::CompareCase::SENSITIVE)) {
+    return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -73,13 +94,17 @@ const char RecentArcMediaSource::kLoadHistogramName[] =
 class RecentArcMediaSource::MediaRoot {
  public:
   MediaRoot(const std::string& root_id, Profile* profile);
+
+  MediaRoot(const MediaRoot&) = delete;
+  MediaRoot& operator=(const MediaRoot&) = delete;
+
   ~MediaRoot();
 
   void GetRecentFiles(Params params);
 
  private:
   void OnGetRecentDocuments(
-      base::Optional<std::vector<arc::mojom::DocumentPtr>> maybe_documents);
+      absl::optional<std::vector<arc::mojom::DocumentPtr>> maybe_documents);
   void ScanDirectory(const base::FilePath& path);
   void OnReadDirectory(
       const base::FilePath& path,
@@ -89,6 +114,7 @@ class RecentArcMediaSource::MediaRoot {
 
   storage::FileSystemURL BuildDocumentsProviderUrl(
       const base::FilePath& path) const;
+  bool MatchesFileType(FileType file_type) const;
 
   // Set in the constructor.
   const std::string root_id_;
@@ -96,7 +122,7 @@ class RecentArcMediaSource::MediaRoot {
   const base::FilePath relative_mount_path_;
 
   // Set at the beginning of GetRecentFiles().
-  base::Optional<Params> params_;
+  absl::optional<Params> params_;
 
   // Number of in-flight ReadDirectory() calls by ScanDirectory().
   int num_inflight_readdirs_ = 0;
@@ -108,19 +134,16 @@ class RecentArcMediaSource::MediaRoot {
   // In case of multiple files with the same document ID found, the file with
   // lexicographically smallest URL is kept. A nullopt value means the
   // corresponding file is not (yet) found.
-  std::map<std::string, base::Optional<RecentFile>> document_id_to_file_;
+  std::map<std::string, absl::optional<RecentFile>> document_id_to_file_;
 
-  base::WeakPtrFactory<MediaRoot> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaRoot);
+  base::WeakPtrFactory<MediaRoot> weak_ptr_factory_{this};
 };
 
 RecentArcMediaSource::MediaRoot::MediaRoot(const std::string& root_id,
                                            Profile* profile)
     : root_id_(root_id),
       profile_(profile),
-      relative_mount_path_(GetRelativeMountPath(root_id)),
-      weak_ptr_factory_(this) {
+      relative_mount_path_(GetRelativeMountPath(root_id)) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
@@ -144,13 +167,20 @@ void RecentArcMediaSource::MediaRoot::GetRecentFiles(Params params) {
     return;
   }
 
-  runner->GetRecentDocuments(kMediaDocumentsProviderAuthority, root_id_,
-                             base::Bind(&MediaRoot::OnGetRecentDocuments,
-                                        weak_ptr_factory_.GetWeakPtr()));
+  if (!MatchesFileType(params_.value().file_type())) {
+    // Return immediately without results when this root's id does not match the
+    // requested file type.
+    OnComplete();
+    return;
+  }
+
+  runner->GetRecentDocuments(arc::kMediaDocumentsProviderAuthority, root_id_,
+                             base::BindOnce(&MediaRoot::OnGetRecentDocuments,
+                                            weak_ptr_factory_.GetWeakPtr()));
 }
 
 void RecentArcMediaSource::MediaRoot::OnGetRecentDocuments(
-    base::Optional<std::vector<arc::mojom::DocumentPtr>> maybe_documents) {
+    absl::optional<std::vector<arc::mojom::DocumentPtr>> maybe_documents) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(params_.has_value());
   DCHECK_EQ(0, num_inflight_readdirs_);
@@ -159,15 +189,14 @@ void RecentArcMediaSource::MediaRoot::OnGetRecentDocuments(
   // Initialize |document_id_to_file_| with recent document IDs returned.
   if (maybe_documents.has_value()) {
     for (const auto& document : maybe_documents.value()) {
-      // Exclude media files under Downloads directory since they are covered
-      // by RecentDownloadSource.
+      // Exclude media files under Downloads or MyFiles directory since they are
+      // covered by RecentDiskSource.
       if (document->android_file_system_path.has_value() &&
-          base::StartsWith(document->android_file_system_path.value(),
-                           kAndroidDownloadDirPrefix,
-                           base::CompareCase::SENSITIVE))
+          IsInsideDownloadsOrMyFiles(
+              document->android_file_system_path.value())) {
         continue;
-
-      document_id_to_file_.emplace(document->document_id, base::nullopt);
+      }
+      document_id_to_file_.emplace(document->document_id, absl::nullopt);
     }
   }
 
@@ -198,7 +227,8 @@ void RecentArcMediaSource::MediaRoot::ScanDirectory(
   }
 
   // In MediaDocumentsProvider, |root_id| and |root_document_id| are the same.
-  auto* root = root_map->Lookup(kMediaDocumentsProviderAuthority, root_id_);
+  auto* root =
+      root_map->Lookup(arc::kMediaDocumentsProviderAuthority, root_id_);
   if (!root) {
     // Media roots should always exist.
     LOG(ERROR) << "ArcDocumentsProviderRoot is missing";
@@ -207,8 +237,8 @@ void RecentArcMediaSource::MediaRoot::ScanDirectory(
   }
 
   root->ReadDirectory(
-      path, base::Bind(&RecentArcMediaSource::MediaRoot::OnReadDirectory,
-                       weak_ptr_factory_.GetWeakPtr(), path));
+      path, base::BindOnce(&RecentArcMediaSource::MediaRoot::OnReadDirectory,
+                           weak_ptr_factory_.GetWeakPtr(), path));
 }
 
 void RecentArcMediaSource::MediaRoot::OnReadDirectory(
@@ -233,7 +263,7 @@ void RecentArcMediaSource::MediaRoot::OnReadDirectory(
     // We keep the lexicographically smallest URL to stabilize the results when
     // there are multiple files with the same document ID.
     auto url = BuildDocumentsProviderUrl(subpath);
-    base::Optional<RecentFile>& entry = iter->second;
+    absl::optional<RecentFile>& entry = iter->second;
     if (!entry.has_value() ||
         storage::FileSystemURL::Comparator()(url, entry.value().url()))
       entry = RecentFile(url, file.last_modified);
@@ -253,7 +283,7 @@ void RecentArcMediaSource::MediaRoot::OnComplete() {
 
   std::vector<RecentFile> files;
   for (const auto& entry : document_id_to_file_) {
-    const base::Optional<RecentFile>& file = entry.second;
+    const absl::optional<RecentFile>& file = entry.second;
     if (file.has_value())
       files.emplace_back(file.value());
   }
@@ -274,12 +304,28 @@ RecentArcMediaSource::MediaRoot::BuildDocumentsProviderUrl(
       storage::ExternalMountPoints::GetSystemInstance();
 
   return mount_points->CreateExternalFileSystemURL(
-      params_.value().origin(), arc::kDocumentsProviderMountPointName,
-      relative_mount_path_.Append(path));
+      blink::StorageKey(url::Origin::Create(params_.value().origin())),
+      arc::kDocumentsProviderMountPointName, relative_mount_path_.Append(path));
+}
+
+bool RecentArcMediaSource::MediaRoot::MatchesFileType(
+    FileType file_type) const {
+  switch (file_type) {
+    case FileType::kAll:
+      return true;
+    case FileType::kImage:
+      return root_id_ == arc::kImagesRootDocumentId;
+    case FileType::kVideo:
+      return root_id_ == arc::kVideosRootDocumentId;
+    case FileType::kDocument:
+      return root_id_ == arc::kDocumentsRootDocumentId;
+    default:
+      return false;
+  }
 }
 
 RecentArcMediaSource::RecentArcMediaSource(Profile* profile)
-    : profile_(profile), weak_ptr_factory_(this) {
+    : profile_(profile) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   for (const char* root_id : kMediaDocumentsProviderRootIds)
     roots_.emplace_back(std::make_unique<MediaRoot>(root_id, profile_));
@@ -323,6 +369,7 @@ void RecentArcMediaSource::GetRecentFiles(Params params) {
     root->GetRecentFiles(
         Params(params_.value().file_system_context(), params_.value().origin(),
                params_.value().max_files(), params_.value().cutoff_time(),
+               params_.value().file_type(),
                base::BindOnce(&RecentArcMediaSource::OnGetRecentFilesForRoot,
                               weak_ptr_factory_.GetWeakPtr())));
   }

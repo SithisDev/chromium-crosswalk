@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,9 @@
 
 #include "ui/gfx/native_widget_types.h"
 
-class Browser;
-
 namespace content {
 struct NativeWebKeyboardEvent;
-class RenderViewHost;
+class RenderFrameHost;
 class WebContents;
 }
 
@@ -26,9 +24,6 @@ class ExtensionView {
  public:
   virtual ~ExtensionView() {}
 
-  // If attached to a Browser (e.g. popups), the Browser it is attached to.
-  virtual Browser* GetBrowser() = 0;
-
   // Returns the extension's native view.
   virtual gfx::NativeView GetNativeView() = 0;
 
@@ -37,9 +32,10 @@ class ExtensionView {
   virtual void ResizeDueToAutoResize(content::WebContents* web_contents,
                                      const gfx::Size& new_size) = 0;
 
-  // Method for the ExtensionHost to notify us when the RenderViewHost has a
-  // connection.
-  virtual void RenderViewCreated(content::RenderViewHost* render_view_host) = 0;
+  // Method for the ExtensionHost to notify us when a renderer frame connection
+  // is created.
+  virtual void RenderFrameCreated(
+      content::RenderFrameHost* render_frame_host) = 0;
 
   // Handles unhandled keyboard messages coming back from the renderer process.
   virtual bool HandleKeyboardEvent(

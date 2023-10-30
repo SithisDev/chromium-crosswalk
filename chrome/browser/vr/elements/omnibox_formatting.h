@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,7 +51,7 @@ GetElisionParameters(const GURL& gurl,
 // text formatting description that can be applied to a RenderText.  This mainly
 // handles emphasis of hosts, etc., but could also include color.
 VR_UI_EXPORT TextFormatting
-CreateUrlFormatting(const base::string16& formatted_url,
+CreateUrlFormatting(const std::u16string& formatted_url,
                     const url::Parsed& parsed,
                     SkColor emphasized_color,
                     SkColor deemphasized_color);

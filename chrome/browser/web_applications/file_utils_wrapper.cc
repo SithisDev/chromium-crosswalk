@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,6 @@
 #include "base/files/file_util.h"
 
 namespace web_app {
-
-std::unique_ptr<FileUtilsWrapper> FileUtilsWrapper::Clone() {
-  return std::make_unique<FileUtilsWrapper>();
-}
 
 bool FileUtilsWrapper::PathExists(const base::FilePath& path) {
   return base::PathExists(path);
@@ -56,7 +52,13 @@ bool FileUtilsWrapper::ReadFileToString(const base::FilePath& path,
 }
 
 bool FileUtilsWrapper::DeleteFile(const base::FilePath& path, bool recursive) {
-  return base::DeleteFile(path, recursive);
+  if (!recursive)
+    return base::DeleteFile(path);
+  return base::DeletePathRecursively(path);
+}
+
+bool FileUtilsWrapper::DeleteFileRecursively(const base::FilePath& path) {
+  return base::DeletePathRecursively(path);
 }
 
 }  // namespace web_app

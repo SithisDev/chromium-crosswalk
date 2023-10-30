@@ -1,10 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/channel_info.h"
 
 #include "base/system/sys_info.h"
+#include "build/branding_buildflags.h"
+#include "chromeos/crosapi/cpp/crosapi_constants.h"
 #include "components/version_info/version_info.h"
 
 namespace chrome {
@@ -12,16 +14,16 @@ namespace {
 
 version_info::Channel g_chromeos_channel = version_info::Channel::UNKNOWN;
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 // Sets the |g_chromeos_channel|.
 void SetChannel(const std::string& channel) {
-  if (channel == "stable-channel")
+  if (channel == crosapi::kReleaseChannelStable)
     g_chromeos_channel = version_info::Channel::STABLE;
-  else if (channel == "beta-channel")
+  else if (channel == crosapi::kReleaseChannelBeta)
     g_chromeos_channel = version_info::Channel::BETA;
-  else if (channel == "dev-channel")
+  else if (channel == crosapi::kReleaseChannelDev)
     g_chromeos_channel = version_info::Channel::DEV;
-  else if (channel == "canary-channel")
+  else if (channel == crosapi::kReleaseChannelCanary)
     g_chromeos_channel = version_info::Channel::CANARY;
   else
     g_chromeos_channel = version_info::Channel::UNKNOWN;
@@ -30,9 +32,9 @@ void SetChannel(const std::string& channel) {
 
 }  // namespace
 
-std::string GetChannelName() {
-#if defined(GOOGLE_CHROME_BUILD)
-  switch (g_chromeos_channel) {
+std::string GetChannelName(WithExtendedStable with_extended_stable) {
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  switch (GetChannel()) {
     case version_info::Channel::STABLE:
       return std::string();
     case version_info::Channel::BETA:
@@ -44,8 +46,9 @@ std::string GetChannelName() {
     default:
       return "unknown";
   }
-#endif
+#else
   return std::string();
+#endif
 }
 
 version_info::Channel GetChannel() {
@@ -53,10 +56,10 @@ version_info::Channel GetChannel() {
   if (is_channel_set)
     return g_chromeos_channel;
 
-#if defined(GOOGLE_CHROME_BUILD)
-  static const char kChromeOSReleaseTrack[] = "CHROMEOS_RELEASE_TRACK";
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   std::string channel;
-  if (base::SysInfo::GetLsbReleaseValue(kChromeOSReleaseTrack, &channel)) {
+  if (base::SysInfo::GetLsbReleaseValue(crosapi::kChromeOSReleaseTrack,
+                                        &channel)) {
     SetChannel(channel);
     is_channel_set = true;
   }
@@ -64,11 +67,13 @@ version_info::Channel GetChannel() {
   return g_chromeos_channel;
 }
 
-#if defined(GOOGLE_CHROME_BUILD)
+bool IsExtendedStableChannel() {
+  return false;  // Not supported on Chrome OS Ash.
+}
+
 std::string GetChannelSuffixForDataDir() {
   // ChromeOS doesn't support side-by-side installations.
   return std::string();
 }
-#endif  // defined(GOOGLE_CHROME_BUILD)
 
 }  // namespace chrome

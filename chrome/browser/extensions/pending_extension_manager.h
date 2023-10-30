@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,13 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "chrome/browser/extensions/pending_extension_info.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/manifest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom-shared.h"
 
 class GURL;
 
@@ -47,6 +49,10 @@ void SetupPendingExtensionManagerForTest(
 class PendingExtensionManager {
  public:
   explicit PendingExtensionManager(content::BrowserContext* context);
+
+  PendingExtensionManager(const PendingExtensionManager&) = delete;
+  PendingExtensionManager& operator=(const PendingExtensionManager&) = delete;
+
   ~PendingExtensionManager();
 
   // TODO(skerner): Many of these methods can be private once code in
@@ -72,16 +78,6 @@ class PendingExtensionManager {
   // Whether there is a high-priority pending extension (one from either policy
   // or an external component extension).
   bool HasHighPriorityPendingExtension() const;
-
-  // Notifies the manager that we are reinstalling the policy force-installed
-  // extension with |id| because we detected corruption in the current copy.
-  void ExpectPolicyReinstallForCorruption(const ExtensionId& id);
-
-  // Are we expecting a reinstall of the extension with |id| due to corruption?
-  bool IsPolicyReinstallForCorruptionExpected(const ExtensionId& id) const;
-
-  // Whether or not there are any corrupted policy extensions.
-  bool HasAnyPolicyReinstallForCorruption() const;
 
   // Adds an extension in a pending state; the extension with the
   // given info will be installed on the next auto-update cycle.
@@ -109,29 +105,25 @@ class PendingExtensionManager {
   bool AddFromExternalUpdateUrl(const std::string& id,
                                 const std::string& install_parameter,
                                 const GURL& update_url,
-                                Manifest::Location location,
+                                mojom::ManifestLocation location,
                                 int creation_flags,
                                 bool mark_acknowledged);
 
   // Add a pending extension record for an external CRX file.
   // Return true if the CRX should be installed, false if an existing
   // pending record overrides it.
-  bool AddFromExternalFile(
-      const std::string& id,
-      Manifest::Location location,
-      const base::Version& version,
-      int creation_flags,
-      bool mark_acknowledged);
+  bool AddFromExternalFile(const std::string& id,
+                           mojom::ManifestLocation location,
+                           const base::Version& version,
+                           int creation_flags,
+                           bool mark_acknowledged);
 
   // Get the list of pending IDs that should be installed from an update URL.
   // Pending extensions that will be installed from local files will not be
   // included in the set.
-  void GetPendingIdsForUpdateCheck(
-      std::list<std::string>* out_ids_for_update_check) const;
+  std::list<std::string> GetPendingIdsForUpdateCheck() const;
 
  private:
-  typedef std::list<PendingExtensionInfo> PendingExtensionList;
-
   // Assumes an extension with id |id| is not already installed.
   // Return true if the extension was added.
   bool AddExtensionImpl(
@@ -141,24 +133,27 @@ class PendingExtensionManager {
       const base::Version& version,
       PendingExtensionInfo::ShouldAllowInstallPredicate should_allow_install,
       bool is_from_sync,
-      Manifest::Location install_source,
+      mojom::ManifestLocation install_source,
       int creation_flags,
       bool mark_acknowledged,
       bool remote_install);
 
+  // Caches the set of Chrome app IDs undergoing migration to web apps because
+  // it is expensive to generate every time (multiple SkBitmap copies).
+  void EnsureMigratedDefaultChromeAppIdsCachePopulated();
+
   // Add a pending extension record directly.  Used for unit tests that need
   // to set an inital state. Use friendship to allow the tests to call this
   // method.
-  void AddForTesting(const PendingExtensionInfo& pending_extension_info);
+  void AddForTesting(PendingExtensionInfo pending_extension_info);
 
   // The BrowserContext with which the manager is associated.
-  content::BrowserContext* context_;
+  raw_ptr<content::BrowserContext> context_;
 
-  PendingExtensionList pending_extension_list_;
+  std::map<std::string, PendingExtensionInfo> pending_extensions_;
 
-  // A set of policy force-installed extension ids that are being reinstalled
-  // due to corruption, mapped to the time we detected the corruption.
-  std::map<ExtensionId, base::TimeTicks> expected_policy_reinstalls_;
+  absl::optional<base::flat_set<std::string>>
+      migrating_default_chrome_app_ids_cache_;
 
   FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
                            UpdatePendingExtensionAlreadyInstalled);
@@ -166,8 +161,6 @@ class PendingExtensionManager {
   friend void SetupPendingExtensionManagerForTest(
       int count, const GURL& update_url,
       PendingExtensionManager* pending_extension_manager);
-
-  DISALLOW_COPY_AND_ASSIGN(PendingExtensionManager);
 };
 
 }  // namespace extensions

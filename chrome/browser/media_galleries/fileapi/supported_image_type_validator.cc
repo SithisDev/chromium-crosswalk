@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,15 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/check_op.h"
 #include "base/files/file.h"
 #include "base/location.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/stl_util.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
-#include "chrome/browser/image_decoder.h"
+#include "chrome/browser/image_decoder/image_decoder.h"
+#include "components/download/public/common/quarantine_connection.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -43,9 +42,9 @@ std::unique_ptr<std::string> ReadOnFileThread(const base::FilePath& path) {
     return result;
   }
 
-  result.reset(new std::string);
+  result = std::make_unique<std::string>();
   result->resize(file_info.size);
-  if (file.Read(0, base::data(*result), file_info.size) != file_info.size) {
+  if (file.Read(0, std::data(*result), file_info.size) != file_info.size) {
     result.reset();
   }
 
@@ -54,33 +53,27 @@ std::unique_ptr<std::string> ReadOnFileThread(const base::FilePath& path) {
 
 class ImageDecoderDelegateAdapter : public ImageDecoder::ImageRequest {
  public:
-  ImageDecoderDelegateAdapter(
-      std::unique_ptr<std::string> data,
-      const storage::CopyOrMoveFileValidator::ResultCallback& callback)
-      : data_(std::move(data)), callback_(callback) {
-    DCHECK(data_);
-  }
+  explicit ImageDecoderDelegateAdapter(
+      storage::CopyOrMoveFileValidator::ResultCallback callback)
+      : callback_(std::move(callback)) {}
 
-  const std::string& data() {
-    return *data_;
-  }
+  ImageDecoderDelegateAdapter(const ImageDecoderDelegateAdapter&) = delete;
+  ImageDecoderDelegateAdapter& operator=(const ImageDecoderDelegateAdapter&) =
+      delete;
 
   // ImageDecoder::ImageRequest methods.
   void OnImageDecoded(const SkBitmap& /*decoded_image*/) override {
-    callback_.Run(base::File::FILE_OK);
+    std::move(callback_).Run(base::File::FILE_OK);
     delete this;
   }
 
   void OnDecodeImageFailed() override {
-    callback_.Run(base::File::FILE_ERROR_SECURITY);
+    std::move(callback_).Run(base::File::FILE_ERROR_SECURITY);
     delete this;
   }
 
  private:
-  std::unique_ptr<std::string> data_;
   storage::CopyOrMoveFileValidator::ResultCallback callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(ImageDecoderDelegateAdapter);
 };
 
 }  // namespace
@@ -102,32 +95,33 @@ bool SupportedImageTypeValidator::SupportsFileType(const base::FilePath& path) {
 }
 
 void SupportedImageTypeValidator::StartPreWriteValidation(
-    const ResultCallback& result_callback) {
+    ResultCallback result_callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(callback_.is_null());
-  callback_ = result_callback;
+  callback_ = std::move(result_callback);
 
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
-      base::Bind(&ReadOnFileThread, path_),
-      base::Bind(&SupportedImageTypeValidator::OnFileOpen,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&ReadOnFileThread, path_),
+      base::BindOnce(&SupportedImageTypeValidator::OnFileOpen,
+                     weak_factory_.GetWeakPtr()));
 }
 
 SupportedImageTypeValidator::SupportedImageTypeValidator(
-    const base::FilePath& path)
-    : path_(path) {}
+    const base::FilePath& path,
+    download::QuarantineConnectionCallback quarantine_connection_callback)
+    : AVScanningFileValidator(quarantine_connection_callback), path_(path) {}
 
 void SupportedImageTypeValidator::OnFileOpen(
     std::unique_ptr<std::string> data) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!data.get()) {
-    callback_.Run(base::File::FILE_ERROR_SECURITY);
+    std::move(callback_).Run(base::File::FILE_ERROR_SECURITY);
     return;
   }
 
   // |adapter| will delete itself after a completion message is received.
   ImageDecoderDelegateAdapter* adapter =
-      new ImageDecoderDelegateAdapter(std::move(data), callback_);
-  ImageDecoder::Start(adapter, adapter->data());
+      new ImageDecoderDelegateAdapter(std::move(callback_));
+  ImageDecoder::Start(adapter, std::move(*data));
 }

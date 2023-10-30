@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,11 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/memory/singleton.h"
-#include "base/single_thread_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
-#include "chrome/browser/vr/metrics/metrics_helper.h"
 #include "chrome/browser/vr/model/assets.h"
 #include "chrome/browser/vr/vr_buildflags.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -79,10 +78,9 @@ bool AssetsLoader::AssetsSupported() {
 #endif  // BUILDFLAG(USE_VR_ASSETS_COMPONENT)
 }
 
-void AssetsLoader::OnComponentReady(
-    const base::Version& version,
-    const base::FilePath& install_dir,
-    std::unique_ptr<base::DictionaryValue> manifest) {
+void AssetsLoader::OnComponentReady(const base::Version& version,
+                                    const base::FilePath& install_dir,
+                                    base::Value manifest) {
   main_thread_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&AssetsLoader::OnComponentReadyInternal,
@@ -95,19 +93,6 @@ void AssetsLoader::Load(OnAssetsLoadedCallback on_loaded) {
                                 weak_ptr_factory_.GetWeakPtr(),
                                 base::ThreadTaskRunnerHandle::Get(),
                                 std::move(on_loaded)));
-}
-
-MetricsHelper* AssetsLoader::GetMetricsHelper() {
-  // If we instantiate metrics_helper_ in the constructor all functions of
-  // MetricsHelper must be called in a valid sequence from the thread the
-  // constructor ran on. However, the assets class can be instantiated from any
-  // thread. To avoid the aforementioned restriction, create metrics_helper_ the
-  // first time it is used and, thus, give the caller control over when the
-  // sequence starts.
-  if (!metrics_helper_) {
-    metrics_helper_ = std::make_unique<MetricsHelper>();
-  }
-  return metrics_helper_.get();
 }
 
 bool AssetsLoader::ComponentReady() {
@@ -224,10 +209,7 @@ void AssetsLoader::LoadAssetsTask(
 
   auto sounds_iter = sounds.begin();
   while (status == AssetsLoadStatus::kSuccess && sounds_iter != sounds.end()) {
-    const char* min_version;
-    const base::FilePath::CharType* file_name;
-    std::unique_ptr<std::string>* data;
-    std::tie(min_version, file_name, data) = *sounds_iter;
+    auto [min_version, file_name, data] = *sounds_iter;
     if (component_version >= base::Version(min_version)) {
       status = LoadSound(component_install_dir, file_name, data);
     }
@@ -244,8 +226,7 @@ void AssetsLoader::LoadAssetsTask(
 }
 
 AssetsLoader::AssetsLoader()
-    : main_thread_task_runner_(base::CreateSingleThreadTaskRunnerWithTraits(
-          {content::BrowserThread::UI})) {
+    : main_thread_task_runner_(content::GetUIThreadTaskRunner({})) {
   DCHECK(main_thread_task_runner_.get());
 }
 
@@ -260,7 +241,6 @@ void AssetsLoader::OnComponentReadyInternal(const base::Version& version,
   if (on_component_ready_callback_) {
     on_component_ready_callback_.Run();
   }
-  GetMetricsHelper()->OnComponentReady(version);
 }
 
 void AssetsLoader::LoadInternal(
@@ -268,7 +248,7 @@ void AssetsLoader::LoadInternal(
     OnAssetsLoadedCallback on_loaded) {
   DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
   DCHECK(component_ready_);
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
       base::BindOnce(&AssetsLoader::LoadAssetsTask, task_runner,
                      component_version_, component_install_dir_,

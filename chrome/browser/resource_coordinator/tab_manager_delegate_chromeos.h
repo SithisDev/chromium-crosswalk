@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,22 +10,22 @@
 #include <utility>
 #include <vector>
 
+#include "ash/components/arc/mojom/process.mojom.h"
 #include "base/callback.h"
+#include "base/check.h"
 #include "base/containers/flat_map.h"
 #include "base/gtest_prod_util.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/chromeos/arc/process/arc_process.h"
-#include "chrome/browser/chromeos/arc/process/arc_process_service.h"
+#include "chrome/browser/ash/arc/process/arc_process.h"
+#include "chrome/browser/ash/arc/process/arc_process_service.h"
 #include "chrome/browser/resource_coordinator/lifecycle_unit.h"
-#include "chrome/browser/resource_coordinator/lifecycle_unit_state.mojom.h"
+#include "chrome/browser/resource_coordinator/lifecycle_unit_state.mojom-forward.h"
 #include "chrome/browser/resource_coordinator/tab_manager.h"
 #include "chrome/browser/ui/browser_list_observer.h"
-#include "chromeos/dbus/debug_daemon_client.h"
-#include "components/arc/common/process.mojom.h"
+#include "chromeos/ash/components/dbus/debug_daemon/debug_daemon_client.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/wm/public/activation_change_observer.h"
@@ -66,6 +66,9 @@ class TabManagerDelegate : public wm::ActivationChangeObserver,
   TabManagerDelegate(const base::WeakPtr<TabManager>& tab_manager,
                      TabManagerDelegate::MemoryStat* mem_stat);
 
+  TabManagerDelegate(const TabManagerDelegate&) = delete;
+  TabManagerDelegate& operator=(const TabManagerDelegate&) = delete;
+
   ~TabManagerDelegate() override;
 
   void OnBrowserSetLastActive(Browser* browser) override;
@@ -104,7 +107,7 @@ class TabManagerDelegate : public wm::ActivationChangeObserver,
                        ::mojom::LifecycleUnitDiscardReason reason);
 
   // Get debugd client instance. Virtual for unit testing.
-  virtual chromeos::DebugDaemonClient* GetDebugDaemonClient();
+  virtual ash::DebugDaemonClient* GetDebugDaemonClient();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(TabManagerDelegateTest, CandidatesSorted);
@@ -147,15 +150,6 @@ class TabManagerDelegate : public wm::ActivationChangeObserver,
       const LifecycleUnitVector& lifecycle_units,
       const OptionalArcProcessList& arc_processes);
 
-  // This is only used for TabRanker experiment for now.
-  // If TabRanker is enabled, this will take the last N lifecycle units in the
-  // |candidates|; sort these lifecycle units based on the TabRanker order; and
-  // put these sorted lifecycle unit back to the vacancies of these lifecycle
-  // units in the |candidates|.
-  // All apps in the |candidates| will not be influenced.
-  static void SortLifecycleUnitWithTabRanker(std::vector<Candidate>* candidates,
-                                             LifecycleUnitSorter sorter);
-
   // Returns the LifecycleUnits in TabManager. Virtual for unit tests.
   virtual LifecycleUnitVector GetLifecycleUnits();
 
@@ -195,7 +189,7 @@ class TabManagerDelegate : public wm::ActivationChangeObserver,
   // being killed. In that case, killing them every time is just a waste of
   // resources.
   static constexpr base::TimeDelta GetArcRespawnKillDelay() {
-    return base::TimeDelta::FromSeconds(60);
+    return base::Seconds(60);
   }
 
   // The OOM adjustment score for persistent ARC processes.
@@ -227,9 +221,7 @@ class TabManagerDelegate : public wm::ActivationChangeObserver,
   std::unique_ptr<TabManagerDelegate::MemoryStat> mem_stat_;
 
   // Weak pointer factory used for posting tasks to other threads.
-  base::WeakPtrFactory<TabManagerDelegate> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabManagerDelegate);
+  base::WeakPtrFactory<TabManagerDelegate> weak_ptr_factory_{this};
 };
 
 // On ARC enabled machines, either a tab or an app could be a possible
@@ -250,6 +242,9 @@ class TabManagerDelegate::Candidate {
   // But if TabRanker is on, kMaxScore guarantees all apps are sorted before
   // tabs.
   explicit Candidate(const arc::ArcProcess* app) : app_(app) { DCHECK(app_); }
+
+  Candidate(const Candidate&) = delete;
+  Candidate& operator=(const Candidate&) = delete;
 
   // Move-only class.
   Candidate(Candidate&&) = default;
@@ -274,7 +269,6 @@ class TabManagerDelegate::Candidate {
   LifecycleUnit* lifecycle_unit_ = nullptr;
   const arc::ArcProcess* app_ = nullptr;
   ProcessType process_type_ = GetProcessTypeInternal();
-  DISALLOW_COPY_AND_ASSIGN(Candidate);
 };
 
 // A thin wrapper over library process_metric.h to get memory status so unit
@@ -290,14 +284,6 @@ class TabManagerDelegate::MemoryStat {
 
   // Returns estimated memory to be freed if the process |handle| is killed.
   virtual int EstimatedMemoryFreedKB(base::ProcessHandle handle);
-
- private:
-  // Returns the low memory margin system config. Low memory condition is
-  // reported if available memory is under the number.
-  static int LowMemoryMarginKB();
-
-  // Reads in an integer.
-  static int ReadIntFromFile(const char* file_name, int default_val);
 };
 
 }  // namespace resource_coordinator

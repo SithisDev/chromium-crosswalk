@@ -1,13 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/process/launch.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/values.h"
 #include "base/win/scoped_handle.h"
@@ -33,9 +32,31 @@ TEST(GcpPasswordTest, GenerateRandomPassword) {
   // Generate a few passwords and make sure length i correct.
   for (int i = 0; i < 100; ++i) {
     ASSERT_EQ(S_OK,
-              manager->GenerateRandomPassword(password, base::size(password)));
+              manager->GenerateRandomPassword(password, std::size(password)));
     ASSERT_LT(24u, wcslen(password));
   }
+}
+
+TEST(GcpOsVersionTest, GetOsFromRegistries) {
+  registry_util::RegistryOverrideManager registry_override_;
+  InitializeRegistryOverrideForTesting(&registry_override_);
+  wchar_t kOsRegistryPath[] =
+      L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
+  wchar_t kOsMajorName[] = L"CurrentMajorVersionNumber";
+  wchar_t kOsMinorName[] = L"CurrentMinorVersionNumber";
+  wchar_t kOsBuildName[] = L"CurrentBuildNumber";
+  wchar_t kOsBuild[] = L"10819";
+  DWORD major = 15;
+  DWORD minor = 1;
+
+  SetMachineRegDWORD(kOsRegistryPath, kOsMajorName, major);
+  SetMachineRegDWORD(kOsRegistryPath, kOsMinorName, minor);
+  SetMachineRegString(kOsRegistryPath, kOsBuildName, kOsBuild);
+
+  std::string version;
+  GetOsVersion(&version);
+
+  ASSERT_EQ(version, "15.1.10819");
 }
 
 class GcpProcHelperTest : public ::testing::Test {
@@ -63,7 +84,7 @@ bool GcpProcHelperTest::TestPipe(
     const base::win::ScopedHandle::Handle& writing) {
   char input_buffer[8];
   char output_buffer[8];
-  strcpy_s(input_buffer, base::size(input_buffer), "hello");
+  strcpy_s(input_buffer, std::size(input_buffer), "hello");
   const DWORD kExpectedDataLength = strlen(input_buffer) + 1;
 
   // Make sure what is written can be read.
@@ -73,7 +94,7 @@ bool GcpProcHelperTest::TestPipe(
   EXPECT_EQ(kExpectedDataLength, written);
 
   DWORD read;
-  EXPECT_TRUE(ReadFile(reading, output_buffer, base::size(output_buffer), &read,
+  EXPECT_TRUE(ReadFile(reading, output_buffer, std::size(output_buffer), &read,
                        nullptr));
   EXPECT_EQ(kExpectedDataLength, read);
   return strcmp(input_buffer, output_buffer) == 0;
@@ -383,7 +404,7 @@ TEST_F(GcpProcHelperTest, WaitForProcess) {
   // Write to stdin of the child process.
   const int kBufferSize = 16;
   char input_buffer[kBufferSize];
-  strcpy_s(input_buffer, base::size(input_buffer), "hello");
+  strcpy_s(input_buffer, std::size(input_buffer), "hello");
   const DWORD kExpectedDataLength = strlen(input_buffer) + 1;
   DWORD written;
   ASSERT_TRUE(::WriteFile(parent_handles.hstdin_write.Get(), input_buffer,
@@ -416,11 +437,11 @@ TEST_F(GcpProcHelperTest, GetCommandLineForEntrypoint) {
   // Get short path name of this binary and build the expect command line.
   wchar_t path[MAX_PATH];
   wchar_t short_path[MAX_PATH];
-  ASSERT_LT(0u, GetModuleFileName(nullptr, path, base::size(path)));
-  ASSERT_LT(0u, GetShortPathName(path, short_path, base::size(short_path)));
+  ASSERT_LT(0u, GetModuleFileName(nullptr, path, std::size(path)));
+  ASSERT_LT(0u, GetShortPathName(path, short_path, std::size(short_path)));
 
-  base::string16 expected_arg =
-      base::StringPrintf(L"%ls,%ls", short_path, L"entrypoint");
+  std::wstring expected_arg =
+      base::StringPrintf(L"\"%ls\",%ls", short_path, L"entrypoint");
 
   ASSERT_EQ(1u, command_line.GetArgs().size());
   ASSERT_EQ(expected_arg, command_line.GetArgs()[0]);
@@ -445,8 +466,16 @@ TEST(Enroll, EnrollToGoogleMdmIfNeeded_NotEnabled) {
 // 4. User SID.
 // 5. Username.
 // 6. Domain.
+// 7. Serial Number.
+// 8. Machine Guid.
+// 9. Is ADJoined User.
+// 10 Device resource Id.
 class GcpEnrollmentArgsTest
     : public ::testing::TestWithParam<std::tuple<const char*,
+                                                 const char*,
+                                                 const char*,
+                                                 const char*,
+                                                 const char*,
                                                  const char*,
                                                  const char*,
                                                  const char*,
@@ -468,10 +497,22 @@ TEST_P(GcpEnrollmentArgsTest, EnrollToGoogleMdmIfNeeded_MissingArgs) {
   const char* sid = std::get<3>(GetParam());
   const char* username = std::get<4>(GetParam());
   const char* domain = std::get<5>(GetParam());
+  const char* serial_number = std::get<6>(GetParam());
+  std::wstring serial_number16 =
+      base::UTF8ToWide(base::StringPrintf("%s", serial_number));
+  const char* machine_guid = std::get<7>(GetParam());
+  std::wstring machine_guid16 =
+      base::UTF8ToWide(base::StringPrintf("%s", machine_guid));
+  const char* is_user_ad_joined = std::get<8>(GetParam());
+  const char* device_resource_id = std::get<9>(GetParam());
+  FakeOSUserManager fake_os_user_manager;
 
   bool should_succeed = (email && email[0]) && (id_token && id_token[0]) &&
                         (access_token && access_token[0]) && (sid && sid[0]) &&
-                        (username && username[0]) && (domain && domain[0]);
+                        (username && username[0]) && (domain && domain[0]) &&
+                        (machine_guid && machine_guid[0]) &&
+                        (serial_number && serial_number[0]) &&
+                        (is_user_ad_joined && is_user_ad_joined[0]);
 
   base::Value properties(base::Value::Type::DICTIONARY);
   if (email)
@@ -486,6 +527,20 @@ TEST_P(GcpEnrollmentArgsTest, EnrollToGoogleMdmIfNeeded_MissingArgs) {
     properties.SetStringKey(kKeyUsername, username);
   if (domain)
     properties.SetStringKey(kKeyDomain, domain);
+  if (sid)
+    properties.SetStringKey(kKeySID, sid);
+  if (is_user_ad_joined)
+    properties.SetStringKey(kKeyIsAdJoinedUser, is_user_ad_joined);
+
+  SetMachineGuidForTesting(machine_guid16);
+  GoogleRegistrationDataForTesting g_registration_data(serial_number16);
+
+  if (device_resource_id) {
+    std::wstring sid16 = base::UTF8ToWide(base::StringPrintf("%s", sid));
+    HRESULT hr = SetUserProperty(sid16, kRegUserDeviceResourceId,
+                                 base::UTF8ToWide(device_resource_id));
+    EXPECT_TRUE(SUCCEEDED(hr));
+  }
 
   // EnrollToGoogleMdmIfNeeded() should fail if any field is missing.
   if (should_succeed) {
@@ -496,13 +551,31 @@ TEST_P(GcpEnrollmentArgsTest, EnrollToGoogleMdmIfNeeded_MissingArgs) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    ,
+    GcpRegistrationData,
     GcpEnrollmentArgsTest,
     ::testing::Combine(::testing::Values("foo@gmail.com", "", nullptr),
                        ::testing::Values("id_token", "", nullptr),
                        ::testing::Values("access_token", "", nullptr),
                        ::testing::Values("sid", "", nullptr),
                        ::testing::Values("username", "", nullptr),
-                       ::testing::Values("domain", "", nullptr)));
+                       ::testing::Values("domain", "", nullptr),
+                       ::testing::Values("serial_number"),
+                       ::testing::Values("machine_guid"),
+                       ::testing::Values("true", "false"),
+                       ::testing::Values("device_resource_id", "")));
+
+INSTANTIATE_TEST_SUITE_P(
+    GcpRegistrationHardwareIds,
+    GcpEnrollmentArgsTest,
+    ::testing::Combine(::testing::Values("foo@gmail.com"),
+                       ::testing::Values("id_token"),
+                       ::testing::Values("access_token"),
+                       ::testing::Values("sid"),
+                       ::testing::Values("username"),
+                       ::testing::Values("domain"),
+                       ::testing::Values("serial_number", ""),
+                       ::testing::Values("machine_guid", ""),
+                       ::testing::Values("true"),
+                       ::testing::Values("device_resource_id", "")));
 
 }  // namespace credential_provider

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,5 +28,5 @@ bool UnifiedAutoplayConfig::IsBlockAutoplayUserModifiable(Profile* profile) {
   HostContentSettingsMap* settings_map =
       HostContentSettingsMapFactory::GetForProfile(profile);
   return settings_map->GetDefaultContentSetting(
-             CONTENT_SETTINGS_TYPE_SOUND, nullptr) != CONTENT_SETTING_BLOCK;
+             ContentSettingsType::SOUND, nullptr) != CONTENT_SETTING_BLOCK;
 }

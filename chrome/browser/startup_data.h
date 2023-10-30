@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
+#include "components/leveldb_proto/public/proto_database_provider.h"
 
 namespace user_prefs {
 class PrefRegistrySyncable;
@@ -36,6 +36,10 @@ class ChromeFeatureListCreator;
 class StartupData {
  public:
   StartupData();
+
+  StartupData(const StartupData&) = delete;
+  StartupData& operator=(const StartupData&) = delete;
+
   ~StartupData();
 
   // Records core profile settings into the SystemProfileProto. It is important
@@ -45,7 +49,7 @@ class StartupData {
   // browser mode.
   void RecordCoreSystemProfile();
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Initializes all necessary parameters to create the Profile's PrefService.
   void CreateProfilePrefService();
 
@@ -72,6 +76,10 @@ class StartupData {
   // Passes ownership of the |prefs_| to the caller.
   std::unique_ptr<sync_preferences::PrefServiceSyncable>
   TakeProfilePrefService();
+
+  // Passes ownership of the |proto_db_provider_| to the caller.
+  std::unique_ptr<leveldb_proto::ProtoDatabaseProvider>
+  TakeProtoDatabaseProvider();
 #endif
 
   ChromeFeatureListCreator* chrome_feature_list_creator() {
@@ -79,9 +87,9 @@ class StartupData {
   }
 
  private:
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   void PreProfilePrefServiceInit();
-  void CreateProfilePrefServiceInternal();
+  void CreateServicesInternal();
 
   std::unique_ptr<ProfileKey> key_;
 
@@ -92,11 +100,11 @@ class StartupData {
   scoped_refptr<user_prefs::PrefRegistrySyncable> pref_registry_;
 
   std::unique_ptr<sync_preferences::PrefServiceSyncable> prefs_;
+
+  std::unique_ptr<leveldb_proto::ProtoDatabaseProvider> proto_db_provider_;
 #endif
 
   std::unique_ptr<ChromeFeatureListCreator> chrome_feature_list_creator_;
-
-  DISALLOW_COPY_AND_ASSIGN(StartupData);
 };
 
 #endif  // CHROME_BROWSER_STARTUP_DATA_H_

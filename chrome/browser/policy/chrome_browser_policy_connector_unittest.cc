@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,10 @@
 
 #include <memory>
 
+#include "base/test/task_environment.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
@@ -15,9 +17,10 @@
 
 namespace policy {
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 // HasMachineLevelPolicies() is not implemented on ChromeOS.
 TEST(ChromeBrowserPolicyConnectorTest, HasMachineLevelPolicies) {
+  base::test::TaskEnvironment env;
   MockConfigurationPolicyProvider provider;
   BrowserPolicyConnectorBase::SetPolicyProviderForTesting(&provider);
 
@@ -26,11 +29,11 @@ TEST(ChromeBrowserPolicyConnectorTest, HasMachineLevelPolicies) {
 
   PolicyMap map;
   map.Set("test-policy", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-          POLICY_SOURCE_PLATFORM, std::make_unique<base::Value>("hello"),
-          nullptr);
+          POLICY_SOURCE_PLATFORM, base::Value("hello"), nullptr);
   provider.UpdateChromePolicy(map);
   EXPECT_TRUE(connector.HasMachineLevelPolicies());
+  BrowserPolicyConnectorBase::SetPolicyProviderForTesting(nullptr);
 }
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace policy

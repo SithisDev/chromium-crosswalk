@@ -1,19 +1,19 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.keyboard_accessory.data;
 
-import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.LayoutRes;
-import android.support.annotation.Nullable;
-import android.support.annotation.Px;
 import android.view.ViewGroup;
+
+import androidx.annotation.LayoutRes;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.Callback;
 import org.chromium.chrome.browser.keyboard_accessory.AccessoryAction;
 import org.chromium.chrome.browser.keyboard_accessory.AccessoryTabType;
+import org.chromium.url.GURL;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,14 +26,15 @@ public class KeyboardAccessoryData {
      * Describes a tab which should be displayed as a small icon at the start of the keyboard
      * accessory. Typically, a tab is responsible to change the accessory sheet below the accessory.
      */
-    public final static class Tab {
+    public static final class Tab {
         private final String mTitle;
-        private final Drawable mIcon;
+        private Drawable mIcon;
         private final @Nullable String mOpeningAnnouncement;
         private final String mContentDescription;
         private final int mTabLayout;
         private final @AccessoryTabType int mRecordingType;
         private final @Nullable Listener mListener;
+        private final PropertyProvider<Drawable> mIconProvider = new PropertyProvider<>();
 
         /**
          * A Tab's Listener get's notified when e.g. the Tab was assigned a view.
@@ -41,6 +42,7 @@ public class KeyboardAccessoryData {
         public interface Listener {
             /**
              * Triggered when the tab was successfully created.
+             *
              * @param view The newly created accessory sheet of the tab.
              */
             void onTabCreated(ViewGroup view);
@@ -66,6 +68,20 @@ public class KeyboardAccessoryData {
             mTabLayout = tabLayout;
             mListener = listener;
             mRecordingType = recordingType;
+        }
+
+        public void setIcon(Drawable icon) {
+            mIcon = icon;
+            mIconProvider.notifyObservers(mIcon);
+        }
+
+        /**
+         * Adds an observer to be notified of icon changes.
+         *
+         * @param observer The observer that will be notified of the icon change.
+         */
+        public void addIconObserver(Provider.Observer<Drawable> observer) {
+            mIconProvider.addObserver(observer);
         }
 
         /**
@@ -132,11 +148,17 @@ public class KeyboardAccessoryData {
     public static final class Action {
         private final String mCaption;
         private final Callback<Action> mActionCallback;
+        private final Callback<Action> mLongPressCallback;
         private @AccessoryAction int mType;
 
         public Action(String caption, @AccessoryAction int type, Callback<Action> actionCallback) {
+            this(caption, type, actionCallback, null);
+        }
+        public Action(String caption, @AccessoryAction int type, Callback<Action> actionCallback,
+                @Nullable Callback<Action> longPressCallback) {
             mCaption = caption;
             mActionCallback = actionCallback;
+            mLongPressCallback = longPressCallback;
             mType = type;
         }
 
@@ -146,6 +168,10 @@ public class KeyboardAccessoryData {
 
         public Callback<Action> getCallback() {
             return mActionCallback;
+        }
+
+        public Callback<Action> getLongPressCallback() {
+            return mLongPressCallback;
         }
 
         public @AccessoryAction int getActionType() {
@@ -171,29 +197,57 @@ public class KeyboardAccessoryData {
     }
 
     /**
+     * Represents a toggle displayed above suggestions in the accessory sheet, through which the
+     * user can set an option. Displayed for example when password saving is disabled for the
+     * current site, to allow the user to easily re-enable saving if desired.
+     */
+    public static final class OptionToggle {
+        private final String mDisplayText;
+        private final boolean mEnabled;
+        private final Callback<Boolean> mCallback;
+        private final @AccessoryAction int mType;
+
+        public OptionToggle(String displayText, boolean enabled, @AccessoryAction int type,
+                Callback<Boolean> callback) {
+            mDisplayText = displayText;
+            mEnabled = enabled;
+            mCallback = callback;
+            mType = type;
+        }
+
+        public String getDisplayText() {
+            return mDisplayText;
+        }
+
+        public boolean isEnabled() {
+            return mEnabled;
+        }
+        public Callback<Boolean> getCallback() {
+            return mCallback;
+        }
+        public @AccessoryAction int getActionType() {
+            return mType;
+        }
+    }
+
+    /**
      * Represents a Profile, or a Credit Card, or the credentials for a website
      * (username + password), to be shown on the manual fallback UI.
      */
-    public final static class UserInfo {
-        private final String mTitle;
+    public static final class UserInfo {
+        private final String mOrigin;
+        private final GURL mIconUrl;
         private final List<UserInfoField> mFields = new ArrayList<>();
-        private final @Nullable FaviconProvider mFaviconProvider;
+        private final boolean mIsExactMatch;
 
-        /**
-         * Favicons used by UserInfo views are provided and mocked using this interface.
-         */
-        public interface FaviconProvider {
-            /**
-             * Starts a request for a favicon. The callback can be called either asynchronously or
-             * synchronously (depending on whether the icon was cached).
-             * @param favicon The icon to be used for this Item. If null, use the default icon.
-             */
-            void fetchFavicon(@Px int desiredSize, Callback<Bitmap> favicon);
+        public UserInfo(String origin, boolean isExactMatch) {
+            this(origin, isExactMatch, null);
         }
 
-        public UserInfo(String title, @Nullable FaviconProvider faviconProvider) {
-            mTitle = title;
-            mFaviconProvider = faviconProvider;
+        public UserInfo(String origin, boolean isExactMatch, GURL iconUrl) {
+            mOrigin = origin;
+            mIsExactMatch = isExactMatch;
+            mIconUrl = iconUrl;
         }
 
         /**
@@ -212,25 +266,60 @@ public class KeyboardAccessoryData {
         }
 
         /**
-         * @return A string to be used as title. May be empty but not null.
+         * @return A string indicating the origin. May be empty but not null.
          */
-        public String getTitle() {
-            return mTitle;
+        public String getOrigin() {
+            return mOrigin;
         }
 
         /**
-         * Possibly holds a favicon provider.
-         * @return A {@link FaviconProvider}. Optional.
+         * @return True iff the user info originates from a first-party item and not from a PSL or
+         *         affiliated match.
          */
-        public @Nullable FaviconProvider getFaviconProvider() {
-            return mFaviconProvider;
+        public boolean isExactMatch() {
+            return mIsExactMatch;
+        }
+
+        /**
+         * The url for the icon to be downloaded and displayed in the manual filling view. For
+         * credit cards, the `mOrigin` is used as an identifier for the icon. However, if the
+         * `mIconUrl` is set, it'll be used to download the icon and then display it.
+         */
+        public GURL getIconUrl() {
+            return mIconUrl;
+        }
+    }
+
+    /**
+     * Represents a Promo Code Offer to be shown on the manual fallback UI.
+     */
+    public static final class PromoCodeInfo {
+        private UserInfoField mPromoCode;
+        private String mDetailsText;
+
+        public PromoCodeInfo() {}
+
+        public void setPromoCode(UserInfoField promoCode) {
+            mPromoCode = promoCode;
+        }
+
+        public void setDetailsText(String detailsText) {
+            mDetailsText = detailsText;
+        }
+
+        public UserInfoField getPromoCode() {
+            return mPromoCode;
+        }
+
+        public String getDetailsText() {
+            return mDetailsText;
         }
     }
 
     /**
      * Represents a command below the suggestions, such as "Manage password...".
      */
-    public final static class FooterCommand {
+    public static final class FooterCommand {
         private final String mDisplayText;
         private final Callback<FooterCommand> mCallback;
 
@@ -253,8 +342,7 @@ public class KeyboardAccessoryData {
         }
 
         /**
-         * Returns the translated text to be shown on the UI for this footer command. This text is
-         * used for accessibility.
+         * Invokes the stored callback. To be called when the user taps on the footer command.
          */
         public void execute() {
             mCallback.onResult(this);
@@ -265,23 +353,38 @@ public class KeyboardAccessoryData {
      * Represents the contents of a accessory sheet tab below the keyboard accessory, which can
      * correspond to passwords, credit cards, or profiles data. Created natively.
      */
-    public final static class AccessorySheetData {
+    public static final class AccessorySheetData {
         private final String mTitle;
+        private final String mWarning;
         private final @AccessoryTabType int mSheetType;
+        private OptionToggle mToggle;
         private final List<UserInfo> mUserInfoList = new ArrayList<>();
+        private final List<PromoCodeInfo> mPromoCodeInfoList = new ArrayList<>();
         private final List<FooterCommand> mFooterCommands = new ArrayList<>();
 
         /**
          * Creates the AccessorySheetData object.
          * @param title The title of accessory sheet tab.
+         * @param warning An optional warning to be displayed the beginning of the sheet.
          */
-        public AccessorySheetData(@AccessoryTabType int sheetType, String title) {
+        public AccessorySheetData(@AccessoryTabType int sheetType, String title, String warning) {
             mSheetType = sheetType;
             mTitle = title;
+            mWarning = warning;
+            mToggle = null;
         }
 
         public @AccessoryTabType int getSheetType() {
             return mSheetType;
+        }
+
+        public void setOptionToggle(OptionToggle toggle) {
+            mToggle = toggle;
+        }
+
+        @Nullable
+        public OptionToggle getOptionToggle() {
+            return mToggle;
         }
 
         /**
@@ -292,10 +395,24 @@ public class KeyboardAccessoryData {
         }
 
         /**
+         * Returns a warning to be displayed at the beginning of the sheet. Empty string otherwise.
+         */
+        public String getWarning() {
+            return mWarning;
+        }
+
+        /**
          * Returns the list of {@link UserInfo} to be shown on the accessory sheet.
          */
         public List<UserInfo> getUserInfoList() {
             return mUserInfoList;
+        }
+
+        /**
+         * Returns the list of {@link PromoCodeInfo} to be shown on the accessory sheet.
+         */
+        public List<PromoCodeInfo> getPromoCodeInfoList() {
+            return mPromoCodeInfoList;
         }
 
         /**

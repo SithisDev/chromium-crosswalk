@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,19 @@
 
 namespace browser_switcher {
 
+extern const char kLBSExtensionId[];
+
 class BrowserSwitcherPolicyMigrator
     : public policy::ChromeExtensionPolicyMigrator {
  public:
   BrowserSwitcherPolicyMigrator();
   ~BrowserSwitcherPolicyMigrator() override;
 
-  void Migrate(policy::PolicyBundle* bundle) override;
+  BrowserSwitcherPolicyMigrator(const BrowserSwitcherPolicyMigrator&) = delete;
+  BrowserSwitcherPolicyMigrator& operator=(
+      const BrowserSwitcherPolicyMigrator&) = delete;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(BrowserSwitcherPolicyMigrator);
+  void Migrate(policy::PolicyBundle* bundle) override;
 };
 
 }  // namespace browser_switcher

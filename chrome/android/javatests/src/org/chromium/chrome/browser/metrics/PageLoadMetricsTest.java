@@ -1,11 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.metrics;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -15,12 +16,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.FlakyTest;
-import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -32,31 +30,32 @@ import java.util.concurrent.TimeUnit;
  * Tests for {@link PageLoadMetrics}
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@RetryOnFailure
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PageLoadMetricsTest {
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
+    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
-    private static final int PAGE_LOAD_METRICS_TIMEOUT_MS = 3000;
-    private static final String TEST_PAGE = "/chrome/test/data/android/google.html";
-    private static final String TEST_PAGE_2 = "/chrome/test/data/android/test.html";
+    private static final int PAGE_LOAD_METRICS_TIMEOUT_MS = 6000;
+    private static final String PAGE_PREFIX = "/chrome/test/data/android/google.html";
 
-    private String mTestPage;
-    private String mTestPage2;
     private EmbeddedTestServer mTestServer;
+    private int mLoadCount;
+
+    // Provide the next URL to test with. To eliminate a potential source of flakiness each observed
+    // URL is unique.
+    private String getNextLoadUrl() {
+        int i = mLoadCount++;
+        return mTestServer.getURL(PAGE_PREFIX + "?q=" + i);
+    }
 
     @Before
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityOnBlankPage();
         mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
-        mTestPage = mTestServer.getURL(TEST_PAGE);
-        mTestPage2 = mTestServer.getURL(TEST_PAGE_2);
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -81,13 +80,14 @@ public class PageLoadMetricsTest {
         private long mNavigationId = NO_NAVIGATION_ID;
 
         @Override
-        public void onNewNavigation(WebContents webContents, long navigationId) {
+        public void onNewNavigation(WebContents webContents, long navigationId,
+                boolean isFirstNavigationInWebContents) {
             if (mNavigationId == NO_NAVIGATION_ID) mNavigationId = navigationId;
         }
 
         @Override
         public void onFirstContentfulPaint(WebContents webContents, long navigationId,
-                long navigationStartTick, long firstContentfulPaintMs) {
+                long navigationStartMicros, long firstContentfulPaintMs) {
             if (mNavigationId != navigationId) return;
 
             if (firstContentfulPaintMs > 0) mFirstContentfulPaintLatch.countDown();
@@ -95,7 +95,7 @@ public class PageLoadMetricsTest {
 
         @Override
         public void onLoadEventStart(WebContents webContents, long navigationId,
-                long navigationStartTick, long loadEventStartMs) {
+                long navigationStartMicros, long loadEventStartMs) {
             if (mNavigationId != navigationId) return;
 
             if (loadEventStartMs > 0) mLoadEventStartLatch.countDown();
@@ -127,7 +127,6 @@ public class PageLoadMetricsTest {
 
     @Test
     @SmallTest
-    @FlakyTest(message = "crbug.com/983804")
     public void testPageLoadMetricEmitted() throws InterruptedException {
         Assert.assertFalse("Tab shouldn't be loading anything before we add observer",
                 mActivityTestRule.getActivity().getActivityTab().isLoading());
@@ -135,27 +134,27 @@ public class PageLoadMetricsTest {
         TestThreadUtils.runOnUiThreadBlockingNoException(
                 () -> PageLoadMetrics.addObserver(metricsObserver));
 
-        mActivityTestRule.loadUrl(mTestPage);
+        mActivityTestRule.loadUrl(getNextLoadUrl());
         assertMetricsEmitted(metricsObserver);
 
+        mActivityTestRule.loadUrl(getNextLoadUrl());
         TestThreadUtils.runOnUiThreadBlockingNoException(
                 () -> PageLoadMetrics.removeObserver(metricsObserver));
     }
 
     @Test
     @SmallTest
-    @FlakyTest(message = "crbug.com/986025")
     public void testPageLoadMetricNavigationIdSetCorrectly() throws InterruptedException {
         PageLoadMetricsTestObserver metricsObserver = new PageLoadMetricsTestObserver();
         TestThreadUtils.runOnUiThreadBlockingNoException(
                 () -> PageLoadMetrics.addObserver(metricsObserver));
-        mActivityTestRule.loadUrl(mTestPage);
+        mActivityTestRule.loadUrl(getNextLoadUrl());
         assertMetricsEmitted(metricsObserver);
 
         PageLoadMetricsTestObserver metricsObserver2 = new PageLoadMetricsTestObserver();
         TestThreadUtils.runOnUiThreadBlockingNoException(
                 () -> PageLoadMetrics.addObserver(metricsObserver2));
-        mActivityTestRule.loadUrl(mTestPage2);
+        mActivityTestRule.loadUrl(getNextLoadUrl());
         assertMetricsEmitted(metricsObserver2);
 
         Assert.assertNotEquals("Subsequent navigations should have different navigation ids",

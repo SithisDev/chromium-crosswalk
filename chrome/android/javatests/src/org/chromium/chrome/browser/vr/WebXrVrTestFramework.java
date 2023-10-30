@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.vr;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
 import org.junit.Assert;
 
@@ -22,19 +22,16 @@ import java.lang.annotation.RetentionPolicy;
  */
 public class WebXrVrTestFramework extends WebXrTestFramework {
     @Retention(RetentionPolicy.SOURCE)
-    @IntDef({CONSENT_DIALOG_ACTION_DO_NOTHING, CONSENT_DIALOG_ACTION_ALLOW,
-            CONSENT_DIALOG_ACTION_DENY})
-    public @interface ConsentDialogAction {}
+    @IntDef({PERMISSION_PROMPT_ACTION_DO_NOTHING, PERMISSION_PROMPT_ACTION_ALLOW,
+            PERMISSION_PROMPT_ACTION_DENY})
+    public @interface PermissionPromptAction {}
 
-    public static final int CONSENT_DIALOG_ACTION_DO_NOTHING = 0;
-    public static final int CONSENT_DIALOG_ACTION_ALLOW = 1;
-    public static final int CONSENT_DIALOG_ACTION_DENY = 2;
+    public static final int PERMISSION_PROMPT_ACTION_DO_NOTHING = 0;
+    public static final int PERMISSION_PROMPT_ACTION_ALLOW = 1;
+    public static final int PERMISSION_PROMPT_ACTION_DENY = 2;
 
-    // If set, a consent dialog is expected on all enterSessionWithUserGesture* methods.
-    protected boolean mShouldExpectConsentDialog = true;
-
-    @ConsentDialogAction
-    protected int mConsentDialogAction = CONSENT_DIALOG_ACTION_ALLOW;
+    @PermissionPromptAction
+    protected int mPermissionPromptAction = PERMISSION_PROMPT_ACTION_ALLOW;
 
     public WebXrVrTestFramework(ChromeActivityTestRule rule) {
         super(rule);
@@ -44,12 +41,12 @@ public class WebXrVrTestFramework extends WebXrTestFramework {
     }
 
     /**
-     * Set the default action to be taken when the consent dialog is displayed.
+     * Set the default action to be taken when the permission prompt is displayed.
      *
-     * @param action The action to take on a consent dialog.
+     * @param action The action to take on a permission prompt.
      */
-    public void setConsentDialogAction(@ConsentDialogAction int action) {
-        mConsentDialogAction = action;
+    public void setPermissionPromptAction(@PermissionPromptAction int action) {
+        mPermissionPromptAction = action;
     }
 
     /**
@@ -69,12 +66,26 @@ public class WebXrVrTestFramework extends WebXrTestFramework {
         }
         super.enterSessionWithUserGesture(webContents);
 
-        if (!mShouldExpectConsentDialog) return;
-        PermissionUtils.waitForConsentPrompt(getRule().getActivity());
-        if (mConsentDialogAction == CONSENT_DIALOG_ACTION_ALLOW)
-            PermissionUtils.acceptConsentPrompt(getRule().getActivity());
-        else if (mConsentDialogAction == CONSENT_DIALOG_ACTION_DENY)
-            PermissionUtils.declineConsentPrompt(getRule().getActivity());
+        if (!shouldExpectPermissionPrompt()) return;
+        PermissionUtils.waitForPermissionPrompt();
+        if (mPermissionPromptAction == PERMISSION_PROMPT_ACTION_ALLOW) {
+            PermissionUtils.acceptPermissionPrompt();
+        } else if (mPermissionPromptAction == PERMISSION_PROMPT_ACTION_DENY) {
+            PermissionUtils.denyPermissionPrompt();
+        }
+    }
+
+    /**
+     * 'enterSessionWithUserGestureOrFail' is specific to immersive sessions. This method does the
+     * same, but for the magic window session.
+     */
+    public void enterMagicWindowSessionWithUserGestureOrFail() {
+        runJavaScriptOrFail(
+                "sessionTypeToRequest = sessionTypes.MAGIC_WINDOW", POLL_TIMEOUT_SHORT_MS);
+        enterSessionWithUserGesture();
+        pollJavaScriptBooleanOrFail(
+                "sessionInfos[sessionTypes.MAGIC_WINDOW].currentSession != null",
+                POLL_TIMEOUT_LONG_MS);
     }
 
     /**
@@ -83,10 +94,20 @@ public class WebXrVrTestFramework extends WebXrTestFramework {
      * @param webContents The WebContents of the tab to enter the immersive session in.
      */
     @Override
-    public void enterSessionWithUserGestureOrFail(WebContents webContents) {
+    public void enterSessionWithUserGestureOrFail(
+            WebContents webContents, boolean needsCameraPermission) {
         runJavaScriptOrFail(
                 "sessionTypeToRequest = sessionTypes.IMMERSIVE", POLL_TIMEOUT_LONG_MS, webContents);
+
+        boolean willPromptForCamera =
+                needsCameraPermission && permissionRequestWouldTriggerPrompt("camera");
+
         enterSessionWithUserGesture(webContents);
+
+        if (willPromptForCamera) {
+            PermissionUtils.waitForPermissionPrompt();
+            PermissionUtils.acceptPermissionPrompt();
+        }
 
         pollJavaScriptBooleanOrFail("sessionInfos[sessionTypes.IMMERSIVE].currentSession != null",
                 POLL_TIMEOUT_LONG_MS, webContents);
@@ -95,13 +116,32 @@ public class WebXrVrTestFramework extends WebXrTestFramework {
     }
 
     /**
-     * Ends a WebXR immersive session.
+     * End an immersive session and wait until that session has actually ended.
      *
      * @param webContents The WebContents for the tab to end the session in.
      */
     @Override
     public void endSession(WebContents webContents) {
+        // Use a long timeout for session.end(), this can unexpectedly take more than
+        // a second. TODO(https://crbug.com/1014159): investigate why.
         runJavaScriptOrFail("sessionInfos[sessionTypes.IMMERSIVE].currentSession.end()",
-                POLL_TIMEOUT_SHORT_MS, webContents);
+                POLL_TIMEOUT_LONG_MS, webContents);
+
+        // Wait for the session to end before proceeding with followup tests.
+        pollJavaScriptBooleanOrFail("sessionInfos[sessionTypes.IMMERSIVE].currentSession == null",
+                POLL_TIMEOUT_LONG_MS, webContents);
+    }
+
+    /**
+     * Checks whether an immersive VR session would trigger the permission prompt.
+     *
+     * @param webContents The WebContents to check in.
+     * @return True if an immersive VR session request would trigger the permission prompt,
+     *         otherwise
+     *     false.
+     */
+    @Override
+    public boolean shouldExpectPermissionPrompt(WebContents webContents) {
+        return shouldExpectPermissionPrompt("sessionTypeToRequest", webContents);
     }
 }

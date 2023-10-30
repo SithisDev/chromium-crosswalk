@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,19 +8,21 @@ import android.content.Context;
 import android.graphics.drawable.Drawable;
 import android.widget.ImageView;
 
+import androidx.appcompat.content.res.AppCompatResources;
+
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.download.home.list.view.UiUtils;
-import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
 import org.chromium.ui.resources.dynamics.ViewResourceInflater;
 
 /**
- * Manages an icon to display for a non-action card returned by the server.
+ * Manages an icon to display in the {@link ContextualSearchBarControl} in a non-action card
+ * returned by the server. A Card is a structured result from the CoCa backend that can
+ * be rendered directly in the Bar. Action cards have associated intents, like dialing
+ * a phone number. This class handles some special cases for the general
+ * {@link ContextualSearchImageControl} that is responsible for any image that is rendered
+ * in the Bar.
  */
 public class ContextualSearchCardIconControl extends ViewResourceInflater {
-    // A separator that we expect in the title of a dictionary response.
-    private static final String DEFINITION_MID_DOT = "\u00b7";
-
     private final Context mContext;
     private boolean mHasIcon;
 
@@ -35,33 +37,10 @@ public class ContextualSearchCardIconControl extends ViewResourceInflater {
     }
 
     /**
-     * Tries to update the given controls to display a dictionary definition card, and returns
-     * whether that was successful. We use the Context, which normally shows the word tapped and its
-     * surrounding text to show the dictionary word and its pronunciation.
-     * @param contextControl The {@link ContextualSearchContextControl} that displays a two-part
-     *        main bar text, to set to the dictionary-word/pronunciation.
-     * @param imageControl The control for the image to show in the bar.  If successful we'll show a
-     *        dictionary icon here.
-     * @param searchTerm The string that represents the search term to display.
+     * Sets the icon to a vector drawable dictionary definition image.
      */
-    boolean didUpdateControlsForDefinition(ContextualSearchContextControl contextControl,
-            ContextualSearchImageControl imageControl, String searchTerm) {
-        // This middle-dot character is returned by the server and marks the beginning of the
-        // pronunciation.
-        int dotSeparatorLocation = searchTerm.indexOf(DEFINITION_MID_DOT);
-        if (dotSeparatorLocation <= 0 || dotSeparatorLocation >= searchTerm.length() - 1) {
-            return false;
-        }
-
-        // Style with the pronunciation in gray in the second half.
-        String word = searchTerm.substring(0, dotSeparatorLocation);
-        String pronunciation = searchTerm.substring(dotSeparatorLocation + 1, searchTerm.length());
-        pronunciation = LocalizationUtils.isLayoutRtl() ? pronunciation + DEFINITION_MID_DOT
-                                                        : DEFINITION_MID_DOT + pronunciation;
-        contextControl.setContextDetails(word, pronunciation);
+    void setVectorDrawableDefinitionIcon() {
         setVectorDrawableResourceId(R.drawable.ic_book_round);
-        imageControl.setCardIconResourceId(getIconResId());
-        return true;
     }
 
     /**
@@ -69,7 +48,7 @@ public class ContextualSearchCardIconControl extends ViewResourceInflater {
      * @param resId The resource ID of a drawable.
      */
     private void setVectorDrawableResourceId(int resId) {
-        Drawable drawable = UiUtils.getDrawable(mContext, resId);
+        Drawable drawable = AppCompatResources.getDrawable(mContext, resId);
         if (drawable != null) {
             inflate();
             ((ImageView) getView()).setImageDrawable(drawable);

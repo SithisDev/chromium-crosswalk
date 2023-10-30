@@ -1,11 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_PAGE_INFO_PAGE_INFO_BUBBLE_VIEW_BASE_H_
 #define CHROME_BROWSER_UI_VIEWS_PAGE_INFO_PAGE_INFO_BUBBLE_VIEW_BASE_H_
 
+#include "components/page_info/page_info_ui.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
 
@@ -26,6 +28,8 @@ class Widget;
 class PageInfoBubbleViewBase : public views::BubbleDialogDelegateView,
                                public content::WebContentsObserver {
  public:
+  METADATA_HEADER(PageInfoBubbleViewBase);
+
   // Type of the bubble being displayed.
   enum BubbleType {
     BUBBLE_NONE,
@@ -34,15 +38,19 @@ class PageInfoBubbleViewBase : public views::BubbleDialogDelegateView,
     // Custom bubble for internal pages like chrome:// and chrome-extensions://.
     BUBBLE_INTERNAL_PAGE,
     // Custom bubble for displaying safety tips.
-    BUBBLE_SAFETY_TIP
+    BUBBLE_SAFETY_TIP,
+    // Custom bubble for displaying accuracy tips.
+    BUBBLE_ACCURACY_TIP,
   };
+
+  PageInfoBubbleViewBase(const PageInfoBubbleViewBase&) = delete;
+  PageInfoBubbleViewBase& operator=(const PageInfoBubbleViewBase&) = delete;
 
   // Returns the type of the bubble being shown. For testing only.
   static BubbleType GetShownBubbleType();
 
-  // Returns a weak reference to the page info bubble being shown. For testing
-  // only.
-  static views::BubbleDialogDelegateView* GetPageInfoBubble();
+  // Returns the page info bubble being shown.
+  static views::BubbleDialogDelegateView* GetPageInfoBubbleForTesting();
 
  protected:
   PageInfoBubbleViewBase(views::View* anchor_view,
@@ -52,23 +60,19 @@ class PageInfoBubbleViewBase : public views::BubbleDialogDelegateView,
                          content::WebContents* web_contents);
 
   // views::BubbleDialogDelegateView:
-  int GetDialogButtons() const override;
-  base::string16 GetWindowTitle() const override;
-  bool ShouldShowCloseButton() const override;
   void OnWidgetDestroying(views::Widget* widget) override;
 
-  void set_window_title(const base::string16& title) { window_title_ = title; }
+  // WebContentsObserver:
+  void WebContentsDestroyed() override;
 
  private:
+  friend class SafetyTipPageInfoBubbleViewBrowserTest;
+
   // WebContentsObserver:
   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
   void OnVisibilityChanged(content::Visibility visibility) override;
-  void DidStartNavigation(content::NavigationHandle* handle) override;
+  void PrimaryPageChanged(content::Page& page) override;
   void DidChangeVisibleSecurityState() override;
-
-  base::string16 window_title_;
-
-  DISALLOW_COPY_AND_ASSIGN(PageInfoBubbleViewBase);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_PAGE_INFO_PAGE_INFO_BUBBLE_VIEW_BASE_H_

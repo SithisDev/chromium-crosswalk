@@ -1,19 +1,17 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/metrics/field_trial.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_brand.h"
-#include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/google/core/browser/google_url_tracker.h"
 #include "components/google/core/common/google_util.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
@@ -22,36 +20,24 @@
 #include "url/gurl.h"
 
 #if BUILDFLAG(ENABLE_RLZ)
-#include "components/rlz/rlz_tracker.h"
+#include "components/rlz/rlz_tracker.h"  // nogncheck crbug.com/1125897
 #endif
 
 using content::BrowserThread;
 
-// static
-std::string* UIThreadSearchTermsData::google_base_url_ = NULL;
-
-UIThreadSearchTermsData::UIThreadSearchTermsData(Profile* profile)
-    : profile_(profile) {
+UIThreadSearchTermsData::UIThreadSearchTermsData() {
   DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
-      BrowserThread::CurrentlyOn(BrowserThread::UI));
+         BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
 std::string UIThreadSearchTermsData::GoogleBaseURLValue() const {
   DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
       BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (google_base_url_)
-    return *google_base_url_;
   GURL base_url(google_util::CommandLineGoogleBaseURL());
   if (base_url.is_valid())
     return base_url.spec();
 
-  if (!profile_)
-    return SearchTermsData::GoogleBaseURLValue();
-
-  const GoogleURLTracker* tracker =
-      GoogleURLTrackerFactory::GetForProfile(profile_);
-  return tracker ?
-      tracker->google_url().spec() : GoogleURLTracker::kDefaultGoogleHomepage;
+  return SearchTermsData::GoogleBaseURLValue();
 }
 
 std::string UIThreadSearchTermsData::GetApplicationLocale() const {
@@ -61,12 +47,12 @@ std::string UIThreadSearchTermsData::GetApplicationLocale() const {
 }
 
 // Android implementations are in ui_thread_search_terms_data_android.cc.
-#if !defined(OS_ANDROID)
-base::string16 UIThreadSearchTermsData::GetRlzParameterValue(
+#if !BUILDFLAG(IS_ANDROID)
+std::u16string UIThreadSearchTermsData::GetRlzParameterValue(
     bool from_app_list) const {
   DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
       BrowserThread::CurrentlyOn(BrowserThread::UI));
-  base::string16 rlz_string;
+  std::u16string rlz_string;
 #if BUILDFLAG(ENABLE_RLZ)
   // For organic brandcodes do not use rlz at all. Empty brandcode usually
   // means a chromium install. This is ok.
@@ -94,23 +80,29 @@ std::string UIThreadSearchTermsData::GetSearchClient() const {
 }
 #endif
 
-std::string UIThreadSearchTermsData::GetSuggestClient() const {
+std::string UIThreadSearchTermsData::GetSuggestClient(
+    bool non_searchbox_ntp) const {
   DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
       BrowserThread::CurrentlyOn(BrowserThread::UI));
-#if defined(OS_ANDROID)
-  return ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE ?
-      "chrome" : "chrome-omni";
+#if BUILDFLAG(IS_ANDROID)
+  if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE) {
+    return non_searchbox_ntp ? "chrome-android-search-resumption-module"
+                             : "chrome";
+  }
+  return "chrome-omni";
 #else
   return "chrome-omni";
 #endif
 }
 
-std::string UIThreadSearchTermsData::GetSuggestRequestIdentifier() const {
+std::string UIThreadSearchTermsData::GetSuggestRequestIdentifier(
+    bool non_searchbox_ntp) const {
   DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
       BrowserThread::CurrentlyOn(BrowserThread::UI));
-#if defined(OS_ANDROID)
-  if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE)
-    return "chrome-mobile-ext-ansg";
+#if BUILDFLAG(IS_ANDROID)
+  if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE) {
+    return non_searchbox_ntp ? std::string() : "chrome-mobile-ext-ansg";
+  }
 #endif
   return "chrome-ext-ansg";
 }
@@ -124,16 +116,12 @@ std::string UIThreadSearchTermsData::GoogleImageSearchSource() const {
   if (version_info::IsOfficialBuild())
     version += " (Official)";
   version += " " + version_info::GetOSType();
-  std::string modifier(chrome::GetChannelName());
+  // Do not distinguish extended from regular stable in image search queries.
+  std::string modifier(
+      chrome::GetChannelName(chrome::WithExtendedStable(false)));
   if (!modifier.empty())
     version += " " + modifier;
   return version;
-}
-
-// static
-void UIThreadSearchTermsData::SetGoogleBaseURL(const std::string& base_url) {
-  delete google_base_url_;
-  google_base_url_ = base_url.empty() ? NULL : new std::string(base_url);
 }
 
 size_t UIThreadSearchTermsData::EstimateMemoryUsage() const {

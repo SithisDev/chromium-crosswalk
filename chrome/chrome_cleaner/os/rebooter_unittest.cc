@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,8 +69,8 @@ TEST_F(RebooterTest, RegisterPostRebootRun) {
                                              /*logs_uploads_allowed=*/false));
 
   std::string switch_str(kPostRebootSwitchesInOtherRegistryKeySwitch);
-  EXPECT_TRUE(RunOnceCommandLineContains(
-      TEST_PRODUCT_SHORTNAME_STRING, base::UTF8ToUTF16(switch_str).c_str()));
+  EXPECT_TRUE(RunOnceCommandLineContains(TEST_PRODUCT_SHORTNAME_STRING,
+                                         base::UTF8ToWide(switch_str).c_str()));
 
   EXPECT_TRUE(
       RunOnceOverrideCommandLineContains(kTestCleanupId, kExpectedTestSwitch));

@@ -1,27 +1,30 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/signin/signin_promo.h"
 
 #include "base/strings/string_number_conversions.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_consistency_mode_manager.h"
 #include "chrome/browser/signin/signin_promo_util.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/google/core/common/google_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition_config.h"
+#include "extensions/browser/guest_view/web_view/web_view_guest.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/url_util.h"
 #include "url/gurl.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/windows_version.h"
 #endif
 
@@ -32,7 +35,7 @@ const char kSignInPromoQueryKeyAutoClose[] = "auto_close";
 const char kSignInPromoQueryKeyForceKeepData[] = "force_keep_data";
 const char kSignInPromoQueryKeyReason[] = "reason";
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 GURL GetEmbeddedPromoURL(signin_metrics::AccessPoint access_point,
                          signin_metrics::Reason reason,
                          bool auto_close) {
@@ -40,10 +43,10 @@ GURL GetEmbeddedPromoURL(signin_metrics::AccessPoint access_point,
            static_cast<int>(signin_metrics::AccessPoint::ACCESS_POINT_MAX));
   CHECK_NE(static_cast<int>(access_point),
            static_cast<int>(signin_metrics::AccessPoint::ACCESS_POINT_UNKNOWN));
-  CHECK_LT(static_cast<int>(reason),
-           static_cast<int>(signin_metrics::Reason::REASON_MAX));
+  CHECK_LE(static_cast<int>(reason),
+           static_cast<int>(signin_metrics::Reason::kMaxValue));
   CHECK_NE(static_cast<int>(reason),
-           static_cast<int>(signin_metrics::Reason::REASON_UNKNOWN_REASON));
+           static_cast<int>(signin_metrics::Reason::kUnknownReason));
 
   GURL url(chrome::kChromeUIChromeSigninURL);
   url = net::AppendQueryParameter(
@@ -67,7 +70,7 @@ GURL GetEmbeddedReauthURLWithEmail(signin_metrics::AccessPoint access_point,
   url = net::AppendQueryParameter(url, "validateEmail", "1");
   return net::AppendQueryParameter(url, "readOnlyEmail", "1");
 }
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 GURL GetChromeSyncURLForDice(const std::string& email,
                              const std::string& continue_url) {
@@ -89,8 +92,12 @@ GURL GetAddAccountURLForDice(const std::string& email,
   return url;
 }
 
-GURL GetSigninPartitionURL() {
-  return GURL("chrome-guest://chrome-signin/?");
+content::StoragePartition* GetSigninPartition(
+    content::BrowserContext* browser_context) {
+  const auto signin_partition_config = content::StoragePartitionConfig::Create(
+      browser_context, "chrome-signin", /* partition_name= */ "",
+      /* in_memory= */ true);
+  return browser_context->GetStoragePartition(signin_partition_config);
 }
 
 signin_metrics::AccessPoint GetAccessPointForEmbeddedPromoURL(const GURL& url) {
@@ -116,27 +123,17 @@ signin_metrics::AccessPoint GetAccessPointForEmbeddedPromoURL(const GURL& url) {
 signin_metrics::Reason GetSigninReasonForEmbeddedPromoURL(const GURL& url) {
   std::string value;
   if (!net::GetValueForKeyInQuery(url, kSignInPromoQueryKeyReason, &value))
-    return signin_metrics::Reason::REASON_UNKNOWN_REASON;
+    return signin_metrics::Reason::kUnknownReason;
 
   int reason = -1;
   base::StringToInt(value, &reason);
-  if (reason < static_cast<int>(
-                   signin_metrics::Reason::REASON_SIGNIN_PRIMARY_ACCOUNT) ||
-      reason >= static_cast<int>(signin_metrics::Reason::REASON_MAX)) {
-    return signin_metrics::Reason::REASON_UNKNOWN_REASON;
+  if (reason <
+          static_cast<int>(signin_metrics::Reason::kSigninPrimaryAccount) ||
+      reason > static_cast<int>(signin_metrics::Reason::kMaxValue)) {
+    return signin_metrics::Reason::kUnknownReason;
   }
 
   return static_cast<signin_metrics::Reason>(reason);
-}
-
-bool IsAutoCloseEnabledInEmbeddedURL(const GURL& url) {
-  std::string value;
-  if (net::GetValueForKeyInQuery(url, kSignInPromoQueryKeyAutoClose, &value)) {
-    int enabled = 0;
-    if (base::StringToInt(value, &enabled) && enabled == 1)
-      return true;
-  }
-  return false;
 }
 
 void RegisterProfilePrefs(

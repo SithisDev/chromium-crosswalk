@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
@@ -25,6 +24,11 @@ class BackgroundFetchPermissionContextTest
  protected:
   BackgroundFetchPermissionContextTest() = default;
 
+  BackgroundFetchPermissionContextTest(
+      const BackgroundFetchPermissionContextTest&) = delete;
+  BackgroundFetchPermissionContextTest& operator=(
+      const BackgroundFetchPermissionContextTest&) = delete;
+
   ~BackgroundFetchPermissionContextTest() override = default;
 
   ContentSetting GetPermissonStatus(
@@ -35,7 +39,7 @@ class BackgroundFetchPermissionContextTest
 
     if (with_frame) {
       content::WebContentsTester::For(web_contents())->NavigateAndCommit(url);
-      render_frame_host = web_contents()->GetMainFrame();
+      render_frame_host = web_contents()->GetPrimaryMainFrame();
     }
 
     auto permission_result = permission_context->GetPermissionStatus(
@@ -51,12 +55,8 @@ class BackgroundFetchPermissionContextTest
         HostContentSettingsMapFactory::GetForProfile(profile());
     ASSERT_TRUE(host_content_settings_map);
     host_content_settings_map->SetContentSettingDefaultScope(
-        url /* primary_url*/, url /* secondary_url*/, content_type,
-        std::string() /* resource_identifier */, setting);
+        url /* primary_url*/, url /* secondary_url*/, content_type, setting);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(BackgroundFetchPermissionContextTest);
 };
 
 // Test that Background Fetch permission is "allow" by default, when queried
@@ -69,18 +69,18 @@ TEST_F(BackgroundFetchPermissionContextTest, TestOutcomeAllowWithFrame) {
             CONTENT_SETTING_ALLOW);
 }
 
-// Test that Background Fetch permission is "allow" when queried from a worker
+// Test that Background Fetch permission is "prompt" when queried from a worker
 // context, if the Automatic Downloads content setting is set to
 // CONTENT_SETTING_ALLOW.
 TEST_F(BackgroundFetchPermissionContextTest, TestOutcomeAllowWithoutFrame) {
   GURL url("https://example.com");
-  SetContentSetting(url, CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS,
+  SetContentSetting(url, ContentSettingsType::AUTOMATIC_DOWNLOADS,
                     CONTENT_SETTING_ALLOW);
 
   BackgroundFetchPermissionContext permission_context(profile());
 
   EXPECT_EQ(GetPermissonStatus(url, &permission_context, /*with_frame =*/false),
-            CONTENT_SETTING_ALLOW);
+            CONTENT_SETTING_ASK);
 }
 
 // Test that Background Fetch permission is "deny" when queried from a worker
@@ -88,7 +88,7 @@ TEST_F(BackgroundFetchPermissionContextTest, TestOutcomeAllowWithoutFrame) {
 // CONTENT_SETTING_BLOCK.
 TEST_F(BackgroundFetchPermissionContextTest, TestOutcomeDenyWithoutFrame) {
   GURL url("https://example.com");
-  SetContentSetting(url, CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS,
+  SetContentSetting(url, ContentSettingsType::AUTOMATIC_DOWNLOADS,
                     CONTENT_SETTING_BLOCK);
 
   BackgroundFetchPermissionContext permission_context(profile());
@@ -104,7 +104,7 @@ TEST_F(BackgroundFetchPermissionContextTest, TestOutcomePromptWithoutFrame) {
   ASSERT_TRUE(host_content_settings_map);
 
   GURL url("https://example.com");
-  SetContentSetting(url, CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS,
+  SetContentSetting(url, ContentSettingsType::AUTOMATIC_DOWNLOADS,
                     CONTENT_SETTING_ASK);
 
   BackgroundFetchPermissionContext permission_context(profile());

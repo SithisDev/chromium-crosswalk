@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,15 @@ import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.AttributeSet;
 
+import com.google.android.material.textfield.TextInputLayout;
+
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.widget.CompatibilityTextInputLayout;
 
 /**
- * Wraps around {@link CompatibilityTextInputLayout} to implement a basic empty field error behavior
+ * Wraps around {@link TextInputLayout} to implement a basic empty field error behavior
  * for the Bookmark related TextInputLayouts.
  */
-public class BookmarkTextInputLayout extends CompatibilityTextInputLayout {
+public class BookmarkTextInputLayout extends TextInputLayout {
     private String mEmptyErrorMessage;
 
     public BookmarkTextInputLayout(Context context, AttributeSet attrs) {
@@ -55,14 +56,14 @@ public class BookmarkTextInputLayout extends CompatibilityTextInputLayout {
     /**
      * @return Trimmed text for validation.
      */
-    String getTrimmedText() {
+    public String getTrimmedText() {
         return getEditText().getText().toString().trim();
     }
 
     /**
      * @return Whether the content is empty.
      */
-    boolean isEmpty() {
+    public boolean isEmpty() {
         return TextUtils.isEmpty(getTrimmedText());
     }
 
@@ -71,7 +72,7 @@ public class BookmarkTextInputLayout extends CompatibilityTextInputLayout {
      * If there is a need for extra validation, this method should be overridden
      * and extra validation statements should be added after calling super.validate()
      */
-    void validate() {
+    public void validate() {
         if (mEmptyErrorMessage != null) {
             setError(isEmpty() ? mEmptyErrorMessage : null);
         }

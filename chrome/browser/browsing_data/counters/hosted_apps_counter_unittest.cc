@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,14 @@
 
 #include "base/bind.h"
 #include "base/guid.h"
+#include "base/memory/raw_ptr.h"
 #include "base/values.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/browsing_data/core/browsing_data_utils.h"
 #include "components/browsing_data/core/pref_names.h"
 #include "components/crx_file/id_util.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/value_builder.h"
@@ -31,7 +32,7 @@ using extensions::ListBuilder;
 class HostedAppsCounterTest : public testing::Test {
  public:
   void SetUp() override {
-    profile_.reset(new TestingProfile());
+    profile_ = std::make_unique<TestingProfile>();
     extension_registry_ = extensions::ExtensionRegistry::Get(profile_.get());
 
     SetHostedAppsDeletionPref(true);
@@ -41,9 +42,7 @@ class HostedAppsCounterTest : public testing::Test {
   // Adding and removing apps and extensions. ----------------------------------
 
   std::string AddExtension() {
-    return AddItem(
-        base::GenerateGUID(),
-        std::unique_ptr<base::DictionaryValue>());
+    return AddItem(base::GenerateGUID(), /*app_manifest=*/nullptr);
   }
 
   std::string AddPackagedApp() {
@@ -139,9 +138,9 @@ class HostedAppsCounterTest : public testing::Test {
   }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
-  extensions::ExtensionRegistry* extension_registry_;
+  raw_ptr<extensions::ExtensionRegistry> extension_registry_;
 
   bool finished_;
   browsing_data::BrowsingDataCounter::ResultInt num_apps_;
@@ -152,9 +151,10 @@ class HostedAppsCounterTest : public testing::Test {
 TEST_F(HostedAppsCounterTest, Count) {
   Profile* profile = GetProfile();
   HostedAppsCounter counter(profile);
-  counter.Init(
-      profile->GetPrefs(), browsing_data::ClearBrowsingDataTab::ADVANCED,
-      base::Bind(&HostedAppsCounterTest::Callback, base::Unretained(this)));
+  counter.Init(profile->GetPrefs(),
+               browsing_data::ClearBrowsingDataTab::ADVANCED,
+               base::BindRepeating(&HostedAppsCounterTest::Callback,
+                                   base::Unretained(this)));
   counter.Restart();
   EXPECT_EQ(0u, GetNumHostedApps());
 
@@ -179,9 +179,10 @@ TEST_F(HostedAppsCounterTest, Count) {
 TEST_F(HostedAppsCounterTest, OnlyHostedApps) {
   Profile* profile = GetProfile();
   HostedAppsCounter counter(profile);
-  counter.Init(
-      profile->GetPrefs(), browsing_data::ClearBrowsingDataTab::ADVANCED,
-      base::Bind(&HostedAppsCounterTest::Callback, base::Unretained(this)));
+  counter.Init(profile->GetPrefs(),
+               browsing_data::ClearBrowsingDataTab::ADVANCED,
+               base::BindRepeating(&HostedAppsCounterTest::Callback,
+                                   base::Unretained(this)));
 
   AddHostedApp();  // 1
   AddExtension();
@@ -217,9 +218,10 @@ TEST_F(HostedAppsCounterTest, OnlyHostedApps) {
 TEST_F(HostedAppsCounterTest, Examples) {
   Profile* profile = GetProfile();
   HostedAppsCounter counter(profile);
-  counter.Init(
-      profile->GetPrefs(), browsing_data::ClearBrowsingDataTab::ADVANCED,
-      base::Bind(&HostedAppsCounterTest::Callback, base::Unretained(this)));
+  counter.Init(profile->GetPrefs(),
+               browsing_data::ClearBrowsingDataTab::ADVANCED,
+               base::BindRepeating(&HostedAppsCounterTest::Callback,
+                                   base::Unretained(this)));
   counter.Restart();
   EXPECT_EQ(0u, GetExamples().size());
 

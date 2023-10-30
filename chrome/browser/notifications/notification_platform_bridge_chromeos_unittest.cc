@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "chrome/browser/notifications/notification_handler.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/public/cpp/notification.h"
@@ -16,7 +16,7 @@
 // Regression test for https://crbug.com/840105
 TEST(NotificationPlatformBridgeChromeOsTest, Update) {
   message_center::MessageCenter::Initialize();
-  content::TestBrowserThreadBundle thread_bundle;
+  content::BrowserTaskEnvironment task_environment;
   TestingProfile profile;
   NotificationPlatformBridgeChromeOs bridge;
 
@@ -27,11 +27,11 @@ TEST(NotificationPlatformBridgeChromeOsTest, Update) {
   auto initial_delegate =
       base::MakeRefCounted<message_center::HandleNotificationClickDelegate>(
           base::BindRepeating(
-              [](int* clicks, base::Optional<int> button_index) { ++*clicks; },
+              [](int* clicks, absl::optional<int> button_index) { ++*clicks; },
               &initial_delegate_clicks));
   message_center::Notification initial_notification(
-      message_center::NOTIFICATION_TYPE_SIMPLE, id, base::string16(),
-      base::string16(), gfx::Image(), base::string16(), GURL(),
+      message_center::NOTIFICATION_TYPE_SIMPLE, id, std::u16string(),
+      std::u16string(), ui::ImageModel(), std::u16string(), GURL(),
       message_center::NotifierId(), {}, initial_delegate);
   bridge.Display(NotificationHandler::Type::TRANSIENT, &profile,
                  initial_notification, nullptr);
@@ -46,11 +46,11 @@ TEST(NotificationPlatformBridgeChromeOsTest, Update) {
   auto updated_delegate =
       base::MakeRefCounted<message_center::HandleNotificationClickDelegate>(
           base::BindRepeating(
-              [](int* clicks, base::Optional<int> button_index) { ++*clicks; },
+              [](int* clicks, absl::optional<int> button_index) { ++*clicks; },
               &updated_delegate_clicks));
   message_center::Notification updated_notification(
-      message_center::NOTIFICATION_TYPE_SIMPLE, id, base::string16(),
-      base::string16(), gfx::Image(), base::string16(), GURL(),
+      message_center::NOTIFICATION_TYPE_SIMPLE, id, std::u16string(),
+      std::u16string(), ui::ImageModel(), std::u16string(), GURL(),
       message_center::NotifierId(), {}, updated_delegate);
   bridge.Display(NotificationHandler::Type::TRANSIENT, &profile,
                  updated_notification, nullptr);

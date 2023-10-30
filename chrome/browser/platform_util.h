@@ -1,14 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_PLATFORM_UTIL_H_
 #define CHROME_BROWSER_PLATFORM_UTIL_H_
 
-#include <string>
-
 #include "base/callback_forward.h"
-#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "chrome/common/buildflags.h"
 #include "ui/gfx/native_widget_types.h"
@@ -41,13 +38,10 @@ enum OpenOperationResult {
 enum OpenItemType {
   OPEN_FILE,
   OPEN_FOLDER,
-#if defined(OS_LINUX)
-  SHOW_ITEM_IN_FOLDER
-#endif
 };
 
 // Callback used with OpenFile and OpenFolder.
-typedef base::Callback<void(OpenOperationResult)> OpenOperationCallback;
+typedef base::OnceCallback<void(OpenOperationResult)> OpenOperationCallback;
 
 // Opens the item specified by |full_path|, which is expected to be the type
 // indicated by |item_type| in the desktop's default manner.
@@ -64,7 +58,7 @@ typedef base::Callback<void(OpenOperationResult)> OpenOperationCallback;
 void OpenItem(Profile* profile,
               const base::FilePath& full_path,
               OpenItemType item_type,
-              const OpenOperationCallback& callback);
+              OpenOperationCallback callback);
 
 // Opens the folder containing the item specified by |full_path| in the
 // desktop's default manner. If possible, the item will be selected. The
@@ -100,11 +94,14 @@ void ActivateWindow(gfx::NativeWindow window);
 // whether the view has the visible attribute set.
 bool IsVisible(gfx::NativeView view);
 
-#if defined(OS_MACOSX)
-// On 10.7+, back and forward swipe gestures can be triggered using a scroll
-// gesture, if enabled in System Preferences. This function returns true if
-// the feature is supported and enabled, and false otherwise.
+#if BUILDFLAG(IS_MAC)
+// On the Mac, back and forward swipe gestures can be triggered using a scroll
+// gesture, if enabled in System Preferences. This function returns true if the
+// feature is enabled, and false otherwise.
 bool IsSwipeTrackingFromScrollEventsEnabled();
+
+// Returns the active window which accepts keyboard inputs.
+NSWindow* GetActiveWindow();
 #endif
 
 // Returns true if the given browser window is in locked fullscreen mode

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,14 @@
 #include "chrome/browser/media/router/discovery/discovery_network_monitor.h"
 #include "chrome/browser/media/router/discovery/mdns/media_sink_util.h"
 #include "chrome/browser/media/router/media_router_feature.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/common/media_router/media_sink.h"
 #include "components/cast_channel/cast_socket_service.h"
+#include "components/media_router/common/media_sink.h"
+#include "components/media_router/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 
 namespace media_router {
+
+constexpr char kLoggerComponent[] = "CastMediaSinkService";
 
 CastMediaSinkService::CastMediaSinkService()
     : impl_(nullptr, base::OnTaskRunnerDeleter(nullptr)) {}
@@ -27,6 +29,7 @@ CastMediaSinkService::~CastMediaSinkService() {
     dns_sd_registry_->RemoveObserver(this);
     dns_sd_registry_ = nullptr;
   }
+  local_state_change_registrar_.RemoveAll();
 }
 
 void CastMediaSinkService::Start(
@@ -53,7 +56,7 @@ void CastMediaSinkService::Start(
       FROM_HERE, base::BindOnce(&CastMediaSinkServiceImpl::Start,
                                 base::Unretained(impl_.get())));
 
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
   StartMdnsDiscovery();
 #endif
 }
@@ -97,7 +100,14 @@ void CastMediaSinkService::StartMdnsDiscovery() {
     dns_sd_registry_ = DnsSdRegistry::GetInstance();
     dns_sd_registry_->AddObserver(this);
     dns_sd_registry_->RegisterDnsSdListener(kCastServiceType);
+    LoggerList::GetInstance()->Log(
+        LoggerImpl::Severity::kInfo, mojom::LogCategory::kDiscovery,
+        kLoggerComponent, "mDNS discovery started.", "", "", "");
   }
+}
+
+bool CastMediaSinkService::MdnsDiscoveryStarted() {
+  return dns_sd_registry_ != nullptr;
 }
 
 void CastMediaSinkService::OnUserGesture() {
@@ -105,8 +115,6 @@ void CastMediaSinkService::OnUserGesture() {
   if (dns_sd_registry_)
     dns_sd_registry_->ResetAndDiscover();
 
-  DVLOG(2) << "OnUserGesture: open channel now for " << cast_sinks_.size()
-           << " devices discovered in latest round of mDNS";
   impl_->task_runner()->PostTask(
       FROM_HERE, base::BindOnce(&CastMediaSinkServiceImpl::OpenChannelsNow,
                                 base::Unretained(impl_.get()), cast_sinks_));
@@ -123,20 +131,14 @@ void CastMediaSinkService::OnDnsSdEvent(
     const std::string& service_type,
     const DnsSdRegistry::DnsSdServiceList& services) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DVLOG(2) << "CastMediaSinkService::OnDnsSdEvent found " << services.size()
-           << " services";
-
   cast_sinks_.clear();
-
   for (const auto& service : services) {
     // Create Cast sink from mDNS service description.
     MediaSinkInternal cast_sink;
     CreateCastMediaSinkResult result = CreateCastMediaSink(service, &cast_sink);
     if (result != CreateCastMediaSinkResult::kOk) {
-      DVLOG(2) << "Fail to create Cast device [error]: " << result;
       continue;
     }
-
     cast_sinks_.push_back(cast_sink);
   }
 

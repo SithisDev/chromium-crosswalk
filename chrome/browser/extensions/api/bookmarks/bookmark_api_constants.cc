@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,6 +23,8 @@ const char kEditBookmarksDisabled[] = "Bookmark editing is disabled.";
 const char kModifyManagedError[] = "Can't modify managed bookmarks.";
 const char kInvalidParamError[] = "Parameter 'key' is invalid.";
 const char kCannotSetUrlOfFolderError[] = "Can't set URL of a bookmark folder.";
+const char kBookmarkNodesNotFoundFromIdListError[] =
+    "Could not find bookmark nodes with given ids: [*]";
 
 }  // namespace bookmark_api_constants
 }  // namespace extensions

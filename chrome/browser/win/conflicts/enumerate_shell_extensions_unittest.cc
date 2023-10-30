@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,11 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_reg_util_win.h"
 #include "chrome/browser/win/conflicts/module_info_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -21,6 +21,11 @@ namespace {
 class EnumerateShellExtensionsTest : public testing::Test {
  public:
   EnumerateShellExtensionsTest() = default;
+
+  EnumerateShellExtensionsTest(const EnumerateShellExtensionsTest&) = delete;
+  EnumerateShellExtensionsTest& operator=(const EnumerateShellExtensionsTest&) =
+      delete;
+
   ~EnumerateShellExtensionsTest() override = default;
 
   // Override all registry hives so that real shell extensions don't mess up
@@ -34,14 +39,12 @@ class EnumerateShellExtensionsTest : public testing::Test {
         registry_override_manager_.OverrideRegistry(HKEY_LOCAL_MACHINE));
   }
 
-  void RunUntilIdle() { scoped_task_environment_.RunUntilIdle(); }
+  void RunUntilIdle() { task_environment_.RunUntilIdle(); }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   registry_util::RegistryOverrideManager registry_override_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(EnumerateShellExtensionsTest);
 };
 
 // Adds a fake shell extension entry to the registry that should be found by
@@ -130,7 +133,7 @@ TEST_F(EnumerateShellExtensionsTest, EnumerateApprovedShellExtensionPaths) {
                           base::Unretained(&shell_extension_paths)));
 
   ASSERT_EQ(3u, shell_extension_paths.size());
-  for (size_t i = 0; i < base::size(kTestCases); i++) {
+  for (size_t i = 0; i < std::size(kTestCases); i++) {
     // The inefficiency is fine as long as the number of test cases stays small.
     EXPECT_TRUE(base::Contains(shell_extension_paths,
                                base::FilePath(kTestCases[i].path)));
@@ -189,7 +192,7 @@ TEST_F(EnumerateShellExtensionsTest, EnumerateShellExtensionPaths) {
                           base::Unretained(&shell_extension_paths)));
 
   ASSERT_EQ(5u, shell_extension_paths.size());
-  for (size_t i = 0; i < base::size(kTestCases); ++i) {
+  for (size_t i = 0; i < std::size(kTestCases); ++i) {
     // The inefficiency is fine as long as the number of test cases stays small.
     EXPECT_TRUE(base::Contains(shell_extension_paths,
                                base::FilePath(kTestCases[i].path)));

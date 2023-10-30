@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,18 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/proxy_config/pref_proxy_config_tracker_impl.h"
 #include "content/public/browser/browser_thread.h"
-#include "mojo/public/cpp/bindings/associated_interface_ptr.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
-#endif  // defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/profiles/profile_helper.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/api/proxy/proxy_api.h"
@@ -33,15 +35,16 @@ ProxyConfigMonitor::ProxyConfigMonitor(Profile* profile) {
   profile_ = profile;
 #endif
 
-// If this is the ChromeOS sign-in profile, just create the tracker from global
-// state.
-#if defined(OS_CHROMEOS)
-  if (chromeos::ProfileHelper::IsSigninProfile(profile)) {
+// If this is the ChromeOS sign-in or lock screen profile, just create the
+// tracker from global state.
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  if (ash::ProfileHelper::IsSigninProfile(profile) ||
+      ash::ProfileHelper::IsLockScreenProfile(profile)) {
     pref_proxy_config_tracker_ =
         ProxyServiceFactory::CreatePrefProxyConfigTrackerOfLocalState(
             g_browser_process->local_state());
   }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   if (!pref_proxy_config_tracker_) {
     pref_proxy_config_tracker_ =
@@ -50,7 +53,7 @@ ProxyConfigMonitor::ProxyConfigMonitor(Profile* profile) {
   }
 
   proxy_config_service_ = ProxyServiceFactory::CreateProxyConfigService(
-      pref_proxy_config_tracker_.get());
+      pref_proxy_config_tracker_.get(), profile);
 
   proxy_config_service_->AddObserver(this);
 }
@@ -64,8 +67,7 @@ ProxyConfigMonitor::ProxyConfigMonitor(PrefService* local_state) {
           local_state);
 
   proxy_config_service_ = ProxyServiceFactory::CreateProxyConfigService(
-      pref_proxy_config_tracker_.get());
-
+      pref_proxy_config_tracker_.get(), nullptr);
   proxy_config_service_->AddObserver(this);
 }
 
@@ -78,18 +80,18 @@ ProxyConfigMonitor::~ProxyConfigMonitor() {
 
 void ProxyConfigMonitor::AddToNetworkContextParams(
     network::mojom::NetworkContextParams* network_context_params) {
-  network::mojom::ProxyConfigClientPtr proxy_config_client;
-  network_context_params->proxy_config_client_request =
-      mojo::MakeRequest(&proxy_config_client);
-  proxy_config_client_set_.AddPtr(std::move(proxy_config_client));
+  mojo::PendingRemote<network::mojom::ProxyConfigClient> proxy_config_client;
+  network_context_params->proxy_config_client_receiver =
+      proxy_config_client.InitWithNewPipeAndPassReceiver();
+  proxy_config_client_set_.Add(std::move(proxy_config_client));
 
-  poller_binding_set_.AddBinding(
-      this,
-      mojo::MakeRequest(&network_context_params->proxy_config_poller_client));
+  poller_receiver_set_.Add(this,
+                           network_context_params->proxy_config_poller_client
+                               .InitWithNewPipeAndPassReceiver());
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  error_binding_set_.AddBinding(
-      this, mojo::MakeRequest(&network_context_params->proxy_error_client));
+  error_receiver_set_.Add(this, network_context_params->proxy_error_client
+                                    .InitWithNewPipeAndPassReceiver());
 #endif
 
   net::ProxyConfigWithAnnotation proxy_config;
@@ -108,22 +110,20 @@ void ProxyConfigMonitor::OnProxyConfigChanged(
     net::ProxyConfigService::ConfigAvailability availability) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
          !BrowserThread::IsThreadInitialized(BrowserThread::UI));
-  proxy_config_client_set_.ForAllPtrs(
-      [config,
-       availability](network::mojom::ProxyConfigClient* proxy_config_client) {
-        switch (availability) {
-          case net::ProxyConfigService::CONFIG_VALID:
-            proxy_config_client->OnProxyConfigUpdated(config);
-            break;
-          case net::ProxyConfigService::CONFIG_UNSET:
-            proxy_config_client->OnProxyConfigUpdated(
-                net::ProxyConfigWithAnnotation::CreateDirect());
-            break;
-          case net::ProxyConfigService::CONFIG_PENDING:
-            NOTREACHED();
-            break;
-        }
-      });
+  for (const auto& proxy_config_client : proxy_config_client_set_) {
+    switch (availability) {
+      case net::ProxyConfigService::CONFIG_VALID:
+        proxy_config_client->OnProxyConfigUpdated(config);
+        break;
+      case net::ProxyConfigService::CONFIG_UNSET:
+        proxy_config_client->OnProxyConfigUpdated(
+            net::ProxyConfigWithAnnotation::CreateDirect());
+        break;
+      case net::ProxyConfigService::CONFIG_PENDING:
+        NOTREACHED();
+        break;
+    }
+  }
 }
 
 void ProxyConfigMonitor::OnLazyProxyConfigPoll() {

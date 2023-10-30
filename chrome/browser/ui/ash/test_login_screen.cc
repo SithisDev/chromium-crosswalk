@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "ash/public/cpp/child_accounts/parent_access_controller.h"
 #include "ash/public/cpp/scoped_guest_button_blocker.h"
 
 namespace {
@@ -42,19 +43,24 @@ void TestLoginScreen::EnableAddUserButton(bool enable) {}
 
 void TestLoginScreen::EnableShutdownButton(bool enable) {}
 
-void TestLoginScreen::ShowGuestButtonInOobe(bool show) {}
+void TestLoginScreen::EnableShelfButtons(bool enable) {}
+
+void TestLoginScreen::SetIsFirstSigninStep(bool is_first) {}
 
 void TestLoginScreen::ShowParentAccessButton(bool show) {}
-
-void TestLoginScreen::ShowParentAccessWidget(
-    const AccountId& child_account_id,
-    base::RepeatingCallback<void(bool success)> callback,
-    ash::ParentAccessRequestReason reason,
-    bool extra_dimmer) {}
 
 void TestLoginScreen::SetAllowLoginAsGuest(bool allow_guest) {}
 
 std::unique_ptr<ash::ScopedGuestButtonBlocker>
 TestLoginScreen::GetScopedGuestButtonBlocker() {
   return std::make_unique<ScopedGuestButtonBlockerTestImpl>();
+}
+
+void TestLoginScreen::RequestSecurityTokenPin(
+    ash::SecurityTokenPinRequest request) {}
+
+void TestLoginScreen::ClearSecurityTokenPinRequest() {}
+
+views::Widget* TestLoginScreen::GetLoginWindowWidget() {
+  return nullptr;
 }

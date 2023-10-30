@@ -1,11 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/apps/platform_apps/install_chrome_app.h"
 
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/webstore_install_with_prompt.h"
@@ -49,18 +48,20 @@ class WebstoreInstallWithPromptAppsOnly
             profile,
             parent_window,
             extensions::WebstoreStandaloneInstaller::Callback()) {}
+  WebstoreInstallWithPromptAppsOnly(const WebstoreInstallWithPromptAppsOnly&) =
+      delete;
+  WebstoreInstallWithPromptAppsOnly& operator=(
+      const WebstoreInstallWithPromptAppsOnly&) = delete;
 
  private:
   ~WebstoreInstallWithPromptAppsOnly() override {}
 
   // extensions::WebstoreStandaloneInstaller overrides:
   void OnManifestParsed() override;
-
-  DISALLOW_COPY_AND_ASSIGN(WebstoreInstallWithPromptAppsOnly);
 };
 
 void WebstoreInstallWithPromptAppsOnly::OnManifestParsed() {
-  if (!manifest()->HasKey(extensions::manifest_keys::kApp)) {
+  if (!manifest()->FindKey(extensions::manifest_keys::kApp)) {
     CompleteInstall(extensions::webstore_install::NOT_PERMITTED,
                     kInstallChromeAppErrorNotAnApp);
     return;
@@ -89,11 +90,11 @@ void InstallChromeApp(const std::string& app_id) {
   browser->OpenURL(params);
 
   ExtensionRegistry* registry = ExtensionRegistry::Get(browser->profile());
-  // Skip if this app is already installed or blacklisted. For disabled or
+  // Skip if this app is already installed or blocklisted. For disabled or
   // or terminated apps, going through the installation flow should re-enable
   // them.
   const extensions::Extension* installed_extension = registry->GetExtensionById(
-      app_id, ExtensionRegistry::ENABLED | ExtensionRegistry::BLACKLISTED);
+      app_id, ExtensionRegistry::ENABLED | ExtensionRegistry::BLOCKLISTED);
   // TODO(jackhou): For installed apps, maybe we should do something better,
   // e.g. show the app list (and re-add it to the taskbar).
   if (installed_extension)

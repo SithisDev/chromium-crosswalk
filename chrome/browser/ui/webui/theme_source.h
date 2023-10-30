@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,9 @@
 
 #include <string>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "content/public/browser/url_data_source.h"
 
 class Profile;
@@ -18,39 +17,54 @@ class Profile;
 class ThemeSource : public content::URLDataSource {
  public:
   explicit ThemeSource(Profile* profile);
+  ThemeSource(Profile* profile, bool serve_untrusted);
+
+  ThemeSource(const ThemeSource&) = delete;
+  ThemeSource& operator=(const ThemeSource&) = delete;
+
   ~ThemeSource() override;
 
   // content::URLDataSource implementation.
   std::string GetSource() override;
   void StartDataRequest(
-      const std::string& path,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      const content::URLDataSource::GotDataCallback& callback) override;
-  std::string GetMimeType(const std::string& path) override;
-  scoped_refptr<base::SingleThreadTaskRunner> TaskRunnerForRequestPath(
-      const std::string& path) override;
+      const GURL& url,
+      const content::WebContents::Getter& wc_getter,
+      content::URLDataSource::GotDataCallback callback) override;
+  std::string GetMimeType(const GURL& url) override;
   bool AllowCaching() override;
   bool ShouldServiceRequest(const GURL& url,
-                            content::ResourceContext* resource_context,
+                            content::BrowserContext* browser_context,
                             int render_process_id) override;
+  std::string GetAccessControlAllowOriginForOrigin(
+      const std::string& origin) override;
+  std::string GetContentSecurityPolicy(
+      network::mojom::CSPDirectiveName directive) override;
 
  private:
   // Fetches and sends the theme bitmap.
-  void SendThemeBitmap(const content::URLDataSource::GotDataCallback& callback,
+  void SendThemeBitmap(content::URLDataSource::GotDataCallback callback,
                        int resource_id,
                        float scale);
 
   // Used in place of SendThemeBitmap when the desired scale is larger than
   // what the resource bundle supports.  This can rescale the provided bitmap up
   // to the desired size.
-  void SendThemeImage(const content::URLDataSource::GotDataCallback& callback,
+  void SendThemeImage(content::URLDataSource::GotDataCallback callback,
                       int resource_id,
                       float scale);
 
-  // The profile this object was initialized with.
-  Profile* profile_;
+  // Generates and sends a CSS stylesheet with colors from the |ColorProvider|.
+  // A 'sets' query parameter must be specified to indicate which colors should
+  // be in the stylesheet. e.g chrome://theme/colors.css?sets=ui,chrome
+  void SendColorsCss(const GURL& url,
+                     const content::WebContents::Getter& wc_getter,
+                     content::URLDataSource::GotDataCallback callback);
 
-  DISALLOW_COPY_AND_ASSIGN(ThemeSource);
+  // The profile this object was initialized with.
+  raw_ptr<Profile> profile_;
+
+  // Whether this source services chrome-unstrusted://theme.
+  bool serve_untrusted_;
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_THEME_SOURCE_H_

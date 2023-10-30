@@ -1,10 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.browsing_data;
 
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 
 /**
  * A {@link UrlFilter} that delegates the matching to the native side.
@@ -18,13 +19,14 @@ public class UrlFilterBridge implements UrlFilter {
     @Override
     public boolean matchesUrl(String url) {
         assert mNativeUrlFilterBridge != 0;
-        return nativeMatchesUrl(mNativeUrlFilterBridge, url);
+        return UrlFilterBridgeJni.get().matchesUrl(
+                mNativeUrlFilterBridge, UrlFilterBridge.this, url);
     }
 
     /** Destroys the native counterpart of this object. */
     public void destroy() {
         assert mNativeUrlFilterBridge != 0;
-        nativeDestroy(mNativeUrlFilterBridge);
+        UrlFilterBridgeJni.get().destroy(mNativeUrlFilterBridge, UrlFilterBridge.this);
         mNativeUrlFilterBridge = 0;
     }
 
@@ -42,6 +44,9 @@ public class UrlFilterBridge implements UrlFilter {
         mNativeUrlFilterBridge = nativeUrlFilterBridge;
     }
 
-    private native boolean nativeMatchesUrl(long nativeUrlFilterBridge, String url);
-    private native void nativeDestroy(long nativeUrlFilterBridge);
+    @NativeMethods
+    interface Natives {
+        boolean matchesUrl(long nativeUrlFilterBridge, UrlFilterBridge caller, String url);
+        void destroy(long nativeUrlFilterBridge, UrlFilterBridge caller);
+    }
 }

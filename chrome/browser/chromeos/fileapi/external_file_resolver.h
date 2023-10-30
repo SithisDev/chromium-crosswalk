@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,12 @@
 
 #include "base/callback.h"
 #include "base/files/file.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/chromeos/file_manager/fileapi_util.h"
+#include "chrome/browser/ash/file_manager/fileapi_util.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_byte_range.h"
-#include "storage/browser/fileapi/file_system_url.h"
-#include "storage/browser/fileapi/isolated_context.h"
+#include "storage/browser/file_system/file_system_url.h"
+#include "storage/browser/file_system/isolated_context.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -43,6 +42,10 @@ class ExternalFileResolver {
       int64_t size)>;
 
   explicit ExternalFileResolver(void* profile_id);
+
+  ExternalFileResolver(const ExternalFileResolver&) = delete;
+  ExternalFileResolver& operator=(const ExternalFileResolver&) = delete;
+
   virtual ~ExternalFileResolver();
 
   // Extracts any extra information needed to open the URL from the request's
@@ -80,9 +83,7 @@ class ExternalFileResolver {
   scoped_refptr<storage::FileSystemContext> file_system_context_;
   file_manager::util::FileSystemURLAndHandle isolated_file_system_;
   std::string mime_type_;
-  base::WeakPtrFactory<ExternalFileResolver> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExternalFileResolver);
+  base::WeakPtrFactory<ExternalFileResolver> weak_ptr_factory_{this};
 };
 
 }  // namespace chromeos

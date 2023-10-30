@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,19 +8,11 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/app_list/search/search_result_ranker/recurrence_predictor.h"
 #include "chrome/browser/ui/app_list/search/search_result_ranker/recurrence_ranker_config.pb.h"
-#include "services/data_decoder/public/mojom/json_parser.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
-
-namespace base {
-class Value;
-}
-
-namespace service_manager {
-class Connector;
-}  // namespace service_manager
+#include "services/data_decoder/public/cpp/data_decoder.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace app_list {
 
@@ -39,37 +31,40 @@ std::unique_ptr<RecurrencePredictor> MakePredictor(
 class JsonConfigConverter {
  public:
   using OnConfigLoadedCallback =
-      base::OnceCallback<void(base::Optional<RecurrenceRankerConfigProto>)>;
+      base::OnceCallback<void(absl::optional<RecurrenceRankerConfigProto>)>;
 
-  // The constructor requires a connector to interact with the parsing service.
-  // For most use cases, this can be content::GetSystemConnector().
-  explicit JsonConfigConverter(service_manager::Connector* connector);
+  // Creates a JsonConfigConverter and starts a conversion of |json_string|.
+  // |model_identifier| is used for metrics reporting in the same way as
+  // RecurrenceRanker's |model_identifier|.
+  //
+  // The provided |callback| will be called with the resulting proto if the
+  // conversion succeeded, or absl::nullopt if the parsing or conversion failed.
+  // If the returned JsonConfigConverter instance is destroyed before parsing is
+  // complete, |callback| will never be called.
+  //
+  // |callback| should destroy the returned JsonConfigConverter instance.
+  static std::unique_ptr<JsonConfigConverter> Convert(
+      const std::string& json_string,
+      const std::string& model_identifier,
+      OnConfigLoadedCallback callback);
+
   ~JsonConfigConverter();
 
-  // Performs a conversion. The provided |callback| will be called with the
-  // resulting proto if the conversion succeeded, or base::nullopt if the
-  // parsing or conversion failed. |model_identifier| is used for metrics
-  // reporting in the same way as the RecurrenceRanker's |model_identifier|
-  // parameter.
-  void Convert(const std::string& json_string,
-               const std::string& model_identifier,
-               OnConfigLoadedCallback callback);
-
  private:
-  // Create or reuse a connection to the data decoder service for safe JSON
-  // parsing.
-  data_decoder::mojom::JsonParser& GetJsonParser();
+  JsonConfigConverter();
+
+  // Performs a conversion.
+  void Start(const std::string& json_string,
+             const std::string& model_identifier,
+             OnConfigLoadedCallback callback);
 
   // Callback for parser.
   void OnJsonParsed(OnConfigLoadedCallback callback,
                     const std::string& model_identifier,
-                    const base::Optional<base::Value> json_data,
-                    const base::Optional<std::string>& error);
+                    data_decoder::DataDecoder::ValueOrError result);
 
   std::string model_identifier_;
-
-  service_manager::Connector* connector_;
-  data_decoder::mojom::JsonParserPtr json_parser_;
+  base::WeakPtrFactory<JsonConfigConverter> weak_ptr_factory_{this};
 };
 
 }  // namespace app_list

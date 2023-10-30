@@ -1,9 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 GEN(`
 #include "base/metrics/field_trial_params.h"
+#include "content/public/test/browser_test.h"
 
 const base::Feature kTestFeature{"TestFeature",
     base::FEATURE_DISABLED_BY_DEFAULT};

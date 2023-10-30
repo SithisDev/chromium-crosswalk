@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,37 +22,38 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/navigation_simulator.h"
+#include "content/public/test/test_utils.h"
 #include "content/public/test/web_contents_tester.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 using content::WebContents;
 using content::WebContentsObserver;
 
 namespace {
+
 // content::WebContentsDelegate destructor is protected: subclass for testing.
 class TestWebContentsDelegate : public content::WebContentsDelegate {};
-
-class PrintPreviewDialogDestroyedObserver : public WebContentsObserver {
- public:
-  explicit PrintPreviewDialogDestroyedObserver(WebContents* dialog)
-      : WebContentsObserver(dialog) {}
-  ~PrintPreviewDialogDestroyedObserver() override = default;
-
-  bool dialog_destroyed() const { return dialog_destroyed_; }
-
- private:
-  // content::WebContentsObserver implementation.
-  void WebContentsDestroyed() override { dialog_destroyed_ = true; }
-
-  bool dialog_destroyed_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(PrintPreviewDialogDestroyedObserver);
-};
 
 }  // namespace
 
 namespace printing {
 
 using PrintPreviewDialogControllerUnitTest = PrintPreviewTest;
+
+TEST_F(PrintPreviewDialogControllerUnitTest, IsPrintPreviewURL) {
+  EXPECT_TRUE(PrintPreviewDialogController::IsPrintPreviewURL(
+      GURL("chrome://print/fake-path")));
+  EXPECT_FALSE(PrintPreviewDialogController::IsPrintPreviewURL(
+      GURL("chrome-untrusted://print/fake-path")));
+}
+
+TEST_F(PrintPreviewDialogControllerUnitTest, IsPrintPreviewContentURL) {
+  EXPECT_TRUE(PrintPreviewDialogController::IsPrintPreviewContentURL(
+      GURL("chrome-untrusted://print/fake-path")));
+  EXPECT_FALSE(PrintPreviewDialogController::IsPrintPreviewContentURL(
+      GURL("chrome://print/fake-path")));
+}
 
 // Create/Get a preview dialog for initiator.
 TEST_F(PrintPreviewDialogControllerUnitTest, GetOrCreatePreviewDialog) {
@@ -71,7 +72,7 @@ TEST_F(PrintPreviewDialogControllerUnitTest, GetOrCreatePreviewDialog) {
 
   // Get the preview dialog for initiator.
   PrintViewManager::FromWebContents(initiator)->PrintPreviewNow(
-      initiator->GetMainFrame(), false);
+      initiator->GetPrimaryMainFrame(), false);
   WebContents* preview_dialog =
       dialog_controller->GetOrCreatePreviewDialog(initiator);
 
@@ -96,7 +97,7 @@ TEST_F(PrintPreviewDialogControllerUnitTest, GetOrCreatePreviewDialog) {
 // initiator gets focused.
 //
 // Flaky on Mac. https://crbug.com/845844
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 #define MAYBE_MultiplePreviewDialogs DISABLED_MultiplePreviewDialogs
 #else
 #define MAYBE_MultiplePreviewDialogs MultiplePreviewDialogs
@@ -123,18 +124,18 @@ TEST_F(PrintPreviewDialogControllerUnitTest, MAYBE_MultiplePreviewDialogs) {
       PrintPreviewDialogController::GetInstance();
   ASSERT_TRUE(dialog_controller);
 
-  // Create preview dialog for |web_contents_1|
+  // Create preview dialog for `web_contents_1`
   PrintViewManager::FromWebContents(web_contents_1)
-      ->PrintPreviewNow(web_contents_1->GetMainFrame(), false);
+      ->PrintPreviewNow(web_contents_1->GetPrimaryMainFrame(), false);
   WebContents* preview_dialog_1 =
       dialog_controller->GetOrCreatePreviewDialog(web_contents_1);
 
   EXPECT_NE(web_contents_1, preview_dialog_1);
   EXPECT_EQ(2, tab_strip_model->count());
 
-  // Create preview dialog for |web_contents_2|
+  // Create preview dialog for `web_contents_2`
   PrintViewManager::FromWebContents(web_contents_2)
-      ->PrintPreviewNow(web_contents_2->GetMainFrame(), false);
+      ->PrintPreviewNow(web_contents_2->GetPrimaryMainFrame(), false);
   WebContents* preview_dialog_2 =
       dialog_controller->GetOrCreatePreviewDialog(web_contents_2);
 
@@ -155,12 +156,12 @@ TEST_F(PrintPreviewDialogControllerUnitTest, MAYBE_MultiplePreviewDialogs) {
   EXPECT_EQ(-1, preview_dialog_1_index);
   EXPECT_EQ(-1, preview_dialog_2_index);
 
-  // Since |preview_dialog_2_index| was the most recently created dialog, its
+  // Since `preview_dialog_2_index` was the most recently created dialog, its
   // initiator should have focus.
   EXPECT_EQ(tab_2_index, tab_strip_model->active_index());
 
-  // When we get the preview dialog for |web_contents_1|,
-  // |preview_dialog_1| is activated and focused.
+  // When we get the preview dialog for `web_contents_1`,
+  // `preview_dialog_1` is activated and focused.
   dialog_controller->GetOrCreatePreviewDialog(web_contents_1);
   EXPECT_EQ(tab_1_index, tab_strip_model->active_index());
 }
@@ -183,7 +184,7 @@ TEST_F(PrintPreviewDialogControllerUnitTest, ClearInitiatorDetails) {
 
   // Get the preview dialog for the initiator.
   PrintViewManager::FromWebContents(initiator)->PrintPreviewNow(
-      initiator->GetMainFrame(), false);
+      initiator->GetPrimaryMainFrame(), false);
   WebContents* preview_dialog =
       dialog_controller->GetOrCreatePreviewDialog(initiator);
 
@@ -211,9 +212,10 @@ TEST_F(PrintPreviewDialogControllerUnitTest, ClearInitiatorDetails) {
 // (typed + address bar) to an existing page as occurs in gmail does not cause
 // the dialogs to close.
 TEST_F(PrintPreviewDialogControllerUnitTest, CloseDialogOnNavigation) {
-  // Two similar URLs (same webpage, different URL fragments)
-  GURL tiger_barb("https://www.google.com/#q=tiger+barb");
+  // Two similar URLs (same webpage, different URL fragment/query)
+  // Gmail navigates from fragment to query when opening an email to print.
   GURL tiger("https://www.google.com/#q=tiger");
+  GURL tiger_barb("https://www.google.com/#?q=tiger+barb");
 
   // Set up by opening a new tab and getting web contents
   EXPECT_EQ(1u, chrome::GetTotalBrowserCount());
@@ -236,13 +238,13 @@ TEST_F(PrintPreviewDialogControllerUnitTest, CloseDialogOnNavigation) {
   WebContents* tiger_preview_dialog =
       dialog_controller->GetOrCreatePreviewDialog(web_contents);
   PrintViewManager* manager = PrintViewManager::FromWebContents(web_contents);
-  manager->PrintPreviewNow(web_contents->GetMainFrame(), false);
+  manager->PrintPreviewNow(web_contents->GetPrimaryMainFrame(), false);
 
   // New print preview dialog is a constrained window, so the number of tabs is
   // still 1.
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
   EXPECT_NE(web_contents, tiger_preview_dialog);
-  PrintPreviewDialogDestroyedObserver tiger_destroyed(tiger_preview_dialog);
+  content::WebContentsDestroyedWatcher tiger_destroyed(tiger_preview_dialog);
 
   // Navigate via link to a similar page.
   content::NavigationSimulator::NavigateAndCommitFromBrowser(web_contents,
@@ -252,27 +254,30 @@ TEST_F(PrintPreviewDialogControllerUnitTest, CloseDialogOnNavigation) {
   EXPECT_EQ(tiger_barb, web_contents->GetLastCommittedURL());
 
   // Print preview now should return true as the navigation should have closed
-  // |tiger_preview_dialog| and the previous dialog should have closed.
-  EXPECT_TRUE(manager->PrintPreviewNow(web_contents->GetMainFrame(), false));
+  // `tiger_preview_dialog` and the previous dialog should have closed.
+  EXPECT_TRUE(
+      manager->PrintPreviewNow(web_contents->GetPrimaryMainFrame(), false));
   WebContents* tiger_barb_preview_dialog =
       dialog_controller->GetOrCreatePreviewDialog(web_contents);
   ASSERT_TRUE(tiger_barb_preview_dialog);
 
   // Check a new dialog was created - either the pointers should be different or
   // the previous web contents must have been destroyed.
-  EXPECT_TRUE(tiger_destroyed.dialog_destroyed() ||
+  EXPECT_TRUE(tiger_destroyed.IsDestroyed() ||
               tiger_barb_preview_dialog != tiger_preview_dialog);
   EXPECT_NE(tiger_barb_preview_dialog, web_contents);
-  PrintPreviewDialogDestroyedObserver tiger_barb_destroyed(
+  content::WebContentsDestroyedWatcher tiger_barb_destroyed(
       tiger_barb_preview_dialog);
 
-  // Now this returns false as |tiger_barb_preview_dialog| is open.
-  EXPECT_FALSE(manager->PrintPreviewNow(web_contents->GetMainFrame(), false));
+  // Now this returns false as `tiger_barb_preview_dialog` is open.
+  EXPECT_FALSE(
+      manager->PrintPreviewNow(web_contents->GetPrimaryMainFrame(), false));
 
   // Navigate with back button or ALT+LEFT ARROW to a similar page.
   content::NavigationSimulator::GoBack(web_contents);
   EXPECT_EQ(tiger, web_contents->GetLastCommittedURL());
-  EXPECT_TRUE(manager->PrintPreviewNow(web_contents->GetMainFrame(), false));
+  EXPECT_TRUE(
+      manager->PrintPreviewNow(web_contents->GetPrimaryMainFrame(), false));
 
   // Get new dialog
   WebContents* tiger_preview_dialog_2 =
@@ -280,21 +285,23 @@ TEST_F(PrintPreviewDialogControllerUnitTest, CloseDialogOnNavigation) {
   ASSERT_TRUE(tiger_preview_dialog_2);
 
   // Verify this is a new dialog.
-  EXPECT_TRUE(tiger_barb_destroyed.dialog_destroyed() ||
+  EXPECT_TRUE(tiger_barb_destroyed.IsDestroyed() ||
               tiger_barb_preview_dialog != tiger_preview_dialog_2);
   EXPECT_NE(tiger_preview_dialog_2, web_contents);
-  PrintPreviewDialogDestroyedObserver tiger_2_destroyed(
+  content::WebContentsDestroyedWatcher tiger_2_destroyed(
       tiger_preview_dialog_2);
 
   // Try to simulate Gmail navigation: Navigate to an existing page (via
   // Forward) but modify the navigation type while pending to look like an
   // address bar + typed transition (like Gmail auto navigation)
-  content::NavigationController& nav_controller = web_contents->GetController();
-  nav_controller.GoForward();
-  nav_controller.GetPendingEntry()->SetTransitionType(ui::PageTransitionFromInt(
-      ui::PAGE_TRANSITION_TYPED | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR));
-  CommitPendingLoad(&nav_controller);
-
+  std::unique_ptr<content::NavigationSimulator> forward_nav =
+      content::NavigationSimulator::CreateHistoryNavigation(
+          1, web_contents, false /* is_renderer_initiated */);
+  forward_nav->Start();
+  web_contents->GetController().GetPendingEntry()->SetTransitionType(
+      ui::PageTransitionFromInt(ui::PAGE_TRANSITION_TYPED |
+                                ui::PAGE_TRANSITION_FROM_ADDRESS_BAR));
+  forward_nav->Commit();
   // Navigation successful
   EXPECT_EQ(tiger_barb, web_contents->GetLastCommittedURL());
 
@@ -302,13 +309,57 @@ TEST_F(PrintPreviewDialogControllerUnitTest, CloseDialogOnNavigation) {
   // preview now should return false, dialog is still alive, and the dialog
   // returned by GetOrCreatePreviewDialog should be the same as the earlier
   // dialog.
-  EXPECT_FALSE(manager->PrintPreviewNow(web_contents->GetMainFrame(), false));
-  EXPECT_FALSE(tiger_2_destroyed.dialog_destroyed());
+  EXPECT_FALSE(
+      manager->PrintPreviewNow(web_contents->GetPrimaryMainFrame(), false));
+  EXPECT_FALSE(tiger_2_destroyed.IsDestroyed());
   WebContents* tiger_preview_dialog_2b =
       dialog_controller->GetOrCreatePreviewDialog(web_contents);
   ASSERT_TRUE(tiger_preview_dialog_2b);
   EXPECT_EQ(tiger_preview_dialog_2b, tiger_preview_dialog_2);
   EXPECT_NE(tiger_preview_dialog_2b, web_contents);
+
+  // Navigate with back button or ALT+LEFT ARROW to a similar page.
+  content::NavigationSimulator::GoBack(web_contents);
+  EXPECT_EQ(tiger, web_contents->GetLastCommittedURL());
+  EXPECT_TRUE(
+      manager->PrintPreviewNow(web_contents->GetPrimaryMainFrame(), false));
+
+  // Get new dialog
+  WebContents* tiger_preview_dialog_3 =
+      dialog_controller->GetOrCreatePreviewDialog(web_contents);
+  ASSERT_TRUE(tiger_preview_dialog_3);
+
+  // Verify this is a new dialog.
+  EXPECT_TRUE(tiger_barb_destroyed.IsDestroyed() ||
+              tiger_preview_dialog_2 != tiger_preview_dialog_3);
+  EXPECT_NE(tiger_preview_dialog_3, web_contents);
+  content::WebContentsDestroyedWatcher tiger_3_destroyed(
+      tiger_preview_dialog_3);
+
+  // Try to simulate renderer reloading a PWA page: Navigate to an existing page
+  // (via Forward) but modify the navigation type while pending to look like a
+  // PAGE_TRANSITION_AUTO_BOOKMARK.
+  forward_nav = content::NavigationSimulator::CreateHistoryNavigation(
+      1, web_contents, false /* is_renderer_initiated */);
+  forward_nav->Start();
+  web_contents->GetController().GetPendingEntry()->SetTransitionType(
+      ui::PageTransitionFromInt(ui::PAGE_TRANSITION_AUTO_BOOKMARK));
+  forward_nav->Commit();
+  // Navigation successful
+  EXPECT_EQ(tiger_barb, web_contents->GetLastCommittedURL());
+
+  // Print preview should not have changed due to this navigation type so print
+  // preview now should return false, dialog is still alive, and the dialog
+  // returned by GetOrCreatePreviewDialog should be the same as the earlier
+  // dialog.
+  EXPECT_FALSE(
+      manager->PrintPreviewNow(web_contents->GetPrimaryMainFrame(), false));
+  EXPECT_FALSE(tiger_3_destroyed.IsDestroyed());
+  WebContents* tiger_preview_dialog_3b =
+      dialog_controller->GetOrCreatePreviewDialog(web_contents);
+  ASSERT_TRUE(tiger_preview_dialog_3);
+  EXPECT_EQ(tiger_preview_dialog_3b, tiger_preview_dialog_3);
+  EXPECT_NE(tiger_preview_dialog_3, web_contents);
 }
 
 // Tests preview dialog controller cleans up correctly and does not throw errors
@@ -322,7 +373,7 @@ TEST_F(PrintPreviewDialogControllerUnitTest, MultiplePreviewDialogsClose) {
   ASSERT_TRUE(tab_strip_model);
   EXPECT_EQ(0, tab_strip_model->count());
 
-  // Create a new tab with contents |web_contents_1|
+  // Create a new tab with contents `web_contents_1`
   chrome::NewTab(browser());
   WebContents* web_contents_1 = tab_strip_model->GetActiveWebContents();
   ASSERT_TRUE(web_contents_1);
@@ -331,23 +382,23 @@ TEST_F(PrintPreviewDialogControllerUnitTest, MultiplePreviewDialogsClose) {
       PrintPreviewDialogController::GetInstance();
   ASSERT_TRUE(dialog_controller);
 
-  // Create preview dialog for |web_contents_1|. Should not create a new tab.
+  // Create preview dialog for `web_contents_1`. Should not create a new tab.
   PrintViewManager::FromWebContents(web_contents_1)
-      ->PrintPreviewNow(web_contents_1->GetMainFrame(), false);
+      ->PrintPreviewNow(web_contents_1->GetPrimaryMainFrame(), false);
   WebContents* preview_dialog_1 =
       dialog_controller->GetOrCreatePreviewDialog(web_contents_1);
   EXPECT_NE(web_contents_1, preview_dialog_1);
   EXPECT_EQ(1, tab_strip_model->count());
 
-  // Create a new tab with contents |web_contents_2|
+  // Create a new tab with contents `web_contents_2`
   chrome::NewTab(browser());
   WebContents* web_contents_2 = tab_strip_model->GetActiveWebContents();
   ASSERT_TRUE(web_contents_2);
   EXPECT_EQ(2, tab_strip_model->count());
 
-  // Create preview dialog for |web_contents_2|
+  // Create preview dialog for `web_contents_2`
   PrintViewManager::FromWebContents(web_contents_2)
-      ->PrintPreviewNow(web_contents_2->GetMainFrame(), false);
+      ->PrintPreviewNow(web_contents_2->GetPrimaryMainFrame(), false);
   WebContents* preview_dialog_2 =
       dialog_controller->GetOrCreatePreviewDialog(web_contents_2);
   EXPECT_NE(web_contents_2, preview_dialog_2);
@@ -357,16 +408,16 @@ TEST_F(PrintPreviewDialogControllerUnitTest, MultiplePreviewDialogsClose) {
   // dialogs are constrained in their respective initiators.
   EXPECT_EQ(2, tab_strip_model->count());
 
-  // Close |web_contents_1|'s tab
+  // Close `web_contents_1`'s tab
   int tab_1_index = tab_strip_model->GetIndexOfWebContents(web_contents_1);
   tab_strip_model->CloseWebContentsAt(tab_1_index, 0);
   EXPECT_EQ(1, tab_strip_model->count());
 
-  // Simulate a crash of the render process host for |web_contents_2|. Print
+  // Simulate a crash of the render process host for `web_contents_2`. Print
   // preview controller should exit cleanly and not crash.
   content::MockRenderProcessHost* rph =
       static_cast<content::MockRenderProcessHost*>(
-          web_contents_2->GetMainFrame()->GetProcess());
+          web_contents_2->GetPrimaryMainFrame()->GetProcess());
   rph->SimulateCrash();
 }
 

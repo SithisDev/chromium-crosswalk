@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include "base/feature_list.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/sys_string_conversions.h"
@@ -21,31 +22,18 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/prefs/pref_service.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/image/image.h"
 
 namespace {
 
-constexpr int kMenuAvatarIconSize = 38;
-
-// Used in UMA histogram macros, shouldn't be reordered or renumbered
-enum ValidateMenuItemSelector {
-  UNKNOWN_SELECTOR = 0,
-  NEW_PROFILE,
-  EDIT_PROFILE,
-  SWITCH_PROFILE_MENU,
-  SWITCH_PROFILE_DOCK,
-  MAX_VALIDATE_MENU_SELECTOR,
-};
-
-// Check Add Person pref.
-bool IsAddPersonEnabled() {
-  PrefService* service = g_browser_process->local_state();
-  DCHECK(service);
-  return service->GetBoolean(prefs::kBrowserAddPersonEnabled);
+NSString* GetProfileMenuTitle() {
+  return l10n_util::GetNSStringWithFixup(IDS_PROFILES_MENU_NAME);
 }
 
 }  // namespace
@@ -88,13 +76,13 @@ class Observer : public BrowserListObserver, public AvatarMenuObserver {
 
 @implementation ProfileMenuController
 
-- (id)initWithMainMenuItem:(NSMenuItem*)item {
+- (instancetype)initWithMainMenuItem:(NSMenuItem*)item {
   if ((self = [super init])) {
-    mainMenuItem_ = item;
+    _mainMenuItem = item;
 
-    base::scoped_nsobject<NSMenu> menu([[NSMenu alloc] initWithTitle:
-        l10n_util::GetNSStringWithFixup(IDS_PROFILES_OPTIONS_GROUP_NAME)]);
-    [mainMenuItem_ setSubmenu:menu];
+    base::scoped_nsobject<NSMenu> menu(
+        [[NSMenu alloc] initWithTitle:GetProfileMenuTitle()]);
+    [_mainMenuItem setSubmenu:menu];
 
     // This object will be constructed as part of nib loading, which happens
     // before the message loop starts and g_browser_process is available.
@@ -107,49 +95,47 @@ class Observer : public BrowserListObserver, public AvatarMenuObserver {
 }
 
 - (IBAction)switchToProfileFromMenu:(id)sender {
-  avatarMenu_->SwitchToProfile([sender tag], false,
-                               ProfileMetrics::SWITCH_PROFILE_MENU);
+  _avatarMenu->SwitchToProfile([sender tag], false);
 }
 
 - (IBAction)switchToProfileFromDock:(id)sender {
   // Explicitly bring to the foreground when taking action from the dock.
   [NSApp activateIgnoringOtherApps:YES];
-  avatarMenu_->SwitchToProfile([sender tag], false,
-                               ProfileMetrics::SWITCH_PROFILE_DOCK);
+  _avatarMenu->SwitchToProfile([sender tag], false);
 }
 
 - (IBAction)editProfile:(id)sender {
-  avatarMenu_->EditProfile(avatarMenu_->GetActiveProfileIndex());
+  absl::optional<size_t> active_profile_index =
+      _avatarMenu->GetActiveProfileIndex();
+  DCHECK(active_profile_index);
+  _avatarMenu->EditProfile(*active_profile_index);
 }
 
 - (IBAction)newProfile:(id)sender {
-  profiles::CreateAndSwitchToNewProfile(ProfileManager::CreateCallback(),
-                                        ProfileMetrics::ADD_NEW_USER_MENU);
+  _avatarMenu->AddNewProfile();
 }
 
 - (BOOL)insertItemsIntoMenu:(NSMenu*)menu
                    atOffset:(NSInteger)offset
                    fromDock:(BOOL)dock {
-  if (!avatarMenu_)
+  if (!_avatarMenu)
     return NO;
 
   // Don't show the list of profiles in the dock if only one profile exists.
-  if (dock && avatarMenu_->GetNumberOfItems() <= 1)
+  if (dock && _avatarMenu->GetNumberOfItems() <= 1)
     return NO;
 
   if (dock) {
-    NSString* headerName =
-        l10n_util::GetNSStringWithFixup(IDS_PROFILES_OPTIONS_GROUP_NAME);
-    base::scoped_nsobject<NSMenuItem> header(
-        [[NSMenuItem alloc] initWithTitle:headerName
-                                   action:NULL
-                            keyEquivalent:@""]);
+    base::scoped_nsobject<NSMenuItem> header([[NSMenuItem alloc]
+        initWithTitle:GetProfileMenuTitle()
+               action:NULL
+        keyEquivalent:@""]);
     [header setEnabled:NO];
     [menu insertItem:header atIndex:offset++];
   }
 
-  for (size_t i = 0; i < avatarMenu_->GetNumberOfItems(); ++i) {
-    const AvatarMenu::Item& itemData = avatarMenu_->GetItemAt(i);
+  for (size_t i = 0; i < _avatarMenu->GetNumberOfItems(); ++i) {
+    const AvatarMenu::Item& itemData = _avatarMenu->GetItemAt(i);
     NSString* name = base::SysUTF16ToNSString(itemData.name);
     SEL action = dock ? @selector(switchToProfileFromDock:)
                       : @selector(switchToProfileFromMenu:);
@@ -159,18 +145,8 @@ class Observer : public BrowserListObserver, public AvatarMenuObserver {
     if (dock) {
       [item setIndentationLevel:1];
     } else {
-      gfx::Image itemIcon;
-      // Always use the low-res, small default avatars in the menu.
-      AvatarMenu::GetImageForMenuButton(itemData.profile_path, &itemIcon);
-
-      // The image might be too large and need to be resized, e.g. if this is
-      // a signed-in user using the GAIA profile photo.
-      if (itemIcon.Width() > kMenuAvatarIconSize ||
-          itemIcon.Height() > kMenuAvatarIconSize) {
-        itemIcon = profiles::GetSizedAvatarIcon(itemIcon, /*is_rectangle=*/true,
-                                                kMenuAvatarIconSize,
-                                                kMenuAvatarIconSize);
-      }
+      gfx::Image itemIcon =
+          profiles::GetAvatarIconForNSMenu(itemData.profile_path);
       [item setImage:itemIcon.ToNSImage()];
       [item setState:itemData.active ? NSOnState : NSOffState];
     }
@@ -181,52 +157,15 @@ class Observer : public BrowserListObserver, public AvatarMenuObserver {
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)menuItem {
-  // In guest mode, chrome://settings isn't available, so disallow creating
-  // or editing a profile.
-  Profile* activeProfile = ProfileManager::GetLastUsedProfile();
-  if (activeProfile->IsGuestSession()) {
-    return [menuItem action] != @selector(newProfile:) &&
-           [menuItem action] != @selector(editProfile:);
-  }
-
-  if (!IsAddPersonEnabled())
-    return [menuItem action] != @selector(newProfile:);
-
-  size_t index = avatarMenu_->GetActiveProfileIndex();
-  if (avatarMenu_->GetNumberOfItems() <= index) {
-    ValidateMenuItemSelector currentSelector = UNKNOWN_SELECTOR;
-    if ([menuItem action] == @selector(newProfile:))
-      currentSelector = NEW_PROFILE;
-    else if ([menuItem action] == @selector(editProfile:))
-      currentSelector = EDIT_PROFILE;
-    else if ([menuItem action] == @selector(switchToProfileFromMenu:))
-      currentSelector = SWITCH_PROFILE_MENU;
-    else if ([menuItem action] == @selector(switchToProfileFromDock:))
-      currentSelector = SWITCH_PROFILE_DOCK;
-    UMA_HISTOGRAM_BOOLEAN("Profile.ValidateMenuItemInvalidIndex.IsGuest",
-                          activeProfile->IsGuestSession());
-    UMA_HISTOGRAM_CUSTOM_COUNTS(
-        "Profile.ValidateMenuItemInvalidIndex.ProfileCount",
-        avatarMenu_->GetNumberOfItems(),
-        1, 20, 20);
-    UMA_HISTOGRAM_ENUMERATION("Profile.ValidateMenuItemInvalidIndex.Selector",
-                              currentSelector,
-                              MAX_VALIDATE_MENU_SELECTOR);
-
+  if (!_avatarMenu->ShouldShowAddNewProfileLink() &&
+      [menuItem action] == @selector(newProfile:)) {
     return NO;
   }
 
-  const AvatarMenu::Item& itemData = avatarMenu_->GetItemAt(index);
-  if ([menuItem action] == @selector(switchToProfileFromDock:) ||
-      [menuItem action] == @selector(switchToProfileFromMenu:)) {
-    if (!itemData.legacy_supervised)
-      return YES;
-
-    return [menuItem tag] == static_cast<NSInteger>(itemData.menu_index);
+  if (!_avatarMenu->ShouldShowEditProfileLink() &&
+      [menuItem action] == @selector(editProfile:)) {
+    return NO;
   }
-
-  if ([menuItem action] == @selector(newProfile:))
-    return !itemData.legacy_supervised;
 
   return YES;
 }
@@ -234,16 +173,15 @@ class Observer : public BrowserListObserver, public AvatarMenuObserver {
 // Private /////////////////////////////////////////////////////////////////////
 
 - (NSMenu*)menu {
-  return [mainMenuItem_ submenu];
+  return [_mainMenuItem submenu];
 }
 
 - (void)initializeMenu {
-  observer_.reset(new ProfileMenuControllerInternal::Observer(self));
-  avatarMenu_.reset(new AvatarMenu(
+  _observer = std::make_unique<ProfileMenuControllerInternal::Observer>(self);
+  _avatarMenu = std::make_unique<AvatarMenu>(
       &g_browser_process->profile_manager()->GetProfileAttributesStorage(),
-      observer_.get(),
-      NULL));
-  avatarMenu_->RebuildMenu();
+      _observer.get(), nullptr);
+  _avatarMenu->RebuildMenu();
 
   [[self menu] addItem:[NSMenuItem separatorItem]];
 
@@ -252,11 +190,11 @@ class Observer : public BrowserListObserver, public AvatarMenuObserver {
                                         action:@selector(editProfile:)];
   [[self menu] addItem:item];
 
-  if (IsAddPersonEnabled()) {
+  if (_avatarMenu->ShouldShowAddNewProfileLink()) {
     [[self menu] addItem:[NSMenuItem separatorItem]];
 
     item = [self createItemWithTitle:l10n_util::GetNSStringWithFixup(
-                                         IDS_PROFILES_CREATE_NEW_PROFILE_OPTION)
+                                         IDS_PROFILES_ADD_PROFILE_LABEL)
                               action:@selector(newProfile:)];
     [[self menu] addItem:item];
   }
@@ -268,12 +206,10 @@ class Observer : public BrowserListObserver, public AvatarMenuObserver {
 // menu item and menu need to be updated to reflect that.
 - (void)activeBrowserChangedTo:(Browser*)browser {
   // Tell the menu that the browser has changed.
-  avatarMenu_->ActiveBrowserChanged(browser);
+  _avatarMenu->ActiveBrowserChanged(browser);
 
   // If |browser| is NULL, it may be because the current profile was deleted
-  // and there are no other loaded profiles. In this case, calling
-  // |avatarMenu_->GetActiveProfileIndex()| may result in a profile being
-  // loaded, which is inappropriate to do on the UI thread.
+  // and there are no other loaded profiles.
   //
   // An early return provides the desired behavior:
   //   a) If the profile was deleted, the menu would have been rebuilt and no
@@ -287,11 +223,11 @@ class Observer : public BrowserListObserver, public AvatarMenuObserver {
   // avatarMenu_->GetActiveProfileIndex() as the index might be
   // incorrect if -activeBrowserChangedTo: is called while we deleting the
   // active profile and closing all its browser windows.
-  avatarMenu_->RebuildMenu();
+  _avatarMenu->RebuildMenu();
 
   // Update the state for the menu items.
-  for (size_t i = 0; i < avatarMenu_->GetNumberOfItems(); ++i) {
-    const AvatarMenu::Item& itemData = avatarMenu_->GetItemAt(i);
+  for (size_t i = 0; i < _avatarMenu->GetNumberOfItems(); ++i) {
+    const AvatarMenu::Item& itemData = _avatarMenu->GetItemAt(i);
     [[[self menu] itemWithTag:itemData.menu_index]
         setState:itemData.active ? NSOnState : NSOffState];
   }
@@ -308,7 +244,7 @@ class Observer : public BrowserListObserver, public AvatarMenuObserver {
 
   BOOL hasContent = [self insertItemsIntoMenu:menu atOffset:0 fromDock:NO];
 
-  [mainMenuItem_ setHidden:!hasContent];
+  [_mainMenuItem setHidden:!hasContent];
 }
 
 - (NSMenuItem*)createItemWithTitle:(NSString*)title action:(SEL)sel {

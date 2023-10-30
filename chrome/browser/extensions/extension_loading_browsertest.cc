@@ -1,10 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 // This file contains tests for extension loading, reloading, and
 // unloading behavior.
 
+#include "base/files/file_util.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/version.h"
@@ -16,24 +17,32 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/extensions/api/tabs.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/devtools_agent_host.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/process_manager.h"
+#include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/test_extension_dir.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/windows_version.h"
 #endif
 
 namespace extensions {
 namespace {
+
+constexpr char kChangeBackgroundScriptTypeExtensionId[] =
+    "ldnnhddmnhbkjipkidpdiheffobcpfmf";
+using ContextType = ExtensionBrowserTest::ContextType;
 
 class ExtensionLoadingTest : public ExtensionBrowserTest {
 };
@@ -44,22 +53,21 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
   ASSERT_TRUE(embedded_test_server()->Start());
 
   TestExtensionDir extension_dir;
-  const char kManifestTemplate[] =
-      "{"
-      "  'name': 'Overrides New Tab',"
-      "  'version': '%d',"
-      "  'description': 'Overrides New Tab',"
-      "  'manifest_version': 2,"
-      "  'background': {"
-      "    'persistent': false,"
-      "    'scripts': ['event.js']"
-      "  },"
-      "  'chrome_url_overrides': {"
-      "    'newtab': 'newtab.html'"
-      "  }"
-      "}";
-  extension_dir.WriteManifestWithSingleQuotes(
-      base::StringPrintf(kManifestTemplate, 1));
+  constexpr char kManifestTemplate[] =
+      R"({
+           "name": "Overrides New Tab",
+           "version": "%d",
+           "description": "Overrides New Tab",
+           "manifest_version": 2,
+           "background": {
+             "persistent": false,
+             "scripts": ["event.js"]
+           },
+           "chrome_url_overrides": {
+             "newtab": "newtab.html"
+           }
+         })";
+  extension_dir.WriteManifest(base::StringPrintf(kManifestTemplate, 1));
   extension_dir.WriteFile(FILE_PATH_LITERAL("event.js"), "");
   extension_dir.WriteFile(FILE_PATH_LITERAL("newtab.html"),
                           "<h1>Overridden New Tab Page</h1>");
@@ -69,7 +77,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
   ASSERT_TRUE(new_tab_extension);
 
   // Visit the New Tab Page to get a renderer using the extension into history.
-  ui_test_utils::NavigateToURL(browser(), GURL("chrome://newtab"));
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), GURL("chrome://newtab")));
 
   // Navigate that tab to a non-extension URL to swap out the extension's
   // renderer.
@@ -77,12 +85,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
       embedded_test_server()->GetURL("/README.chromium");
   EXPECT_THAT(test_link_from_NTP.spec(), testing::EndsWith("/README.chromium"))
       << "Check that the test server started.";
-  NavigateInRenderer(browser()->tab_strip_model()->GetActiveWebContents(),
-                     test_link_from_NTP);
+  EXPECT_TRUE(
+      NavigateInRenderer(browser()->tab_strip_model()->GetActiveWebContents(),
+                         test_link_from_NTP));
 
   // Increase the extension's version.
-  extension_dir.WriteManifestWithSingleQuotes(
-      base::StringPrintf(kManifestTemplate, 2));
+  extension_dir.WriteManifest(base::StringPrintf(kManifestTemplate, 2));
 
   // Upgrade the extension.
   new_tab_extension = UpdateExtension(
@@ -92,9 +100,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
 
   // The extension takes a couple round-trips to the renderer in order
   // to crash, so open a new tab to wait long enough.
-  AddTabAtIndex(browser()->tab_strip_model()->count(),
-                GURL("http://www.google.com/"),
-                ui::PAGE_TRANSITION_TYPED);
+  ASSERT_FALSE(AddTabAtIndex(browser()->tab_strip_model()->count(),
+                             GURL("http://www.google.com/"),
+                             ui::PAGE_TRANSITION_TYPED));
 
   // Check that the extension hasn't crashed.
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
@@ -107,16 +115,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
   ASSERT_TRUE(embedded_test_server()->Start());
 
   TestExtensionDir extension_dir;
-  const char kManifestTemplate[] =
-      "{"
-      "  'name': 'Overrides New Tab',"
-      "  'version': '%d',"
-      "  'description': 'Will override New Tab soon',"
-      "  %s"  // Placeholder for future NTP url override block.
-      "  'manifest_version': 2"
-      "}";
-  extension_dir.WriteManifestWithSingleQuotes(
-      base::StringPrintf(kManifestTemplate, 1, ""));
+  constexpr char kManifestTemplate[] =
+      R"({
+           "name": "Overrides New Tab",
+           "version": "%d",
+           "description": "Will override New Tab soon",
+           %s  // Placeholder for future NTP url override block.
+           "manifest_version": 2
+         })";
+  extension_dir.WriteManifest(base::StringPrintf(kManifestTemplate, 1, ""));
   extension_dir.WriteFile(FILE_PATH_LITERAL("event.js"), "");
   extension_dir.WriteFile(FILE_PATH_LITERAL("newtab.html"),
                           "<h1>Overridden New Tab Page</h1>");
@@ -126,7 +133,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
   ASSERT_TRUE(new_tab_extension);
 
   EXPECT_FALSE(new_tab_extension->permissions_data()->HasAPIPermission(
-      APIPermission::kNewTabPageOverride));
+      mojom::APIPermissionID::kNewTabPageOverride));
 
   // Navigate that tab to a non-extension URL to swap out the extension's
   // renderer.
@@ -134,17 +141,18 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
       embedded_test_server()->GetURL("/README.chromium");
   EXPECT_THAT(test_link_from_ntp.spec(), testing::EndsWith("/README.chromium"))
       << "Check that the test server started.";
-  NavigateInRenderer(browser()->tab_strip_model()->GetActiveWebContents(),
-                     test_link_from_ntp);
+  EXPECT_TRUE(
+      NavigateInRenderer(browser()->tab_strip_model()->GetActiveWebContents(),
+                         test_link_from_ntp));
 
   // Increase the extension's version and add the NTP url override which will
   // add the kNewTabPageOverride permission.
-  const char ntp_override_string[] =
-      "  'chrome_url_overrides': {"
-      "    'newtab': 'newtab.html'"
-      "  },";
-  extension_dir.WriteManifestWithSingleQuotes(
-      base::StringPrintf(kManifestTemplate, 2, ntp_override_string));
+  constexpr char kNtpOverrideString[] =
+      R"("chrome_url_overrides": {
+            "newtab": "newtab.html"
+         },)";
+  extension_dir.WriteManifest(
+      base::StringPrintf(kManifestTemplate, 2, kNtpOverrideString));
 
   // Upgrade the extension, ensure that the upgrade 'worked' in the sense that
   // the extension is still present and not disabled and that it now has the
@@ -156,7 +164,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
   ASSERT_NE(nullptr, new_tab_extension);
 
   EXPECT_TRUE(new_tab_extension->permissions_data()->HasAPIPermission(
-      APIPermission::kNewTabPageOverride));
+      mojom::APIPermissionID::kNewTabPageOverride));
   EXPECT_THAT(new_tab_extension->version().components(),
               testing::ElementsAre(2));
 }
@@ -168,17 +176,17 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
 
   TestExtensionDir extension_dir;
   const char manifest_contents[] =
-      "{"
-      "  'name': 'Test With Lazy Background Page',"
-      "  'version': '0',"
-      "  'manifest_version': 2,"
-      "  'app': {"
-      "    'background': {"
-      "       'scripts': ['event.js']"
-      "    }"
-      "  }"
-      "}";
-  extension_dir.WriteManifestWithSingleQuotes(manifest_contents);
+      R"({
+           "name": "Test With Lazy Background Page",
+           "version": "0",
+           "manifest_version": 2,
+           "app": {
+             "background": {
+                "scripts": ["event.js"]
+             }
+           }
+         })";
+  extension_dir.WriteManifest(manifest_contents);
   extension_dir.WriteFile(FILE_PATH_LITERAL("event.js"), "");
 
   const Extension* extension =
@@ -235,41 +243,41 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest, RuntimeValidWhileDevToolsOpen) {
   TestExtensionDir devtools_dir;
   TestExtensionDir inspect_dir;
 
-  const char kDevtoolsManifest[] =
-      "{"
-      "  'name': 'Devtools',"
-      "  'version': '1',"
-      "  'manifest_version': 2,"
-      "  'devtools_page': 'devtools.html'"
-      "}";
+  constexpr char kDevtoolsManifest[] =
+      R"({
+           "name": "Devtools",
+           "version": "1",
+           "manifest_version": 2,
+           "devtools_page": "devtools.html"
+         })";
 
-  const char kDevtoolsJs[] =
-      "setInterval(function() {"
-      "  chrome.devtools.inspectedWindow.eval('1', function() {"
-      "  });"
-      "}, 4);"
-      "chrome.test.sendMessage('devtools_page_ready');";
+  constexpr char kDevtoolsJs[] =
+      R"(setInterval(function() {
+           chrome.devtools.inspectedWindow.eval('1', function() {
+           });
+         }, 4);
+         chrome.test.sendMessage('devtools_page_ready');)";
 
-  const char kTargetManifest[] =
-      "{"
-      "  'name': 'Inspect target',"
-      "  'version': '1',"
-      "  'manifest_version': 2,"
-      "  'background': {"
-      "    'scripts': ['background.js']"
-      "  }"
-      "}";
+  constexpr char kTargetManifest[] =
+      R"({
+           "name": "Inspect target",
+           "version": "1",
+           "manifest_version": 2,
+           "background": {
+             "scripts": ["background.js"]
+           }
+         })";
 
   // A script to duck-type whether it runs in a background page.
   const char kTargetJs[] =
       "var is_valid = !!(chrome.tabs && chrome.tabs.create);";
 
-  devtools_dir.WriteManifestWithSingleQuotes(kDevtoolsManifest);
+  devtools_dir.WriteManifest(kDevtoolsManifest);
   devtools_dir.WriteFile(FILE_PATH_LITERAL("devtools.js"), kDevtoolsJs);
   devtools_dir.WriteFile(FILE_PATH_LITERAL("devtools.html"),
                          "<script src='devtools.js'></script>");
 
-  inspect_dir.WriteManifestWithSingleQuotes(kTargetManifest);
+  inspect_dir.WriteManifest(kTargetManifest);
   inspect_dir.WriteFile(FILE_PATH_LITERAL("background.js"), kTargetJs);
   const Extension* devtools_ext = LoadExtension(devtools_dir.UnpackedPath());
   ASSERT_TRUE(devtools_ext);
@@ -279,7 +287,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest, RuntimeValidWhileDevToolsOpen) {
   const std::string inspect_ext_id = inspect_ext->id();
 
   // Open the devtools and wait until the devtools_page is ready.
-  ExtensionTestMessageListener devtools_ready("devtools_page_ready", false);
+  ExtensionTestMessageListener devtools_ready("devtools_page_ready");
   devtools_util::InspectBackgroundPage(inspect_ext, profile());
   ASSERT_TRUE(devtools_ready.WaitUntilSatisfied());
 
@@ -305,6 +313,56 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest, RuntimeValidWhileDevToolsOpen) {
   DevToolsWindowTesting::CloseDevToolsWindowSync(
       DevToolsWindow::FindDevToolsWindow(
           content::DevToolsAgentHost::GetOrCreateFor(bg_contents).get()));
+}
+
+// Tests that changing a Service Worker based extension to an event page doesn't
+// crash. Regression test for https://crbug.com/1239752.
+//
+// This test loads a SW based extension that has an event listener for
+// chrome.tabs.onCreated. The event would be registered in ExtensionPrefs. The
+// test then changes the extension to event page and ensures that restarting the
+// browser wouldn't route the event incorrectly to ServiceWorkerTaskQueue (which
+// used to cause a crash).
+IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest, PRE_ChangeBackgroundScriptType) {
+  ExtensionTestMessageListener listener("ready");
+  const Extension* extension = LoadExtension(
+      test_data_dir_.AppendASCII("manifest_changed_before_restart"),
+      {.context_type = ContextType::kServiceWorker});
+  ASSERT_TRUE(extension);
+  EXPECT_TRUE(listener.WaitUntilSatisfied());
+
+  ExtensionId extension_id = extension->id();
+  EXPECT_TRUE(BackgroundInfo::IsServiceWorkerBased(extension));
+
+  // Change |extension| to become an event page extension.
+  {
+    base::ScopedAllowBlockingForTesting allow_blocking;
+    base::FilePath event_page_manifest_file =
+        extension->path().Append(FILE_PATH_LITERAL("manifest.json"));
+    ASSERT_TRUE(base::PathExists(event_page_manifest_file));
+    EXPECT_TRUE(base::CopyFile(
+        test_data_dir_.AppendASCII("manifest_changed_before_restart")
+            .Append(FILE_PATH_LITERAL("manifest.json")),
+        event_page_manifest_file));
+  }
+
+  // Ensure that tabs.onCreated SW event was registered.
+  // It is sufficient that a "lazy" event is present because we already know
+  // that |extension| is SW based.
+  EXPECT_TRUE(EventRouter::Get(profile())->HasLazyEventListenerForTesting(
+      api::tabs::OnCreated::kEventName));
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest, ChangeBackgroundScriptType) {
+  // The goal of this test step is to not crash.
+  const extensions::Extension* extension =
+      extension_registry()->enabled_extensions().GetByID(
+          kChangeBackgroundScriptTypeExtensionId);
+  ASSERT_TRUE(extension);
+
+  // |extension| should not run as SW based after browser restart as it became
+  // an event page extension.
+  EXPECT_FALSE(BackgroundInfo::IsServiceWorkerBased(extension));
 }
 
 }  // namespace

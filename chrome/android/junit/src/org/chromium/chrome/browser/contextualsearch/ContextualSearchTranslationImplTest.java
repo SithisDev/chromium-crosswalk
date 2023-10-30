@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import static org.chromium.chrome.browser.contextualsearch.ContextualSearchTranslationImpl.TranslateBridgeWrapper;
-
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -23,8 +21,9 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.chrome.browser.contextualsearch.ContextualSearchTranslationImpl.TranslateBridgeWrapper;
 
-import java.util.LinkedHashSet;
+import java.util.ArrayList;
 
 /**
  * Tests the {@link ContextualSearchTranslationImpl} class.
@@ -34,18 +33,18 @@ public class ContextualSearchTranslationImplTest {
     private static final String ENGLISH = "en";
     private static final String SPANISH = "es";
     private static final String GERMAN = "de";
-    private static final LinkedHashSet<String> ENGLISH_AND_SPANISH;
+    private static final ArrayList<String> ENGLISH_AND_SPANISH;
     static {
-        LinkedHashSet<String> langs = new LinkedHashSet<String>();
+        ArrayList<String> langs = new ArrayList<String>();
         langs.add(ENGLISH);
         langs.add(SPANISH);
         ENGLISH_AND_SPANISH = langs;
     }
-    private static final LinkedHashSet<String> ENGLISH_SET;
+    private static final ArrayList<String> ENGLISH_LIST;
     static {
-        LinkedHashSet<String> langs = new LinkedHashSet<String>();
+        ArrayList<String> langs = new ArrayList<String>();
         langs.add(ENGLISH);
-        ENGLISH_SET = langs;
+        ENGLISH_LIST = langs;
     }
 
     @Mock
@@ -60,44 +59,50 @@ public class ContextualSearchTranslationImplTest {
     @Before
     public void setup() {
         MockitoAnnotations.initMocks(this);
-        mImpl = new ContextualSearchTranslationImpl(mPolicy, mTranslateBridgeWrapperMock);
-        doReturn(false).when(mPolicy).isTranslationDisabled();
+        mImpl = new ContextualSearchTranslationImpl(mTranslateBridgeWrapperMock);
     }
 
     @Test
     @Feature("TranslateUtilities")
-    public void testNeedsTranslationEmptyModelLanguages() {
-        doReturn(new LinkedHashSet<String>()).when(mTranslateBridgeWrapperMock).getModelLanguages();
+    public void testNeedsTranslationEmptyFluentLanguages() {
+        doReturn(new ArrayList<String>())
+                .when(mTranslateBridgeWrapperMock)
+                .getNeverTranslateLanguages();
         assertThat(mImpl.needsTranslation(ENGLISH), is(true));
     }
 
     @Test
     @Feature("TranslateUtilities")
-    public void testNeedsTranslationUserModelLanguages() {
-        doReturn(ENGLISH_SET).when(mTranslateBridgeWrapperMock).getModelLanguages();
+    public void testNeedsTranslationOneFluentLanguage() {
+        doReturn(ENGLISH_LIST).when(mTranslateBridgeWrapperMock).getNeverTranslateLanguages();
         assertThat(mImpl.needsTranslation(ENGLISH), is(false));
     }
 
     @Test
     @Feature("TranslateUtilities")
-    public void testNeedsTranslationMultipleModelLanguages() {
-        doReturn(ENGLISH_AND_SPANISH).when(mTranslateBridgeWrapperMock).getModelLanguages();
+    public void testNeedsTranslationMultipleFluentLanguages() {
+        doReturn(ENGLISH_AND_SPANISH)
+                .when(mTranslateBridgeWrapperMock)
+                .getNeverTranslateLanguages();
         assertThat(mImpl.needsTranslation(ENGLISH), is(false));
     }
 
     @Test
     @Feature("TranslateUtilities")
-    public void testNeedsTranslationOtherModelLanguage() {
-        doReturn(ENGLISH_AND_SPANISH).when(mTranslateBridgeWrapperMock).getModelLanguages();
+    public void testNeedsTranslationOtherFluentLanguage() {
+        doReturn(ENGLISH_AND_SPANISH)
+                .when(mTranslateBridgeWrapperMock)
+                .getNeverTranslateLanguages();
         assertThat(mImpl.needsTranslation(GERMAN), is(true));
     }
 
     @Test
     @Feature("TranslateUtilities")
-    public void testNeedsTranslationOtherBlocked() {
-        doReturn(ENGLISH_AND_SPANISH).when(mTranslateBridgeWrapperMock).getModelLanguages();
-        doReturn(true).when(mTranslateBridgeWrapperMock).isBlockedLanguage(GERMAN);
-        assertThat(mImpl.needsTranslation(GERMAN), is(false));
+    public void testGetFluentLanguages() {
+        doReturn(ENGLISH_AND_SPANISH)
+                .when(mTranslateBridgeWrapperMock)
+                .getNeverTranslateLanguages();
+        assertThat(mImpl.getTranslateServiceFluentLanguages(), is(ENGLISH + "," + SPANISH));
     }
 
     @Test
@@ -110,26 +115,30 @@ public class ContextualSearchTranslationImplTest {
     @Test
     @Feature("TranslateUtilities")
     public void testForceTranslateIfNeededWhenNeeded() {
-        doReturn(ENGLISH_AND_SPANISH).when(mTranslateBridgeWrapperMock).getModelLanguages();
+        doReturn(ENGLISH_AND_SPANISH)
+                .when(mTranslateBridgeWrapperMock)
+                .getNeverTranslateLanguages();
         doNothing().when(mRequest).forceTranslation(any(), any());
         when(mRequest.isTranslationForced()).thenReturn(true);
 
-        mImpl.forceTranslateIfNeeded(mRequest, GERMAN);
+        mImpl.forceTranslateIfNeeded(mRequest, GERMAN, true);
 
         assertThat(mRequest.isTranslationForced(), is(true));
-        verify(mTranslateBridgeWrapperMock).getModelLanguages();
+        verify(mTranslateBridgeWrapperMock).getNeverTranslateLanguages();
         verify(mRequest).forceTranslation(GERMAN, null);
     }
 
     @Test
     @Feature("TranslateUtilities")
     public void testForceTranslateIfNeededWhenNotNeeded() {
-        doReturn(ENGLISH_AND_SPANISH).when(mTranslateBridgeWrapperMock).getModelLanguages();
+        doReturn(ENGLISH_AND_SPANISH)
+                .when(mTranslateBridgeWrapperMock)
+                .getNeverTranslateLanguages();
 
-        mImpl.forceTranslateIfNeeded(mRequest, ENGLISH);
+        mImpl.forceTranslateIfNeeded(mRequest, ENGLISH, true);
 
         assertThat(mRequest.isTranslationForced(), is(false));
-        verify(mTranslateBridgeWrapperMock).getModelLanguages();
+        verify(mTranslateBridgeWrapperMock).getNeverTranslateLanguages();
         verify(mRequest, never()).forceTranslation(any(), any());
     }
 }

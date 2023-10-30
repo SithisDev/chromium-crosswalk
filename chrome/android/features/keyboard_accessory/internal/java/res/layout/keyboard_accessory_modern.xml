@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Copyright 2018 The Chromium Authors. All rights reserved.
-     Use of this source code is governed by a BSD-style license that can be
-     found in the LICENSE file. -->
+<!--
+Copyright 2018 The Chromium Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
 
 <org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryModernView
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/keyboard_accessory"
     android:layout_gravity="start|bottom"
-    android:contentDescription="@string/autofill_keyboard_accessory_content_description"
+    android:contentDescription="@string/autofill_keyboard_accessory_modern_content_description"
     android:scrollbars="none"
     android:visibility="gone"
     android:orientation="vertical"
@@ -34,7 +36,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="start|bottom"
         android:orientation="horizontal"
-        android:background="@color/modern_primary_color">
+        android:background="@macro/default_bg_color">
 
         <ImageView
             android:id="@+id/show_keyboard"
@@ -52,13 +54,13 @@
             android:id="@+id/sheet_title"
             android:minHeight="48dp"
             android:gravity="center_vertical|start"
-            android:textAppearance="@style/TextAppearance.BlackTitle1"
+            android:textAppearance="@style/TextAppearance.TextLarge.Primary"
             android:layout_height="wrap_content"
             android:layout_width="match_parent"
             android:background="?android:attr/selectableItemBackground"
             android:visibility="gone"/>
 
-        <android.support.v7.widget.RecyclerView
+        <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/bar_items_view"
             android:layout_width="match_parent"
             android:layout_height="match_parent"

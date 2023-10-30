@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/threading/scoped_thread_priority.h"
-#include "chrome/common/safe_browsing/pe_image_reader_win.h"
-#include "components/safe_browsing/proto/csd.pb.h"
+#include "base/win/pe_image_reader.h"
+#include "components/safe_browsing/core/common/proto/csd.pb.h"
 
 namespace safe_browsing {
 
@@ -45,7 +45,7 @@ void BinaryFeatureExtractor::CheckSignature(
     ClientDownloadRequest_SignatureInfo* signature_info) {
   // Mitigate the issues caused by loading DLLs on a background thread
   // (http://crbug/973868).
-  base::ScopedThreadMayLoadLibraryOnBackgroundThread priority_boost(FROM_HERE);
+  SCOPED_MAY_LOAD_LIBRARY_AT_BACKGROUND_PRIORITY();
 
   DVLOG(2) << "Checking signature for " << file_path.value();
 
@@ -117,7 +117,7 @@ bool BinaryFeatureExtractor::ExtractImageFeaturesFromData(
     ExtractHeadersOption options,
     ClientDownloadRequest_ImageHeaders* image_headers,
     google::protobuf::RepeatedPtrField<std::string>* signed_data) {
-  PeImageReader pe_image;
+  base::win::PeImageReader pe_image;
   if (!pe_image.Initialize(data, data_size))
     return false;
 
@@ -130,7 +130,7 @@ bool BinaryFeatureExtractor::ExtractImageFeaturesFromData(
   size_t optional_header_size = 0;
   const uint8_t* optional_header_data =
       pe_image.GetOptionalHeaderData(&optional_header_size);
-  if (pe_image.GetWordSize() == PeImageReader::WORD_SIZE_32) {
+  if (pe_image.GetWordSize() == base::win::PeImageReader::WORD_SIZE_32) {
     pe_headers->set_optional_headers32(optional_header_data,
                                        optional_header_size);
   } else {

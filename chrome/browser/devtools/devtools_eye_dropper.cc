@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,50 +11,53 @@
 #include "build/build_config.h"
 #include "cc/paint/skia_paint_canvas.h"
 #include "components/viz/common/features.h"
-#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
-#include "content/public/common/cursor_info.h"
-#include "content/public/common/screen_info.h"
 #include "media/base/limits.h"
 #include "media/base/video_frame.h"
+#include "media/capture/mojom/video_capture_buffer.mojom.h"
 #include "media/capture/mojom/video_capture_types.mojom.h"
-#include "third_party/blink/public/platform/web_input_event.h"
-#include "third_party/blink/public/platform/web_mouse_event.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "skia/ext/legacy_display_globals.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/input/web_mouse_event.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkPixmap.h"
+#include "ui/base/cursor/cursor.h"
+#include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 #include "ui/gfx/geometry/size_conversions.h"
 
 DevToolsEyeDropper::DevToolsEyeDropper(content::WebContents* web_contents,
                                        EyeDropperCallback callback)
-    : content::WebContentsObserver(web_contents),
-      callback_(callback),
-      last_cursor_x_(-1),
-      last_cursor_y_(-1),
-      host_(nullptr) {
-  mouse_event_callback_ =
-      base::Bind(&DevToolsEyeDropper::HandleMouseEvent, base::Unretained(this));
-  content::RenderViewHost* rvh = web_contents->GetRenderViewHost();
-  if (rvh)
-    AttachToHost(rvh->GetWidget());
+    : content::WebContentsObserver(web_contents), callback_(callback) {
+  mouse_event_callback_ = base::BindRepeating(
+      &DevToolsEyeDropper::HandleMouseEvent, base::Unretained(this));
+  if (web_contents->GetPrimaryMainFrame()->IsRenderFrameLive())
+    AttachToHost(web_contents->GetPrimaryMainFrame());
 }
 
 DevToolsEyeDropper::~DevToolsEyeDropper() {
-  DetachFromHost();
+  if (host_) {
+    // If the renderer frame was destroyed already, we're already detached.
+    DetachFromHost();
+  }
 }
 
-void DevToolsEyeDropper::AttachToHost(content::RenderWidgetHost* host) {
-  host_ = host;
-  host_->AddMouseEventCallback(mouse_event_callback_);
+void DevToolsEyeDropper::AttachToHost(content::RenderFrameHost* frame_host) {
+  DCHECK(frame_host->IsRenderFrameLive());
+  // Historically, (see https://crbug.com/847363) this code handled the
+  // RenderWidgetHostView being null, but now it is listening to creation of the
+  // frame which includes creation of the widget so it is implied that
+  // RenderWidgetHostView exists.
+  DCHECK(frame_host->GetView());
 
-  // The view can be null if the renderer process has crashed.
-  // (https://crbug.com/847363)
-  if (!host_->GetView())
-    return;
+  host_ = frame_host->GetView()->GetRenderWidgetHost();
+  host_->AddMouseEventCallback(mouse_event_callback_);
 
   // Capturing a full-page screenshot can be costly so we shouldn't do it too
   // often. We can capture at a lower frame rate without hurting the user
@@ -68,43 +71,63 @@ void DevToolsEyeDropper::AttachToHost(content::RenderWidgetHost* host) {
       host_->GetView()->GetViewBounds().size(), true);
   video_capturer_->SetAutoThrottlingEnabled(false);
   video_capturer_->SetMinSizeChangePeriod(base::TimeDelta());
-  video_capturer_->SetFormat(media::PIXEL_FORMAT_ARGB,
-                             gfx::ColorSpace::CreateREC709());
-  video_capturer_->SetMinCapturePeriod(base::TimeDelta::FromSeconds(1) /
-                                       kMaxFrameRate);
-  video_capturer_->Start(this);
+  video_capturer_->SetFormat(media::PIXEL_FORMAT_ARGB);
+  video_capturer_->SetMinCapturePeriod(base::Seconds(1) / kMaxFrameRate);
+  video_capturer_->Start(this, viz::mojom::BufferFormatPreference::kDefault);
 }
 
 void DevToolsEyeDropper::DetachFromHost() {
-  if (!host_)
-    return;
   host_->RemoveMouseEventCallback(mouse_event_callback_);
-  content::CursorInfo cursor_info;
-  cursor_info.type = ui::CursorType::kPointer;
-  host_->SetCursor(cursor_info);
+  ui::Cursor cursor(ui::mojom::CursorType::kPointer);
+  host_->SetCursor(cursor);
   video_capturer_.reset();
   host_ = nullptr;
 }
 
-void DevToolsEyeDropper::RenderViewCreated(content::RenderViewHost* host) {
-  if (!host_)
-    AttachToHost(host->GetWidget());
+void DevToolsEyeDropper::RenderFrameCreated(
+    content::RenderFrameHost* frame_host) {
+  // Only handle the initial main frame, not speculative ones.
+  if (frame_host != web_contents()->GetPrimaryMainFrame())
+    return;
+  DCHECK(!host_);
+
+  AttachToHost(frame_host);
 }
 
-void DevToolsEyeDropper::RenderViewDeleted(content::RenderViewHost* host) {
-  if (host->GetWidget() == host_) {
-    DetachFromHost();
-    ResetFrame();
-  }
+void DevToolsEyeDropper::RenderFrameDeleted(
+    content::RenderFrameHost* frame_host) {
+  // Only handle the active main frame, not speculative ones.
+  if (frame_host != web_contents()->GetPrimaryMainFrame())
+    return;
+  DCHECK(host_);
+  DCHECK_EQ(host_, frame_host->GetRenderWidgetHost());
+
+  DetachFromHost();
+  ResetFrame();
 }
 
-void DevToolsEyeDropper::RenderViewHostChanged(
-    content::RenderViewHost* old_host,
-    content::RenderViewHost* new_host) {
-  if ((old_host && old_host->GetWidget() == host_) || (!old_host && !host_)) {
-    DetachFromHost();
-    AttachToHost(new_host->GetWidget());
+void DevToolsEyeDropper::RenderFrameHostChanged(
+    content::RenderFrameHost* old_host,
+    content::RenderFrameHost* new_host) {
+  // Since we skipped speculative main frames in RenderFrameCreated, we must
+  // watch for them being swapped in by watching for RenderFrameHostChanged().
+  if (new_host != web_contents()->GetPrimaryMainFrame())
+    return;
+  // Don't watch for the initial main frame RenderFrameHost, which does not come
+  // with a renderer frame. We'll hear about that from RenderFrameCreated.
+  if (!old_host) {
+    // If this fails, then we need to AttachToHost() here when the `new_host`
+    // has its renderer frame. Since `old_host` is null only when this observer
+    // method is called at startup, it should be before the renderer frame is
+    // created.
+    DCHECK(!new_host->IsRenderFrameLive());
+    return;
   }
+  DCHECK(host_);
+  DCHECK_EQ(host_, old_host->GetRenderWidgetHost());
+
+  DetachFromHost();
+  AttachToHost(new_host);
 }
 
 void DevToolsEyeDropper::ResetFrame() {
@@ -114,14 +137,14 @@ void DevToolsEyeDropper::ResetFrame() {
 }
 
 bool DevToolsEyeDropper::HandleMouseEvent(const blink::WebMouseEvent& event) {
-  last_cursor_x_ = event.PositionInWidget().x;
-  last_cursor_y_ = event.PositionInWidget().y;
+  last_cursor_x_ = event.PositionInWidget().x();
+  last_cursor_y_ = event.PositionInWidget().y();
   if (frame_.drawsNothing())
     return true;
 
   if (event.button == blink::WebMouseEvent::Button::kLeft &&
-      (event.GetType() == blink::WebInputEvent::kMouseDown ||
-       event.GetType() == blink::WebInputEvent::kMouseMove)) {
+      (event.GetType() == blink::WebInputEvent::Type::kMouseDown ||
+       event.GetType() == blink::WebInputEvent::Type::kMouseMove)) {
     if (last_cursor_x_ < 0 || last_cursor_x_ >= frame_.width() ||
         last_cursor_y_ < 0 || last_cursor_y_ >= frame_.height()) {
       return true;
@@ -163,7 +186,7 @@ void DevToolsEyeDropper::UpdateCursor() {
 // magnified projection only with centered hotspot.
 // Mac Retina requires cursor to be > 120px in order to render smoothly.
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   const float kCursorSize = 63;
   const float kDiameter = 63;
   const float kHotspotOffset = 32;
@@ -177,16 +200,14 @@ void DevToolsEyeDropper::UpdateCursor() {
   const float kPixelSize = 10;
 #endif
 
-  content::ScreenInfo screen_info;
-  host_->GetScreenInfo(&screen_info);
-  double device_scale_factor = screen_info.device_scale_factor;
+  float device_scale_factor = host_->GetDeviceScaleFactor();
 
   SkBitmap result;
   result.allocN32Pixels(kCursorSize * device_scale_factor,
                         kCursorSize * device_scale_factor);
   result.eraseARGB(0, 0, 0, 0);
 
-  SkCanvas canvas(result);
+  SkCanvas canvas(result, skia::LegacyDisplayGlobals::GetSkSurfaceProps());
   canvas.scale(device_scale_factor, device_scale_factor);
   canvas.translate(0.5f, 0.5f);
 
@@ -226,7 +247,9 @@ void DevToolsEyeDropper::UpdateCursor() {
                                      last_cursor_y_ - pixel_count / 2,
                                      pixel_count, pixel_count);
   SkRect dst_rect = SkRect::MakeXYWH(padding, padding, kDiameter, kDiameter);
-  canvas.drawBitmapRect(frame_, src_rect, dst_rect, NULL);
+  canvas.drawImageRect(frame_.asImage(), src_rect, dst_rect,
+                       SkSamplingOptions(), nullptr,
+                       SkCanvas::kStrict_SrcRectConstraint);
 
   // Paint grid.
   paint.setStrokeWidth(1);
@@ -253,20 +276,20 @@ void DevToolsEyeDropper::UpdateCursor() {
   paint.setAntiAlias(true);
   canvas.drawCircle(kCursorSize / 2, kCursorSize / 2, kDiameter / 2, paint);
 
-  content::CursorInfo cursor_info;
-  cursor_info.type = ui::CursorType::kCustom;
-  cursor_info.image_scale_factor = device_scale_factor;
-  cursor_info.custom_image = result;
-  cursor_info.hotspot = gfx::Point(kHotspotOffset * device_scale_factor,
-                                   kHotspotOffset * device_scale_factor);
-  host_->SetCursor(cursor_info);
+  ui::Cursor cursor(ui::mojom::CursorType::kCustom);
+  cursor.set_image_scale_factor(device_scale_factor);
+  cursor.set_custom_bitmap(result);
+  cursor.set_custom_hotspot(gfx::Point(kHotspotOffset * device_scale_factor,
+                                       kHotspotOffset * device_scale_factor));
+  host_->SetCursor(cursor);
 }
 
 void DevToolsEyeDropper::OnFrameCaptured(
-    base::ReadOnlySharedMemoryRegion data,
+    ::media::mojom::VideoBufferHandlePtr data,
     ::media::mojom::VideoFrameInfoPtr info,
     const gfx::Rect& content_rect,
-    viz::mojom::FrameSinkVideoConsumerFrameCallbacksPtr callbacks) {
+    mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
+        callbacks) {
   gfx::Size view_size = host_->GetView()->GetViewBounds().size();
   if (view_size != content_rect.size()) {
     video_capturer_->SetResolutionConstraints(view_size, view_size, true);
@@ -274,11 +297,21 @@ void DevToolsEyeDropper::OnFrameCaptured(
     return;
   }
 
-  if (!data.IsValid()) {
-    callbacks->Done();
-    return;
-  }
-  base::ReadOnlySharedMemoryMapping mapping = data.Map();
+  mojo::Remote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
+      callbacks_remote(std::move(callbacks));
+
+  CHECK(data->is_read_only_shmem_region());
+  base::ReadOnlySharedMemoryRegion& shmem_region =
+      data->get_read_only_shmem_region();
+
+  // The |data| parameter is not nullable and mojo type mapping for
+  // `base::ReadOnlySharedMemoryRegion` defines that nullable version of it is
+  // the same type, with null check being equivalent to IsValid() check. Given
+  // the above, we should never be able to receive a read only shmem region that
+  // is not valid - mojo will enforce it for us.
+  DCHECK(shmem_region.IsValid());
+
+  base::ReadOnlySharedMemoryMapping mapping = shmem_region.Map();
   if (!mapping.IsValid()) {
     DLOG(ERROR) << "Shared memory mapping failed.";
     return;
@@ -305,7 +338,8 @@ void DevToolsEyeDropper::OnFrameCaptured(
     base::ReadOnlySharedMemoryMapping mapping;
     // Prevents FrameSinkVideoCapturer from recycling the shared memory that
     // backs |frame_|.
-    viz::mojom::FrameSinkVideoConsumerFrameCallbacksPtr releaser;
+    mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
+        releaser;
   };
   frame_.installPixels(
       SkImageInfo::MakeN32(content_rect.width(), content_rect.height(),
@@ -317,10 +351,14 @@ void DevToolsEyeDropper::OnFrameCaptured(
       [](void* addr, void* context) {
         delete static_cast<FramePinner*>(context);
       },
-      new FramePinner{std::move(mapping), std::move(callbacks)});
+      new FramePinner{std::move(mapping), callbacks_remote.Unbind()});
   frame_.setImmutable();
 
   UpdateCursor();
 }
+
+void DevToolsEyeDropper::OnNewCropVersion(uint32_t crop_version) {}
+
+void DevToolsEyeDropper::OnFrameWithEmptyRegionCapture() {}
 
 void DevToolsEyeDropper::OnStopped() {}

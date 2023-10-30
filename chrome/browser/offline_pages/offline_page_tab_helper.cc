@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/check.h"
 #include "base/guid.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
@@ -19,6 +19,8 @@
 #include "chrome/browser/offline_pages/prefetch/prefetch_service_factory.h"
 #include "chrome/browser/offline_pages/request_coordinator_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
+#include "components/back_forward_cache/back_forward_cache_disable.h"
 #include "components/offline_pages/core/background/request_coordinator.h"
 #include "components/offline_pages/core/model/offline_page_model_utils.h"
 #include "components/offline_pages/core/offline_page_client_policy.h"
@@ -30,13 +32,13 @@
 #include "components/offline_pages/core/prefetch/offline_metrics_collector.h"
 #include "components/offline_pages/core/prefetch/prefetch_service.h"
 #include "components/offline_pages/core/request_header/offline_page_header.h"
+#include "content/public/browser/back_forward_cache.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "ui/base/page_transition_types.h"
 
 namespace offline_pages {
@@ -45,7 +47,7 @@ using blink::mojom::MHTMLLoadResult;
 
 namespace {
 bool SchemeIsForUntrustedOfflinePages(const GURL& url) {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (url.SchemeIs(url::kContentScheme))
     return true;
 #endif
@@ -77,6 +79,20 @@ OfflinePageTabHelper::LoadedOfflinePageInfo::operator=(
     OfflinePageTabHelper::LoadedOfflinePageInfo&& other) = default;
 
 // static
+void OfflinePageTabHelper::BindHtmlPageNotifier(
+    mojo::PendingAssociatedReceiver<offline_pages::mojom::MhtmlPageNotifier>
+        receiver,
+    content::RenderFrameHost* rfh) {
+  auto* web_contents = content::WebContents::FromRenderFrameHost(rfh);
+  if (!web_contents)
+    return;
+  auto* tab_helper = OfflinePageTabHelper::FromWebContents(web_contents);
+  if (!tab_helper)
+    return;
+  tab_helper->mhtml_page_notifier_receivers_.Bind(rfh, std::move(receiver));
+}
+
+// static
 OfflinePageTabHelper::LoadedOfflinePageInfo
 OfflinePageTabHelper::LoadedOfflinePageInfo::MakeUntrusted() {
   LoadedOfflinePageInfo untrusted_info;
@@ -99,8 +115,8 @@ bool OfflinePageTabHelper::LoadedOfflinePageInfo::IsValid() const {
 
 OfflinePageTabHelper::OfflinePageTabHelper(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      mhtml_page_notifier_bindings_(web_contents, this),
-      weak_ptr_factory_(this) {
+      content::WebContentsUserData<OfflinePageTabHelper>(*web_contents),
+      mhtml_page_notifier_receivers_(web_contents, this) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
@@ -114,8 +130,8 @@ void OfflinePageTabHelper::NotifyMhtmlPageLoadAttempted(
     MHTMLLoadResult load_result,
     const GURL& main_frame_url,
     base::Time date) {
-  if (mhtml_page_notifier_bindings_.GetCurrentTargetFrame() !=
-      web_contents()->GetMainFrame()) {
+  if (mhtml_page_notifier_receivers_.GetCurrentTargetFrame() !=
+      web_contents()->GetPrimaryMainFrame()) {
     return;
   }
 
@@ -160,22 +176,11 @@ void OfflinePageTabHelper::NotifyMhtmlPageLoadAttempted(
 void OfflinePageTabHelper::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
   // Skips non-main frame.
-  if (!navigation_handle->IsInMainFrame())
+  if (!navigation_handle->IsInPrimaryMainFrame())
     return;
-
-  // This is a new navigation so we can invalidate any previously scheduled
-  // operations.
-  weak_ptr_factory_.InvalidateWeakPtrs();
-  reloading_url_on_net_error_ = false;
 
   // The provisional offline info can be cleared no matter how.
   provisional_offline_info_.Clear();
-
-  // If not a fragment navigation, clear the cached offline info.
-  if (offline_info_.offline_page.get() &&
-      !navigation_handle->IsSameDocument()) {
-    offline_info_.Clear();
-  }
 
   // Report any attempted navigation as indication that browser is in use.
   // This doesn't have to be a successful navigation.
@@ -187,7 +192,7 @@ void OfflinePageTabHelper::DidStartNavigation(
 void OfflinePageTabHelper::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
   // Skips non-main frame.
-  if (!navigation_handle->IsInMainFrame())
+  if (!navigation_handle->IsInPrimaryMainFrame())
     return;
 
   if (!navigation_handle->HasCommitted())
@@ -195,6 +200,22 @@ void OfflinePageTabHelper::DidFinishNavigation(
 
   if (navigation_handle->IsSameDocument())
     return;
+
+  if (offline_info_.IsValid()) {
+    // Do not store the offline page we are navigating away from in bfcache.
+    // If we managed to establish a network connection, we should reload the
+    // full page on back navigation. If not, offline page is fast to load,
+    // so back-forward cache is not going to be useful here.
+    content::BackForwardCache::DisableForRenderFrameHost(
+        navigation_handle->GetPreviousRenderFrameHostId(),
+        back_forward_cache::DisabledReason(
+            back_forward_cache::DisabledReasonId::kOfflinePage));
+  }
+
+  // This is a new navigation so we can invalidate any previously scheduled
+  // operations.
+  weak_ptr_factory_.InvalidateWeakPtrs();
+  reloading_url_on_net_error_ = false;
 
   FinalizeOfflineInfo(navigation_handle);
   provisional_offline_info_.Clear();
@@ -395,7 +416,7 @@ OfflinePageTrustedState OfflinePageTabHelper::GetTrustedStateForTest() const {
 
 void OfflinePageTabHelper::SetCurrentTargetFrameForTest(
     content::RenderFrameHost* render_frame_host) {
-  mhtml_page_notifier_bindings_.SetCurrentTargetFrameForTesting(
+  mhtml_page_notifier_receivers_.SetCurrentTargetFrameForTesting(
       render_frame_host);
 }
 
@@ -415,9 +436,10 @@ void OfflinePageTabHelper::ScheduleDownloadHelper(
     const std::string& request_origin) {
   OfflinePageUtils::CheckDuplicateDownloads(
       web_contents->GetBrowserContext(), url,
-      base::Bind(&OfflinePageTabHelper::DuplicateCheckDoneForScheduleDownload,
-                 weak_ptr_factory_.GetWeakPtr(), web_contents, name_space, url,
-                 ui_action, request_origin));
+      base::BindOnce(
+          &OfflinePageTabHelper::DuplicateCheckDoneForScheduleDownload,
+          weak_ptr_factory_.GetWeakPtr(), web_contents, name_space, url,
+          ui_action, request_origin));
 }
 
 void OfflinePageTabHelper::DuplicateCheckDoneForScheduleDownload(
@@ -432,9 +454,9 @@ void OfflinePageTabHelper::DuplicateCheckDoneForScheduleDownload(
         static_cast<int>(
             OfflinePageUtils::DownloadUIActionFlags::PROMPT_DUPLICATE)) {
       OfflinePageUtils::ShowDuplicatePrompt(
-          base::Bind(&OfflinePageTabHelper::DoDownloadPageLater,
-                     weak_ptr_factory_.GetWeakPtr(), web_contents, name_space,
-                     url, ui_action, request_origin),
+          base::BindOnce(&OfflinePageTabHelper::DoDownloadPageLater,
+                         weak_ptr_factory_.GetWeakPtr(), web_contents,
+                         name_space, url, ui_action, request_origin),
           url,
           result ==
               OfflinePageUtils::DuplicateCheckResult::DUPLICATE_REQUEST_FOUND,
@@ -471,6 +493,6 @@ void OfflinePageTabHelper::DoDownloadPageLater(
   }
 }
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(OfflinePageTabHelper)
+WEB_CONTENTS_USER_DATA_KEY_IMPL(OfflinePageTabHelper);
 
 }  // namespace offline_pages

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,15 @@
 #include <utility>
 
 #include "build/build_config.h"
-#include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
-#include "chrome/browser/ui/views/collected_cookies_views.h"
+#include "chrome/browser/ui/sync/profile_signin_confirmation_helper.h"
 #include "chrome/browser/ui/views/hung_renderer_view.h"
 #include "chrome/browser/ui/views/passwords/password_bubble_view_base.h"
+#include "chrome/browser/ui/views/site_data/page_specific_site_data_dialog_controller.h"
 #include "content/public/browser/web_contents.h"
 
-#if !defined(OS_CHROMEOS)
-#include "chrome/browser/ui/views/sync/profile_signin_confirmation_dialog_views.h"
+#if defined(TOOLKIT_VIEWS) && !BUILDFLAG(IS_CHROMEOS)
+#include "chrome/browser/ui/views/web_apps/deprecated_apps_dialog_view.h"
+#include "chrome/browser/ui/views/web_apps/force_installed_deprecated_apps_dialog_view.h"
 #endif
 
 // static
@@ -32,15 +33,15 @@ TabDialogsViews::TabDialogsViews(content::WebContents* contents)
   DCHECK(contents);
 }
 
-TabDialogsViews::~TabDialogsViews() {
-}
+TabDialogsViews::~TabDialogsViews() = default;
 
 gfx::NativeView TabDialogsViews::GetDialogParentView() const {
   return web_contents_->GetNativeView();
 }
 
 void TabDialogsViews::ShowCollectedCookies() {
-  CollectedCookiesViews::CreateAndShowForWebContents(web_contents_);
+  PageSpecificSiteDataDialogController::CreateAndShowForWebContents(
+      web_contents_);
 }
 
 void TabDialogsViews::ShowHungRendererDialog(
@@ -56,20 +57,7 @@ void TabDialogsViews::HideHungRendererDialog(
 }
 
 bool TabDialogsViews::IsShowingHungRendererDialog() {
-  return HungRendererDialogView::GetInstance();
-}
-
-void TabDialogsViews::ShowProfileSigninConfirmation(
-    Browser* browser,
-    Profile* profile,
-    const std::string& username,
-    std::unique_ptr<ui::ProfileSigninConfirmationDelegate> delegate) {
-#if !defined(OS_CHROMEOS)
-  ProfileSigninConfirmationDialogViews::ShowDialog(browser, profile, username,
-                                                   std::move(delegate));
-#else
-  NOTREACHED();
-#endif
+  return HungRendererDialogView::IsShowingForWebContents(web_contents_);
 }
 
 void TabDialogsViews::ShowManagePasswordsBubble(bool user_action) {
@@ -90,4 +78,26 @@ void TabDialogsViews::HideManagePasswordsBubble() {
     return;
   if (bubble->GetWebContents() == web_contents_)
     PasswordBubbleViewBase::CloseCurrentBubble();
+}
+
+void TabDialogsViews::ShowDeprecatedAppsDialog(
+    const extensions::ExtensionId& optional_launched_extension_id,
+    const std::set<extensions::ExtensionId>& deprecated_app_ids,
+    content::WebContents* web_contents,
+    base::OnceClosure launch_anyways) {
+#if defined(TOOLKIT_VIEWS) && !BUILDFLAG(IS_CHROMEOS)
+  DeprecatedAppsDialogView::CreateAndShowDialog(
+      optional_launched_extension_id, deprecated_app_ids, web_contents,
+      std::move(launch_anyways));
+#endif
+}
+
+void TabDialogsViews::ShowForceInstalledDeprecatedAppsDialog(
+    const extensions::ExtensionId& app_id,
+    content::WebContents* web_contents,
+    base::OnceClosure launch_anyways) {
+#if defined(TOOLKIT_VIEWS) && !BUILDFLAG(IS_CHROMEOS)
+  ForceInstalledDeprecatedAppsDialogView::CreateAndShowDialog(
+      app_id, web_contents, std::move(launch_anyways));
+#endif
 }

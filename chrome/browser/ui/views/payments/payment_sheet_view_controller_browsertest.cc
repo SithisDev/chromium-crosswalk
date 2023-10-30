@@ -1,75 +1,40 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/views/payments/payment_request_browsertest_base.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view_ids.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
+#include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/strings/grit/components_strings.h"
+#include "content/public/test/browser_test.h"
+#include "net/dns/mock_host_resolver.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace payments {
 
-// A simple PaymentRequest which simply requests 'visa' or 'mastercard' and
-// nothing else.
-class PaymentSheetViewControllerNoShippingTest
-    : public PaymentRequestBrowserTestBase {
- protected:
-  PaymentSheetViewControllerNoShippingTest() {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(PaymentSheetViewControllerNoShippingTest);
-};
-
-// With no data present, the pay button should be disabled.
-IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerNoShippingTest, NoData) {
-  NavigateTo("/payment_request_no_shipping_test.html");
-  InvokePaymentRequestUI();
-
-  EXPECT_FALSE(IsPayButtonEnabled());
-}
-
-// With a supported card (Visa) present, the pay button should be enabled.
-IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerNoShippingTest,
-                       SupportedCard) {
-  NavigateTo("/payment_request_no_shipping_test.html");
-  autofill::AutofillProfile profile(autofill::test::GetFullProfile());
-  AddAutofillProfile(profile);
-  autofill::CreditCard card(autofill::test::GetCreditCard());  // Visa card.
-  card.set_billing_address_id(profile.guid());
-  AddCreditCard(card);
-
-  InvokePaymentRequestUI();
-  EXPECT_TRUE(IsPayButtonEnabled());
-}
-
-// With only an unsupported card (Amex) in the database, the pay button should
-// be disabled.
-IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerNoShippingTest,
-                       UnsupportedCard) {
-  NavigateTo("/payment_request_no_shipping_test.html");
-  AddCreditCard(autofill::test::GetCreditCard2());  // Amex card.
-
-  InvokePaymentRequestUI();
-  EXPECT_FALSE(IsPayButtonEnabled());
-}
+using PaymentSheetViewControllerNoShippingTest = PaymentRequestBrowserTestBase;
 
 // If shipping and contact info are not requested, their rows should not be
 // present.
 IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerNoShippingTest,
                        NoShippingNoContactRows) {
+  std::string payment_method_name;
+  InstallPaymentApp("a.com", "payment_request_success_responder.js",
+                    &payment_method_name);
+
   NavigateTo("/payment_request_no_shipping_test.html");
-  InvokePaymentRequestUI();
+  InvokePaymentRequestUIWithJs("buyWithMethods([{supportedMethods:'" +
+                               payment_method_name + "'}]);");
 
   EXPECT_NE(nullptr, dialog_view()->GetViewByID(static_cast<int>(
                          DialogViewID::PAYMENT_SHEET_SUMMARY_SECTION)));
-  EXPECT_NE(nullptr,
-            dialog_view()->GetViewByID(static_cast<int>(
-                DialogViewID::PAYMENT_SHEET_PAYMENT_METHOD_SECTION_BUTTON)));
   EXPECT_EQ(nullptr,
             dialog_view()->GetViewByID(static_cast<int>(
                 DialogViewID::PAYMENT_SHEET_SHIPPING_ADDRESS_SECTION)));
@@ -79,167 +44,71 @@ IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerNoShippingTest,
                          DialogViewID::PAYMENT_SHEET_CONTACT_INFO_SECTION)));
 }
 
-// Accepts 'visa' cards and requests the full contact details.
-class PaymentSheetViewControllerContactDetailsTest
-    : public PaymentRequestBrowserTestBase {
- protected:
-  PaymentSheetViewControllerContactDetailsTest() {}
+typedef PaymentRequestBrowserTestBase PaymentHandlerUITest;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(PaymentSheetViewControllerContactDetailsTest);
-};
+IN_PROC_BROWSER_TEST_F(PaymentHandlerUITest, BackReturnsToPaymentSheet) {
+  NavigateTo("/payment_handler.html");
 
-// With no data present, the pay button should be disabled.
-IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerContactDetailsTest, NoData) {
-  NavigateTo("/payment_request_contact_details_and_free_shipping_test.html");
-  InvokePaymentRequestUI();
-
-  EXPECT_FALSE(IsPayButtonEnabled());
-}
-
-// With a supported card (Visa) present, the pay button is still disabled
-// because there is no contact details.
-IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerContactDetailsTest,
-                       SupportedCard_NoContactInfo) {
-  NavigateTo("/payment_request_contact_details_and_free_shipping_test.html");
-  AddCreditCard(autofill::test::GetCreditCard());  // Visa card.
-
-  InvokePaymentRequestUI();
-  EXPECT_FALSE(IsPayButtonEnabled());
-}
-
-// With a supported card (Visa) present and a complete address profile, there is
-// enough information to enable the pay button.
-IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerContactDetailsTest,
-                       SupportedCard_CompleteContactInfo) {
-  NavigateTo("/payment_request_contact_details_and_free_shipping_test.html");
+  // Add an autofill profile and credit card so the payment sheet is shown.
   autofill::AutofillProfile profile(autofill::test::GetFullProfile());
   AddAutofillProfile(profile);
   autofill::CreditCard card(autofill::test::GetCreditCard());  // Visa card.
   card.set_billing_address_id(profile.guid());
   AddCreditCard(card);
 
-  InvokePaymentRequestUI();
+  // Installs a payment handler which opens a window.
+  EXPECT_EQ("success", content::EvalJs(GetActiveWebContents(), "install()"));
+
+  ResetEventWaiterForDialogOpened();
+  EXPECT_EQ(
+      "success",
+      content::EvalJs(GetActiveWebContents(),
+                      "paymentRequestWithOptions({requestShipping: true})"));
+  WaitForObservedEvent();
+
   EXPECT_TRUE(IsPayButtonEnabled());
+  EXPECT_FALSE(IsViewVisible(DialogViewID::PAYMENT_APP_OPENED_WINDOW_SHEET));
+
+  // Click on Pay to show the payment handler window. The presence of Pay
+  // indicates that the payment sheet is presenting.
+  ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                               DialogEvent::PAYMENT_HANDLER_WINDOW_OPENED});
+  ClickOnDialogViewAndWait(DialogViewID::PAY_BUTTON, dialog_view());
+
+  EXPECT_TRUE(IsViewVisible(DialogViewID::BACK_BUTTON));
+  EXPECT_TRUE(IsViewVisible(DialogViewID::PAYMENT_APP_OPENED_WINDOW_SHEET));
+
+  // Click on back arrow to return to the payment sheet.
+  ClickOnBackArrow();
+
+  EXPECT_TRUE(IsPayButtonEnabled());
+  EXPECT_FALSE(IsViewVisible(DialogViewID::PAYMENT_APP_OPENED_WINDOW_SHEET));
 }
 
-// With only an unsupported card present and a complete address profile, the pay
-// button is disabled.
-IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerContactDetailsTest,
-                       UnsupportedCard_CompleteContactInfo) {
-  NavigateTo("/payment_request_contact_details_and_free_shipping_test.html");
-  AddCreditCard(autofill::test::GetCreditCard2());  // Amex card.
-  AddAutofillProfile(autofill::test::GetFullProfile());
+IN_PROC_BROWSER_TEST_F(PaymentHandlerUITest, BackAbortsRequestIfSkipSheet) {
+  NavigateTo("/payment_handler.html");
+  EXPECT_EQ("success", content::EvalJs(GetActiveWebContents(), "install()"));
 
-  InvokePaymentRequestUI();
-  EXPECT_FALSE(IsPayButtonEnabled());
-}
+  // Skip the sheet flow skips directly to the payment handler window.
+  ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                               DialogEvent::DIALOG_OPENED,
+                               DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                               DialogEvent::PAYMENT_HANDLER_WINDOW_OPENED});
 
-// With a supported card (Visa) present and a *incomplete* address profile, the
-// pay button is disabled.
-IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerContactDetailsTest,
-                       SupportedCard_IncompleteContactInfo) {
-  NavigateTo("/payment_request_contact_details_and_free_shipping_test.html");
-  AddCreditCard(autofill::test::GetCreditCard());  // Visa card.
+  EXPECT_EQ("success", content::EvalJs(GetActiveWebContents(),
+                                       "launchWithoutWaitForResponse()"));
+  WaitForObservedEvent();
 
-  autofill::AutofillProfile profile = autofill::test::GetFullProfile();
-  // Remove the name from the profile to be stored.
-  profile.SetRawInfo(autofill::NAME_FIRST, base::ASCIIToUTF16(""));
-  profile.SetRawInfo(autofill::NAME_MIDDLE, base::ASCIIToUTF16(""));
-  profile.SetRawInfo(autofill::NAME_LAST, base::ASCIIToUTF16(""));
-  AddAutofillProfile(profile);
+  EXPECT_TRUE(IsViewVisible(DialogViewID::BACK_BUTTON));
+  EXPECT_TRUE(IsViewVisible(DialogViewID::PAYMENT_APP_OPENED_WINDOW_SHEET));
 
-  InvokePaymentRequestUI();
-  EXPECT_FALSE(IsPayButtonEnabled());
-}
-
-// If shipping and contact info are requested, show all the rows.
-IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerContactDetailsTest,
-                       AllRowsPresent) {
-  NavigateTo("/payment_request_contact_details_and_free_shipping_test.html");
-  InvokePaymentRequestUI();
-
-  EXPECT_NE(nullptr, dialog_view()->GetViewByID(static_cast<int>(
-                         DialogViewID::PAYMENT_SHEET_SUMMARY_SECTION)));
-  // The buttons to select payment methods and shipping address are present.
-  EXPECT_NE(nullptr,
-            dialog_view()->GetViewByID(static_cast<int>(
-                DialogViewID::PAYMENT_SHEET_PAYMENT_METHOD_SECTION_BUTTON)));
-  EXPECT_NE(nullptr,
-            dialog_view()->GetViewByID(static_cast<int>(
-                DialogViewID::PAYMENT_SHEET_SHIPPING_ADDRESS_SECTION_BUTTON)));
-  // Shipping option section (or its button) is not yet present.
-  EXPECT_EQ(nullptr, dialog_view()->GetViewByID(static_cast<int>(
-                         DialogViewID::PAYMENT_SHEET_SHIPPING_OPTION_SECTION)));
-  EXPECT_EQ(nullptr,
-            dialog_view()->GetViewByID(static_cast<int>(
-                DialogViewID::PAYMENT_SHEET_SHIPPING_OPTION_SECTION_BUTTON)));
-  // Contact details button is present.
-  EXPECT_NE(nullptr,
-            dialog_view()->GetViewByID(static_cast<int>(
-                DialogViewID::PAYMENT_SHEET_CONTACT_INFO_SECTION_BUTTON)));
-}
-
-IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerContactDetailsTest,
-                       AllClickableRowsPresent) {
-  NavigateTo("/payment_request_contact_details_and_free_shipping_test.html");
-  autofill::AutofillProfile profile(autofill::test::GetFullProfile());
-  AddAutofillProfile(profile);
-  autofill::CreditCard card(autofill::test::GetCreditCard());  // Visa card.
-  card.set_billing_address_id(profile.guid());
-  AddCreditCard(card);
-  InvokePaymentRequestUI();
-
-  EXPECT_NE(nullptr, dialog_view()->GetViewByID(static_cast<int>(
-                         DialogViewID::PAYMENT_SHEET_SUMMARY_SECTION)));
-  EXPECT_NE(nullptr, dialog_view()->GetViewByID(static_cast<int>(
-                         DialogViewID::PAYMENT_SHEET_PAYMENT_METHOD_SECTION)));
-  EXPECT_NE(nullptr,
-            dialog_view()->GetViewByID(static_cast<int>(
-                DialogViewID::PAYMENT_SHEET_SHIPPING_ADDRESS_SECTION)));
-  EXPECT_NE(nullptr, dialog_view()->GetViewByID(static_cast<int>(
-                         DialogViewID::PAYMENT_SHEET_SHIPPING_OPTION_SECTION)));
-  EXPECT_NE(nullptr, dialog_view()->GetViewByID(static_cast<int>(
-                         DialogViewID::PAYMENT_SHEET_CONTACT_INFO_SECTION)));
-}
-
-IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerContactDetailsTest,
-                       RetryWithEmptyError) {
-  NavigateTo("/payment_request_retry.html");
-
-  autofill::AutofillProfile address = autofill::test::GetFullProfile();
-  AddAutofillProfile(address);
-
-  autofill::CreditCard card = autofill::test::GetCreditCard();
-  card.set_billing_address_id(address.guid());
-  AddCreditCard(card);
-
-  InvokePaymentRequestUI();
-  PayWithCreditCard(base::ASCIIToUTF16("123"));
-  RetryPaymentRequest("{}", dialog_view());
-
-  EXPECT_EQ(base::ASCIIToUTF16(
-                "There was an error processing your order. Please try again."),
-            GetLabelText(DialogViewID::WARNING_LABEL));
-}
-
-IN_PROC_BROWSER_TEST_F(PaymentSheetViewControllerContactDetailsTest,
-                       RetryWithError) {
-  NavigateTo("/payment_request_retry.html");
-
-  autofill::AutofillProfile address = autofill::test::GetFullProfile();
-  AddAutofillProfile(address);
-
-  autofill::CreditCard card = autofill::test::GetCreditCard();
-  card.set_billing_address_id(address.guid());
-  AddCreditCard(card);
-
-  InvokePaymentRequestUI();
-  PayWithCreditCard(base::ASCIIToUTF16("123"));
-  RetryPaymentRequest("{ error: 'ERROR MESSAGE' }", dialog_view());
-
-  EXPECT_EQ(base::ASCIIToUTF16("ERROR MESSAGE"),
-            GetLabelText(DialogViewID::WARNING_LABEL));
+  // Click on back arrow aborts the payment request.
+  ResetEventWaiter(DialogEvent::DIALOG_CLOSED);
+  ClickOnDialogViewAndWait(DialogViewID::BACK_BUTTON,
+                           /* wait_for_animation= */ false);
 }
 
 }  // namespace payments

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,16 @@
 
 #include <unordered_map>
 
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/sequence_checker.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/safe_browsing/certificate_reporting_service.h"
-#include "content/public/test/test_browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
-#include "services/network/public/mojom/url_loader.mojom.h"
+#include "services/network/public/mojom/url_loader.mojom-forward.h"
 
 namespace certificate_reporting_test_utils {
 
@@ -73,7 +74,8 @@ class RequestObserver {
 
   // Called when a request created or destroyed, depending on whichever one this
   // class observes.
-  void OnRequest(const std::string& serialized_report,
+  void OnRequest(const network::ResourceRequest& url_request,
+                 const std::string& serialized_report,
                  ReportSendingResult report_type);
 
   // These must be called on the UI thread.
@@ -81,6 +83,7 @@ class RequestObserver {
   const ObservedReportMap& failed_reports() const;
   const ObservedReportMap& delayed_reports() const;
   const std::vector<std::string>& full_reports() const;
+  const std::vector<network::ResourceRequest>& full_requests() const;
   void ClearObservedReports();
 
  private:
@@ -93,6 +96,7 @@ class RequestObserver {
   ObservedReportMap delayed_reports_;
 
   std::vector<std::string> full_reports_;
+  std::vector<network::ResourceRequest> full_requests_;
 };
 
 // Class to wait for the CertificateReportingService to reset.
@@ -121,6 +125,11 @@ class CertificateReportingServiceTestHelper
  public:
   CertificateReportingServiceTestHelper();
 
+  CertificateReportingServiceTestHelper(
+      const CertificateReportingServiceTestHelper&) = delete;
+  CertificateReportingServiceTestHelper& operator=(
+      const CertificateReportingServiceTestHelper&) = delete;
+
   // Changes the behavior of report uploads to fail, succeed or hang.
   void SetFailureMode(ReportSendingResult expected_report_result);
 
@@ -129,11 +138,15 @@ class CertificateReportingServiceTestHelper
   void ResumeDelayedRequest();
 
   void WaitForRequestsCreated(const ReportExpectation& expectation);
-  void WaitForRequestsCreated(const ReportExpectation& expectation,
-                              std::vector<std::string>* full_reports);
+  void WaitForRequestsCreated(
+      const ReportExpectation& expectation,
+      std::vector<std::string>* full_reports,
+      std::vector<network::ResourceRequest>* full_requests);
   void WaitForRequestsDestroyed(const ReportExpectation& expectation);
-  void WaitForRequestsDestroyed(const ReportExpectation& expectation,
-                                std::vector<std::string>* full_reports);
+  void WaitForRequestsDestroyed(
+      const ReportExpectation& expectation,
+      std::vector<std::string>* full_reports,
+      std::vector<network::ResourceRequest>* full_requests);
 
   // Checks that all requests are destroyed and that there are no in-flight
   // reports in |service|.
@@ -146,24 +159,27 @@ class CertificateReportingServiceTestHelper
   friend class base::RefCounted<CertificateReportingServiceTestHelper>;
   ~CertificateReportingServiceTestHelper() override;
 
-  void SendResponse(network::mojom::URLLoaderClientPtr client, bool fail);
+  void SendResponse(mojo::PendingRemote<network::mojom::URLLoaderClient> client,
+                    bool fail);
 
   // network::SharedURLLoaderFactory
-  void CreateLoaderAndStart(network::mojom::URLLoaderRequest request,
-                            int32_t routing_id,
-                            int32_t request_id,
-                            uint32_t options,
-                            const network::ResourceRequest& url_request,
-                            network::mojom::URLLoaderClientPtr client,
-                            const net::MutableNetworkTrafficAnnotationTag&
-                                traffic_annotation) override;
-  void Clone(network::mojom::URLLoaderFactoryRequest request) override;
-  std::unique_ptr<network::SharedURLLoaderFactoryInfo> Clone() override;
+  void CreateLoaderAndStart(
+      mojo::PendingReceiver<network::mojom::URLLoader> receiver,
+      int32_t request_id,
+      uint32_t options,
+      const network::ResourceRequest& url_request,
+      mojo::PendingRemote<network::mojom::URLLoaderClient> client,
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
+      override;
+  void Clone(mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver)
+      override;
+  std::unique_ptr<network::PendingSharedURLLoaderFactory> Clone() override;
 
   ReportSendingResult expected_report_result_;
 
-  network::mojom::URLLoaderClientPtr delayed_client_;
+  mojo::PendingRemote<network::mojom::URLLoaderClient> delayed_client_;
   std::string delayed_report_;
+  network::ResourceRequest delayed_request_;
   ReportSendingResult delayed_result_;
 
   RequestObserver request_created_observer_;
@@ -171,8 +187,6 @@ class CertificateReportingServiceTestHelper
 
   uint8_t server_public_key_[32];
   uint8_t server_private_key_[32];
-
-  DISALLOW_COPY_AND_ASSIGN(CertificateReportingServiceTestHelper);
 };
 
 // Class to test reporting events histogram for CertificateReportingService.

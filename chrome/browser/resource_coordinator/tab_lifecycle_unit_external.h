@@ -1,9 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_RESOURCE_COORDINATOR_TAB_LIFECYCLE_UNIT_EXTERNAL_H_
 #define CHROME_BROWSER_RESOURCE_COORDINATOR_TAB_LIFECYCLE_UNIT_EXTERNAL_H_
+
+#include "chrome/browser/resource_coordinator/lifecycle_unit_state.mojom.h"
 
 namespace content {
 class WebContents;
@@ -32,10 +34,6 @@ class TabLifecycleUnitExternal {
   // Returns the WebContents associated with this tab.
   virtual content::WebContents* GetWebContents() const = 0;
 
-  // Whether the tab is playing audio, has played audio recently, is accessing
-  // the microphone, is accessing the camera or is being mirrored.
-  virtual bool IsMediaTab() const = 0;
-
   // Returns true if this tab can be automatically discarded.
   virtual bool IsAutoDiscardable() const = 0;
 
@@ -43,16 +41,13 @@ class TabLifecycleUnitExternal {
   virtual void SetAutoDiscardable(bool auto_discardable) = 0;
 
   // Discards the tab.
-  virtual bool DiscardTab() = 0;
+  virtual bool DiscardTab(mojom::LifecycleUnitDiscardReason reason) = 0;
 
   // Returns true if the tab is discarded.
   virtual bool IsDiscarded() const = 0;
 
   // Returns the number of times that the tab was discarded.
   virtual int GetDiscardCount() const = 0;
-
-  // Returns true if the tab is frozen.
-  virtual bool IsFrozen() const = 0;
 };
 
 }  // namespace resource_coordinator

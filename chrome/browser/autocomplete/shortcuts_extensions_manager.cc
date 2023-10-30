@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,12 @@
 #include "chrome/browser/autocomplete/shortcuts_backend_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/omnibox/browser/shortcuts_backend.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 
 ShortcutsExtensionsManager::ShortcutsExtensionsManager(Profile* profile)
-    : registry_observer_(this), profile_(profile) {
+    : profile_(profile) {
   DCHECK(profile_);
-  registry_observer_.Add(extensions::ExtensionRegistry::Get(profile_));
+  registry_observation_.Observe(extensions::ExtensionRegistry::Get(profile_));
 }
 
 ShortcutsExtensionsManager::~ShortcutsExtensionsManager() {}
@@ -34,5 +33,5 @@ void ShortcutsExtensionsManager::OnExtensionUnloaded(
 
 void ShortcutsExtensionsManager::OnShutdown(
     extensions::ExtensionRegistry* registry) {
-  registry_observer_.RemoveAll();
+  registry_observation_.Reset();
 }

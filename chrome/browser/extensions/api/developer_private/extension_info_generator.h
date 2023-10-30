@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,16 @@
 #include <memory>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/extensions/api/developer_private.h"
+#include "extensions/common/url_pattern.h"
+#include "extensions/common/url_pattern_set.h"
+
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
+class SupervisedUserService;
+#endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
 namespace content {
 class BrowserContext;
@@ -38,22 +45,31 @@ class ExtensionInfoGenerator {
  public:
   using ExtensionInfoList = std::vector<api::developer_private::ExtensionInfo>;
 
-  using ExtensionInfosCallback = base::Callback<void(ExtensionInfoList)>;
+  using ExtensionInfosCallback = base::OnceCallback<void(ExtensionInfoList)>;
 
   explicit ExtensionInfoGenerator(content::BrowserContext* context);
+
+  ExtensionInfoGenerator(const ExtensionInfoGenerator&) = delete;
+  ExtensionInfoGenerator& operator=(const ExtensionInfoGenerator&) = delete;
+
   ~ExtensionInfoGenerator();
 
   // Creates and asynchronously returns an ExtensionInfo for the given
   // |extension_id|, if the extension can be found.
   // If the extension cannot be found, an empty vector is passed to |callback|.
   void CreateExtensionInfo(const std::string& id,
-                           const ExtensionInfosCallback& callback);
+                           ExtensionInfosCallback callback);
 
   // Creates and asynchronously returns a collection of ExtensionInfos,
   // optionally including disabled and terminated.
   void CreateExtensionsInfo(bool include_disabled,
                             bool include_terminated,
-                            const ExtensionInfosCallback& callback);
+                            ExtensionInfosCallback callback);
+
+  // Returns a list of URLPatterns where no pattern is completely contained by
+  // another pattern in the list.
+  static std::vector<URLPattern> GetDistinctHosts(
+      const URLPatternSet& patterns);
 
  private:
   // Creates an ExtensionInfo for the given |extension| and |state|, and
@@ -67,29 +83,26 @@ class ExtensionInfoGenerator {
       const gfx::Image& image);
 
   // Returns the icon url for the default icon to use.
-  const std::string& GetDefaultIconUrl(bool is_app, bool is_disabled);
+  std::string GetDefaultIconUrl(const std::string& name);
 
   // Returns an icon url from the given image.
   std::string GetIconUrlFromImage(const gfx::Image& image);
 
   // Various systems, cached for convenience.
-  content::BrowserContext* browser_context_;
-  CommandService* command_service_;
-  ExtensionSystem* extension_system_;
-  ExtensionPrefs* extension_prefs_;
-  ExtensionActionAPI* extension_action_api_;
-  WarningService* warning_service_;
-  ErrorConsole* error_console_;
-  ImageLoader* image_loader_;
+  raw_ptr<content::BrowserContext> browser_context_;
+  raw_ptr<CommandService> command_service_;
+  raw_ptr<ExtensionSystem> extension_system_;
+  raw_ptr<ExtensionPrefs> extension_prefs_;
+  raw_ptr<ExtensionActionAPI> extension_action_api_;
+  raw_ptr<WarningService> warning_service_;
+  raw_ptr<ErrorConsole> error_console_;
+  raw_ptr<ImageLoader> image_loader_;
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
+  raw_ptr<SupervisedUserService> supervised_user_service_;
+#endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
   // The number of pending image loads.
   size_t pending_image_loads_;
-
-  // Default icons, cached and lazily initialized.
-  std::string default_app_icon_url_;
-  std::string default_extension_icon_url_;
-  std::string default_disabled_app_icon_url_;
-  std::string default_disabled_extension_icon_url_;
 
   // The list of extension infos that have been generated.
   ExtensionInfoList list_;
@@ -98,8 +111,6 @@ class ExtensionInfoGenerator {
   ExtensionInfosCallback callback_;
 
   base::WeakPtrFactory<ExtensionInfoGenerator> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionInfoGenerator);
 };
 
 }  // namespace extensions

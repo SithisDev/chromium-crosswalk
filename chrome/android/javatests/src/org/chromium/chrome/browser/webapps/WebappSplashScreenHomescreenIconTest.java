@@ -1,14 +1,14 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.webapps;
 
-import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
-import android.support.test.filters.SmallTest;
 import android.view.ViewGroup;
 import android.widget.ImageView;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -16,13 +16,11 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.ShortcutHelper;
-import org.chromium.chrome.browser.metrics.WebappSplashUmaCache;
+import org.chromium.chrome.browser.browserservices.intents.WebappConstants;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 /**
@@ -37,10 +35,10 @@ public class WebappSplashScreenHomescreenIconTest {
     private ViewGroup mSplashScreen;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mSplashScreen = mActivityTestRule.startWebappActivityAndWaitForSplashScreen(
                 mActivityTestRule.createIntent().putExtra(
-                        ShortcutHelper.EXTRA_ICON, WebappActivityTestRule.TEST_ICON));
+                        WebappConstants.EXTRA_ICON, WebappActivityTestRule.TEST_ICON));
     }
 
     @Test
@@ -53,22 +51,5 @@ public class WebappSplashScreenHomescreenIconTest {
 
         Assert.assertEquals(192, drawable.getBitmap().getWidth());
         Assert.assertEquals(192, drawable.getBitmap().getHeight());
-    }
-
-    @Test
-    @SmallTest
-    @Feature({"Webapps"})
-    public void testUmaFallbackIcon() {
-        Assert.assertEquals(1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        WebappSplashUmaCache.HISTOGRAM_SPLASHSCREEN_ICON_TYPE,
-                        WebappSplashUmaCache.SplashIconType.FALLBACK));
-
-        Bitmap icon = ShortcutHelper.decodeBitmapFromString(WebappActivityTestRule.TEST_ICON);
-        int sizeInDp = Math.round((float) icon.getWidth()
-                / mActivityTestRule.getActivity().getResources().getDisplayMetrics().density);
-        Assert.assertEquals(1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        WebappSplashUmaCache.HISTOGRAM_SPLASHSCREEN_ICON_SIZE, sizeInDp));
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,18 @@
 
 #include <stdint.h>
 
-#include <memory>
-
 #include "chrome/services/media_gallery_util/public/mojom/media_parser.mojom.h"
-#include "services/service_manager/public/cpp/service_context_ref.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 
 class MediaParserFactory : public chrome::mojom::MediaParserFactory {
  public:
   explicit MediaParserFactory(
-      std::unique_ptr<service_manager::ServiceContextRef> service_ref);
+      mojo::PendingReceiver<chrome::mojom::MediaParserFactory> receiver);
+
+  MediaParserFactory(const MediaParserFactory&) = delete;
+  MediaParserFactory& operator=(const MediaParserFactory&) = delete;
+
   ~MediaParserFactory() override;
 
  private:
@@ -24,9 +27,7 @@ class MediaParserFactory : public chrome::mojom::MediaParserFactory {
                          int64_t ffmpeg_cpu_flags,
                          CreateMediaParserCallback callback) override;
 
-  const std::unique_ptr<service_manager::ServiceContextRef> service_ref_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaParserFactory);
+  mojo::Receiver<chrome::mojom::MediaParserFactory> receiver_;
 };
 
 #endif  // CHROME_SERVICES_MEDIA_GALLERY_UTIL_MEDIA_PARSER_FACTORY_H_

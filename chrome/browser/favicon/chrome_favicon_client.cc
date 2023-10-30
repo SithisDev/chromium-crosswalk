@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,14 @@
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/browser/bookmark_model.h"
-#include "extensions/common/constants.h"
+#include "components/dom_distiller/core/url_constants.h"
+#include "components/dom_distiller/core/url_utils.h"
+#include "extensions/buildflags/buildflags.h"
 #include "url/gurl.h"
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "extensions/common/constants.h"
+#endif
 
 namespace {
 
@@ -31,8 +37,22 @@ ChromeFaviconClient::~ChromeFaviconClient() {
 }
 
 bool ChromeFaviconClient::IsNativeApplicationURL(const GURL& url) {
-  return url.SchemeIs(content::kChromeUIScheme) ||
-         url.SchemeIs(extensions::kExtensionScheme);
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  if (url.SchemeIs(extensions::kExtensionScheme))
+    return true;
+#endif
+
+  return url.SchemeIs(content::kChromeUIScheme);
+}
+
+bool ChromeFaviconClient::IsReaderModeURL(const GURL& url) {
+  return url.SchemeIs(dom_distiller::kDomDistillerScheme);
+}
+
+const GURL ChromeFaviconClient::GetOriginalUrlFromReaderModeUrl(
+    const GURL& url) {
+  DCHECK(IsReaderModeURL(url));
+  return dom_distiller::url_utils::GetOriginalUrlFromDistillerUrl(url);
 }
 
 base::CancelableTaskTracker::TaskId

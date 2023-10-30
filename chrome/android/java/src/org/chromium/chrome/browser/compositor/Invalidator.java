@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,25 +9,15 @@ package org.chromium.chrome.browser.compositor;
  */
 public class Invalidator {
     /**
-     * Interface for the client that gets invalidated.
-     */
-    public interface Client {
-        /**
-         * Do the invalidation.
-         */
-        void doInvalidate();
-    }
-
-    /**
      * Interface for the host that drives the invalidations.
      */
     public interface Host {
         /**
          * Requests an invalidation of the view.
          *
-         * @param view The {@link View} to invalidate.
+         * @param invalidator {@link Runnable} that invalidates the view.
          */
-        void deferInvalidate(Client view);
+        void deferInvalidate(Runnable invalidator);
     }
 
     private Host mHost;
@@ -43,13 +33,13 @@ public class Invalidator {
      * Invalidates either immediately (if no host is specified) or at time
      * triggered by the host.
      *
-     * @param client The {@link Client} to invalidate, most likely a view.
+     * @param invalidator The {@link Runnable} performing invalidation.
      */
-    public void invalidate(Client client) {
+    public void invalidate(Runnable invalidator) {
         if (mHost != null) {
-            mHost.deferInvalidate(client);
+            mHost.deferInvalidate(invalidator);
         } else {
-            client.doInvalidate();
+            invalidator.run();
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,19 +17,11 @@
 #include "chrome/browser/ui/app_list/search/search_result_ranker/recurrence_predictor.pb.h"
 #include "chrome/browser/ui/app_list/search/search_result_ranker/recurrence_ranker.pb.h"
 #include "chrome/browser/ui/app_list/search/search_result_ranker/recurrence_ranker_config.pb.h"
-#include "content/public/browser/system_connector.h"
-#include "services/data_decoder/public/cpp/safe_json_parser.h"
-#include "services/data_decoder/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
-
-namespace service_manager {
-class Connector;
-}  // namespace service_manager
 
 namespace app_list {
 namespace {
 
-using base::Optional;
+using absl::optional;
 using base::Value;
 
 using FakePredictorConfig = RecurrencePredictorConfigProto::FakePredictorConfig;
@@ -50,40 +42,40 @@ using ExponentialWeightsEnsembleConfig =
 // Conversion utilities
 //---------------------
 
-base::Optional<const Value*> GetNestedField(const Value* value,
+absl::optional<const Value*> GetNestedField(const Value* value,
                                             const std::string& key) {
   const Value* field = value->FindKey(key);
   if (!field || !field->is_dict())
-    return base::nullopt;
-  return base::Optional<const Value*>(field);
+    return absl::nullopt;
+  return absl::optional<const Value*>(field);
 }
 
-Optional<const Value*> GetList(const Value* value, const std::string& key) {
+optional<const Value*> GetList(const Value* value, const std::string& key) {
   const Value* field = value->FindKey(key);
   if (!field || !field->is_list())
-    return base::nullopt;
-  return base::Optional<const Value*>(field);
+    return absl::nullopt;
+  return absl::optional<const Value*>(field);
 }
 
-Optional<int> GetInt(const Value* value, const std::string& key) {
+optional<int> GetInt(const Value* value, const std::string& key) {
   const Value* field = value->FindKey(key);
   if (!field || !field->is_int())
-    return base::nullopt;
+    return absl::nullopt;
   return field->GetInt();
 }
 
-base::Optional<double> GetDouble(const Value* value, const std::string& key) {
+absl::optional<double> GetDouble(const Value* value, const std::string& key) {
   const Value* field = value->FindKey(key);
   if (!field || !field->is_double())
-    return base::nullopt;
+    return absl::nullopt;
   return field->GetDouble();
 }
 
-base::Optional<std::string> GetString(const Value* value,
+absl::optional<std::string> GetString(const Value* value,
                                       const std::string& key) {
   const Value* field = value->FindKey(key);
   if (!field || !field->is_string())
-    return base::nullopt;
+    return absl::nullopt;
   return field->GetString();
 }
 
@@ -110,7 +102,7 @@ bool ConvertHourBinPredictor(const Value* value,
   if (!bin_weights)
     return false;
 
-  for (const Value& bin_weight : bin_weights.value()->GetList()) {
+  for (const Value& bin_weight : bin_weights.value()->GetListDeprecated()) {
     const auto& bin = GetInt(&bin_weight, "bin");
     const auto& weight = GetDouble(&bin_weight, "weight");
     if (!bin || !weight)
@@ -135,7 +127,7 @@ bool ConvertExponentialWeightsEnsemble(
   proto->set_learning_rate(learning_rate.value());
 
   bool success = true;
-  for (const Value& predictor : predictors.value()->GetList())
+  for (const Value& predictor : predictors.value()->GetListDeprecated())
     success &= ConvertRecurrencePredictor(&predictor, proto->add_predictors());
   return success;
 }
@@ -230,53 +222,43 @@ std::unique_ptr<RecurrencePredictor> MakePredictor(
     return std::make_unique<ExponentialWeightsEnsemble>(
         config.exponential_weights_ensemble(), model_identifier);
 
-  LogInitializationStatus(model_identifier,
-                          InitializationStatus::kInvalidConfigPredictor);
   NOTREACHED();
   return nullptr;
 }
 
-JsonConfigConverter::JsonConfigConverter(service_manager::Connector* connector)
-    : connector_(connector) {}
-JsonConfigConverter::~JsonConfigConverter() {}
+std::unique_ptr<JsonConfigConverter> JsonConfigConverter::Convert(
+    const std::string& json_string,
+    const std::string& model_identifier,
+    OnConfigLoadedCallback callback) {
+  // We don't use make_unique because the ctor is private.
+  std::unique_ptr<JsonConfigConverter> converter(new JsonConfigConverter());
+  converter->Start(json_string, model_identifier, std::move(callback));
+  return converter;
+}
 
-void JsonConfigConverter::Convert(const std::string& json_string,
-                                  const std::string& model_identifier,
-                                  OnConfigLoadedCallback callback) {
-  DCHECK(connector_);
-  GetJsonParser().Parse(
-      json_string,
-      base::BindOnce(&JsonConfigConverter::OnJsonParsed, base::Unretained(this),
-                     std::move(callback), model_identifier));
+JsonConfigConverter::JsonConfigConverter() = default;
+
+JsonConfigConverter::~JsonConfigConverter() = default;
+
+void JsonConfigConverter::Start(const std::string& json_string,
+                                const std::string& model_identifier,
+                                OnConfigLoadedCallback callback) {
+  data_decoder::DataDecoder::ParseJsonIsolated(
+      json_string, base::BindOnce(&JsonConfigConverter::OnJsonParsed,
+                                  weak_ptr_factory_.GetWeakPtr(),
+                                  std::move(callback), model_identifier));
 }
 
 void JsonConfigConverter::OnJsonParsed(
     OnConfigLoadedCallback callback,
     const std::string& model_identifier,
-    const base::Optional<base::Value> json_data,
-    const base::Optional<std::string>& error) {
+    data_decoder::DataDecoder::ValueOrError result) {
   RecurrenceRankerConfigProto proto;
-  if (json_data && ConvertRecurrenceRanker(&json_data.value(), &proto)) {
-    LogJsonConfigConversionStatus(model_identifier,
-                                  JsonConfigConversionStatus::kSuccess);
+  if (result.has_value() && ConvertRecurrenceRanker(&*result, &proto)) {
     std::move(callback).Run(std::move(proto));
   } else {
-    LogJsonConfigConversionStatus(model_identifier,
-                                  JsonConfigConversionStatus::kFailure);
-    std::move(callback).Run(base::nullopt);
+    std::move(callback).Run(absl::nullopt);
   }
-}
-
-data_decoder::mojom::JsonParser& JsonConfigConverter::GetJsonParser() {
-  if (!json_parser_) {
-    connector_->BindInterface(data_decoder::mojom::kServiceName,
-                              mojo::MakeRequest(&json_parser_));
-    json_parser_.set_connection_error_handler(base::BindOnce(
-        [](JsonConfigConverter* const loader) { loader->json_parser_.reset(); },
-        base::Unretained(this)));
-  }
-
-  return *json_parser_;
 }
 
 }  // namespace app_list

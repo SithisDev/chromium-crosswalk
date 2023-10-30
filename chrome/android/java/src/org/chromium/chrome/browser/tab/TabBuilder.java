@@ -1,12 +1,16 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.tab;
 
-import org.chromium.chrome.browser.tab.TabUma.TabCreationState;
-import org.chromium.chrome.browser.tabmodel.TabLaunchType;
+import androidx.annotation.Nullable;
+
+import org.chromium.base.Callback;
+import org.chromium.chrome.browser.tab.state.CriticalPersistedTabData;
+import org.chromium.chrome.browser.tab.state.SerializedCriticalPersistedTabData;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
@@ -16,12 +20,20 @@ import org.chromium.ui.base.WindowAndroid;
 public class TabBuilder {
     private int mId = Tab.INVALID_TAB_ID;
     private Tab mParent;
+    private TabResolver mTabResolver;
     private boolean mIncognito;
     private WindowAndroid mWindow;
     private Integer mLaunchType;
     private Integer mCreationType;
     private boolean mFromFrozenState;
     private LoadUrlParams mLoadUrlParams;
+
+    private WebContents mWebContents;
+    private TabDelegateFactory mDelegateFactory;
+    private boolean mInitiallyHidden;
+    private TabState mTabState;
+    private SerializedCriticalPersistedTabData mSerializedCriticalPersistedTabData;
+    private Callback<Tab> mPreInitializeAction;
 
     /**
      * Sets the id with which the Tab to create should be identified.
@@ -40,6 +52,16 @@ public class TabBuilder {
      */
     public TabBuilder setParent(Tab parent) {
         mParent = parent;
+        return this;
+    }
+
+    /**
+     * Sets the tab resolver (tab id -> {@link Tab} mapping)
+     * @param tabResolver the {@link TabResolver}
+     * @return {@link TabBuilder} creating the Tab.
+     */
+    public TabBuilder setTabResolver(TabResolver tabResolver) {
+        mTabResolver = tabResolver;
         return this;
     }
 
@@ -73,6 +95,70 @@ public class TabBuilder {
         return this;
     }
 
+    /**
+     * Sets a {@link WebContents} object to be used on the Tab. If not set, a new one
+     * will be created.
+     * @param webContents {@link WebContents} object.
+     * @return {@link TabBuilder} creating the Tab.
+     */
+    public TabBuilder setWebContents(WebContents webContents) {
+        mWebContents = webContents;
+        return this;
+    }
+
+    /**
+     * Sets a {@link TabDelegateFactory} object.
+     * @param delegateFactory The factory delegated to create various Tab-related objects.
+     * @return {@link TabBuilder} creating the Tab.
+     */
+    public TabBuilder setDelegateFactory(TabDelegateFactory delegateFactory) {
+        mDelegateFactory = delegateFactory;
+        return this;
+    }
+
+    /**
+     * Sets a pre-initialization action to run.
+     * @param action {@link Callback} object to invoke before {@link #initialize()}.
+     * @return {@link TabBuilder} creating the Tab.
+     */
+    public TabBuilder setPreInitializeAction(Callback<Tab> action) {
+        mPreInitializeAction = action;
+        return this;
+    }
+
+    /**
+     * Sets a flag indicating whether the Tab should start as hidden. Only used if
+     * {@code webContents} is {@code null}.
+     * @param initiallyHidden {@code true} if the newly created {@link WebContents} will be hidden.
+     * @return {@link TabBuilder} creating the Tab.
+     */
+    public TabBuilder setInitiallyHidden(boolean initiallyHidden) {
+        mInitiallyHidden = initiallyHidden;
+        return this;
+    }
+
+    /**
+     * Sets a {@link TabState} object containing information about this Tab, if it was persisted.
+     * @param tabState State object.
+     * @return {@link TabBuilder} creating the Tab.
+     */
+    public TabBuilder setTabState(TabState tabState) {
+        mTabState = tabState;
+        return this;
+    }
+
+    /**
+     * Sets a serialized {@link CriticalPersistedTabData} object containing information about the
+     * tab, if it was persisted
+     * @param serializedCriticalPersistedTabData serialized {@link CriticalPersistedTabData}
+     * @return {@link TabBuilder} creating the Tab
+     */
+    public TabBuilder setSerializedCriticalPersistedTabData(
+            @Nullable SerializedCriticalPersistedTabData serializedCriticalPersistedTabData) {
+        mSerializedCriticalPersistedTabData = serializedCriticalPersistedTabData;
+        return this;
+    }
+
     public Tab build() {
         // Pre-condition check
         if (mCreationType != null) {
@@ -86,8 +172,32 @@ public class TabBuilder {
             if (mFromFrozenState) assert mLaunchType == TabLaunchType.FROM_RESTORE;
         }
 
-        return new Tab(
-                mId, mParent, mIncognito, mWindow, mLaunchType, mCreationType, mLoadUrlParams);
+        TabImpl tab =
+                new TabImpl(mId, mIncognito, mLaunchType, mSerializedCriticalPersistedTabData);
+        Tab parent = null;
+        if (mParent != null) {
+            parent = mParent;
+        } else if (mTabResolver != null) {
+            if (!CriticalPersistedTabData.isEmptySerialization(
+                        mSerializedCriticalPersistedTabData)) {
+                parent = mTabResolver.resolve(CriticalPersistedTabData.from(tab).getParentId());
+            } else if (mTabState != null) {
+                parent = mTabResolver.resolve(mTabState.parentId);
+            }
+        }
+        tab.updateWindowAndroid(mWindow);
+
+        if (parent != null && mDelegateFactory == null) {
+            mDelegateFactory = ((TabImpl) parent).getDelegateFactory();
+        }
+
+        if (mPreInitializeAction != null) mPreInitializeAction.onResult(tab);
+
+        // Initializes Tab. Its user data objects are also initialized through the event
+        // |onInitialized| of TabObserver they register.
+        tab.initialize(parent, mCreationType, mLoadUrlParams, mWebContents, mDelegateFactory,
+                mInitiallyHidden, mTabState);
+        return tab;
     }
 
     private TabBuilder setCreationType(@TabCreationState int type) {

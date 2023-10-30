@@ -1,16 +1,18 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.contextualsearch;
 
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
 
-import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.content_public.browser.WebContents;
+import org.chromium.base.annotations.NativeClassQualifiedName;
+import org.chromium.base.annotations.NativeMethods;
 
 /**
  * Provides a context in which to search, and links to the native ContextualSearchContext.
@@ -19,7 +21,6 @@ import org.chromium.content_public.browser.WebContents;
  * or changed.
  */
 public abstract class ContextualSearchContext {
-    private static final String TAG = "TTS Context";
     static final int INVALID_OFFSET = -1;
 
     // Non-visible word-break marker.
@@ -39,9 +40,6 @@ public abstract class ContextualSearchContext {
     private int mSelectionStartOffset = INVALID_OFFSET;
     private int mSelectionEndOffset = INVALID_OFFSET;
 
-    // The home country, or an empty string if not set.
-    private String mHomeCountry = "";
-
     // The detected language of the context, or {@code null} if not yet detected, and empty if
     // it cannot be reliably determined.
     private String mDetectedLanguage;
@@ -49,8 +47,8 @@ public abstract class ContextualSearchContext {
     // The offset of an initial Tap gesture within the text content.
     private int mTapOffset = INVALID_OFFSET;
 
-    // The initial word selected by a Tap, or null.
-    private String mInitialSelectedWord;
+    // The selection being resolved, or null if no resolve has started.
+    private String mSelectionBeingResolved;
 
     // The original encoding of the base page.
     private String mEncoding;
@@ -66,57 +64,20 @@ public abstract class ContextualSearchContext {
     // The offset of the tap within the tapped word, or {@code INVALID_OFFSET} if not yet analyzed.
     private int mTapWithinWordOffset = INVALID_OFFSET;
 
-    // The words before and after the tapped word, and their offsets.
-    private String mWordPreviousToTap;
-    private int mWordPreviousToTapOffset = INVALID_OFFSET;
-    private String mWordFollowingTap;
-    private int mWordFollowingTapOffset = INVALID_OFFSET;
+    // Translation members.
+    @NonNull
+    private String mTargetLanguage = "";
+    @NonNull
+    private String mFluentLanguages = "";
 
-    // Data about the previous user interactions and the event-ID from the server that will log it.
-    private long mPreviousEventId;
-    private int mPreviousUserInteractions;
-
-    /** A {@link ContextualSearchContext} that ignores changes to the selection. */
-    private static class ChangeIgnoringContext extends ContextualSearchContext {
-        @Override
-        void onSelectionChanged() {}
-    }
-
-    /**
-     * Returns a {@link ContextualSearchContext} given an insertion point in text.
-     * @param surroundingText The text to use for our context.
-     * @param insertionPointOffset The offset of the insertion point in characters from the start of
-     *        the surrounding text.
-     * @return A {@link ContextualSearchContext} or {@code null} if the insertion point happens to
-     *         miss a word (e.g. it has non-word characters on both sides).
-     */
-    static public @Nullable ContextualSearchContext getContextForInsertionPoint(
-            String surroundingText, int insertionPointOffset) {
-        ContextualSearchContext context = new ChangeIgnoringContext();
-        context.setSurroundingText(
-                "UTF-8", surroundingText, insertionPointOffset, insertionPointOffset);
-        int start = context.findWordStartOffset(insertionPointOffset);
-        int end = context.findWordEndOffset(insertionPointOffset);
-        context.setSurroundingText("UTF-8", surroundingText, start, end, true);
-        if (start < end && start >= 0 && end <= surroundingText.length()) {
-            context.setInitialSelectedWord(surroundingText.substring(start, end));
-        }
-        if (context.hasValidSelection() && !TextUtils.isEmpty(context.getInitialSelectedWord())) {
-            Log.i(TAG, "identified default query: " + context.getWordTapped());
-            // TODO(donnd): figure out which of these parameters should be passed in.
-            context.setResolveProperties("US", true, 0, 0);
-            return context;
-        }
-
-        // TODO(donnd): Consider hunting around for a valid word instead of just giving up.
-        return null;
-    }
+    // The Related Searches stamp - non-empty when Related Searches are being requested.
+    private String mRelatedSearchesStamp;
 
     /**
      * Constructs a context that tracks the selection and some amount of page content.
      */
     ContextualSearchContext() {
-        mNativePointer = nativeInit();
+        mNativePointer = ContextualSearchContextJni.get().init(this);
         mHasSetResolveProperties = false;
     }
 
@@ -125,32 +86,45 @@ public abstract class ContextualSearchContext {
      * page content.
      * @param homeCountry The country where the user usually resides, or an empty string if not
      *        known.
-     * @param maySendBasePageUrl Whether policy allows sending the base-page URL to the server.
-     * @param previousEventId An EventID from the server to send along with the resolve request.
-     * @param previousUserInteractions Persisted interaction outcomes to send along with the resolve
-     *         request.
+     * @param doSendBasePageUrl Whether the base-page URL should be sent to the server.
+     * @param targetLanguage The language to translate into, in case translation might be needed.
+     * @param fluentLanguages An ordered comma-separated list of ISO 639 language codes that
+     *        the user can read fluently, or an empty string.
      */
-    void setResolveProperties(String homeCountry, boolean maySendBasePageUrl, long previousEventId,
-            int previousUserInteractions) {
+    void setResolveProperties(@NonNull String homeCountry, boolean doSendBasePageUrl,
+            @NonNull String targetLanguage, @NonNull String fluentLanguages) {
+        // TODO(donnd): consider making this a constructor variation.
         mHasSetResolveProperties = true;
-        mHomeCountry = homeCountry;
-        mPreviousEventId = previousEventId;
-        mPreviousUserInteractions = previousUserInteractions;
-        nativeSetResolveProperties(getNativePointer(), homeCountry, maySendBasePageUrl,
-                previousEventId, previousUserInteractions);
+        ContextualSearchContextJni.get().setResolveProperties(
+                getNativePointer(), this, homeCountry, doSendBasePageUrl);
+        mTargetLanguage = targetLanguage;
+        mFluentLanguages = fluentLanguages;
     }
 
     /**
      * This method should be called to clean up storage when an instance of this class is
-     * no longer in use.  The nativeDestroy will call the destructor on the native instance.
+     * no longer in use.  The ContextualSearchContextJni.get().destroy will call the destructor on
+     * the native instance.
      */
-    public void destroy() {
+    void destroy() {
         assert mNativePointer != 0;
-        nativeDestroy(mNativePointer);
+        ContextualSearchContextJni.get().destroy(mNativePointer, this);
         mNativePointer = 0;
 
         // Also zero out private data that may be sizable.
         mSurroundingText = null;
+    }
+
+    /**
+     * Sets the surrounding text and selection offsets assuming UTF-8 and no insertion-point
+     * support.
+     * @param surroundingText The text from the base page surrounding the selection.
+     * @param startOffset The offset of start the selection.
+     * @param endOffset The offset of the end of the selection
+     */
+    @VisibleForTesting
+    void setSurroundingText(String surroundingText, int startOffset, int endOffset) {
+        setSurroundingText("UTF-8", surroundingText, startOffset, endOffset);
     }
 
     /**
@@ -160,21 +134,9 @@ public abstract class ContextualSearchContext {
      * @param startOffset The offset of start the selection.
      * @param endOffset The offset of the end of the selection
      */
+    @VisibleForTesting
     void setSurroundingText(
             String encoding, String surroundingText, int startOffset, int endOffset) {
-        setSurroundingText(encoding, surroundingText, startOffset, endOffset, false);
-    }
-
-    /**
-     * Sets the surrounding text and selection offsets.
-     * @param encoding The original encoding of the base page.
-     * @param surroundingText The text from the base page surrounding the selection.
-     * @param startOffset The offset of start the selection.
-     * @param endOffset The offset of the end of the selection.
-     * @param setNative Whether to set the native context too by passing it through JNI.
-     */
-    void setSurroundingText(String encoding, String surroundingText, int startOffset, int endOffset,
-            boolean setNative) {
         assert startOffset <= endOffset;
         mEncoding = encoding;
         mSurroundingText = surroundingText;
@@ -184,24 +146,30 @@ public abstract class ContextualSearchContext {
                 && !hasAnalyzedTap()) {
             analyzeTap(startOffset);
         }
-        // Notify of an initial selection if it's not empty.
+        // Notify of a changed selection if it's not empty.
         if (endOffset > startOffset) {
-            updateInitialSelectedWord();
             onSelectionChanged();
         }
-        if (setNative) {
-            nativeSetContent(getNativePointer(), mSurroundingText, mSelectionStartOffset,
-                    mSelectionEndOffset);
-        }
+        // Detect the language of the surroundings or the selection.
+        setTranslationLanguages(getDetectedLanguage(), mTargetLanguage, mFluentLanguages);
     }
 
     /**
-     * Sets the surrounding text to just identify the current selection.
-     * @param selection The current selection on the base page.
+     * Sets the surrounding text and the selection range to the given params, and pushes them
+     * down to the native layer.
+     * @param surroundingText The complete text string to use as the context of the search, which
+     *        surrounds the selection.
+     * @param startOffset The offset from the beginning of the surrounding text to the start of the
+     *        selection (in characters).
+     * @param endOffset The offset from the beginning of the surrounding text to the end of the
+     *        selection (in characters).
      */
-    void setSurroundingText(WebContents basePageWebContents, String selection) {
-        String encoding = basePageWebContents != null ? basePageWebContents.getEncoding() : null;
-        setSurroundingText(encoding, selection, 0, selection.length());
+    void setSurroundingsAndSelection(String surroundingText, int startOffset, int endOffset) {
+        mSurroundingText = surroundingText;
+        mSelectionStartOffset = startOffset;
+        mSelectionEndOffset = endOffset;
+        ContextualSearchContextJni.get().setSurroundingsAndSelection(
+                mNativePointer, this, surroundingText, startOffset, endOffset);
     }
 
     /**
@@ -236,24 +204,12 @@ public abstract class ContextualSearchContext {
     }
 
     /**
-     * @return The home country, or an empty string if none set.
+     * @return The selection being resolved, or {@code null} if no resolve has been
+     * requested.
      */
-    String getHomeCountry() {
-        return mHomeCountry;
-    }
-
-    /**
-     * @return The initial word selected by a Tap.
-     */
-    String getInitialSelectedWord() {
-        return mInitialSelectedWord;
-    }
-
-    /**
-     * @param word The initial word selected.
-     */
-    private void setInitialSelectedWord(String word) {
-        mInitialSelectedWord = word;
+    @Nullable
+    String getSelectionBeingResolved() {
+        return mSelectionBeingResolved;
     }
 
     /**
@@ -276,13 +232,20 @@ public abstract class ContextualSearchContext {
     }
 
     /**
-     * Specifies that this resolve must return a non-expanding result.
+     * Prepares the Context to be used in a Resolve request by supplying last minute parameters.
+     * If this call is not made before a Resolve then defaults are used (not exact and not a
+     * Related Search).
+     * @param isExactSearch Specifies whether this search must be exact -- meaning the resolve must
+     *        return a non-expanding result that matches the selection exactly.
+     * @param relatedSearchesStamp Information to be attached to the Resolve request that is needed
+     *        for Related Searches. If this string is empty then no Related Searches results will
+     *        be requested.
      */
-    void setRestrictedResolve() {
-        mSurroundingText = mInitialSelectedWord;
-        mSelectionStartOffset = 0;
-        mSelectionEndOffset = mSurroundingText.length();
-        nativeRestrictResolve(mNativePointer);
+    void prepareToResolve(boolean isExactSearch, String relatedSearchesStamp) {
+        mSelectionBeingResolved = getCurrentSelection();
+        mRelatedSearchesStamp = relatedSearchesStamp;
+        ContextualSearchContextJni.get().prepareToResolve(
+                mNativePointer, this, isExactSearch, relatedSearchesStamp);
     }
 
     /**
@@ -296,24 +259,19 @@ public abstract class ContextualSearchContext {
         // Fully track the selection as it changes.
         mSelectionStartOffset += startAdjust;
         mSelectionEndOffset += endAdjust;
-        updateInitialSelectedWord();
-        nativeAdjustSelection(getNativePointer(), startAdjust, endAdjust);
+        ContextualSearchContextJni.get().adjustSelection(
+                getNativePointer(), this, startAdjust, endAdjust);
         // Notify of changes.
         onSelectionChanged();
     }
 
-    /** Updates the initial selected word if it has not yet been set. */
-    private void updateInitialSelectedWord() {
-        if (TextUtils.isEmpty(mInitialSelectedWord) && !TextUtils.isEmpty(mSurroundingText)) {
-            // TODO(donnd): investigate the root cause of crbug.com/725027 that requires this
-            // additional validation to prevent this substring call from crashing!
-            if (mSelectionEndOffset < mSelectionStartOffset || mSelectionStartOffset < 0
-                    || mSelectionEndOffset > mSurroundingText.length()) {
-                return;
-            }
-            mInitialSelectedWord =
-                    mSurroundingText.substring(mSelectionStartOffset, mSelectionEndOffset);
+    /** Returns the current selection, or an empty string if there is no valid selection. */
+    private String getCurrentSelection() {
+        if (TextUtils.isEmpty(mSurroundingText) || mSelectionEndOffset < mSelectionStartOffset
+                || mSelectionStartOffset < 0 || mSelectionEndOffset > mSurroundingText.length()) {
+            return "";
         }
+        return mSurroundingText.substring(mSelectionStartOffset, mSelectionEndOffset);
     }
 
     /** @return the current selection, or an empty string if data is invalid or nothing selected. */
@@ -336,12 +294,33 @@ public abstract class ContextualSearchContext {
      * @return An ISO 639 language code string, or an empty string if the language cannot be
      *         reliably determined.
      */
+    @NonNull
     String getDetectedLanguage() {
         assert mSurroundingText != null;
         if (mDetectedLanguage == null) {
-            mDetectedLanguage = nativeDetectLanguage(mNativePointer);
+            mDetectedLanguage =
+                    ContextualSearchContextJni.get().detectLanguage(mNativePointer, this);
         }
         return mDetectedLanguage;
+    }
+
+    /**
+     * Pushes the given languages down to the native ContextualSearchContext.
+     * @param detectedLanguage An ISO 639 language code string for the language to translate from.
+     * @param targetLanguage An ISO 639 language code string to translation into.
+     * @param fluentLanguages An ordered comma-separated list of ISO 639 language codes that
+     *        the user can read fluently, or an empty string.
+     */
+    @VisibleForTesting
+    void setTranslationLanguages(@NonNull String detectedLanguage, @NonNull String targetLanguage,
+            @NonNull String fluentLanguages) {
+        // Set redundant languages to empty strings.
+        fluentLanguages = targetLanguage.equals(fluentLanguages) ? "" : fluentLanguages;
+        // The target language is essential in order to provide results the user can read, and if
+        // not specified the server may fallback onto a guess based on location, which isn't
+        // always a good experience.
+        ContextualSearchContextJni.get().setTranslationLanguages(
+                mNativePointer, this, detectedLanguage, targetLanguage, fluentLanguages);
     }
 
     // ============================================================================================
@@ -358,7 +337,7 @@ public abstract class ContextualSearchContext {
     }
 
     /**
-     * @return Whether this context has a valid selection.
+     * @return Whether this context has a valid selection, which may be an insertion point.
      */
     @VisibleForTesting
     boolean hasValidSelection() {
@@ -386,51 +365,12 @@ public abstract class ContextualSearchContext {
     }
 
     /**
-     * @return The offset of the start of the tapped word, or {@code INVALID_OFFSET} if the tapped
-     *         word cannot be identified by the current parsing capability.
-     * @see #analyzeTap(int)
-     */
-    int getWordTappedOffset() {
-        return mWordTappedStartOffset;
-    }
-
-    /**
      * @return The offset of the tap within the tapped word, or {@code INVALID_OFFSET} if the tapped
      *         word cannot be identified by the current parsing capability.
      * @see #analyzeTap(int)
      */
     int getTapOffsetWithinTappedWord() {
         return mTapWithinWordOffset;
-    }
-
-    /**
-     * @return The word previous to the word that was tapped, or {@code null} if not available.
-     */
-    String getWordPreviousToTap() {
-        return mWordPreviousToTap;
-    }
-
-    /**
-     * @return The offset of the first character of the word previous to the word that was tapped,
-     *         or {@code INVALID_OFFSET} if not available.
-     */
-    int getWordPreviousToTapOffset() {
-        return mWordPreviousToTapOffset;
-    }
-
-    /**
-     * @return The word following the word that was tapped, or {@code null} if not available.
-     */
-    String getWordFollowingTap() {
-        return mWordFollowingTap;
-    }
-
-    /**
-     * @return The offset of the first character of the word following the word that was tapped,
-     *         or {@code INVALID_OFFSET} if not available.
-     */
-    int getWordFollowingTapOffset() {
-        return mWordFollowingTapOffset;
     }
 
     /**
@@ -451,50 +391,8 @@ public abstract class ContextualSearchContext {
         int wordEndOffset = findWordEndOffset(mTapOffset);
         if (wordStartOffset == INVALID_OFFSET || wordEndOffset == INVALID_OFFSET) return;
 
-        mWordTappedStartOffset = wordStartOffset;
         mWordTapped = mSurroundingText.substring(wordStartOffset, wordEndOffset);
         mTapWithinWordOffset = mTapOffset - wordStartOffset;
-
-        findPreviousWord();
-        findFollowingWord();
-    }
-
-    /**
-     * Finds the word previous to the word tapped.
-     */
-    void findPreviousWord() {
-        // Scan past word-break characters preceding the tapped word.
-        int previousWordEndOffset = mWordTappedStartOffset;
-        while (previousWordEndOffset >= 1 && isWordBreakAtIndex(previousWordEndOffset - 1)) {
-            --previousWordEndOffset;
-        }
-        if (previousWordEndOffset == 0) return;
-
-        mWordPreviousToTapOffset = findWordStartOffset(previousWordEndOffset);
-        if (mWordPreviousToTapOffset == INVALID_OFFSET) return;
-
-        mWordPreviousToTap =
-                mSurroundingText.substring(mWordPreviousToTapOffset, previousWordEndOffset);
-    }
-
-    /**
-     * Finds the word following the word tapped.
-     */
-    void findFollowingWord() {
-        int tappedWordOffset = getWordTappedOffset();
-        int followingWordStartOffset = tappedWordOffset + mWordTapped.length() + 1;
-        while (followingWordStartOffset < mSurroundingText.length()
-                && isWordBreakAtIndex(followingWordStartOffset)) {
-            ++followingWordStartOffset;
-        }
-        if (followingWordStartOffset == mSurroundingText.length()) return;
-
-        int wordFollowingTapEndOffset = findWordEndOffset(followingWordStartOffset);
-        if (wordFollowingTapEndOffset == INVALID_OFFSET) return;
-
-        mWordFollowingTapOffset = followingWordStartOffset;
-        mWordFollowingTap =
-                mSurroundingText.substring(mWordFollowingTapOffset, wordFollowingTapEndOffset);
     }
 
     /**
@@ -547,13 +445,8 @@ public abstract class ContextualSearchContext {
     // ============================================================================================
 
     @VisibleForTesting
-    int getPreviousUserInteractions() {
-        return mPreviousUserInteractions;
-    }
-
-    @VisibleForTesting
-    long getPreviousEventId() {
-        return mPreviousEventId;
+    String getRelatedSearchesStamp() {
+        return mRelatedSearchesStamp;
     }
 
     // ============================================================================================
@@ -566,25 +459,30 @@ public abstract class ContextualSearchContext {
         return mNativePointer;
     }
 
-    // ============================================================================================
-    // Native methods.
-    // ============================================================================================
-    @VisibleForTesting
-    protected native long nativeInit();
-    @VisibleForTesting
-    protected native void nativeDestroy(long nativeContextualSearchContext);
-    @VisibleForTesting
-    protected native void nativeSetResolveProperties(long nativeContextualSearchContext,
-            String homeCountry, boolean maySendBasePageUrl, long previousEventId,
-            int previousEventResults);
-    @VisibleForTesting
-    protected native void nativeAdjustSelection(
-            long nativeContextualSearchContext, int startAdjust, int endAdjust);
-    @VisibleForTesting
-    protected native void nativeSetContent(long nativeContextualSearchContext, String content,
-            int selectionStart, int selectionEnd);
-    @VisibleForTesting
-    protected native String nativeDetectLanguage(long nativeContextualSearchContext);
-    @VisibleForTesting
-    protected native void nativeRestrictResolve(long nativeContextualSearchContext);
+    @NativeMethods
+    interface Natives {
+        @NativeClassQualifiedName("NativeContextualSearchContext")
+        long init(ContextualSearchContext caller);
+        @NativeClassQualifiedName("NativeContextualSearchContext")
+        void destroy(long nativeContextualSearchContext, ContextualSearchContext caller);
+        @NativeClassQualifiedName("NativeContextualSearchContext")
+        void setResolveProperties(long nativeContextualSearchContext,
+                ContextualSearchContext caller, String homeCountry, boolean doSendBasePageUrl);
+        @NativeClassQualifiedName("NativeContextualSearchContext")
+        void adjustSelection(long nativeContextualSearchContext, ContextualSearchContext caller,
+                int startAdjust, int endAdjust);
+        @NativeClassQualifiedName("NativeContextualSearchContext")
+        String detectLanguage(long nativeContextualSearchContext, ContextualSearchContext caller);
+        @NativeClassQualifiedName("NativeContextualSearchContext")
+        void setTranslationLanguages(long nativeContextualSearchContext,
+                ContextualSearchContext caller, String detectedLanguage, String targetLanguage,
+                String fluentLanguages);
+        @NativeClassQualifiedName("NativeContextualSearchContext")
+        void prepareToResolve(long nativeContextualSearchContext, ContextualSearchContext caller,
+                boolean isExactSearch, String relatedSearchesStamp);
+        @NativeClassQualifiedName("NativeContextualSearchContext")
+        void setSurroundingsAndSelection(long nativeContextualSearchContext,
+                ContextualSearchContext caller, String surroundings, int startOffset,
+                int endOffset);
+    }
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,12 @@
 
 #include <utility>
 
-#include "base/macros.h"
 #include "build/build_config.h"
-#include "chrome/browser/ui/browser_dialogs.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/common/buildflags.h"
 #include "ui/base/accelerators/accelerator.h"
+#include "ui/base/metadata/metadata_header_macros.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/events/event_constants.h"
@@ -20,7 +21,6 @@
 #include "ui/views/border.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/bubble/bubble_frame_view.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/client_view.h"
@@ -28,31 +28,32 @@
 #include "ui/views/window/native_frame_view.h"
 #include "ui/views/window/non_client_view.h"
 
-#if BUILDFLAG(ENABLE_APP_LIST)
-#include "ash/public/cpp/app_list/app_list_config.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/public/cpp/app_list/app_list_color_provider.h"
 #include "third_party/skia/include/core/SkPaint.h"
-#include "ui/native_theme/native_theme.h"
 #include "ui/views/background.h"
 #endif
 
 namespace {
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 const ui::ModalType kModalType = ui::MODAL_TYPE_CHILD;
-const views::BubbleBorder::Shadow kShadowType = views::BubbleBorder::NO_ASSETS;
+const views::BubbleBorder::Shadow kShadowType = views::BubbleBorder::NO_SHADOW;
 #else
 const ui::ModalType kModalType = ui::MODAL_TYPE_WINDOW;
 const views::BubbleBorder::Shadow kShadowType =
-    views::BubbleBorder::SMALL_SHADOW;
+    views::BubbleBorder::STANDARD_SHADOW;
 #endif
 
-#if BUILDFLAG(ENABLE_APP_LIST)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // The background for App List dialogs, which appears as a rounded rectangle
 // with the same border radius and color as the app list contents.
 class AppListOverlayBackground : public views::Background {
  public:
-  AppListOverlayBackground() {}
-  ~AppListOverlayBackground() override {}
+  AppListOverlayBackground() = default;
+  AppListOverlayBackground(const AppListOverlayBackground&) = delete;
+  AppListOverlayBackground& operator=(const AppListOverlayBackground&) = delete;
+  ~AppListOverlayBackground() override = default;
 
   // Overridden from views::Background:
   void Paint(gfx::Canvas* canvas, views::View* view) const override {
@@ -63,120 +64,13 @@ class AppListOverlayBackground : public views::Background {
 
     cc::PaintFlags flags;
     flags.setStyle(cc::PaintFlags::kFill_Style);
-    flags.setColor(
-        app_list::AppListConfig::instance().contents_background_color());
+    flags.setColor(ash::AppListColorProvider::Get()->GetContentsBackgroundColor(
+        view->GetWidget()));
     canvas->DrawRoundRect(view->GetContentsBounds(),
                           kAppListOverlayBorderRadius, flags);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AppListOverlayBackground);
 };
-#endif  // ENABLE_APP_LIST
-
-// Base container for modal dialogs. Encases a content view in a modal dialog
-// with an accelerator to close on escape.
-class BaseDialogContainer : public views::DialogDelegateView {
- public:
-  BaseDialogContainer(std::unique_ptr<views::View> dialog_body,
-                      const base::Closure& close_callback)
-      : dialog_body_(AddChildView(std::move(dialog_body))),
-        close_callback_(close_callback) {
-    // Since we are using a ClientView instead of a DialogClientView, we need to
-    // manually bind the escape key to close the dialog.
-    ui::Accelerator escape(ui::VKEY_ESCAPE, ui::EF_NONE);
-    AddAccelerator(escape);
-  }
-  ~BaseDialogContainer() override {}
-
- protected:
-  views::View* dialog_body() { return dialog_body_; }
-
- private:
-  // Overridden from views::View:
-  void ViewHierarchyChanged(
-      const views::ViewHierarchyChangedDetails& details) override {
-    views::DialogDelegateView::ViewHierarchyChanged(details);
-    if (details.is_add && details.child == this)
-      GetFocusManager()->AdvanceFocus(false);
-  }
-
-  bool AcceleratorPressed(const ui::Accelerator& accelerator) override {
-    DCHECK_EQ(accelerator.key_code(), ui::VKEY_ESCAPE);
-    GetWidget()->CloseWithReason(views::Widget::ClosedReason::kEscKeyPressed);
-    return true;
-  }
-
-  // Overridden from views::DialogDelegate:
-  int GetDialogButtons() const override { return ui::DIALOG_BUTTON_NONE; }
-
-  // Overridden from views::WidgetDelegate:
-  ui::ModalType GetModalType() const override { return kModalType; }
-  void WindowClosing() override {
-    if (!close_callback_.is_null())
-      close_callback_.Run();
-  }
-  views::ClientView* CreateClientView(views::Widget* widget) override {
-    return new views::ClientView(widget, GetContentsView());
-  }
-
-  views::View* dialog_body_;
-  const base::Closure close_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(BaseDialogContainer);
-};
-
-#if BUILDFLAG(ENABLE_APP_LIST)
-
-// The contents view for an App List Dialog, which covers the entire app list
-// and adds a close button.
-class AppListDialogContainer : public BaseDialogContainer,
-                               public views::ButtonListener {
- public:
-  explicit AppListDialogContainer(std::unique_ptr<views::View> dialog_body)
-      : BaseDialogContainer(std::move(dialog_body), base::RepeatingClosure()) {
-    SetBackground(std::make_unique<AppListOverlayBackground>());
-    close_button_ = AddChildView(views::BubbleFrameView::CreateCloseButton(
-        this, GetNativeTheme()->SystemDarkModeEnabled()));
-  }
-  ~AppListDialogContainer() override {}
-
- private:
-  // views::View:
-  void Layout() override {
-    // Margin of the close button from the top right-hand corner of the dialog.
-    const int kCloseButtonDialogMargin = 10;
-
-    close_button_->SetPosition(
-        gfx::Point(width() - close_button_->width() - kCloseButtonDialogMargin,
-                   kCloseButtonDialogMargin));
-
-    dialog_body()->SetBoundsRect(GetContentsBounds());
-    views::DialogDelegateView::Layout();
-  }
-
-  // views::WidgetDelegate:
-  views::NonClientFrameView* CreateNonClientFrameView(
-      views::Widget* widget) override {
-    return new views::NativeFrameView(widget);
-  }
-
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override {
-    if (sender == close_button_) {
-      GetWidget()->CloseWithReason(
-          views::Widget::ClosedReason::kCloseButtonClicked);
-    } else {
-      NOTREACHED();
-    }
-  }
-
-  views::Button* close_button_;
-
-  DISALLOW_COPY_AND_ASSIGN(AppListDialogContainer);
-};
-
-#endif  // ENABLE_APP_LIST
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 // A BubbleFrameView that allows its client view to extend all the way to the
 // top of the dialog, overlapping the BubbleFrameView's close button. This
@@ -185,72 +79,62 @@ class AppListDialogContainer : public BaseDialogContainer,
 // BubbleFrameView.
 class FullSizeBubbleFrameView : public views::BubbleFrameView {
  public:
+  METADATA_HEADER(FullSizeBubbleFrameView);
   FullSizeBubbleFrameView()
       : views::BubbleFrameView(gfx::Insets(), gfx::Insets()) {}
-  ~FullSizeBubbleFrameView() override {}
+  FullSizeBubbleFrameView(const FullSizeBubbleFrameView&) = delete;
+  FullSizeBubbleFrameView& operator=(const FullSizeBubbleFrameView&) = delete;
+  ~FullSizeBubbleFrameView() override = default;
 
  private:
-  // Overridden from views::ViewTargeterDelegate:
-  bool DoesIntersectRect(const View* target,
-                         const gfx::Rect& rect) const override {
-    // Make sure click events can still reach the close button, even if the
-    // ClientView overlaps it.
-    // NOTE: |rect| is in the mirrored coordinate space, so we must use the
-    // close button's mirrored bounds to correctly target the close button when
-    // in RTL mode.
-    if (IsCloseButtonVisible() &&
-        GetCloseButtonMirroredBounds().Intersects(rect)) {
-      return true;
-    }
-    return views::BubbleFrameView::DoesIntersectRect(target, rect);
-  }
-
   // Overridden from views::BubbleFrameView:
   bool ExtendClientIntoTitle() const override { return true; }
-
-  DISALLOW_COPY_AND_ASSIGN(FullSizeBubbleFrameView);
 };
 
+BEGIN_METADATA(FullSizeBubbleFrameView, views::BubbleFrameView)
+END_METADATA
+
 // A container view for a native dialog, which sizes to the given fixed |size|.
-class NativeDialogContainer : public BaseDialogContainer {
+class NativeDialogContainer : public views::DialogDelegateView {
  public:
+  METADATA_HEADER(NativeDialogContainer);
   NativeDialogContainer(std::unique_ptr<views::View> dialog_body,
                         const gfx::Size& size,
-                        const base::Closure& close_callback)
-      : BaseDialogContainer(std::move(dialog_body), close_callback) {
+                        base::OnceClosure close_callback) {
+    SetButtons(ui::DIALOG_BUTTON_NONE);
+    SetModalType(kModalType);
+    AddChildView(std::move(dialog_body));
     SetLayoutManager(std::make_unique<views::FillLayout>());
-    chrome::RecordDialogCreation(chrome::DialogIdentifier::NATIVE_CONTAINER);
     SetPreferredSize(size);
+
+    if (!close_callback.is_null()) {
+      RegisterWindowClosingCallback(std::move(close_callback));
+    }
   }
-  ~NativeDialogContainer() override {}
+  NativeDialogContainer(const NativeDialogContainer&) = delete;
+  NativeDialogContainer& operator=(const NativeDialogContainer&) = delete;
+  ~NativeDialogContainer() override = default;
 
  private:
   // Overridden from views::WidgetDelegate:
-  views::NonClientFrameView* CreateNonClientFrameView(
+  std::unique_ptr<views::NonClientFrameView> CreateNonClientFrameView(
       views::Widget* widget) override {
-    FullSizeBubbleFrameView* frame = new FullSizeBubbleFrameView();
-    auto border = std::make_unique<views::BubbleBorder>(
-        views::BubbleBorder::FLOAT, kShadowType, gfx::kPlaceholderColor);
-    border->set_use_theme_background_color(true);
-    frame->SetBubbleBorder(std::move(border));
+    auto frame = std::make_unique<FullSizeBubbleFrameView>();
+    frame->SetBubbleBorder(std::make_unique<views::BubbleBorder>(
+        views::BubbleBorder::FLOAT, kShadowType));
     return frame;
   }
-
-  DISALLOW_COPY_AND_ASSIGN(NativeDialogContainer);
 };
 
-}  // namespace
+BEGIN_METADATA(NativeDialogContainer, views::DialogDelegateView)
+END_METADATA
 
-#if BUILDFLAG(ENABLE_APP_LIST)
-views::DialogDelegateView* CreateAppListContainerForView(
-    std::unique_ptr<views::View> view) {
-  return new AppListDialogContainer(std::move(view));
-}
-#endif  // ENABLE_APP_LIST
+}  // namespace
 
 views::DialogDelegateView* CreateDialogContainerForView(
     std::unique_ptr<views::View> view,
     const gfx::Size& size,
-    const base::Closure& close_callback) {
-  return new NativeDialogContainer(std::move(view), size, close_callback);
+    base::OnceClosure close_callback) {
+  return new NativeDialogContainer(std::move(view), size,
+                                   std::move(close_callback));
 }

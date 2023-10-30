@@ -1,10 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser;
 
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -14,12 +14,11 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.test.ScreenShooter;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.ui.test.util.UiRestriction;
-
-import java.io.IOException;
 
 /**
  * Simple test to demonstrate use of ScreenShooter rule.
@@ -35,19 +34,17 @@ public class ExampleUiCaptureTest {
     public ScreenShooter mScreenShooter = new ScreenShooter();
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         mActivityTestRule.startMainActivityFromLauncher();
     }
 
     /**
      * Capture the New Tab Page and the tab switcher.
-     * @throws IOException
-     * @throws InterruptedException
      */
     @Test
     @SmallTest
     @Feature({"UiCatalogue"})
-    public void testCaptureNewTabPage() throws IOException, InterruptedException {
+    public void testCaptureNewTabPage() {
         mScreenShooter.shoot("NTP", ScreenShooter.TagsEnum.UiCatalogueExample);
     }
 }

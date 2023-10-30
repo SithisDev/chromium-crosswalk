@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 #include <utility>
 
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_variant.h"
@@ -38,7 +38,9 @@ void UiaAccessibilityEventWaiter::Wait() {
 
 void UiaAccessibilityEventWaiter::WaitWithTimeout(base::TimeDelta timeout) {
   // Pump messages via |shutdown_loop_| until the thread is complete.
-  shutdown_loop_.RunWithTimeout(timeout);
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, shutdown_loop_.QuitClosure(), timeout);
+  shutdown_loop_.Run();
   base::PlatformThread::Join(thread_handle_);
 }
 
@@ -87,6 +89,11 @@ void UiaAccessibilityEventWaiter::Thread::ThreadMain() {
   CHECK(cache_request_.Get());
   CHECK(SUCCEEDED(cache_request_->AddProperty(UIA_NamePropertyId)));
   CHECK(SUCCEEDED(cache_request_->AddProperty(UIA_AriaRolePropertyId)));
+
+  // Match AccEvent by using Raw View
+  Microsoft::WRL::ComPtr<IUIAutomationCondition> pRawCond;
+  CHECK(SUCCEEDED(uia_->get_RawViewCondition(&pRawCond)));
+  CHECK(SUCCEEDED(cache_request_->put_TreeFilter(pRawCond.Get())));
 
   // Subscribe to focus events.
   uia_->AddFocusChangedEventHandler(cache_request_.Get(),
@@ -161,14 +168,14 @@ void UiaAccessibilityEventWaiter::Thread::EventHandler::CleanUp() {
   root_.Reset();
 }
 
-STDMETHODIMP
+HRESULT
 UiaAccessibilityEventWaiter::Thread::EventHandler::HandleFocusChangedEvent(
     IUIAutomationElement* sender) {
   // Add focus changed event handling code here.
   return S_OK;
 }
 
-STDMETHODIMP
+HRESULT
 UiaAccessibilityEventWaiter::Thread::EventHandler::HandlePropertyChangedEvent(
     IUIAutomationElement* sender,
     PROPERTYID property_id,
@@ -182,7 +189,7 @@ UiaAccessibilityEventWaiter::Thread::EventHandler::HandlePropertyChangedEvent(
   return S_OK;
 }
 
-STDMETHODIMP
+HRESULT
 UiaAccessibilityEventWaiter::Thread::EventHandler::HandleStructureChangedEvent(
     IUIAutomationElement* sender,
     StructureChangeType change_type,
@@ -191,11 +198,16 @@ UiaAccessibilityEventWaiter::Thread::EventHandler::HandleStructureChangedEvent(
   return S_OK;
 }
 
-STDMETHODIMP
+HRESULT
 UiaAccessibilityEventWaiter::Thread::EventHandler::HandleAutomationEvent(
     IUIAutomationElement* sender,
     EVENTID event_id) {
-  // Add automation event handling code here.
+  if (owner_ &&
+      event_id ==
+          ui::AXPlatformNodeWin::MojoEventToUIAEvent(owner_->info_.event) &&
+      MatchesNameRole(sender)) {
+    owner_->SendShutdownSignal();
+  }
   return S_OK;
 }
 
@@ -206,9 +218,10 @@ bool UiaAccessibilityEventWaiter::Thread::EventHandler::MatchesNameRole(
   sender->get_CachedAriaRole(aria_role.Receive());
   sender->get_CachedName(name.Receive());
 
-  if (base::string16(aria_role, SysStringLen(aria_role)) ==
+  if (std::wstring(aria_role.Get(), SysStringLen(aria_role.Get())) ==
           owner_->info_.role &&
-      base::string16(name, SysStringLen(name)) == owner_->info_.name) {
+      std::wstring(name.Get(), SysStringLen(name.Get())) ==
+          owner_->info_.name) {
     return true;
   }
   return false;

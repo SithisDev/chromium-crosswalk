@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,12 @@
 
 #include <stdint.h>
 
-#include <string>
-
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
 #include "chrome/services/media_gallery_util/public/mojom/media_parser.mojom.h"
 #include "media/base/data_source.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace base {
 class TaskRunner;
@@ -25,8 +25,9 @@ class TaskRunner;
 class IPCDataSource : public media::DataSource {
  public:
   // May only be called on the utility thread.
-  IPCDataSource(chrome::mojom::MediaDataSourcePtr media_data_source,
-                int64_t total_size);
+  IPCDataSource(
+      mojo::PendingRemote<chrome::mojom::MediaDataSource> media_data_source,
+      int64_t total_size);
   ~IPCDataSource() override;
 
   // media::DataSource implementation. The methods may be called on any single
@@ -36,22 +37,22 @@ class IPCDataSource : public media::DataSource {
   void Read(int64_t position,
             int size,
             uint8_t* destination,
-            const ReadCB& callback) override;
-  bool GetSize(int64_t* size_out) override;
+            ReadCB callback) override;
+  [[nodiscard]] bool GetSize(int64_t* size_out) override;
   bool IsStreaming() override;
   void SetBitrate(int bitrate) override;
 
  private:
   // Media data read helpers: must be run on the utility thread.
   void ReadMediaData(uint8_t* destination,
-                     const ReadCB& callback,
+                     ReadCB callback,
                      int64_t position,
                      int size);
   void ReadDone(uint8_t* destination,
-                const ReadCB& callback,
+                ReadCB callback,
                 const std::vector<uint8_t>& data);
 
-  chrome::mojom::MediaDataSourcePtr media_data_source_;
+  mojo::Remote<chrome::mojom::MediaDataSource> media_data_source_;
   const int64_t total_size_;
 
   scoped_refptr<base::TaskRunner> utility_task_runner_;

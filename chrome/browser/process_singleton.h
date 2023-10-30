@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,29 +8,25 @@
 #include "base/sequence_checker.h"
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
-#include <windows.h>
-#endif  // defined(OS_WIN)
-
-#include <set>
-#include <vector>
+#if BUILDFLAG(IS_WIN)
+#include "base/win/windows_types.h"
+#endif  // BUILDFLAG(IS_WIN)
 
 #include "base/callback.h"
+#include "base/check.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/process/process.h"
 #include "ui/gfx/native_widget_types.h"
 
-#if defined(OS_POSIX) && !defined(OS_ANDROID)
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID)
 #include "base/files/scoped_temp_dir.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/message_window.h"
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 namespace base {
 class CommandLine;
@@ -51,10 +47,10 @@ class ProcessSingleton {
  public:
   // Used to send the reason of remote hang process termination as histogram.
   enum RemoteHungProcessTerminateReason {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     USER_ACCEPTED_TERMINATION = 1,
     NO_VISIBLE_WINDOW_FOUND = 2,
-#elif defined(OS_POSIX)
+#elif BUILDFLAG(IS_POSIX)
     NOTIFY_ATTEMPTS_EXCEEDED = 3,
     SOCKET_WRITE_FAILED = 4,
     SOCKET_READ_FAILED = 5,
@@ -68,10 +64,10 @@ class ProcessSingleton {
     TERMINATE_SUCCEEDED = 0,
     TERMINATE_FAILED = 1,
     REMOTE_PROCESS_NOT_FOUND = 2,
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     TERMINATE_WAIT_TIMEOUT = 3,
     RUNNING_PROCESS_NOTIFY_ERROR = 4,
-#elif defined(OS_POSIX)
+#elif BUILDFLAG(IS_POSIX)
     TERMINATE_NOT_ENOUGH_PERMISSIONS = 5,
     REMOTE_PROCESS_SHUTTING_DOWN = 6,
     PROFILE_UNLOCKED = 7,
@@ -103,11 +99,15 @@ class ProcessSingleton {
   // handled within the current browser instance or false if the remote process
   // should handle it (i.e., because the current process is shutting down).
   using NotificationCallback =
-      base::Callback<bool(const base::CommandLine& command_line,
-                          const base::FilePath& current_directory)>;
+      base::RepeatingCallback<bool(const base::CommandLine& command_line,
+                                   const base::FilePath& current_directory)>;
 
   ProcessSingleton(const base::FilePath& user_data_dir,
                    const NotificationCallback& notification_callback);
+
+  ProcessSingleton(const ProcessSingleton&) = delete;
+  ProcessSingleton& operator=(const ProcessSingleton&) = delete;
+
   ~ProcessSingleton();
 
   // Notify another process, if available. Otherwise sets ourselves as the
@@ -127,18 +127,21 @@ class ProcessSingleton {
   // another process should call this directly.
   bool Create();
 
+  // Start watching for notifications from other processes.
+  void StartWatching();
+
   // Clear any lock state during shutdown.
   void Cleanup();
 
-#if defined(OS_POSIX) && !defined(OS_ANDROID)
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID)
   static void DisablePromptForTesting();
   static void SkipIsChromeProcessCheckForTesting(bool skip);
   static void SetUserOptedUnlockInUseProfileForTesting(bool set_unlock);
 #endif
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Called to query whether to kill a hung browser process that has visible
   // windows. Return true to allow killing the hung process.
-  using ShouldKillRemoteProcessCallback = base::Callback<bool()>;
+  using ShouldKillRemoteProcessCallback = base::RepeatingCallback<bool()>;
   void OverrideShouldKillRemoteProcessCallbackForTesting(
       const ShouldKillRemoteProcessCallback& display_dialog_callback);
 #endif
@@ -150,7 +153,7 @@ class ProcessSingleton {
   // On Windows, Create() has to be called before this.
   NotifyResult NotifyOtherProcess();
 
-#if defined(OS_POSIX) && !defined(OS_ANDROID)
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID)
   // Exposed for testing.  We use a timeout on Linux, and in tests we want
   // this timeout to be short.
   NotifyResult NotifyOtherProcessWithTimeout(
@@ -164,13 +167,13 @@ class ProcessSingleton {
       const base::TimeDelta& timeout);
   void OverrideCurrentPidForTesting(base::ProcessId pid);
   void OverrideKillCallbackForTesting(
-      const base::Callback<void(int)>& callback);
+      const base::RepeatingCallback<void(int)>& callback);
 #endif
 
  private:
   NotificationCallback notification_callback_;  // Handler for notifications.
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   bool EscapeVirtualization(const base::FilePath& user_data_dir);
 
   HWND remote_window_;  // The HWND_MESSAGE of another browser.
@@ -179,7 +182,7 @@ class ProcessSingleton {
   HANDLE lock_file_;
   base::FilePath user_data_dir_;
   ShouldKillRemoteProcessCallback should_kill_remote_process_callback_;
-#elif defined(OS_POSIX) && !defined(OS_ANDROID)
+#elif BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID)
   // Return true if the given pid is one of our child processes.
   // Assumes that the current pid is the root of all pids of the current
   // instance.
@@ -204,7 +207,7 @@ class ProcessSingleton {
 
   // Function to call when the other process is hung and needs to be killed.
   // Allows overriding for tests.
-  base::Callback<void(int)> kill_callback_;
+  base::RepeatingCallback<void(int)> kill_callback_;
 
   // Path in file system to the socket.
   base::FilePath socket_path_;
@@ -217,6 +220,7 @@ class ProcessSingleton {
 
   // Temporary directory to hold the socket.
   base::ScopedTempDir socket_dir_;
+  int sock_ = -1;
 
   // Helper class for linux specific messages.  LinuxWatcher is ref counted
   // because it posts messages between threads.
@@ -224,7 +228,7 @@ class ProcessSingleton {
   scoped_refptr<LinuxWatcher> watcher_;
 #endif
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
   // macOS 10.13 tries to open a new Chrome instance if a user tries to
   // open an external link after Chrome has updated, but not relaunched.
   // This method extracts any waiting "open URL" AppleEvent and forwards
@@ -235,8 +239,6 @@ class ProcessSingleton {
 #endif
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(ProcessSingleton);
 };
 
 #endif  // CHROME_BROWSER_PROCESS_SINGLETON_H_

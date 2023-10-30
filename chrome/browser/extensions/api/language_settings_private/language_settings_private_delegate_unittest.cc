@@ -1,16 +1,19 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/api/language_settings_private/language_settings_private_delegate.h"
 
 #include "base/bind.h"
+#include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/spellcheck/browser/pref_names.h"
+#include "components/spellcheck/common/spellcheck_features.h"
 #include "components/spellcheck/spellcheck_buildflags.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/event_router_factory.h"
@@ -45,8 +48,14 @@ class LanguageSettingsPrivateDelegateTest
     EventRouterFactory::GetInstance()->SetTestingFactory(
         profile(), base::BindRepeating(&BuildEventRouter));
 
+#if BUILDFLAG(IS_WIN)
+    // Tests were designed assuming Hunspell dictionary used and may fail when
+    // Windows spellcheck is enabled by default.
+    feature_list_.InitAndDisableFeature(spellcheck::kWinUseBrowserSpellChecker);
+#endif  // BUILDFLAG(IS_WIN)
+
     base::ListValue language_codes;
-    language_codes.AppendString("fr");
+    language_codes.Append("fr");
     profile()->GetPrefs()->Set(spellcheck::prefs::kSpellCheckDictionaries,
                                language_codes);
 
@@ -89,6 +98,9 @@ class LanguageSettingsPrivateDelegateTest
       run_loop_->Quit();
   }
 
+#if BUILDFLAG(IS_WIN)
+  base::test::ScopedFeatureList feature_list_;
+#endif  // BUILDFLAG(IS_WIN)
   std::unique_ptr<LanguageSettingsPrivateDelegate> delegate_;
   std::unique_ptr<base::RunLoop> run_loop_;
 };

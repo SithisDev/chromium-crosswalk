@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@ enum ExitCode {
   UNABLE_TO_FIND_REGISTRY_KEY = 110,
   PATCH_NOT_FOR_INSTALLED_VERSION = 111,
   UNABLE_TO_EXTRACT_CHROME_ARCHIVE = 112,
-  UNABLE_TO_EXTRACT_SETUP_BL = 113,
+  // UNABLE_TO_EXTRACT_SETUP_BL = 113,
   // UNABLE_TO_EXTRACT_SETUP_BN = 114,
   UNABLE_TO_EXTRACT_SETUP_EXE = 115,
   UNABLE_TO_EXTRACT_SETUP = 116,

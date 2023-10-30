@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,6 @@ namespace chrome_cleaner {
 constexpr UwSId kGoogleTestAUwSID = 341;
 constexpr UwSId kGoogleTestBUwSID = 342;
 constexpr UwSId kGoogleTestCUwSID = 343;
-
-extern const char kGoogleTestAUwEID[];
-extern const char kGoogleTestBUwEID[];
-extern const char kGoogleTestExtensionInvalid1[];
-extern const char kGoogleTestExtensionInvalid2[];
 
 extern const char kTestUwsAFileContents[];
 extern const int kTestUwsAFileContentsSize;

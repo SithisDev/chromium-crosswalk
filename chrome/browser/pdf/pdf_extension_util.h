@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 
 #include <string>
 
+#include "base/values.h"
+#include "build/chromeos_buildflags.h"
 #include "pdf/buildflags.h"
 
 #if !BUILDFLAG(ENABLE_PDF)
@@ -19,6 +21,21 @@ namespace pdf_extension_util {
 // browser_resources.grd and certain fields are replaced based on what chrome
 // flags are enabled.
 std::string GetManifest();
+
+// Represents the context within which the PDF Viewer runs.
+enum class PdfViewerContext {
+  kPdfViewer,
+  kPrintPreview,
+  kAll,
+};
+
+// Adds all strings used by the PDF Viewer depending on the provided `context`.
+void AddStrings(PdfViewerContext context, base::Value::Dict* dict);
+
+// Adds additional data used by the PDF Viewer UI in `dict`, for example
+// whether certain features are enabled/disabled.
+// `enable_annotations` only applies on platforms that supports annotations.
+void AddAdditionalData(bool enable_annotations, base::Value::Dict* dict);
 
 }  // namespace pdf_extension_util
 

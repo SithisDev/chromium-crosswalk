@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,7 @@ bool GetNativeWindow(const Browser* browser, gfx::NativeWindow* native_window) {
 }  // namespace
 
 BrowserActivationWaiter::BrowserActivationWaiter(const Browser* browser)
-    : browser_(browser), observed_(false) {
+    : browser_(browser) {
   // When the active browser closes, the next "last active browser" in the
   // BrowserList might not be immediately activated. So we need to wait for the
   // "last active browser" to actually be active.
@@ -43,8 +43,6 @@ BrowserActivationWaiter::BrowserActivationWaiter(const Browser* browser)
   }
   BrowserList::AddObserver(this);
 }
-
-BrowserActivationWaiter::~BrowserActivationWaiter() {}
 
 void BrowserActivationWaiter::WaitForActivation() {
   if (observed_)
@@ -59,12 +57,6 @@ void BrowserActivationWaiter::OnBrowserSetLastActive(Browser* browser) {
   if (browser != browser_)
     return;
 
-// On Mac, BrowserWindowCocoa::Show() sets the active browser before the
-// window becomes the key window.
-#if !defined(OS_MACOSX)
-  EXPECT_TRUE(browser->window()->IsActive());
-#endif
-
   observed_ = true;
   BrowserList::RemoveObserver(this);
   if (run_loop_.running())
@@ -72,7 +64,7 @@ void BrowserActivationWaiter::OnBrowserSetLastActive(Browser* browser) {
 }
 
 BrowserDeactivationWaiter::BrowserDeactivationWaiter(const Browser* browser)
-    : browser_(browser), observed_(false) {
+    : browser_(browser) {
   if (chrome::FindLastActive() != browser_ && !browser->window()->IsActive()) {
     observed_ = true;
     return;
@@ -102,7 +94,7 @@ void BrowserDeactivationWaiter::OnBrowserNoLongerActive(Browser* browser) {
 }
 
 bool BringBrowserWindowToFront(const Browser* browser) {
-  gfx::NativeWindow window = NULL;
+  gfx::NativeWindow window = nullptr;
   if (!GetNativeWindow(browser, &window))
     return false;
 
@@ -120,7 +112,7 @@ bool SendKeyPressSync(const Browser* browser,
                       bool shift,
                       bool alt,
                       bool command) {
-  gfx::NativeWindow window = NULL;
+  gfx::NativeWindow window = nullptr;
   if (!GetNativeWindow(browser, &window))
     return false;
   return SendKeyPressToWindowSync(window, key, control, shift, alt, command);
@@ -132,7 +124,7 @@ bool SendKeyPressToWindowSync(const gfx::NativeWindow window,
                               bool shift,
                               bool alt,
                               bool command) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   DCHECK(key != ui::VKEY_ESCAPE || !control)
       << "'ctrl + esc' opens start menu on Windows. Start menu on windows "
          "2012 is a full-screen always on top window. It breaks all "
@@ -144,7 +136,7 @@ bool SendKeyPressToWindowSync(const gfx::NativeWindow window,
   bool result;
   result = ui_controls::SendKeyPressNotifyWhenDone(
       window, key, control, shift, alt, command, runner->QuitClosure());
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   if (!result && ui_test_utils::ShowAndFocusNativeWindow(window)) {
     result = ui_controls::SendKeyPressNotifyWhenDone(
         window, key, control, shift, alt, command, runner->QuitClosure());

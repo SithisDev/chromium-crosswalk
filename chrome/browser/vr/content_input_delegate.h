@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "chrome/browser/vr/macros.h"
 #include "chrome/browser/vr/model/text_input_info.h"
 #include "chrome/browser/vr/platform_ui_input_delegate.h"
@@ -25,8 +24,15 @@ class PlatformInputHandler;
 // ContentElement.
 class VR_BASE_EXPORT ContentInputDelegate : public PlatformUiInputDelegate {
  public:
+  using TextInputUpdateCallback =
+      base::OnceCallback<void(const TextInputInfo&)>;
+
   ContentInputDelegate();
   explicit ContentInputDelegate(PlatformInputHandler* content);
+
+  ContentInputDelegate(const ContentInputDelegate&) = delete;
+  ContentInputDelegate& operator=(const ContentInputDelegate&) = delete;
+
   ~ContentInputDelegate() override;
 
   // Text Input specific.
@@ -43,12 +49,8 @@ class VR_BASE_EXPORT ContentInputDelegate : public PlatformUiInputDelegate {
       int selection_start,
       int selection_end,
       int composition_start,
-      int compositon_end,
-      base::OnceCallback<void(const TextInputInfo&)> callback);
-
-  void OnWebInputTextChangedForTest(const base::string16& text) {
-    OnWebInputTextChanged(text);
-  }
+      int composition_end,
+      TextInputUpdateCallback callback);
 
   void ClearTextInputState();
 
@@ -59,21 +61,17 @@ class VR_BASE_EXPORT ContentInputDelegate : public PlatformUiInputDelegate {
   enum TextRequestState {
     kNoPendingRequest,
     kRequested,
-    kResponseReceived,
   };
   bool ContentGestureIsLocked(InputEvent::Type type);
-  void OnWebInputTextChanged(const base::string16& text);
+  void OnWebInputTextChanged(TextInputInfo pending_input_info,
+                             const std::u16string& text);
 
   int content_id_ = 0;
   int locked_content_id_ = 0;
 
   EditedText last_keyboard_edit_;
   TextRequestState pending_text_request_state_ = kNoPendingRequest;
-  TextInputInfo pending_text_input_info_;
-  std::queue<base::OnceCallback<void(const TextInputInfo&)>>
-      update_state_callbacks_;
-
-  DISALLOW_COPY_AND_ASSIGN(ContentInputDelegate);
+  std::queue<TextInputUpdateCallback> update_state_callbacks_;
 };
 
 }  // namespace vr

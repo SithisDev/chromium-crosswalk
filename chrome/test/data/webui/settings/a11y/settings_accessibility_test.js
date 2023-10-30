@@ -1,8 +1,8 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/** @fileoverview Runs the Polymer Accessibility Settings tests. */
+/** @fileoverview Runs the Polymer 3 Accessibility Settings tests. */
 
 // Polymer BrowserTest fixture and aXe-core accessibility audit.
 GEN_INCLUDE([
@@ -15,24 +15,42 @@ GEN_INCLUDE([
  * @constructor
  * @extends {PolymerTest}
  */
-function SettingsAccessibilityTest() {}
+function SettingsAccessibilityV3Test() {}
 
 // Default accessibility audit options. Specify in test definition to use.
-SettingsAccessibilityTest.axeOptions = {
+SettingsAccessibilityV3Test.axeOptions = {
   'rules': {
     // Disable 'skip-link' check since there are few tab stops before the main
     // content.
     'skip-link': {enabled: false},
     // TODO(crbug.com/761461): enable after addressing flaky tests.
     'color-contrast': {enabled: false},
-  }
+    // The HTML language attribute isn't set by the test_loader.html dummy file.
+    'html-has-lang': {enabled: false},
+    // TODO(crbug.com/1224185): Fails when the device is managed (due to
+    // violations in <managed-footnote>, happens on some Win bots.
+    'region': {enabled: false},
+    // TODO(crbug.com/1224185): Fails when the device is managed (due to
+    // violations in <managed-footnote>, happens on some Win bots.
+    'link-in-text-block': {enabled: false},
+  },
 };
 
 // Default accessibility audit options. Specify in test definition to use.
-SettingsAccessibilityTest.violationFilter = {
-  // Polymer components use aria-active-attribute.
+SettingsAccessibilityV3Test.violationFilter = {
   'aria-valid-attr': function(nodeResult) {
-    return nodeResult.element.hasAttribute('aria-active-attribute');
+    const attributeAllowlist = [
+      'aria-active-attribute',  // Polymer components use aria-active-attribute.
+      'aria-roledescription',   // This attribute is now widely supported.
+    ];
+
+    return attributeAllowlist.some(a => nodeResult.element.hasAttribute(a));
+  },
+  'aria-allowed-attr': function(nodeResult) {
+    const attributeAllowlist = [
+      'aria-roledescription',  // This attribute is now widely supported.
+    ];
+    return attributeAllowlist.some(a => nodeResult.element.hasAttribute(a));
   },
   'button-name': function(nodeResult) {
     if (nodeResult.element.classList.contains('icon-expand-more')) {
@@ -43,28 +61,28 @@ SettingsAccessibilityTest.violationFilter = {
     // tabindex -1 anyway.
     const parentNode = nodeResult.element.parentNode;
     return parentNode && parentNode.host &&
-        (parentNode.host.tagName == 'CR-TOGGLE' ||
-         parentNode.host.tagName == 'CR-CHECKBOX');
+        (parentNode.host.tagName === 'CR-TOGGLE' ||
+         parentNode.host.tagName === 'CR-CHECKBOX');
   },
 };
 
-SettingsAccessibilityTest.prototype = {
+SettingsAccessibilityV3Test.prototype = {
   __proto__: PolymerTest.prototype,
 
   /** @override */
-  browsePreload: 'chrome://settings/',
+  browsePreload:
+      'chrome://settings/test_loader.html?module=settings/a11y/basic_a11y_v3_test.js',
 
   // Include files that define the mocha tests.
   extraLibraries: [
-    ...PolymerTest.prototype.extraLibraries,
-    '../ensure_lazy_loaded.js',
+    '//third_party/axe-core/axe.js',
   ],
-
-  // TODO(hcarmona): Remove once ADT is not longer in the testing infrastructure
-  runAccessibilityChecks: false,
 
   setUp: function() {
     PolymerTest.prototype.setUp.call(this);
-    settings.ensureLazyLoaded();
+
+    return new Promise(resolve => {
+      document.addEventListener('a11y-setup-complete', resolve);
+    });
   },
 };

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@ enum LayoutConstant {
   // The height of a button within the Bookmarks Bar.
   BOOKMARK_BAR_BUTTON_HEIGHT,
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
   // This is a little smaller than the bookmarkbar height because of the visual
   // overlap with the main toolbar. This height should not be used when
   // computing the height of the toolbar.
@@ -28,24 +28,21 @@ enum LayoutConstant {
   // The height of Bookmarks Bar, when visible in "New Tab Page" mode.
   BOOKMARK_BAR_NTP_HEIGHT,
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
   // The amount of space between the inner bookmark bar and the outer toolbar on
   // new tab pages.
   BOOKMARK_BAR_NTP_PADDING,
 #endif
 
-  // The size of the app menu button in a hosted app browser window.
-  HOSTED_APP_MENU_BUTTON_SIZE,
-
-  // The size of page action icons in a hosted app title bar.
-  HOSTED_APP_PAGE_ACTION_ICON_SIZE,
+  // The size of icons used in Download bubbles.
+  // TODO(crbug/1296323): We should be sourcing the size of the file icon from
+  // the layout
+  // provider rather than relying on hardcoded constants.
+  DOWNLOAD_ICON_SIZE,
 
   // The vertical padding between the edge of a location bar bubble and its
   // contained text.
   LOCATION_BAR_BUBBLE_FONT_VERTICAL_PADDING,
-
-  // The corner radius used for the location bar bubble.
-  LOCATION_BAR_BUBBLE_CORNER_RADIUS,
 
   // The vertical inset to apply to the bounds of a location bar bubble's anchor
   // view, to bring the bubble closer to the anchor.  This compensates for the
@@ -64,6 +61,9 @@ enum LayoutConstant {
 
   // The size of the icons used inside the LocationBar.
   LOCATION_BAR_ICON_SIZE,
+
+  // The size of icons used in PageInfo bubbles.
+  PAGE_INFO_ICON_SIZE,
 
   // Padding after the tab title.
   TAB_AFTER_TITLE_PADDING,
@@ -94,14 +94,33 @@ enum LayoutConstant {
   // non-pixel-aligned drawing goes in.  See https://crbug.com/765723.
   TABSTRIP_TOOLBAR_OVERLAP,
 
+  // The horizontal padding between any right aligned controls and the end of
+  // the TabStripRegionView.
+  TABSTRIP_REGION_VIEW_CONTROL_PADDING,
+
+  // The total height, including icons and insets, of buttons in the toolbar.
+  TOOLBAR_BUTTON_HEIGHT,
+
   // Additional horizontal padding between the elements in the toolbar.
   TOOLBAR_ELEMENT_PADDING,
 
   // The horizontal space between most items in the toolbar.
   TOOLBAR_STANDARD_SPACING,
+
+  // The size of the app menu button in a web app browser window.
+  WEB_APP_MENU_BUTTON_SIZE,
+
+  // The size of page action icons in a web app title bar.
+  WEB_APP_PAGE_ACTION_ICON_SIZE,
 };
 
 enum LayoutInset {
+  // The padding around icons used in Download bubbles.
+  DOWNLOAD_ICON,
+
+  // The padding around rows used in Download bubbles.
+  DOWNLOAD_ROW,
+
   // The padding used around the icon inside the LocationBar. The full width of
   // the icon would be LOCATION_BAR_ICON_SIZE + 2 * inset.width(). The full
   // height of the icon would be LOCATION_BAR_ICON_SIZE + 2 * inset.height().
@@ -110,18 +129,24 @@ enum LayoutInset {
   // (e.g. does not highlight on hover).
   LOCATION_BAR_ICON_INTERIOR_PADDING,
 
-  // The padding inside the border of a toolbar button (around the image).
-  TOOLBAR_BUTTON,
-
   // The padding inside the border of a toolbar action view button.
   TOOLBAR_ACTION_VIEW,
 
+  // The padding inside the border of a toolbar button (around the image).
+  TOOLBAR_BUTTON,
+
   // The padding between the edges of the toolbar and its content.
   TOOLBAR_INTERIOR_MARGIN,
+
+  // The padding between the edges of the toolbar and its content when the webui
+  // tab strip is enabled. Special handling is needed as when the browser is
+  // maximized and the tabstrip is collapsed the toolbar will sit flush with the
+  // edge of the screen.
+  WEBUI_TAB_STRIP_TOOLBAR_INTERIOR_MARGIN,
 };
 
 int GetLayoutConstant(LayoutConstant constant);
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 // Use this function instead of GetLayoutConstant() for Cocoa browser.
 // This will handle Cocoa specific layout constants. For non Cocoa specific
 // constants, it will call GetLayoutConstant() anyway.

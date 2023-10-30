@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@ namespace content_settings {
 
 class SupervisedUserProviderTest : public ::testing::Test {
  public:
-  SupervisedUserProviderTest() {}
+  SupervisedUserProviderTest() = default;
 
   void SetUp() override;
   void TearDown() override;
@@ -50,129 +50,112 @@ void SupervisedUserProviderTest::TearDown() {
 }
 
 TEST_F(SupervisedUserProviderTest, GeolocationTest) {
-  std::unique_ptr<RuleIterator> rule_iterator = provider_->GetRuleIterator(
-      CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string(), false);
+  std::unique_ptr<RuleIterator> rule_iterator =
+      provider_->GetRuleIterator(ContentSettingsType::GEOLOCATION, false);
   EXPECT_FALSE(rule_iterator);
 
   // Disable the default geolocation setting.
   EXPECT_CALL(mock_observer_,
-              OnContentSettingChanged(_, _, CONTENT_SETTINGS_TYPE_GEOLOCATION,
-                                      std::string()));
+              OnContentSettingChanged(_, _, ContentSettingsType::GEOLOCATION));
   service_.SetLocalSetting(supervised_users::kGeolocationDisabled,
                            std::make_unique<base::Value>(true));
 
-  rule_iterator = provider_->GetRuleIterator(CONTENT_SETTINGS_TYPE_GEOLOCATION,
-                                             std::string(), false);
+  rule_iterator =
+      provider_->GetRuleIterator(ContentSettingsType::GEOLOCATION, false);
   ASSERT_TRUE(rule_iterator->HasNext());
   Rule rule = rule_iterator->Next();
   EXPECT_FALSE(rule_iterator->HasNext());
 
   EXPECT_EQ(ContentSettingsPattern::Wildcard(), rule.primary_pattern);
   EXPECT_EQ(ContentSettingsPattern::Wildcard(), rule.secondary_pattern);
-  EXPECT_EQ(CONTENT_SETTING_BLOCK, ValueToContentSetting(&rule.value));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK, ValueToContentSetting(rule.value));
 
   // Re-enable the default geolocation setting.
   EXPECT_CALL(mock_observer_,
-              OnContentSettingChanged(_, _, CONTENT_SETTINGS_TYPE_GEOLOCATION,
-                                      std::string()));
+              OnContentSettingChanged(_, _, ContentSettingsType::GEOLOCATION));
   service_.SetLocalSetting(supervised_users::kGeolocationDisabled,
                            std::make_unique<base::Value>(false));
 
-  rule_iterator = provider_->GetRuleIterator(CONTENT_SETTINGS_TYPE_GEOLOCATION,
-                                             std::string(), false);
+  rule_iterator =
+      provider_->GetRuleIterator(ContentSettingsType::GEOLOCATION, false);
   EXPECT_FALSE(rule_iterator);
 }
 
 TEST_F(SupervisedUserProviderTest, CookiesTest) {
-  std::unique_ptr<RuleIterator> rule_iterator = provider_->GetRuleIterator(
-      CONTENT_SETTINGS_TYPE_COOKIES, std::string(), false);
-  EXPECT_FALSE(rule_iterator);
+  std::unique_ptr<RuleIterator> rule_iterator =
+      provider_->GetRuleIterator(ContentSettingsType::COOKIES, false);
 
-  // Allow cookies everywhere.
-  EXPECT_CALL(mock_observer_,
-              OnContentSettingChanged(_, _, CONTENT_SETTINGS_TYPE_COOKIES,
-                                      std::string()));
-  service_.SetLocalSetting(supervised_users::kCookiesAlwaysAllowed,
-                           std::make_unique<base::Value>(true));
-
-  rule_iterator = provider_->GetRuleIterator(CONTENT_SETTINGS_TYPE_COOKIES,
-                                             std::string(), false);
   ASSERT_TRUE(rule_iterator->HasNext());
   Rule rule = rule_iterator->Next();
   EXPECT_FALSE(rule_iterator->HasNext());
 
   EXPECT_EQ(ContentSettingsPattern::Wildcard(), rule.primary_pattern);
   EXPECT_EQ(ContentSettingsPattern::Wildcard(), rule.secondary_pattern);
-  EXPECT_EQ(CONTENT_SETTING_ALLOW, ValueToContentSetting(&rule.value));
+  EXPECT_EQ(CONTENT_SETTING_ALLOW, ValueToContentSetting(rule.value));
 
   // Re-enable the default cookie setting.
   EXPECT_CALL(mock_observer_,
-              OnContentSettingChanged(_, _, CONTENT_SETTINGS_TYPE_COOKIES,
-                                      std::string()));
+              OnContentSettingChanged(_, _, ContentSettingsType::COOKIES));
   service_.SetLocalSetting(supervised_users::kCookiesAlwaysAllowed,
                            std::make_unique<base::Value>(false));
 
-  rule_iterator = provider_->GetRuleIterator(CONTENT_SETTINGS_TYPE_COOKIES,
-                                             std::string(), false);
+  rule_iterator =
+      provider_->GetRuleIterator(ContentSettingsType::COOKIES, false);
   EXPECT_FALSE(rule_iterator);
 }
 
 TEST_F(SupervisedUserProviderTest, CameraMicTest) {
   std::unique_ptr<RuleIterator> rule_iterator = provider_->GetRuleIterator(
-      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, std::string(), false);
+      ContentSettingsType::MEDIASTREAM_CAMERA, false);
   EXPECT_FALSE(rule_iterator);
-  rule_iterator = provider_->GetRuleIterator(
-      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string(), false);
+  rule_iterator =
+      provider_->GetRuleIterator(ContentSettingsType::MEDIASTREAM_MIC, false);
   EXPECT_FALSE(rule_iterator);
 
   // Disable the default camera and microphone setting.
   EXPECT_CALL(
       mock_observer_,
-      OnContentSettingChanged(_, _, CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
-                              std::string()));
-  EXPECT_CALL(mock_observer_,
-              OnContentSettingChanged(
-                  _, _, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string()));
+      OnContentSettingChanged(_, _, ContentSettingsType::MEDIASTREAM_CAMERA));
+  EXPECT_CALL(mock_observer_, OnContentSettingChanged(
+                                  _, _, ContentSettingsType::MEDIASTREAM_MIC));
   service_.SetLocalSetting(supervised_users::kCameraMicDisabled,
                            std::make_unique<base::Value>(true));
 
   rule_iterator = provider_->GetRuleIterator(
-      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, std::string(), false);
+      ContentSettingsType::MEDIASTREAM_CAMERA, false);
   ASSERT_TRUE(rule_iterator->HasNext());
   Rule rule = rule_iterator->Next();
   EXPECT_FALSE(rule_iterator->HasNext());
 
   EXPECT_EQ(ContentSettingsPattern::Wildcard(), rule.primary_pattern);
   EXPECT_EQ(ContentSettingsPattern::Wildcard(), rule.secondary_pattern);
-  EXPECT_EQ(CONTENT_SETTING_BLOCK, ValueToContentSetting(&rule.value));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK, ValueToContentSetting(rule.value));
 
-  rule_iterator = provider_->GetRuleIterator(
-      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string(), false);
+  rule_iterator =
+      provider_->GetRuleIterator(ContentSettingsType::MEDIASTREAM_MIC, false);
   ASSERT_TRUE(rule_iterator->HasNext());
   rule = rule_iterator->Next();
   EXPECT_FALSE(rule_iterator->HasNext());
 
   EXPECT_EQ(ContentSettingsPattern::Wildcard(), rule.primary_pattern);
   EXPECT_EQ(ContentSettingsPattern::Wildcard(), rule.secondary_pattern);
-  EXPECT_EQ(CONTENT_SETTING_BLOCK, ValueToContentSetting(&rule.value));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK, ValueToContentSetting(rule.value));
 
   // Re-enable the default camera and microphone setting.
   EXPECT_CALL(
       mock_observer_,
-      OnContentSettingChanged(_, _, CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
-                              std::string()));
-  EXPECT_CALL(mock_observer_,
-              OnContentSettingChanged(
-                  _, _, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string()));
+      OnContentSettingChanged(_, _, ContentSettingsType::MEDIASTREAM_CAMERA));
+  EXPECT_CALL(mock_observer_, OnContentSettingChanged(
+                                  _, _, ContentSettingsType::MEDIASTREAM_MIC));
   service_.SetLocalSetting(supervised_users::kCameraMicDisabled,
                            std::make_unique<base::Value>(false));
 
   rule_iterator = provider_->GetRuleIterator(
-      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, std::string(), false);
+      ContentSettingsType::MEDIASTREAM_CAMERA, false);
   EXPECT_FALSE(rule_iterator);
 
-  rule_iterator = provider_->GetRuleIterator(
-      CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string(), false);
+  rule_iterator =
+      provider_->GetRuleIterator(ContentSettingsType::MEDIASTREAM_MIC, false);
   EXPECT_FALSE(rule_iterator);
 }
 

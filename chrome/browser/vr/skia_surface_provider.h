@@ -1,13 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_VR_SKIA_SURFACE_PROVIDER_H_
 #define CHROME_BROWSER_VR_SKIA_SURFACE_PROVIDER_H_
 
-#include "chrome/browser/vr/gl_bindings.h"
+#include "device/vr/gl_bindings.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
-#include "third_party/skia/include/gpu/GrContext.h"
+#include "third_party/skia/include/gpu/GrDirectContext.h"
 
 class SkSurface;
 

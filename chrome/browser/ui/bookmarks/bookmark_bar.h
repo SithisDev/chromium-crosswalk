@@ -1,20 +1,23 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_BOOKMARKS_BOOKMARK_BAR_H_
 #define CHROME_BROWSER_UI_BOOKMARKS_BOOKMARK_BAR_H_
 
-#include "base/macros.h"
-
 class BookmarkBar {
  public:
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
   enum State {
     // The bookmark bar is not visible.
-    HIDDEN,
+    HIDDEN = 0,
 
-    // The bookmark bar is visible and not detached.
-    SHOW
+    // The bookmark bar is visible.
+    SHOW = 1,
+
+    // Constant used by the histogram macros.
+    kMaxValue = SHOW
   };
 
   // Used when the state changes to indicate if the transition should be
@@ -24,8 +27,9 @@ class BookmarkBar {
     DONT_ANIMATE_STATE_CHANGE
   };
 
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(BookmarkBar);
+  BookmarkBar() = delete;
+  BookmarkBar(const BookmarkBar&) = delete;
+  BookmarkBar& operator=(const BookmarkBar&) = delete;
 };
 
 #endif  // CHROME_BROWSER_UI_BOOKMARKS_BOOKMARK_BAR_H_

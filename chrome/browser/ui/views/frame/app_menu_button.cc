@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 
 #include <utility>
 
+#include "base/observer_list.h"
+#include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/browser/ui/views/frame/app_menu_button_observer.h"
@@ -14,25 +16,20 @@
 #include "ui/views/controls/button/menu_button_controller.h"
 #include "ui/views/view_class_properties.h"
 
-AppMenuButton::AppMenuButton(views::MenuButtonListener* menu_button_listener)
-    : ToolbarButton(nullptr) {
+AppMenuButton::AppMenuButton(PressedCallback callback)
+    : ToolbarButton(PressedCallback()) {
   std::unique_ptr<views::MenuButtonController> menu_button_controller =
       std::make_unique<views::MenuButtonController>(
-          this, menu_button_listener, CreateButtonControllerDelegate());
+          this, std::move(callback),
+          std::make_unique<views::Button::DefaultButtonControllerDelegate>(
+              this));
   menu_button_controller_ = menu_button_controller.get();
   SetButtonController(std::move(menu_button_controller));
   SetProperty(views::kInternalPaddingKey, gfx::Insets());
+  SetProperty(views::kElementIdentifierKey, kAppMenuButtonElementId);
 }
 
-AppMenuButton::~AppMenuButton() {}
-
-void AppMenuButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
-  // TODO(pbos): Consolidate with ToolbarButton::OnBoundsChanged.
-  // ToolbarButton::OnBoundsChanged calls UpdateHighlightBackgroundAndInsets
-  // which expects ToolbarButtons to be the same height as the location bar
-  // which breaks tests on ChromeOS.
-  SetToolbarButtonHighlightPath(this, *GetProperty(views::kInternalPaddingKey));
-}
+AppMenuButton::~AppMenuButton() = default;
 
 void AppMenuButton::AddObserver(AppMenuButtonObserver* observer) {
   observer_list_.AddObserver(observer);
@@ -49,6 +46,7 @@ void AppMenuButton::CloseMenu() {
 }
 
 void AppMenuButton::OnMenuClosed() {
+  HandleMenuClosed();
   for (AppMenuButtonObserver& observer : observer_list_)
     observer.AppMenuClosed();
 }
@@ -74,3 +72,5 @@ void AppMenuButton::RunMenu(std::unique_ptr<AppMenuModel> menu_model,
   for (AppMenuButtonObserver& observer : observer_list_)
     observer.AppMenuShown();
 }
+
+void AppMenuButton::HandleMenuClosed() {}

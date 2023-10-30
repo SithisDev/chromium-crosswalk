@@ -1,8 +1,10 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/chromedriver/chrome/stub_devtools_client.h"
+
+#include <memory>
 
 #include "base/values.h"
 #include "chrome/test/chromedriver/chrome/status.h"
@@ -17,6 +19,10 @@ const std::string& StubDevToolsClient::GetId() {
   return id_;
 }
 
+bool StubDevToolsClient::IsNull() const {
+  return false;
+}
+
 bool StubDevToolsClient::WasCrashed() {
   return false;
 }
@@ -28,8 +34,15 @@ Status StubDevToolsClient::ConnectIfNecessary() {
 Status StubDevToolsClient::SendCommand(
     const std::string& method,
     const base::DictionaryValue& params) {
-  std::unique_ptr<base::DictionaryValue> result;
+  base::Value result;
   return SendCommandAndGetResult(method, params, &result);
+}
+
+Status StubDevToolsClient::SendCommandFromWebSocket(
+    const std::string& method,
+    const base::DictionaryValue& params,
+    const int client_command_id) {
+  return SendCommand(method, params);
 }
 
 Status StubDevToolsClient::SendCommandWithTimeout(
@@ -48,8 +61,8 @@ Status StubDevToolsClient::SendAsyncCommand(
 Status StubDevToolsClient::SendCommandAndGetResult(
     const std::string& method,
     const base::DictionaryValue& params,
-    std::unique_ptr<base::DictionaryValue>* result) {
-  result->reset(new base::DictionaryValue());
+    base::Value* result) {
+  *result = base::Value(base::Value::Type::DICTIONARY);
   return Status(kOk);
 }
 
@@ -57,7 +70,7 @@ Status StubDevToolsClient::SendCommandAndGetResultWithTimeout(
     const std::string& method,
     const base::DictionaryValue& params,
     const Timeout* timeout,
-    std::unique_ptr<base::DictionaryValue>* result) {
+    base::Value* result) {
   return SendCommandAndGetResult(method, params, result);
 }
 
@@ -84,3 +97,19 @@ Status StubDevToolsClient::HandleReceivedEvents() {
 void StubDevToolsClient::SetDetached() {}
 
 void StubDevToolsClient::SetOwner(WebViewImpl* owner) {}
+
+WebViewImpl* StubDevToolsClient::GetOwner() const {
+  return nullptr;
+}
+
+DevToolsClient* StubDevToolsClient::GetRootClient() {
+  return this;
+}
+
+DevToolsClient* StubDevToolsClient::GetParentClient() const {
+  return nullptr;
+}
+
+bool StubDevToolsClient::IsMainPage() const {
+  return true;
+}

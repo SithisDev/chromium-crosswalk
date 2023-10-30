@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,8 +45,6 @@ function getActiveTab(callback) {
 
 // Tests refocusing an existing page.
 function testRefocusExistingOptionsPage() {
-  // Note that using chrome://chrome/ as |testUrl| would be problematic here,
-  // because the options page will happily overwrite the tab pointing to it.
   var testUrl = 'about:blank';
 
   // There will already be an options page open from the last test. Find it,
@@ -56,7 +54,7 @@ function testRefocusExistingOptionsPage() {
     chrome.tabs.create({url: testUrl}, callbackPass(function(tab) {
       // Make sure the new tab is active.
       getActiveTab(function(activeTab) {
-        assertEq(testUrl, activeTab.url);
+        assertEq(testUrl, activeTab.url || activeTab.pendingUrl);
         // Open options page should refocus it.
         chrome.runtime.openOptionsPage(callbackPass(function() {
           getActiveTab(function(activeTab) {

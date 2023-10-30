@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,24 +9,26 @@
 
 #include "base/callback.h"
 #include "base/environment.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/vr/test/conditional_skipping.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "content/public/browser/web_contents.h"
-#include "content/public/common/content_features.h"
-#include "content/public/common/content_switches.h"
+#include "device/base/features.h"
 #include "device/vr/test/test_hook.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "url/gurl.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
+
+namespace content {
+class WebContents;
+}
 
 namespace vr {
 
@@ -38,23 +40,16 @@ namespace vr {
 class XrBrowserTestBase : public InProcessBrowserTest {
  public:
   static constexpr base::TimeDelta kPollCheckIntervalShort =
-      base::TimeDelta::FromMilliseconds(50);
+      base::Milliseconds(50);
   static constexpr base::TimeDelta kPollCheckIntervalLong =
-      base::TimeDelta::FromMilliseconds(100);
-  static constexpr base::TimeDelta kPollTimeoutShort =
-      base::TimeDelta::FromMilliseconds(1000);
+      base::Milliseconds(100);
+  static constexpr base::TimeDelta kPollTimeoutShort = base::Milliseconds(1000);
   static constexpr base::TimeDelta kPollTimeoutMedium =
-      base::TimeDelta::FromMilliseconds(5000);
-  static constexpr base::TimeDelta kPollTimeoutLong =
-      base::TimeDelta::FromMilliseconds(10000);
-  // Still considered XR-wide instead of VR-specific since OpenVR can be used
-  // for passthrough AR with certain headsets.
-  static constexpr char kVrOverrideEnvVar[] = "VR_OVERRIDE";
-  static constexpr char kVrOverrideVal[] = "./mock_vr_clients/";
-  static constexpr char kVrConfigPathEnvVar[] = "VR_CONFIG_PATH";
-  static constexpr char kVrConfigPathVal[] = "./";
-  static constexpr char kVrLogPathEnvVar[] = "VR_LOG_PATH";
-  static constexpr char kVrLogPathVal[] = "./";
+      base::Milliseconds(5000);
+  static constexpr base::TimeDelta kPollTimeoutLong = base::Milliseconds(10000);
+  static constexpr char kOpenXrConfigPathEnvVar[] = "XR_RUNTIME_JSON";
+  static constexpr char kOpenXrConfigPathVal[] =
+      "./mock_vr_clients/bin/openxr/openxr.json";
   static constexpr char kTestFileDir[] =
       "chrome/test/data/xr/e2e_test_files/html/";
   static constexpr char kSwitchIgnoreRuntimeRequirements[] =
@@ -70,32 +65,20 @@ class XrBrowserTestBase : public InProcessBrowserTest {
 
   enum class RuntimeType {
     RUNTIME_NONE = 0,
-    RUNTIME_OPENVR = 1,
-    RUNTIME_WMR = 2
+    RUNTIME_OPENXR = 3
   };
 
   XrBrowserTestBase();
+
+  XrBrowserTestBase(const XrBrowserTestBase&) = delete;
+  XrBrowserTestBase& operator=(const XrBrowserTestBase&) = delete;
+
   ~XrBrowserTestBase() override;
 
   void SetUp() override;
   void TearDown() override;
 
   virtual RuntimeType GetRuntimeType() const;
-  device::XrAxisType GetPrimaryAxisType() const;
-  device::XrAxisType GetSecondaryAxisType() const;
-
-  // Returns a GURL to the XR test HTML file of the given name, e.g.
-  // GetHtmlTestFile("foo") returns a GURL for the foo.html file in the XR
-  // test HTML directory.
-  GURL GetFileUrlForHtmlTestFile(const std::string& test_name);
-
-  // Returns a GURL to the XR test HTML file of the given name served through
-  // the local server.
-  GURL GetEmbeddedServerUrlForHtmlTestFile(const std::string& test_name);
-
-  // Returns a pointer to the embedded test server capable of serving test
-  // HTML files, initializing and starting the server if necessary.
-  net::EmbeddedTestServer* GetEmbeddedServer();
 
   // Convenience function for accessing the WebContents belonging to the current
   // tab open in the browser.
@@ -103,7 +86,7 @@ class XrBrowserTestBase : public InProcessBrowserTest {
 
   // Loads the given GURL and blocks until the JavaScript on the page has
   // signalled that pre-test initialization is complete.
-  void LoadUrlAndAwaitInitialization(const GURL& url);
+  void LoadFileAndAwaitInitialization(const std::string& url);
 
   // Convenience function for ensuring the given JavaScript runs successfully
   // without having to always surround in ASSERT_TRUE.
@@ -170,7 +153,8 @@ class XrBrowserTestBase : public InProcessBrowserTest {
   void AssertNoJavaScriptErrors(content::WebContents* web_contents);
 
   Browser* browser() {
-    return browser_ == nullptr ? InProcessBrowserTest::browser() : browser_;
+    return browser_ == nullptr ? InProcessBrowserTest::browser()
+                               : browser_.get();
   }
 
   void SetBrowser(Browser* browser) { browser_ = browser; }
@@ -199,8 +183,9 @@ class XrBrowserTestBase : public InProcessBrowserTest {
 
   // Convenience function for running PollJavaScriptBooleanOrFail with the
   // return value of GetCurrentWebContents.
-  void PollJavaScriptBooleanOrFail(const std::string& bool_expression,
-                                   const base::TimeDelta& timeout);
+  void PollJavaScriptBooleanOrFail(
+      const std::string& bool_expression,
+      const base::TimeDelta& timeout = kPollTimeoutShort);
 
   // Convenience function for running WaitOnJavaScriptStep with the return value
   // of GetCurrentWebContents.
@@ -230,21 +215,30 @@ class XrBrowserTestBase : public InProcessBrowserTest {
   std::vector<base::Feature> enable_features_;
   std::vector<base::Feature> disable_features_;
   std::vector<std::string> append_switches_;
+  std::vector<std::string> enable_blink_features_;
   std::vector<XrTestRequirement> runtime_requirements_;
   std::unordered_set<std::string> ignored_requirements_;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   HWND hwnd_;
 #endif
 
  private:
   void LogJavaScriptFailure();
-  Browser* browser_ = nullptr;
+
+  // Returns a GURL to the XR test HTML file of the given name served through
+  // the local server.
+  GURL GetUrlForFile(const std::string& test_name);
+
+  // Returns a pointer to the embedded test server capable of serving test
+  // HTML files, initializing and starting the server if necessary.
+  net::EmbeddedTestServer* GetEmbeddedServer();
+
+  raw_ptr<Browser> browser_ = nullptr;
   std::unique_ptr<net::EmbeddedTestServer> server_;
   base::test::ScopedFeatureList scoped_feature_list_;
   bool test_skipped_at_startup_ = false;
   bool javascript_failed_ = false;
-  DISALLOW_COPY_AND_ASSIGN(XrBrowserTestBase);
 };
 
 }  // namespace vr

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 namespace chrome {
 
 // Returns true if the given browser command is allowed in app mode.
-bool IsCommandAllowedInAppMode(int command_id);
+bool IsCommandAllowedInAppMode(int command_id, bool is_popup);
 
 // Returns true if the browser process is run in kiosk or forced app mode.
 bool IsRunningInAppMode();

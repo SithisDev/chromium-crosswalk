@@ -1,13 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/chrome_browser_application_mac.h"
 
+#include <Carbon/Carbon.h>  // for <HIToolbox/Events.h>
+
+#include "base/check.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/mac/call_with_eh_frame.h"
-#include "base/mac/sdk_forward_declarations.h"
 #include "base/observer_list.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
@@ -59,14 +60,24 @@ std::string DescriptionForNSEvent(NSEvent* event) {
     case NSEventTypeKeyDown:
     case NSEventTypeKeyUp: {
       // Some NSEvents return a string with NUL in event.characters, see
-      // <https://crbug.com/826908>.
-      std::string characters = base::SysNSStringToUTF8([event.characters
-          stringByReplacingOccurrencesOfString:@"\0"
-                                    withString:@"\\x00"]);
-      std::string unmodified_characters =
-          base::SysNSStringToUTF8([event.charactersIgnoringModifiers
-              stringByReplacingOccurrencesOfString:@"\0"
-                                        withString:@"\\x00"]);
+      // <https://crbug.com/826908>. To make matters worse, in rare cases,
+      // NSEvent.characters or NSEvent.charactersIgnoringModifiers can throw an
+      // NSException complaining that "TSMProcessRawKeyCode failed". Since we're
+      // trying to gather a crash key here, if that exception happens, just
+      // remark that it happened and continue rather than crashing the browser.
+      std::string characters, unmodified_characters;
+      @try {
+        characters = base::SysNSStringToUTF8([event.characters
+            stringByReplacingOccurrencesOfString:@"\0"
+                                      withString:@"\\x00"]);
+        unmodified_characters =
+            base::SysNSStringToUTF8([event.charactersIgnoringModifiers
+                stringByReplacingOccurrencesOfString:@"\0"
+                                          withString:@"\\x00"]);
+      } @catch (id exception) {
+        characters = "(exception)";
+        unmodified_characters = "(exception)";
+      }
       desc += base::StringPrintf(
           " keyCode=0x%d ARepeat=%d characters='%s' unmodifiedCharacters='%s'",
           event.keyCode, event.ARepeat, characters.c_str(),
@@ -85,10 +96,10 @@ std::string DescriptionForNSEvent(NSEvent* event) {
       desc += base::StringPrintf(" buttonNumber=%ld clickCount=%ld",
                                  event.buttonNumber, event.clickCount);
       break;
-    case NSAppKitDefined:
-    case NSSystemDefined:
-    case NSApplicationDefined:
-    case NSPeriodic:
+    case NSEventTypeAppKitDefined:
+    case NSEventTypeSystemDefined:
+    case NSEventTypeApplicationDefined:
+    case NSEventTypePeriodic:
       desc += base::StringPrintf(" subtype=%d data1=%ld data2=%ld",
                                  event.subtype, event.data1, event.data2);
       break;
@@ -102,7 +113,7 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 
 @interface BrowserCrApplication ()<NativeEventProcessor> {
   base::ObserverList<content::NativeEventProcessorObserver>::Unchecked
-      observers_;
+      _observers;
 }
 @end
 
@@ -289,41 +300,49 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 }
 
 - (BOOL)isHandlingSendEvent {
-  return handlingSendEvent_;
+  return _handlingSendEvent;
 }
 
 - (void)setHandlingSendEvent:(BOOL)handlingSendEvent {
-  handlingSendEvent_ = handlingSendEvent;
+  _handlingSendEvent = handlingSendEvent;
 }
 
 - (void)sendEvent:(NSEvent*)event {
   TRACE_EVENT0("toplevel", "BrowserCrApplication::sendEvent");
+
+  // TODO(bokan): Tracing added temporarily to diagnose crbug.com/1039833.
+  TRACE_EVENT_INSTANT1("toplevel", "KeyWindow", TRACE_EVENT_SCOPE_THREAD,
+                       "KeyWin", [[NSApp keyWindow] windowNumber]);
 
   static crash_reporter::CrashKeyString<256> nseventKey("nsevent");
   crash_reporter::ScopedCrashKeyString scopedKey(&nseventKey,
                                                  DescriptionForNSEvent(event));
 
   base::mac::CallWithEHFrame(^{
-    switch (event.type) {
-      case NSLeftMouseDown:
-      case NSRightMouseDown: {
-        // In kiosk mode, we want to prevent context menus from appearing,
-        // so simply discard menu-generating events instead of passing them
-        // along.
-        bool kioskMode = base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kKioskMode);
-        bool ctrlDown = [event modifierFlags] & NSControlKeyMask;
-        if (kioskMode && ([event type] == NSRightMouseDown || ctrlDown))
-          break;
-        FALLTHROUGH;  // Not menu-generating, so pass on the event.
-      }
-
-      default: {
-        base::mac::ScopedSendingEvent sendingEventScoper;
-        content::ScopedNotifyNativeEventProcessorObserver
-            scopedObserverNotifier(&observers_, event);
-        [super sendEvent:event];
-      }
+    static const bool kKioskMode =
+        base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode);
+    if (kKioskMode) {
+      // In kiosk mode, we want to prevent context menus from appearing,
+      // so simply discard menu-generating events instead of passing them
+      // along.
+      BOOL couldTriggerContextMenu =
+          event.type == NSEventTypeRightMouseDown ||
+          (event.type == NSEventTypeLeftMouseDown &&
+           (event.modifierFlags & NSEventModifierFlagControl));
+      if (couldTriggerContextMenu)
+        return;
+    }
+    base::mac::ScopedSendingEvent sendingEventScoper;
+    content::ScopedNotifyNativeEventProcessorObserver scopedObserverNotifier(
+        &_observers, event);
+    // Mac Eisu and Kana keydown events are by default swallowed by sendEvent
+    // and sent directly to IME, which prevents ui keydown events from firing.
+    // These events need to be sent to [NSApp keyWindow] for handling.
+    if ([event type] == NSEventTypeKeyDown &&
+        ([event keyCode] == kVK_JIS_Eisu || [event keyCode] == kVK_JIS_Kana)) {
+      [[NSApp keyWindow] sendEvent:event];
+    } else {
+      [super sendEvent:event];
     }
   });
 }
@@ -347,14 +366,28 @@ std::string DescriptionForNSEvent(NSEvent* event) {
   return [super accessibilityFocusedUIElement];
 }
 
+- (NSAccessibilityRole)accessibilityRole {
+  // For non-VoiceOver AT, such as Voice Control, Apple recommends turning on
+  // a11y when an AT accesses the 'accessibilityRole' property. This function
+  // is accessed frequently so we only change the accessibility state when
+  // accessibility is disabled.
+  content::BrowserAccessibilityState* accessibility_state =
+      content::BrowserAccessibilityState::GetInstance();
+  if (!accessibility_state->GetAccessibilityMode().has_mode(
+          ui::kAXModeBasic.mode())) {
+    accessibility_state->AddAccessibilityModeFlags(ui::kAXModeBasic);
+  }
+  return [super accessibilityRole];
+}
+
 - (void)addNativeEventProcessorObserver:
     (content::NativeEventProcessorObserver*)observer {
-  observers_.AddObserver(observer);
+  _observers.AddObserver(observer);
 }
 
 - (void)removeNativeEventProcessorObserver:
     (content::NativeEventProcessorObserver*)observer {
-  observers_.RemoveObserver(observer);
+  _observers.RemoveObserver(observer);
 }
 
 @end

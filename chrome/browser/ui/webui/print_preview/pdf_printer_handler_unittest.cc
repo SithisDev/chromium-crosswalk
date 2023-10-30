@@ -1,19 +1,182 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/print_preview/pdf_printer_handler.h"
 
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/values_test_util.h"
+#include "build/build_config.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/test/base/browser_with_test_window_test.h"
+#include "chrome/test/base/scoped_browser_locale.h"
 #include "components/url_formatter/url_formatter.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
+
+#if BUILDFLAG(IS_MAC)
+#include "chrome/common/printing/printer_capabilities_mac.h"
+#include "printing/backend/print_backend.h"
+#include "ui/gfx/geometry/size.h"
+#endif
 
 #define FPL(x) FILE_PATH_LITERAL(x)
 
 namespace printing {
 
+namespace {
+
+const char kPdfDeviceName[] = "Save as PDF";
+
+const char kPdfPrinterCapability[] =
+    R"({
+        "capabilities":{
+          "printer":{
+            "color":{
+              "option":[
+                {
+                  "is_default":true,
+                  "type":"STANDARD_COLOR",
+                  "vendor_id":"2"
+                }
+              ]
+            },
+            "dpi": {
+               "option": [ {
+                  "horizontal_dpi": 300,
+                  "is_default": true,
+                  "vertical_dpi": 300
+               } ]
+            },
+            "media_size":{
+              "option":[
+                {
+                  "height_microns":1189000,
+                  "name":"ISO_A0",
+                  "width_microns":841000
+                },
+                {
+                  "height_microns":841000,
+                  "name":"ISO_A1",
+                  "width_microns":594000
+                },
+                {
+                  "height_microns":594000,
+                  "name":"ISO_A2",
+                  "width_microns":420000
+                },
+                {
+                  "height_microns":420000,
+                  "name":"ISO_A3",
+                  "width_microns":297000
+                },
+                {
+                  "height_microns":297000,
+                  "name":"ISO_A4",
+                  "width_microns":210000
+                },
+                {
+                  "height_microns":210000,
+                  "name":"ISO_A5",
+                  "width_microns":148000
+                },
+                {
+                  "height_microns":355600,
+                  "name":"NA_LEGAL",
+                  "width_microns":215900
+                },
+                {
+                  "height_microns":279400,
+                  "is_default":true,
+                  "name":"NA_LETTER",
+                  "width_microns":215900
+                },
+                {
+                  "height_microns":431800,
+                  "name":"NA_LEDGER",
+                  "width_microns":279400
+                }
+              ]
+            },
+            "page_orientation":{
+              "option":[
+                {
+                  "type":"PORTRAIT"
+                },
+                {
+                  "type":"LANDSCAPE"
+                },
+                {
+                  "is_default":true,
+                  "type":"AUTO"
+                }
+              ]
+            }
+          },
+          "version":"1.0"
+        },
+        "deviceName":"Save as PDF"
+      })";
+
+// Used as a callback to StartGetCapability() in tests.
+// Records values returned by StartGetCapability().
+void RecordCapability(base::OnceClosure done_closure,
+                      base::Value::Dict* capability_out,
+                      base::Value::Dict capability) {
+  *capability_out = std::move(capability);
+  std::move(done_closure).Run();
+}
+
+#if BUILDFLAG(IS_MAC)
+base::Value GetValueFromCustomPaper(
+    const PrinterSemanticCapsAndDefaults::Paper& paper) {
+  base::Value paper_value(base::Value::Type::DICTIONARY);
+  paper_value.SetStringKey("custom_display_name", paper.display_name);
+  paper_value.SetIntKey("height_microns", paper.size_um.height());
+  paper_value.SetIntKey("width_microns", paper.size_um.width());
+  return paper_value;
+}
+#endif
+
+}  // namespace
+
 using PdfPrinterHandlerTest = testing::Test;
+
+class PdfPrinterHandlerGetCapabilityTest : public BrowserWithTestWindowTest {
+ public:
+  PdfPrinterHandlerGetCapabilityTest() = default;
+  ~PdfPrinterHandlerGetCapabilityTest() override = default;
+
+  void SetUp() override {
+    BrowserWithTestWindowTest::SetUp();
+
+    // Set the locale to ensure NA_LETTER is the default paper size.
+    scoped_browser_locale_ = std::make_unique<ScopedBrowserLocale>("en-US");
+
+    // Create the PDF printer handler
+    pdf_printer_handler_ = std::make_unique<PdfPrinterHandler>(
+        profile(), browser()->tab_strip_model()->GetActiveWebContents(),
+        /*sticky_settings=*/nullptr);
+  }
+
+ protected:
+  base::Value::Dict StartGetCapabilityAndWaitForResults() {
+    base::RunLoop run_loop;
+    base::Value::Dict capability;
+    pdf_printer_handler_->StartGetCapability(
+        kPdfDeviceName,
+        base::BindOnce(&RecordCapability, run_loop.QuitClosure(), &capability));
+    run_loop.Run();
+
+    return capability;
+  }
+
+ private:
+  std::unique_ptr<ScopedBrowserLocale> scoped_browser_locale_;
+  std::unique_ptr<PdfPrinterHandler> pdf_printer_handler_;
+};
 
 TEST_F(PdfPrinterHandlerTest, GetFileNameForPrintJobTitle) {
   static const struct {
@@ -98,11 +261,52 @@ TEST_F(PdfPrinterHandlerTest, GetFileName) {
   for (const auto& data : kTestData) {
     SCOPED_TRACE(std::string(data.url) + " | " + data.job_title);
     GURL url(data.url);
-    base::string16 job_title = base::ASCIIToUTF16(data.job_title);
+    std::u16string job_title = base::ASCIIToUTF16(data.job_title);
     base::FilePath path =
         PdfPrinterHandler::GetFileName(url, job_title, data.is_savable);
     EXPECT_EQ(data.expected_output, path.value());
   }
 }
+
+TEST_F(PdfPrinterHandlerGetCapabilityTest, GetCapability) {
+  base::Value expected_capability =
+      base::test::ParseJson(kPdfPrinterCapability);
+  ASSERT_TRUE(expected_capability.is_dict());
+  base::Value::Dict capability = StartGetCapabilityAndWaitForResults();
+  EXPECT_EQ(expected_capability.GetDict(), capability);
+}
+
+#if BUILDFLAG(IS_MAC)
+TEST_F(PdfPrinterHandlerGetCapabilityTest,
+       GetMacCustomPaperSizesInCapabilities) {
+  constexpr char kPaperOptionPath[] = "capabilities.printer.media_size.option";
+  static const PrinterSemanticCapsAndDefaults::Papers kTestPapers = {
+      {"printer1", "", gfx::Size(101600, 127000)},
+      {"printer2", "", gfx::Size(76200, 152400)},
+      {"printer3", "", gfx::Size(330200, 863600)},
+      {"printer4", "", gfx::Size(101600, 50800)},
+  };
+
+  base::Value expected_capability =
+      base::test::ParseJson(kPdfPrinterCapability);
+  ASSERT_TRUE(expected_capability.is_dict());
+
+  base::Value::List* expected_paper_options =
+      expected_capability.GetDict().FindListByDottedPath(kPaperOptionPath);
+  ASSERT_TRUE(expected_paper_options);
+
+  for (const PrinterSemanticCapsAndDefaults::Paper& paper : kTestPapers)
+    expected_paper_options->Append(GetValueFromCustomPaper(paper));
+
+  SetMacCustomPaperSizesForTesting(kTestPapers);
+
+  base::Value::Dict capability = StartGetCapabilityAndWaitForResults();
+
+  const base::Value::List* paper_options =
+      capability.FindListByDottedPath(kPaperOptionPath);
+  ASSERT_TRUE(paper_options);
+  EXPECT_EQ(*expected_paper_options, *paper_options);
+}
+#endif
 
 }  // namespace printing

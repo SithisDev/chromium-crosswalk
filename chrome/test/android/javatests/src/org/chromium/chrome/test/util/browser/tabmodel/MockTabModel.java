@@ -1,22 +1,27 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.test.util.browser.tabmodel;
 
+import org.chromium.base.ObserverList;
+import org.chromium.chrome.browser.tab.MockTab;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabBuilder;
+import org.chromium.chrome.browser.tab.TabCreationState;
+import org.chromium.chrome.browser.tab.TabLaunchType;
+import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModel;
-import org.chromium.chrome.browser.tabmodel.TabLaunchType;
+import org.chromium.chrome.browser.tabmodel.IncognitoTabModel;
+import org.chromium.chrome.browser.tabmodel.IncognitoTabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModel;
-import org.chromium.chrome.browser.tabmodel.TabSelectionType;
+import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 
 import java.util.ArrayList;
 
 /**
  * Almost empty implementation to mock a TabModel. It only handles tab creation and queries.
  */
-public class MockTabModel extends EmptyTabModel {
+public class MockTabModel extends EmptyTabModel implements IncognitoTabModel {
     /**
      * Used to create different kinds of Tabs.  If a MockTabModelDelegate is not provided, regular
      * Tabs are produced.
@@ -33,9 +38,11 @@ public class MockTabModel extends EmptyTabModel {
 
     private int mIndex = TabModel.INVALID_TAB_INDEX;
 
+    private final ObserverList<TabModelObserver> mObservers = new ObserverList<>();
     private final ArrayList<Tab> mTabs = new ArrayList<Tab>();
     private final boolean mIncognito;
     private final MockTabModelDelegate mDelegate;
+    private boolean mIsActiveModel;
 
     public MockTabModel(boolean incognito, MockTabModelDelegate delegate) {
         mIncognito = incognito;
@@ -43,14 +50,17 @@ public class MockTabModel extends EmptyTabModel {
     }
 
     public Tab addTab(int id) {
-        Tab tab = mDelegate == null ? new TabBuilder().setId(id).setIncognito(isIncognito()).build()
+        Tab tab = mDelegate == null ? new MockTab(id, isIncognito())
                                     : mDelegate.createTab(id, isIncognito());
         mTabs.add(tab);
         return tab;
     }
 
     @Override
-    public void addTab(Tab tab, int index, @TabLaunchType int type) {
+    public void addTab(
+            Tab tab, int index, @TabLaunchType int type, @TabCreationState int creationState) {
+        for (TabModelObserver observer : mObservers) observer.willAddTab(tab, type);
+
         if (index == -1) {
             mTabs.add(tab);
         } else {
@@ -58,6 +68,15 @@ public class MockTabModel extends EmptyTabModel {
             if (index <= mIndex) {
                 mIndex++;
             }
+        }
+
+        for (TabModelObserver observer : mObservers) observer.didAddTab(tab, type, creationState);
+    }
+
+    @Override
+    public void removeTab(Tab tab) {
+        if (mTabs.remove(tab)) {
+            for (TabModelObserver observer : mObservers) observer.tabRemoved(tab);
         }
     }
 
@@ -87,7 +106,32 @@ public class MockTabModel extends EmptyTabModel {
     }
 
     @Override
-    public void setIndex(int i, @TabSelectionType int type) {
+    public void setIndex(int i, @TabSelectionType int type, boolean skipLoadingTab) {
         mIndex = i;
+    }
+
+    @Override
+    public void addObserver(TabModelObserver observer) {
+        mObservers.addObserver(observer);
+    }
+
+    @Override
+    public void removeObserver(TabModelObserver observer) {
+        mObservers.removeObserver(observer);
+    }
+
+    @Override
+    public void addIncognitoObserver(IncognitoTabModelObserver observer) {}
+
+    @Override
+    public void removeIncognitoObserver(IncognitoTabModelObserver observer) {}
+
+    @Override
+    public boolean isActiveModel() {
+        return mIsActiveModel;
+    }
+
+    public void setAsActiveModelForTesting() {
+        mIsActiveModel = true;
     }
 }

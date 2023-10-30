@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,14 +19,10 @@ void DriveUploaderWrapper::UploadExistingFile(
     const base::FilePath& local_file_path,
     const std::string& content_type,
     const drive::UploadExistingFileOptions& options,
-    const drive::UploadCompletionCallback& callback) {
-  DCHECK(sequence_checker_.CalledOnValidSequence());
+    drive::UploadCompletionCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   drive_uploader_->UploadExistingFile(
-      resource_id,
-      local_file_path,
-      content_type,
-      options,
-      callback,
+      resource_id, local_file_path, content_type, options, std::move(callback),
       google_apis::ProgressCallback());
 }
 
@@ -36,16 +32,11 @@ void DriveUploaderWrapper::UploadNewFile(
     const std::string& title,
     const std::string& content_type,
     const drive::UploadNewFileOptions& options,
-    const drive::UploadCompletionCallback& callback) {
-  DCHECK(sequence_checker_.CalledOnValidSequence());
-  drive_uploader_->UploadNewFile(
-      parent_resource_id,
-      local_file_path,
-      title,
-      content_type,
-      options,
-      callback,
-      google_apis::ProgressCallback());
+    drive::UploadCompletionCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  drive_uploader_->UploadNewFile(parent_resource_id, local_file_path, title,
+                                 content_type, options, std::move(callback),
+                                 google_apis::ProgressCallback());
 }
 
 }  // namespace drive_backend

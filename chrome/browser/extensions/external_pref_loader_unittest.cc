@@ -1,22 +1,33 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/external_pref_loader.h"
 
+#include <memory>
+#include <utility>
+
+#include "ash/constants/ash_pref_names.h"
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/task/post_task.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/extensions/external_provider_impl.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/sync/sync_service_factory.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/sync/driver/test_sync_service.h"
+#include "components/prefs/pref_service.h"
+#include "components/sync/test/fake_sync_change_processor.h"
+#include "components/sync/test/sync_error_factory_mock.h"
+#include "components/sync/test/test_sync_service.h"
+#include "components/sync_preferences/pref_model_associator.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/browser/browser_task_traits.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/common/extension.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using extensions::mojom::ManifestLocation;
 
 namespace extensions {
 
@@ -25,6 +36,10 @@ namespace {
 class TestSyncService : public syncer::TestSyncService {
  public:
   TestSyncService() {}
+
+  TestSyncService(const TestSyncService&) = delete;
+  TestSyncService& operator=(const TestSyncService&) = delete;
+
   ~TestSyncService() override {}
 
   // syncer::SyncService:
@@ -43,8 +58,6 @@ class TestSyncService : public syncer::TestSyncService {
 
  private:
   syncer::SyncServiceObserver* observer_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(TestSyncService);
 };
 
 std::unique_ptr<KeyedService> TestingSyncFactoryFunction(
@@ -66,61 +79,71 @@ class TestExternalPrefLoader : public ExternalPrefLoader {
             profile),
         load_callback_(std::move(load_callback)) {}
 
+  TestExternalPrefLoader(const TestExternalPrefLoader&) = delete;
+  TestExternalPrefLoader& operator=(const TestExternalPrefLoader&) = delete;
+
   void LoadOnFileThread() override {
-    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                             std::move(load_callback_));
+    content::GetUIThreadTaskRunner({})->PostTask(FROM_HERE,
+                                                 std::move(load_callback_));
   }
 
  private:
   ~TestExternalPrefLoader() override {}
   base::OnceClosure load_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestExternalPrefLoader);
 };
 
-class ExternalPrefLoaderTest : public testing::Test {
+class ExternalPrefLoaderTest : public ::testing::Test {
  public:
-  ExternalPrefLoaderTest() {}
-  ~ExternalPrefLoaderTest() override {}
+  ExternalPrefLoaderTest(ExternalPrefLoaderTest&) = delete;
+  ExternalPrefLoaderTest& operator=(ExternalPrefLoaderTest&) = delete;
 
-  void SetUp() override { profile_ = std::make_unique<TestingProfile>(); }
+  void SetUp() override {
+    profile_ = std::make_unique<TestingProfile>();
+    sync_service_ = static_cast<TestSyncService*>(
+        SyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+            profile(), base::BindRepeating(&TestingSyncFactoryFunction)));
+    sync_service_->SetFirstSetupComplete(true);
+  }
 
   void TearDown() override { profile_.reset(); }
 
-  Profile* profile() { return profile_.get(); }
+  TestingProfile* profile() { return profile_.get(); }
+
+  TestSyncService* sync_service() { return sync_service_; }
+
+ protected:
+  ExternalPrefLoaderTest() = default;
+  ~ExternalPrefLoaderTest() override = default;
+
+  base::test::ScopedFeatureList feature_list_;
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExternalPrefLoaderTest);
+  TestSyncService* sync_service_ = nullptr;
 };
 
 // TODO(lazyboy): Add a test to cover
 // PrioritySyncReadyWaiter::OnIsSyncingChanged().
 
 // Tests that we fire pref reading correctly after priority sync state
-// is resolved by ExternalPrefLoader.
+// is resolved by ExternalPrefLoader. This test checks that the flow works
+// regardless of the state of SyncSettingsCategorization.
 TEST_F(ExternalPrefLoaderTest, PrefReadInitiatesCorrectly) {
-  TestSyncService* test_service = static_cast<TestSyncService*>(
-      ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          profile(), base::BindRepeating(&TestingSyncFactoryFunction)));
-  test_service->SetFirstSetupComplete(true);
-
   base::RunLoop run_loop;
   scoped_refptr<ExternalPrefLoader> loader(
       new TestExternalPrefLoader(profile(), run_loop.QuitWhenIdleClosure()));
   ExternalProviderImpl provider(
-      nullptr, loader, profile(), Manifest::INVALID_LOCATION,
-      Manifest::INVALID_LOCATION, Extension::NO_FLAGS);
+      nullptr, loader, profile(), ManifestLocation::kInvalidLocation,
+      ManifestLocation::kInvalidLocation, Extension::NO_FLAGS);
   provider.VisitRegisteredExtension();
 
   // Initially CanSyncFeatureStart() returns true, returning false will let
   // |loader| proceed.
-  test_service->SetDisableReasons(
+  sync_service()->SetDisableReasons(
       syncer::SyncService::DISABLE_REASON_USER_CHOICE);
-  ASSERT_FALSE(test_service->CanSyncFeatureStart());
-  test_service->FireOnStateChanged();
+  ASSERT_FALSE(sync_service()->CanSyncFeatureStart());
+  sync_service()->FireOnStateChanged();
   run_loop.Run();
 }
 

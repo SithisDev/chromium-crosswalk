@@ -1,10 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.vr.rules;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -40,5 +40,6 @@ public @interface XrActivityRestriction {
     /**
      * @return A list of activity restrictions.
      */
-    public @SupportedActivity int[] value();
+    @SupportedActivity
+    public int[] value();
 }

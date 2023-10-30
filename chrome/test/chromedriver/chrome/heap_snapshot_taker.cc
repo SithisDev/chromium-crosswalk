@@ -1,15 +1,14 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/chromedriver/chrome/heap_snapshot_taker.h"
 
 #include <stddef.h>
+
 #include <utility>
 
 #include "base/json/json_reader.h"
-#include "base/logging.h"
-#include "base/stl_util.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/chrome/devtools_client.h"
 #include "chrome/test/chromedriver/chrome/status.h"
@@ -47,13 +46,17 @@ Status HeapSnapshotTaker::TakeSnapshotInternal() {
       "HeapProfiler.collectGarbage",
       "HeapProfiler.takeHeapSnapshot"
   };
-  for (size_t i = 0; i < base::size(kMethods); ++i) {
+  for (size_t i = 0; i < std::size(kMethods); ++i) {
     Status status = client_->SendCommand(kMethods[i], params);
     if (status.IsError())
       return status;
   }
 
   return Status(kOk);
+}
+
+bool HeapSnapshotTaker::ListensToConnections() const {
+  return false;
 }
 
 Status HeapSnapshotTaker::OnEvent(DevToolsClient* client,

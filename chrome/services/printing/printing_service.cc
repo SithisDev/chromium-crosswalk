@@ -1,73 +1,72 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/services/printing/printing_service.h"
 
-#include "base/bind.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/services/printing/pdf_nup_converter.h"
 #include "chrome/services/printing/pdf_to_pwg_raster_converter.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_CHROMEOS)
+#include "chrome/services/printing/pdf_flattener.h"
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/services/printing/pdf_thumbnailer.h"
+#endif
+
+#if BUILDFLAG(IS_WIN)
 #include "chrome/services/printing/pdf_to_emf_converter.h"
 #include "chrome/services/printing/pdf_to_emf_converter_factory.h"
 #endif
 
 namespace printing {
 
-namespace {
-
-#if defined(OS_WIN)
-void OnPdfToEmfConverterFactoryRequest(
-    service_manager::ServiceKeepalive* keepalive,
-    printing::mojom::PdfToEmfConverterFactoryRequest request) {
-  mojo::MakeStrongBinding(std::make_unique<printing::PdfToEmfConverterFactory>(
-                              keepalive->CreateRef()),
-                          std::move(request));
-}
-#endif
-
-void OnPdfToPwgRasterConverterRequest(
-    service_manager::ServiceKeepalive* keepalive,
-    printing::mojom::PdfToPwgRasterConverterRequest request) {
-  mojo::MakeStrongBinding(std::make_unique<printing::PdfToPwgRasterConverter>(
-                              keepalive->CreateRef()),
-                          std::move(request));
-}
-
-void OnPdfNupConverterRequest(service_manager::ServiceKeepalive* keepalive,
-                              printing::mojom::PdfNupConverterRequest request) {
-  mojo::MakeStrongBinding(
-      std::make_unique<printing::PdfNupConverter>(keepalive->CreateRef()),
-      std::move(request));
-}
-
-}  // namespace
-
-PrintingService::PrintingService(service_manager::mojom::ServiceRequest request)
-    : service_binding_(this, std::move(request)),
-      service_keepalive_(&service_binding_, base::TimeDelta()) {}
+PrintingService::PrintingService(
+    mojo::PendingReceiver<mojom::PrintingService> receiver)
+    : receiver_(this, std::move(receiver)) {}
 
 PrintingService::~PrintingService() = default;
 
-void PrintingService::OnStart() {
-#if defined(OS_WIN)
-  registry_.AddInterface(base::BindRepeating(&OnPdfToEmfConverterFactoryRequest,
-                                             &service_keepalive_));
-#endif
-  registry_.AddInterface(base::BindRepeating(&OnPdfToPwgRasterConverterRequest,
-                                             &service_keepalive_));
-  registry_.AddInterface(
-      base::BindRepeating(&OnPdfNupConverterRequest, &service_keepalive_));
+void PrintingService::BindPdfNupConverter(
+    mojo::PendingReceiver<mojom::PdfNupConverter> receiver) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<printing::PdfNupConverter>(),
+                              std::move(receiver));
 }
 
-void PrintingService::OnBindInterface(
-    const service_manager::BindSourceInfo& source_info,
-    const std::string& interface_name,
-    mojo::ScopedMessagePipeHandle interface_pipe) {
-  registry_.BindInterface(interface_name, std::move(interface_pipe));
+void PrintingService::BindPdfToPwgRasterConverter(
+    mojo::PendingReceiver<mojom::PdfToPwgRasterConverter> receiver) {
+  mojo::MakeSelfOwnedReceiver(
+      std::make_unique<printing::PdfToPwgRasterConverter>(),
+      std::move(receiver));
 }
+
+#if BUILDFLAG(IS_CHROMEOS)
+void PrintingService::BindPdfFlattener(
+    mojo::PendingReceiver<mojom::PdfFlattener> receiver) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<printing::PdfFlattener>(),
+                              std::move(receiver));
+}
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+void PrintingService::BindPdfThumbnailer(
+    mojo::PendingReceiver<mojom::PdfThumbnailer> receiver) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<printing::PdfThumbnailer>(),
+                              std::move(receiver));
+}
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+#if BUILDFLAG(IS_WIN)
+void PrintingService::BindPdfToEmfConverterFactory(
+    mojo::PendingReceiver<mojom::PdfToEmfConverterFactory> receiver) {
+  mojo::MakeSelfOwnedReceiver(
+      std::make_unique<printing::PdfToEmfConverterFactory>(),
+      std::move(receiver));
+}
+#endif
 
 }  // namespace printing

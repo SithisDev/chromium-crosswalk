@@ -1,42 +1,50 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.jsdialog;
 
-import static android.support.test.espresso.Espresso.onView;
-import static android.support.test.espresso.action.ViewActions.click;
-import static android.support.test.espresso.action.ViewActions.replaceText;
-import static android.support.test.espresso.assertion.ViewAssertions.matches;
-import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
-import static android.support.test.espresso.matcher.ViewMatchers.isFocusable;
-import static android.support.test.espresso.matcher.ViewMatchers.withId;
-import static android.support.test.espresso.matcher.ViewMatchers.withText;
+import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.action.ViewActions.click;
+import static androidx.test.espresso.action.ViewActions.replaceText;
+import static androidx.test.espresso.assertion.ViewAssertions.matches;
+import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
+import static androidx.test.espresso.matcher.ViewMatchers.isFocusable;
+import static androidx.test.espresso.matcher.ViewMatchers.withId;
+import static androidx.test.espresso.matcher.ViewMatchers.withText;
 
+import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 
+import static org.chromium.ui.test.util.ViewUtils.onViewWaiting;
+
 import android.content.pm.ActivityInfo;
-import android.support.test.espresso.Espresso;
-import android.support.test.filters.MediumTest;
+
+import androidx.test.espresso.Espresso;
+import androidx.test.filters.MediumTest;
 
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
+import org.chromium.chrome.test.batch.BlankCTATabInitialStateRule;
+import org.chromium.components.javascript_dialogs.JavascriptTabModalDialog;
 import org.chromium.content_public.browser.LoadUrlParams;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.ui.base.PageTransition;
@@ -51,10 +59,16 @@ import java.util.concurrent.TimeoutException;
  * Test suite for displaying and functioning of tab modal JavaScript alert, confirm and prompt.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
+@Batch(JavascriptAppModalDialogTest.JAVASCRIPT_DIALOG_BATCH_NAME)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class JavascriptTabModalDialogTest {
+    @ClassRule
+    public static ChromeTabbedActivityTestRule sActivityTestRule =
+            new ChromeTabbedActivityTestRule();
+
     @Rule
-    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
+    public BlankCTATabInitialStateRule mBlankCTATabInitialStateRule =
+            new BlankCTATabInitialStateRule(sActivityTestRule, true);
 
     private static final String EMPTY_PAGE = UrlUtils.encodeHtmlDataUri(
             "<html><title>Modal Dialog Test</title><p>Testcase.</p></title></html>");
@@ -64,9 +78,9 @@ public class JavascriptTabModalDialogTest {
     private ChromeTabbedActivity mActivity;
 
     @Before
-    public void setUp() throws InterruptedException {
-        mActivityTestRule.startMainActivityWithURL(EMPTY_PAGE);
-        mActivity = mActivityTestRule.getActivity();
+    public void setUp() {
+        sActivityTestRule.loadUrl(EMPTY_PAGE);
+        mActivity = sActivityTestRule.getActivity();
     }
 
     /**
@@ -76,8 +90,7 @@ public class JavascriptTabModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "Main"})
-    public void testAlertModalDialog()
-            throws InterruptedException, TimeoutException, ExecutionException {
+    public void testAlertModalDialog() throws TimeoutException, ExecutionException {
         final OnEvaluateJavaScriptResultHelper scriptEvent =
                 executeJavaScriptAndWaitForDialog("alert('Hello Android!');");
 
@@ -95,8 +108,7 @@ public class JavascriptTabModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "Main"})
-    public void testAlertModalDialogWithTwoClicks()
-            throws InterruptedException, TimeoutException, ExecutionException {
+    public void testAlertModalDialogWithTwoClicks() throws TimeoutException, ExecutionException {
         OnEvaluateJavaScriptResultHelper scriptEvent =
                 executeJavaScriptAndWaitForDialog("alert('Hello Android');");
         JavascriptTabModalDialog jsDialog = getCurrentDialog();
@@ -119,8 +131,7 @@ public class JavascriptTabModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "Main"})
-    public void testConfirmModalDialog()
-            throws InterruptedException, TimeoutException, ExecutionException {
+    public void testConfirmModalDialog() throws TimeoutException, ExecutionException {
         OnEvaluateJavaScriptResultHelper scriptEvent =
                 executeJavaScriptAndWaitForDialog("confirm('Android');");
 
@@ -156,8 +167,7 @@ public class JavascriptTabModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "Main"})
-    public void testPromptModalDialog()
-            throws InterruptedException, TimeoutException, ExecutionException {
+    public void testPromptModalDialog() throws TimeoutException, ExecutionException {
         final String promptText = "Hello Android!";
         final OnEvaluateJavaScriptResultHelper scriptEvent =
                 executeJavaScriptAndWaitForDialog("prompt('Android', 'default');");
@@ -183,8 +193,7 @@ public class JavascriptTabModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "Main"})
-    public void testAlertModalDialogMessageFocus()
-            throws InterruptedException, TimeoutException, ExecutionException {
+    public void testAlertModalDialogMessageFocus() throws TimeoutException, ExecutionException {
         assertScrollViewFocusabilityInAlertDialog("alert('Short message!');", false);
 
         // Test on landscape mode so that the message is long enough to make scroll view scrollable
@@ -197,9 +206,8 @@ public class JavascriptTabModalDialogTest {
         mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
     }
 
-    private void assertScrollViewFocusabilityInAlertDialog(
-            final String jsAlertScript, final boolean expectedFocusability)
-            throws InterruptedException, TimeoutException, ExecutionException {
+    private void assertScrollViewFocusabilityInAlertDialog(final String jsAlertScript,
+            final boolean expectedFocusability) throws TimeoutException, ExecutionException {
         final OnEvaluateJavaScriptResultHelper scriptEvent =
                 executeJavaScriptAndWaitForDialog(jsAlertScript);
 
@@ -243,7 +251,7 @@ public class JavascriptTabModalDialogTest {
     public void testDialogDismissedAfterToggleOverview() {
         executeJavaScriptAndWaitForDialog("alert('Android')");
 
-        onView(withId(R.id.tab_switcher_button)).perform(click());
+        onViewWaiting(withId(R.id.tab_switcher_button)).perform(click());
 
         // Entering tab switcher should have dismissed the dialog.
         checkDialogShowing(
@@ -319,12 +327,9 @@ public class JavascriptTabModalDialogTest {
      * Check whether dialog is showing as expected.
      */
     private void checkDialogShowing(final String errorMessage, final boolean shouldBeShown) {
-        CriteriaHelper.pollUiThread(new Criteria(errorMessage) {
-            @Override
-            public boolean isSatisfied() {
-                final boolean isShown = mActivity.getModalDialogManager().isShowing();
-                return shouldBeShown == isShown;
-            }
+        CriteriaHelper.pollUiThread(() -> {
+            final boolean isShown = mActivity.getModalDialogManager().isShowing();
+            Criteria.checkThat(errorMessage, isShown, is(shouldBeShown));
         });
     }
 }

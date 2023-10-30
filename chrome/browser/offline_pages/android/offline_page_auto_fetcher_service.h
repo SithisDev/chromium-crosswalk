@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,10 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
 #include "chrome/browser/offline_pages/android/auto_fetch_page_load_watcher.h"
-#include "chrome/common/offline_page_auto_fetcher.mojom.h"
+#include "chrome/common/offline_page_auto_fetcher.mojom-forward.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/offline_pages/core/background/request_coordinator.h"
 #include "components/offline_pages/core/background/request_queue_results.h"
@@ -66,7 +66,7 @@ class OfflinePageAutoFetcherService : public KeyedService,
    public:
     // Calls |offline_pages::ShowAutoFetchCompleteNotification()|.
     virtual void ShowAutoFetchCompleteNotification(
-        const base::string16& pageTitle,
+        const std::u16string& pageTitle,
         const std::string& original_url,
         const std::string& final_url,
         int android_tab_id,
@@ -115,9 +115,9 @@ class OfflinePageAutoFetcherService : public KeyedService,
 
   std::unique_ptr<AutoFetchNotifier> notifier_;
   AutoFetchPageLoadWatcher page_load_watcher_;
-  RequestCoordinator* request_coordinator_;
-  OfflinePageModel* offline_page_model_;
-  Delegate* delegate_;
+  raw_ptr<RequestCoordinator> request_coordinator_;
+  raw_ptr<OfflinePageModel> offline_page_model_;
+  raw_ptr<Delegate> delegate_;
   base::WeakPtrFactory<OfflinePageAutoFetcherService> weak_ptr_factory_{this};
 };
 

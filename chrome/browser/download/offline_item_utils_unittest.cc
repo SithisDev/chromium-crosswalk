@@ -1,8 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/download/offline_item_utils.h"
+
+#include <memory>
+#include <utility>
+#include <vector>
 
 #include "components/download/public/common/download_utils.h"
 #include "components/download/public/common/mock_download_item.h"
@@ -14,17 +18,20 @@ using OfflineItemFilter = offline_items_collection::OfflineItemFilter;
 using OfflineItemState = offline_items_collection::OfflineItemState;
 using OfflineItemProgressUnit =
     offline_items_collection::OfflineItemProgressUnit;
+using OfflineItemSchedule = offline_items_collection::OfflineItemSchedule;
 using FailState = offline_items_collection::FailState;
 using PendingState = offline_items_collection::PendingState;
 using DownloadItem = download::DownloadItem;
+
 using ::testing::_;
 using ::testing::Return;
 using ::testing::ReturnRefOfCopy;
 
 namespace {
-const GURL kTestUrl("http://www.example.com");
-const GURL kTestOriginalUrl("http://www.exampleoriginalurl.com");
-const char kNameSpace[] = "LEGACY_DOWNLOAD";
+
+constexpr char kNameSpace[] = "LEGACY_DOWNLOAD";
+constexpr char kTestUrl[] = "http://www.example.com";
+constexpr char kTestOriginalUrl[] = "http://www.exampleoriginalurl.com";
 
 }  // namespace
 
@@ -75,10 +82,10 @@ OfflineItemUtilsTest::CreateDownloadItem(
     download::DownloadInterruptReason interrupt_reason) {
   std::unique_ptr<download::MockDownloadItem> item(
       new ::testing::NiceMock<download::MockDownloadItem>());
-  ON_CALL(*item, GetURL()).WillByDefault(ReturnRefOfCopy(kTestUrl));
-  ON_CALL(*item, GetTabUrl()).WillByDefault(ReturnRefOfCopy(kTestUrl));
+  ON_CALL(*item, GetURL()).WillByDefault(ReturnRefOfCopy(GURL(kTestUrl)));
+  ON_CALL(*item, GetTabUrl()).WillByDefault(ReturnRefOfCopy(GURL(kTestUrl)));
   ON_CALL(*item, GetOriginalUrl())
-      .WillByDefault(ReturnRefOfCopy(kTestOriginalUrl));
+      .WillByDefault(ReturnRefOfCopy(GURL(kTestOriginalUrl)));
   ON_CALL(*item, GetDangerType())
       .WillByDefault(Return(download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS));
   ON_CALL(*item, GetId()).WillByDefault(Return(0));
@@ -96,9 +103,7 @@ OfflineItemUtilsTest::CreateDownloadItem(
   ON_CALL(*item, GetLastAccessTime()).WillByDefault(Return(last_access_time));
   ON_CALL(*item, GetReceivedBytes()).WillByDefault(Return(received_bytes));
   ON_CALL(*item, GetTotalBytes()).WillByDefault(Return(total_bytes));
-
   ON_CALL(*item, IsDone()).WillByDefault(Return(IsDownloadDone(item.get())));
-
   return item;
 }
 
@@ -122,6 +127,7 @@ TEST_F(OfflineItemUtilsTest, BasicConversions) {
   base::FilePath file_name(FILE_PATH_LITERAL("image.png"));
   std::string mime_type = "image/png";
   base::Time creation_time = base::Time::Now();
+  base::Time completion_time = base::Time::Now();
   base::Time last_access_time = base::Time::Now();
   download::DownloadInterruptReason interrupt_reason =
       download::DOWNLOAD_INTERRUPT_REASON_NONE;
@@ -149,11 +155,11 @@ TEST_F(OfflineItemUtilsTest, BasicConversions) {
   ON_CALL(*download, AllowMetered()).WillByDefault(Return(allow_metered));
   ON_CALL(*download, GetReceivedBytes()).WillByDefault(Return(received_bytes));
   ON_CALL(*download, GetTotalBytes()).WillByDefault(Return(total_bytes));
+  ON_CALL(*download, GetEndTime()).WillByDefault(Return(completion_time));
 
   ON_CALL(*download, TimeRemaining(_))
       .WillByDefault(testing::DoAll(
-          testing::SetArgPointee<0>(
-              base::TimeDelta::FromMilliseconds(time_remaining_ms)),
+          testing::SetArgPointee<0>(base::Milliseconds(time_remaining_ms)),
           Return(true)));
   ON_CALL(*download, IsDangerous()).WillByDefault(Return(is_dangerous));
 
@@ -173,13 +179,14 @@ TEST_F(OfflineItemUtilsTest, BasicConversions) {
   EXPECT_EQ(total_bytes, offline_item.total_size_bytes);
   EXPECT_EQ(externally_removed, offline_item.externally_removed);
   EXPECT_EQ(creation_time, offline_item.creation_time);
+  EXPECT_EQ(completion_time, offline_item.completion_time);
   EXPECT_EQ(last_access_time, offline_item.last_accessed_time);
   EXPECT_EQ(is_openable, offline_item.is_openable);
   EXPECT_EQ(file_path, offline_item.file_path);
   EXPECT_EQ(mime_type, offline_item.mime_type);
 
-  EXPECT_EQ(kTestUrl, offline_item.page_url);
-  EXPECT_EQ(kTestOriginalUrl, offline_item.original_url);
+  EXPECT_EQ(GURL(kTestUrl), offline_item.url);
+  EXPECT_EQ(GURL(kTestOriginalUrl), offline_item.original_url);
   EXPECT_FALSE(offline_item.is_off_the_record);
   EXPECT_EQ("", offline_item.attribution);
 
@@ -190,7 +197,7 @@ TEST_F(OfflineItemUtilsTest, BasicConversions) {
   EXPECT_EQ(allow_metered, offline_item.allow_metered);
   EXPECT_EQ(received_bytes, offline_item.received_bytes);
   EXPECT_EQ(received_bytes, offline_item.progress.value);
-  EXPECT_TRUE(offline_item.progress.max.has_value());
+  ASSERT_TRUE(offline_item.progress.max.has_value());
   EXPECT_EQ(total_bytes, offline_item.progress.max.value());
   EXPECT_EQ(OfflineItemProgressUnit::BYTES, offline_item.progress.unit);
   EXPECT_EQ(time_remaining_ms, offline_item.time_remaining_ms);

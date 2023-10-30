@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,20 +9,24 @@
 
 #include <string>
 
-#include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/feature_switch.h"
+#include "extensions/common/mojom/manifest.mojom-shared.h"
 
 namespace base {
 class FilePath;
 }
 
-namespace extensions {
+namespace content {
+class BrowserTaskEnvironment;
+}
 
-class ExtensionRegistry;
+namespace extensions {
 
 // An enhancement of ExtensionServiceTestBase that provides helpers to install,
 // update, and uninstall extensions.
@@ -30,13 +34,21 @@ class ExtensionServiceTestWithInstall : public ExtensionServiceTestBase,
                                         public ExtensionRegistryObserver {
  public:
   ExtensionServiceTestWithInstall();
+  explicit ExtensionServiceTestWithInstall(
+      std::unique_ptr<content::BrowserTaskEnvironment> task_environment);
+
+  ExtensionServiceTestWithInstall(const ExtensionServiceTestWithInstall&) =
+      delete;
+  ExtensionServiceTestWithInstall& operator=(
+      const ExtensionServiceTestWithInstall&) = delete;
+
   ~ExtensionServiceTestWithInstall() override;
 
  protected:
   void InitializeExtensionService(
       const ExtensionServiceInitParams& params) override;
 
-  static std::vector<base::string16> GetErrors();
+  static std::vector<std::u16string> GetErrors();
 
   void PackCRX(const base::FilePath& dir_path,
                const base::FilePath& pem_path,
@@ -53,21 +65,21 @@ class ExtensionServiceTestWithInstall : public ExtensionServiceTestBase,
                                      const base::FilePath& pem_path,
                                      InstallState install_state,
                                      int creation_flags,
-                                     Manifest::Location install_location);
+                                     mojom::ManifestLocation install_location);
   const Extension* PackAndInstallCRX(const base::FilePath& dir_path,
                                      const base::FilePath& pem_path,
                                      InstallState install_state);
   const Extension* PackAndInstallCRX(const base::FilePath& dir_path,
                                      InstallState install_state);
   const Extension* PackAndInstallCRX(const base::FilePath& dir_path,
-                                     Manifest::Location install_location,
+                                     mojom::ManifestLocation install_location,
                                      InstallState install_state);
   const Extension* InstallCRX(const base::FilePath& path,
                               InstallState install_state,
                               int creation_flags,
                               const std::string& expected_old_name);
   const Extension* InstallCRX(const base::FilePath& path,
-                              Manifest::Location install_location,
+                              mojom::ManifestLocation install_location,
                               InstallState install_state,
                               int creation_flags);
   const Extension* InstallCRX(const base::FilePath& path,
@@ -116,6 +128,15 @@ class ExtensionServiceTestWithInstall : public ExtensionServiceTestBase,
 
   void TerminateExtension(const std::string& id);
 
+  void BlockAllExtensions();
+
+  void ClearLoadedExtensions();
+
+  const ExtensionList& loaded_extensions() const { return loaded_extensions_; }
+  const Extension* installed_extension() const { return installed_extension_; }
+  bool was_update() const { return was_update_; }
+  UnloadedExtensionReason unloaded_reason() const { return unloaded_reason_; }
+
   // ExtensionRegistryObserver:
   void OnExtensionLoaded(content::BrowserContext* browser_context,
                          const Extension* extension) override;
@@ -127,28 +148,24 @@ class ExtensionServiceTestWithInstall : public ExtensionServiceTestBase,
                                   bool is_update,
                                   const std::string& old_name) override;
 
-  // TODO(treib,devlin): Make these private and add accessors as needed.
-  extensions::ExtensionList loaded_;
-  const Extension* installed_;
+ private:
+  void InstallCRXInternal(const base::FilePath& crx_path,
+                          mojom::ManifestLocation install_location,
+                          InstallState install_state,
+                          int creation_flags);
+
+  extensions::ExtensionList loaded_extensions_;
+  raw_ptr<const Extension> installed_extension_;
   bool was_update_;
   std::string old_name_;
   std::string unloaded_id_;
   UnloadedExtensionReason unloaded_reason_;
-
- private:
-  void InstallCRXInternal(const base::FilePath& crx_path,
-                          Manifest::Location install_location,
-                          InstallState install_state,
-                          int creation_flags);
-
   size_t expected_extensions_count_;
 
   FeatureSwitch::ScopedOverride override_external_install_prompt_;
 
-  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
-      registry_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionServiceTestWithInstall);
+  base::ScopedObservation<ExtensionRegistry, ExtensionRegistryObserver>
+      registry_observation_{this};
 };
 
 }  // namespace extensions

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,11 @@
 @interface ElementAppleScript : NSObject {
  @protected
   // Used by the applescript runtime to identify each unique scriptable object.
-  NSNumber* uniqueID_;
+  NSNumber* _uniqueID;
   // Used by object specifier to find a scriptable object's place in a
   // collection.
-  id container_;
-  NSString* containerProperty_;
+  id _container;
+  NSString* _containerProperty;
 }
 
 @property(nonatomic, copy) NSNumber* uniqueID;

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,9 @@
 
 #include <windows.h>
 
+#include "base/callback_helpers.h"
+#include "base/logging.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/win_util.h"
 #include "components/chrome_cleaner/public/proto/chrome_prompt.pb.h"
@@ -43,8 +46,8 @@ void ProtoChromePromptIPC::Initialize(ErrorHandler* error_handler) {
 
 void ProtoChromePromptIPC::PostPromptUserTask(
     const std::vector<base::FilePath>& files_to_delete,
-    const std::vector<base::string16>& registry_keys,
-    const std::vector<base::string16>& extension_ids,
+    const std::vector<std::wstring>& registry_keys,
+    const std::vector<std::wstring>& extension_ids,
     PromptUserCallback callback) {
   DCHECK(task_runner_);
   task_runner_->PostTask(
@@ -52,20 +55,6 @@ void ProtoChromePromptIPC::PostPromptUserTask(
       base::BindOnce(&ProtoChromePromptIPC::RunPromptUserTask,
                      base::Unretained(this), files_to_delete, registry_keys,
                      extension_ids, std::move(callback)));
-}
-
-void ProtoChromePromptIPC::PostDisableExtensionsTask(
-    const std::vector<base::string16>& extension_ids,
-    DisableExtensionsCallback callback) {
-  NOTIMPLEMENTED();
-  OnConnectionError();
-}
-
-void ProtoChromePromptIPC::TryDeleteExtensions(
-    base::OnceClosure delete_allowed_callback,
-    base::OnceClosure delete_not_allowed_callback) {
-  NOTIMPLEMENTED();
-  OnConnectionError();
 }
 
 void ProtoChromePromptIPC::InitializeImpl() {
@@ -79,8 +68,8 @@ void ProtoChromePromptIPC::InitializeImpl() {
 
 void ProtoChromePromptIPC::RunPromptUserTask(
     const std::vector<base::FilePath>& files_to_delete,
-    const std::vector<base::string16>& registry_keys,
-    const std::vector<base::string16>& extension_ids,
+    const std::vector<std::wstring>& registry_keys,
+    const std::vector<std::wstring>& extension_ids,
     PromptUserCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_NE(state_, State::kUninitialized);
@@ -102,31 +91,31 @@ void ProtoChromePromptIPC::RunPromptUserTask(
   chrome_cleaner::PromptUserRequest prompt_user_message;
   for (const base::FilePath& file_to_delete : files_to_delete) {
     std::string file_path_utf8;
-    if (!base::UTF16ToUTF8(file_to_delete.value().c_str(),
-                           file_to_delete.value().size(), &file_path_utf8)) {
-      std::move(callback).Run(PromptAcceptance::DENIED);
+    if (!base::WideToUTF8(file_to_delete.value().c_str(),
+                          file_to_delete.value().size(), &file_path_utf8)) {
+      std::move(callback).Run(PromptUserResponse::DENIED);
       return;
     } else {
       prompt_user_message.add_files_to_delete(file_path_utf8);
     }
   }
 
-  for (const base::string16& registry_key : registry_keys) {
+  for (const std::wstring& registry_key : registry_keys) {
     std::string registry_key_utf8;
-    if (!base::UTF16ToUTF8(registry_key.c_str(), registry_key.size(),
-                           &registry_key_utf8)) {
-      std::move(callback).Run(PromptAcceptance::DENIED);
+    if (!base::WideToUTF8(registry_key.c_str(), registry_key.size(),
+                          &registry_key_utf8)) {
+      std::move(callback).Run(PromptUserResponse::DENIED);
       return;
     } else {
       prompt_user_message.add_registry_keys(registry_key_utf8);
     }
   }
 
-  for (const base::string16& extension_id : extension_ids) {
+  for (const std::wstring& extension_id : extension_ids) {
     std::string extension_id_utf8;
-    if (!base::UTF16ToUTF8(extension_id.c_str(), extension_id.size(),
-                           &extension_id_utf8)) {
-      std::move(callback).Run(PromptAcceptance::DENIED);
+    if (!base::WideToUTF8(extension_id.c_str(), extension_id.size(),
+                          &extension_id_utf8)) {
+      std::move(callback).Run(PromptUserResponse::DENIED);
       return;
     } else {
       prompt_user_message.add_extension_ids(extension_id_utf8);
@@ -151,7 +140,8 @@ void ProtoChromePromptIPC::RunPromptUserTask(
   }
 
   // Receive the response from Chrome.
-  PromptAcceptance prompt_acceptance = WaitForPromptAcceptance();
+  PromptUserResponse::PromptAcceptance prompt_acceptance =
+      WaitForPromptAcceptance();
 
   if (state_ == State::kDoneInteraction) {
     return;
@@ -207,7 +197,7 @@ void ProtoChromePromptIPC::SendBuffer(const std::string& request_content) {
   WriteByPointer(request_content.data(), kMessageLength);
 }
 
-ProtoChromePromptIPC::PromptAcceptance
+PromptUserResponse::PromptAcceptance
 ProtoChromePromptIPC::WaitForPromptAcceptance() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(State::kWaitingForResponseFromChrome, state_);
@@ -222,16 +212,16 @@ ProtoChromePromptIPC::WaitForPromptAcceptance() {
   if (!::ReadFile(response_read_handle_.Get(), &response_length,
                   sizeof(response_length), &bytes_read, nullptr)) {
     PLOG(ERROR) << "Reading the prompt acceptance message length failed.";
-    return PromptAcceptance::DENIED;
+    return PromptUserResponse::DENIED;
   }
   if (bytes_read != sizeof(response_length)) {
     PLOG(ERROR) << "Short read on the prompt acceptance message length.";
-    return PromptAcceptance::DENIED;
+    return PromptUserResponse::DENIED;
   }
 
   if (response_length == 0 || response_length > kMaxMessageLength) {
     PLOG(ERROR) << "Invalid message length received: " << response_length;
-    return PromptAcceptance::DENIED;
+    return PromptUserResponse::DENIED;
   }
 
   // Read the response.
@@ -240,23 +230,23 @@ ProtoChromePromptIPC::WaitForPromptAcceptance() {
                   base::WriteInto(&response_content, response_length + 1),
                   response_length, &bytes_read, nullptr)) {
     PLOG(ERROR) << "Reading the prompt acceptance message failed";
-    return PromptAcceptance::DENIED;
+    return PromptUserResponse::DENIED;
   }
   if (bytes_read != response_length) {
     PLOG(ERROR) << "Short read on the prompt acceptance message.";
-    return PromptAcceptance::DENIED;
+    return PromptUserResponse::DENIED;
   }
 
   chrome_cleaner::PromptUserResponse response;
   if (!response.ParseFromString(response_content)) {
     LOG(ERROR) << "Parsing of prompt acceptance failed.";
-    return PromptAcceptance::DENIED;
+    return PromptUserResponse::DENIED;
   }
 
   // Successful execution.
   call_connection_closed.ReplaceClosure(base::DoNothing());
 
-  return static_cast<PromptAcceptance>(response.prompt_acceptance());
+  return response.prompt_acceptance();
 }
 
 }  // namespace chrome_cleaner

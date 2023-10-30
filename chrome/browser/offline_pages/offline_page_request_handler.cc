@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,33 +7,32 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
-#include "base/task_runner_util.h"
+#include "base/task/task_runner_util.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/offline_pages/offline_page_model_factory.h"
 #include "chrome/browser/offline_pages/offline_page_tab_helper.h"
 #include "chrome/browser/offline_pages/offline_page_utils.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "components/offline_pages/core/client_namespace_constants.h"
 #include "components/offline_pages/core/offline_clock.h"
+#include "components/offline_pages/core/offline_page_feature.h"
 #include "components/offline_pages/core/offline_page_model.h"
 #include "components/offline_pages/core/request_header/offline_page_header.h"
-#include "components/previews/core/previews_experiments.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_features.h"
-#include "content/public/common/resource_type.h"
 #include "net/base/file_stream.h"
 #include "net/base/filename_util.h"
 #include "net/base/io_buffer.h"
@@ -77,12 +76,6 @@ enum class RequestResult {
 
 // Consistent with the buffer size used in url request data reading.
 const size_t kMaxBufferSizeForValidation = 4096;
-
-content::BrowserThread::ID GetJobThreadID() {
-  return base::FeatureList::IsEnabled(features::kNavigationLoaderOnUI)
-             ? content::BrowserThread::UI
-             : content::BrowserThread::IO;
-}
 
 void GetFileSize(const base::FilePath& file_path, int64_t* file_size) {
   bool succeeded = base::GetFileSize(file_path, file_size);
@@ -254,7 +247,7 @@ void ReportAccessEntryPoint(
 }
 
 OfflinePageModel* GetOfflinePageModel(
-    content::ResourceRequestInfo::WebContentsGetter web_contents_getter) {
+    content::WebContents::Getter web_contents_getter) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   content::WebContents* web_contents = web_contents_getter.Run();
@@ -263,31 +256,14 @@ OfflinePageModel* GetOfflinePageModel(
                       : nullptr;
 }
 
-void NotifyAvailableOfflinePagesOnJobThread(
-    base::WeakPtr<OfflinePageRequestHandler> job,
-    const std::vector<OfflinePageRequestHandler::Candidate>& candidates) {
-  DCHECK_CURRENTLY_ON(GetJobThreadID());
-
-  if (job)
-    job->OnOfflinePagesAvailable(candidates);
-}
-
 // Notifies OfflinePageRequestHandler about all the matched offline pages.
 void NotifyAvailableOfflinePagesOnUI(
     base::WeakPtr<OfflinePageRequestHandler> job,
     const std::vector<OfflinePageRequestHandler::Candidate>& candidates) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  if (base::FeatureList::IsEnabled(features::kNavigationLoaderOnUI)) {
-    NotifyAvailableOfflinePagesOnJobThread(job, candidates);
-  } else {
-    // Delegates to IO thread since OfflinePageRequestHandler should only be
-    // accessed from IO thread.
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::IO},
-        base::BindOnce(&NotifyAvailableOfflinePagesOnJobThread, job,
-                       candidates));
-  }
+  if (job)
+    job->OnOfflinePagesAvailable(candidates);
 }
 
 // Failed to find an offline page.
@@ -309,7 +285,7 @@ void SelectPagesForURLDone(
     const OfflinePageHeader& offline_header,
     OfflinePageRequestHandler::NetworkState network_state,
     base::WeakPtr<OfflinePageRequestHandler> job,
-    content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+    content::WebContents::Getter web_contents_getter,
     const std::vector<OfflinePageItem>& offline_pages) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -345,7 +321,7 @@ void GetPageByOfflineIdDone(
     const GURL& url,
     const OfflinePageHeader& offline_header,
     OfflinePageRequestHandler::NetworkState network_state,
-    content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+    content::WebContents::Getter web_contents_getter,
     base::WeakPtr<OfflinePageRequestHandler> job,
     const OfflinePageItem* offline_page) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -368,7 +344,7 @@ void GetPagesToServeURL(
     const GURL& url,
     const OfflinePageHeader& offline_header,
     OfflinePageRequestHandler::NetworkState network_state,
-    content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+    content::WebContents::Getter web_contents_getter,
     OfflinePageRequestHandler::Delegate::TabIdGetter tab_id_getter,
     base::WeakPtr<OfflinePageRequestHandler> job) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -401,8 +377,9 @@ void GetPagesToServeURL(
         return;
       }
       offline_page_model->GetPageByOfflineId(
-          offline_id, base::Bind(&GetPageByOfflineIdDone, url, offline_header,
-                                 network_state, web_contents_getter, job));
+          offline_id,
+          base::BindOnce(&GetPageByOfflineIdDone, url, offline_header,
+                         network_state, web_contents_getter, job));
       return;
     }
   }
@@ -418,7 +395,7 @@ void GetPagesToServeURL(
 void VisitTrustedOfflinePageOnUI(
     const OfflinePageHeader& offline_header,
     OfflinePageRequestHandler::NetworkState network_state,
-    content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+    content::WebContents::Getter web_contents_getter,
     const OfflinePageItem& offline_page,
     bool archive_is_in_internal_dir) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -452,8 +429,7 @@ void VisitTrustedOfflinePageOnUI(
           OfflinePageRequestHandler::NetworkState::PROHIBITIVELY_SLOW_NETWORK);
 }
 
-void ClearOfflinePageData(
-    content::ResourceRequestInfo::WebContentsGetter web_contents_getter) {
+void ClearOfflinePageData(content::WebContents::Getter web_contents_getter) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   // |web_contents_getter| is passed from IO thread. We need to check if
@@ -487,9 +463,8 @@ OfflinePageRequestHandler::OfflinePageRequestHandler(
     : url_(url),
       delegate_(delegate),
       network_state_(NetworkState::CONNECTED_NETWORK),
-      candidate_index_(0),
-      weak_ptr_factory_(this) {
-  DCHECK_CURRENTLY_ON(GetJobThreadID());
+      candidate_index_(0) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   std::string offline_header_value;
   extra_request_headers.GetHeader(kOfflinePageHeader, &offline_header_value);
   // Note that |offline_header| will be empty if parsing from the header value
@@ -501,12 +476,17 @@ OfflinePageRequestHandler::~OfflinePageRequestHandler() {}
 
 OfflinePageRequestHandler::NetworkState
 OfflinePageRequestHandler::GetNetworkState() const {
-  DCHECK_CURRENTLY_ON(GetJobThreadID());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   if (offline_header_.reason == OfflinePageHeader::Reason::NET_ERROR)
     return OfflinePageRequestHandler::NetworkState::FLAKY_NETWORK;
 
-  if (net::NetworkChangeNotifier::IsOffline())
+  bool is_offline = net::NetworkChangeNotifier::IsOffline();
+  if (offline_pages::IsOfflinePagesNetworkStateLikelyUnknown()) {
+    is_offline = false;
+  }
+
+  if (is_offline)
     return OfflinePageRequestHandler::NetworkState::DISCONNECTED_NETWORK;
 
   // If RELOAD is present in the offline header, load the live page.
@@ -520,38 +500,31 @@ OfflinePageRequestHandler::GetNetworkState() const {
         FORCE_OFFLINE_ON_CONNECTED_NETWORK;
   }
 
-  // Checks if previews are allowed, the network is slow, and the request is
-  // allowed to be shown for previews. When reloading from an offline page or
-  // through other force checks, previews should not be considered; previews
-  // eligiblity is only checked when |offline_header.reason| is Reason::NONE.
-  if (delegate_->ShouldAllowPreview())
-    return OfflinePageRequestHandler::NetworkState::PROHIBITIVELY_SLOW_NETWORK;
-
   // Otherwise, the network state is a good network.
   return OfflinePageRequestHandler::NetworkState::CONNECTED_NETWORK;
 }
 
 void OfflinePageRequestHandler::Start() {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(&OfflinePageRequestHandler::StartAsync,
-                                weak_ptr_factory_.GetWeakPtr()));
-}
-
-void OfflinePageRequestHandler::StartAsync() {
   network_state_ = GetNetworkState();
   if (network_state_ == NetworkState::CONNECTED_NETWORK) {
     delegate_->FallbackToDefault();
     return;
   }
 
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(&OfflinePageRequestHandler::StartAsync,
+                                weak_ptr_factory_.GetWeakPtr()));
+}
+
+void OfflinePageRequestHandler::StartAsync() {
   if (content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
     GetPagesToServeURL(url_, offline_header_, network_state_,
                        delegate_->GetWebContentsGetter(),
                        delegate_->GetTabIdGetter(),
                        weak_ptr_factory_.GetWeakPtr());
   } else {
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::UI},
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&GetPagesToServeURL, url_, offline_header_,
                        network_state_, delegate_->GetWebContentsGetter(),
                        delegate_->GetTabIdGetter(),
@@ -578,8 +551,9 @@ int OfflinePageRequestHandler::ReadRawData(net::IOBuffer* dest, int dest_size) {
 
   return stream_->Read(
       dest, dest_size,
-      base::Bind(&OfflinePageRequestHandler::DidReadForServing,
-                 weak_ptr_factory_.GetWeakPtr(), base::WrapRefCounted(dest)));
+      base::BindOnce(&OfflinePageRequestHandler::DidReadForServing,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     base::WrapRefCounted(dest)));
 }
 
 void OfflinePageRequestHandler::OnOfflinePagesAvailable(
@@ -591,7 +565,7 @@ void OfflinePageRequestHandler::OnOfflinePagesAvailable(
     return;
   }
 
-  file_task_runner_ = base::CreateTaskRunnerWithTraits(
+  file_task_runner_ = base::ThreadPool::CreateTaskRunner(
       {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 
@@ -615,16 +589,6 @@ void OfflinePageRequestHandler::OnTrustedOfflinePageFound() {
     return;
   }
 
-  // If the page is being loaded on a slow network, only use the offline page
-  // if it was created within the past day.
-  if (network_state_ == NetworkState::PROHIBITIVELY_SLOW_NETWORK &&
-      OfflineTimeNow() - GetCurrentOfflinePage().creation_time >
-          previews::params::OfflinePreviewFreshnessDuration()) {
-    ReportRequestResult(RequestResult::PAGE_NOT_FRESH, network_state_);
-    delegate_->FallbackToDefault();
-    return;
-  }
-
   // No need to open the file if it has already been opened for the validation.
   if (stream_) {
     DidOpenForServing(net::OK);
@@ -638,16 +602,17 @@ void OfflinePageRequestHandler::OnTrustedOfflinePageFound() {
   if (IsProcessingFileUrlIntent()) {
     bool valid = net::FileURLToFilePath(offline_header_.intent_url, &file_path);
     DCHECK(valid);
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   } else if (IsProcessingContentUrlIntent()) {
     file_path = base::FilePath(offline_header_.intent_url.spec());
     DCHECK(file_path.IsContentUri());
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
   } else {
     file_path = GetCurrentOfflinePage().file_path;
   }
-  OpenFile(file_path, base::Bind(&OfflinePageRequestHandler::DidOpenForServing,
-                                 weak_ptr_factory_.GetWeakPtr()));
+  OpenFile(file_path,
+           base::BindRepeating(&OfflinePageRequestHandler::DidOpenForServing,
+                               weak_ptr_factory_.GetWeakPtr()));
 }
 
 void OfflinePageRequestHandler::VisitTrustedOfflinePage() {
@@ -658,8 +623,8 @@ void OfflinePageRequestHandler::VisitTrustedOfflinePage() {
 
   delegate_->SetOfflinePageNavigationUIData(true /*is_offline_page*/);
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&VisitTrustedOfflinePageOnUI, offline_header_,
                      network_state_, delegate_->GetWebContentsGetter(),
                      GetCurrentOfflinePage(),
@@ -675,7 +640,7 @@ void OfflinePageRequestHandler::Redirect(const GURL& redirected_url) {
       "Non-Authoritative-Reason: offline redirects",
       // 302 is used to remove response bodies in order to
       // avoid leak when going online.
-      net::URLRequestRedirectJob::REDIRECT_302_FOUND,
+      net::RedirectUtil::ResponseCode::REDIRECT_302_FOUND,
       redirected_url.spec().c_str());
 
   fake_headers_for_redirect_ = base::MakeRefCounted<net::HttpResponseHeaders>(
@@ -711,8 +676,9 @@ OfflinePageRequestHandler::GetAccessEntryPoint() const {
   ui::PageTransition transition =
       static_cast<ui::PageTransition>(delegate_->GetPageTransition());
   if (ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_LINK)) {
-    return PageTransitionGetQualifier(transition) ==
-                   static_cast<int>(ui::PAGE_TRANSITION_FROM_API)
+    return ui::PageTransitionTypeIncludingQualifiersIs(
+               PageTransitionGetQualifier(transition),
+               ui::PAGE_TRANSITION_FROM_API)
                ? AccessEntryPoint::CCT
                : AccessEntryPoint::LINK;
   } else if (ui::PageTransitionCoreTypeIs(transition,
@@ -753,18 +719,12 @@ bool OfflinePageRequestHandler::IsProcessingFileOrContentUrlIntent() const {
 
 void OfflinePageRequestHandler::OpenFile(
     const base::FilePath& file_path,
-    const base::Callback<void(int)>& callback) {
+    const base::RepeatingCallback<void(int)>& callback) {
   if (!stream_)
     stream_ = std::make_unique<net::FileStream>(file_task_runner_);
 
-  int flags =
-      base::File::FLAG_OPEN | base::File::FLAG_READ | base::File::FLAG_ASYNC;
-#if defined(OS_ANDROID)
-  if (!file_path.IsContentUri())
-    flags |= base::File::FLAG_EXCLUSIVE_READ;
-#else
-  flags |= base::File::FLAG_EXCLUSIVE_READ;
-#endif  // defined(OS_ANDROID)
+  int flags = base::File::FLAG_OPEN | base::File::FLAG_READ |
+              base::File::FLAG_ASYNC | base::File::FLAG_WIN_EXCLUSIVE_READ;
   int result = stream_->Open(file_path, flags, callback);
   if (result != net::ERR_IO_PENDING)
     callback.Run(result);
@@ -855,8 +815,8 @@ void OfflinePageRequestHandler::DidGetFileSizeForValidation(
 
   // Open file to compute the digest.
   OpenFile(GetCurrentOfflinePage().file_path,
-           base::Bind(&OfflinePageRequestHandler::DidOpenForValidation,
-                      weak_ptr_factory_.GetWeakPtr()));
+           base::BindRepeating(&OfflinePageRequestHandler::DidOpenForValidation,
+                               weak_ptr_factory_.GetWeakPtr()));
 }
 
 void OfflinePageRequestHandler::DidOpenForValidation(int result) {
@@ -872,10 +832,10 @@ void OfflinePageRequestHandler::DidOpenForValidation(int result) {
 }
 
 void OfflinePageRequestHandler::ReadForValidation() {
-  int result =
-      stream_->Read(buffer_.get(), kMaxBufferSizeForValidation,
-                    base::Bind(&OfflinePageRequestHandler::DidReadForValidation,
-                               weak_ptr_factory_.GetWeakPtr()));
+  int result = stream_->Read(
+      buffer_.get(), kMaxBufferSizeForValidation,
+      base::BindOnce(&OfflinePageRequestHandler::DidReadForValidation,
+                     weak_ptr_factory_.GetWeakPtr()));
   if (result != net::ERR_IO_PENDING)
     DidReadForValidation(result);
 }
@@ -956,9 +916,9 @@ void OfflinePageRequestHandler::DidOpenForServing(int result) {
 
   // Note that we always seek to the beginning of the file because the file may
   // have already been read for validation purpose.
-  int seek_result =
-      stream_->Seek(0, base::Bind(&OfflinePageRequestHandler::DidSeekForServing,
-                                  weak_ptr_factory_.GetWeakPtr()));
+  int seek_result = stream_->Seek(
+      0, base::BindOnce(&OfflinePageRequestHandler::DidSeekForServing,
+                        weak_ptr_factory_.GetWeakPtr()));
   if (seek_result != net::ERR_IO_PENDING)
     DidSeekForServing(net::ERR_REQUEST_RANGE_NOT_SATISFIABLE);
 }
@@ -1020,9 +980,9 @@ void OfflinePageRequestHandler::DidComputeActualDigestForServing(
     // be called before the response is being received. Furthermore, there is
     // no need to clear the offline bit since the error code should already
     // indicate that the offline page is not loaded.
-    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                             base::BindOnce(&ClearOfflinePageData,
-                                            delegate_->GetWebContentsGetter()));
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&ClearOfflinePageData,
+                                  delegate_->GetWebContentsGetter()));
     result = net::ERR_FAILED;
   }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,17 +11,16 @@
 
 #include <string>
 
-#include "base/strings/string16.h"
 #include "base/time/time.h"
 
 namespace base {
 class CommandLine;
 class FilePath;
-}
+}  // namespace base
 
 // Implements the common aspects of loading the main dll for both chrome and
-// chromium scenarios, which are in charge of implementing two abstract
-// methods: OnBeforeLaunch() and OnBeforeExit().
+// chromium scenarios, which are in charge of implementing one abstract
+// method: OnBeforeLaunch()
 class MainDllLoader {
  public:
   MainDllLoader();
@@ -47,16 +46,6 @@ class MainDllLoader {
   virtual void OnBeforeLaunch(const base::CommandLine& cmd_line,
                               const std::string& process_type,
                               const base::FilePath& dll_path) = 0;
-
-  // Called after the chrome.dll entry point returns and before terminating this
-  // process. |dll_path| refers to the path of the Chrome dll that was loaded.
-  virtual void OnBeforeExit(const base::FilePath& dll_path) = 0;
-
- private:
-  // Loads the appropriate DLL for the process type |process_type_|. Populates
-  // |module| with the path of the loaded DLL. Returns a reference to the
-  // module, or null on failure.
-  HMODULE Load(base::FilePath* module);
 
  private:
   HMODULE dll_;

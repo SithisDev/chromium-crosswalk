@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,15 +11,16 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
+#include "base/check.h"
+#include "base/containers/contains.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/notreached.h"
+#include "base/process/launch.h"
+#include "base/process/process.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/synchronization/lock.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/version.h"
@@ -41,7 +42,8 @@
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -55,8 +57,6 @@ using ::testing::Eq;
 using ::testing::InvokeWithoutArgs;
 using ::testing::Return;
 using ::testing::SaveArg;
-
-constexpr char kSRTPromptGroup[] = "SRTGroup";
 
 class Waiter {
  public:
@@ -105,6 +105,9 @@ class ReporterRunnerPolicyTest
                        base::Unretained(this)));
   }
 
+  ReporterRunnerPolicyTest(const ReporterRunnerPolicyTest&) = delete;
+  ReporterRunnerPolicyTest& operator=(const ReporterRunnerPolicyTest&) = delete;
+
   void WaitForComponentRegistration() { waiter_.Wait(); }
 
  protected:
@@ -122,8 +125,9 @@ class ReporterRunnerPolicyTest
   }
 
   void SetUpInProcessBrowserTestFixture() override {
-    EXPECT_CALL(policy_provider_, IsInitializationComplete(_))
-        .WillRepeatedly(Return(true));
+    policy_provider_.SetDefaultReturns(
+        /*is_initialization_complete_return=*/true,
+        /*is_first_policy_load_complete_return=*/true);
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
         &policy_provider_);
 
@@ -133,18 +137,16 @@ class ReporterRunnerPolicyTest
       policy::PolicyMap policies;
       policies.Set(policy::key::kChromeCleanupEnabled,
                    policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-                   policy::POLICY_SOURCE_PLATFORM,
-                   std::make_unique<base::Value>(is_enabled), nullptr);
+                   policy::POLICY_SOURCE_PLATFORM, base::Value(is_enabled),
+                   nullptr);
       policy_provider_.UpdateChromePolicy(policies);
     }
   }
 
   void ComponentRegistered() { waiter_.Signal(); }
 
-  policy::MockConfigurationPolicyProvider policy_provider_;
+  testing::NiceMock<policy::MockConfigurationPolicyProvider> policy_provider_;
   Waiter waiter_;
-
-  DISALLOW_COPY_AND_ASSIGN(ReporterRunnerPolicyTest);
 };
 
 IN_PROC_BROWSER_TEST_P(ReporterRunnerPolicyTest, CheckComponent) {
@@ -184,7 +186,7 @@ using ReporterRunnerTestParams =
 
 class ReporterRunnerTest
     : public InProcessBrowserTest,
-      public SwReporterTestingDelegate,
+      public internal::SwReporterTestingDelegate,
       public ::testing::WithParamInterface<ReporterRunnerTestParams> {
  public:
   ReporterRunnerTest() {
@@ -192,16 +194,15 @@ class ReporterRunnerTest
         GetParam();
   }
 
+  ReporterRunnerTest(const ReporterRunnerTest&) = delete;
+  ReporterRunnerTest& operator=(const ReporterRunnerTest&) = delete;
+
   void SetUpInProcessBrowserTestFixture() override {
-    SetSwReporterTestingDelegate(this);
+    internal::SetSwReporterTestingDelegate(this);
     EXPECT_CALL(policy_provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
         &policy_provider_);
-
-    scoped_feature_list_.InitAndEnableFeatureWithParameters(
-        kChromeCleanupInBrowserPromptFeature,
-        {{"Seed", incoming_seed_}, {"Group", kSRTPromptGroup}});
 
     switch (policy_state_) {
       case PolicyState::kNoLogs:
@@ -213,21 +214,23 @@ class ReporterRunnerTest
         policy::PolicyMap policies;
         policies.Set(policy::key::kChromeCleanupReportingEnabled,
                      policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-                     policy::POLICY_SOURCE_PLATFORM,
-                     std::make_unique<base::Value>(is_enabled), nullptr);
+                     policy::POLICY_SOURCE_PLATFORM, base::Value(is_enabled),
+                     nullptr);
         policy_provider_.UpdateChromePolicy(policies);
         EXPECT_CALL(mock_chrome_cleaner_controller_, logs_enabled(_))
             .WillRepeatedly(Return(is_enabled));
         break;
       }
     }
+
+    EXPECT_CALL(mock_chrome_cleaner_controller_, GetIncomingPromptSeed())
+        .WillRepeatedly(Return(incoming_seed_));
   }
 
   void SetUpOnMainThread() override {
     // SetDateInLocalState calculates a time as Now() minus an offset. Move the
     // simulated clock ahead far enough that this calculation won't underflow.
-    FastForwardBy(
-        base::TimeDelta::FromDays(kDaysBetweenSuccessfulSwReporterRuns * 2));
+    FastForwardBy(base::Days(kDaysBetweenSuccessfulSwReporterRuns * 2));
 
     ClearLastTimeSentReport();
 
@@ -236,17 +239,34 @@ class ReporterRunnerTest
   }
 
   void TearDownInProcessBrowserTestFixture() override {
-    SetSwReporterTestingDelegate(nullptr);
+    internal::SetSwReporterTestingDelegate(nullptr);
   }
 
   // Records that the reporter was launched with the parameters given in
   // |invocation|.
-  int LaunchReporter(const SwReporterInvocation& invocation) override {
+  base::Process LaunchReporterProcess(
+      const SwReporterInvocation& invocation,
+      [[maybe_unused]] const base::LaunchOptions& options) override {
     ++reporter_launch_count_;
     reporter_launch_parameters_.push_back(invocation);
     if (first_launch_callback_)
       std::move(first_launch_callback_).Run();
-    return exit_code_to_report_;
+    // Need to return a valid process so the launch continues.
+    return base::Process::Current();
+  }
+
+  bool WaitForReporterExit(
+      [[maybe_unused]] const base::Process& reporter_process,
+      base::TimeDelta timeout,
+      int* exit_code) override {
+    if (reporter_wait_count_++ < 2 * reporter_launch_count_) {
+      // Simulate a timeout to test the path where ReporterRunner waits more
+      // than once.
+      return false;
+    }
+    if (exit_code)
+      *exit_code = exit_code_to_report_;
+    return true;
   }
 
   // Returns the test's idea of the current time.
@@ -275,6 +295,7 @@ class ReporterRunnerTest
   void ResetReporterRuns(int exit_code_to_report) {
     exit_code_to_report_ = exit_code_to_report;
     reporter_launch_count_ = 0;
+    reporter_wait_count_ = 0;
     reporter_launch_parameters_.clear();
     dialog_controller_created_ = false;
   }
@@ -327,8 +348,7 @@ class ReporterRunnerTest
   // Sets |path| in the local state to a date corresponding to |days| days ago.
   void SetDateInLocalState(const std::string& path, int days) {
     PrefService* local_state = g_browser_process->local_state();
-    local_state->SetInt64(
-        path, (Now() - base::TimeDelta::FromDays(days)).ToInternalValue());
+    local_state->SetInt64(path, (Now() - base::Days(days)).ToInternalValue());
   }
 
   // Sets local state for last time the software reporter ran to |days| days
@@ -362,7 +382,7 @@ class ReporterRunnerTest
     Browser* browser = chrome::FindLastActive();
     DCHECK(browser);
     Profile* profile = browser->profile();
-    SetExtendedReportingPref(profile->GetPrefs(), true);
+    SetExtendedReportingPrefForTests(profile->GetPrefs(), true);
   }
 
   // Expects that the reporter has been launched |expected_launch_count| times,
@@ -403,7 +423,7 @@ class ReporterRunnerTest
 
     // Checks if the last time sent logs is set as no more than one hour ago,
     // which should be enough time if the execution does not fail.
-    EXPECT_LT(now - base::TimeDelta::FromHours(1), last_time_sent_logs);
+    EXPECT_LT(now - base::Hours(1), last_time_sent_logs);
     EXPECT_GE(now, last_time_sent_logs);
   }
 
@@ -570,6 +590,7 @@ class ReporterRunnerTest
 
   bool dialog_controller_created_ = false;
   int reporter_launch_count_ = 0;
+  int reporter_wait_count_ = 0;
   std::vector<SwReporterInvocation> reporter_launch_parameters_;
   int exit_code_to_report_ = kReporterNotLaunchedExitCode;
 
@@ -584,11 +605,6 @@ class ReporterRunnerTest
   // can be used to perform actions in the middle of a queue of reporters which
   // all launch on the same mock clock tick.
   base::OnceClosure first_launch_callback_;
-
-  base::test::ScopedFeatureList scoped_feature_list_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ReporterRunnerTest);
 };
 
 }  // namespace
@@ -682,8 +698,7 @@ IN_PROC_BROWSER_TEST_P(ReporterRunnerTest, MultipleLaunches) {
   // Schedule a launch with 2 invocations, then another with the same 2.
   {
     SCOPED_TRACE("Launch 2 times with retry");
-    FastForwardBy(
-        base::TimeDelta::FromDays(kDaysBetweenSuccessfulSwReporterRuns));
+    FastForwardBy(base::Days(kDaysBetweenSuccessfulSwReporterRuns));
     RunReporterQueueAndWait(chrome_cleaner::kSwReporterNothingFound,
                             SwReporterInvocationResult::kNothingFound,
                             invocations);
@@ -707,7 +722,7 @@ IN_PROC_BROWSER_TEST_P(ReporterRunnerTest, MultipleLaunches) {
 
   {
     SCOPED_TRACE("Attempt to launch after a few days");
-    FastForwardBy(base::TimeDelta::FromDays(kAFewDays));
+    FastForwardBy(base::Days(kAFewDays));
     if (IsUserInitiated(invocation_type_)) {
       RunReporterQueueAndWait(chrome_cleaner::kSwReporterNothingFound,
                               SwReporterInvocationResult::kNothingFound,
@@ -720,8 +735,7 @@ IN_PROC_BROWSER_TEST_P(ReporterRunnerTest, MultipleLaunches) {
       ExpectReporterLaunches({}, /*expect_prompt=*/false);
     }
 
-    FastForwardBy(base::TimeDelta::FromDays(
-        kDaysBetweenSuccessfulSwReporterRuns - kAFewDays));
+    FastForwardBy(base::Days(kDaysBetweenSuccessfulSwReporterRuns - kAFewDays));
     RunReporterQueueAndWait(chrome_cleaner::kSwReporterNothingFound,
                             SwReporterInvocationResult::kNothingFound,
                             invocations);
@@ -731,8 +745,7 @@ IN_PROC_BROWSER_TEST_P(ReporterRunnerTest, MultipleLaunches) {
   // Second launch should not occur after a failure.
   {
     SCOPED_TRACE("Launch multiple times with failure");
-    FastForwardBy(
-        base::TimeDelta::FromDays(kDaysBetweenSuccessfulSwReporterRuns));
+    FastForwardBy(base::Days(kDaysBetweenSuccessfulSwReporterRuns));
     RunReporterQueueAndWait(kReporterNotLaunchedExitCode,
                             SwReporterInvocationResult::kProcessFailedToLaunch,
                             invocations);
@@ -817,13 +830,13 @@ IN_PROC_BROWSER_TEST_P(ReporterRunnerTest, ReporterLogging_MultipleLaunches) {
     first_launch_callback_ = base::BindOnce(
         &ReporterRunnerTest::
             FutureExpectNoReporterLoggingWithLastTimeSentReportSet,
-        base::Unretained(this), base::Passed(&get_first_invocation),
+        base::Unretained(this), std::move(get_first_invocation),
         last_time_sent_logs);
   } else {
     bool expect_logging = ExpectLogging(true);
     first_launch_callback_ = base::BindOnce(
         &ReporterRunnerTest::FutureExpectReporterLoggingHappenedInTheLastHour,
-        base::Unretained(this), base::Passed(&get_first_invocation),
+        base::Unretained(this), std::move(get_first_invocation),
         expect_logging);
   }
 

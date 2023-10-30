@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/test/base/js_test_api.h"
 #include "third_party/blink/public/web/blink.h"
 
 namespace {
@@ -159,9 +160,7 @@ bool V8UnitTest::RunJavascriptTestF(const std::string& test_fixture,
       .Check();
   v8::Local<v8::Value> args[] = {
       v8::Boolean::New(isolate, false),
-      v8::String::NewFromUtf8(isolate, "RUN_TEST_F", v8::NewStringType::kNormal)
-          .ToLocalChecked(),
-      params};
+      v8::String::NewFromUtf8Literal(isolate, "RUN_TEST_F"), params};
 
   v8::TryCatch try_catch(isolate);
   v8::Local<v8::Value> result =
@@ -177,30 +176,14 @@ bool V8UnitTest::RunJavascriptTestF(const std::string& test_fixture,
 }
 
 void V8UnitTest::InitPathsAndLibraries() {
-  base::FilePath test_data;
-  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_data));
-
-  g_test_data_directory = test_data.AppendASCII("webui");
+  JsTestApiConfig config;
+  g_test_data_directory = config.search_path;
+  user_libraries_ = config.default_libraries;
 
   ASSERT_TRUE(base::PathService::Get(chrome::DIR_GEN_TEST_DATA,
                                      &g_gen_test_data_directory));
 
   ASSERT_TRUE(base::PathService::Get(base::DIR_SOURCE_ROOT, &g_src_root));
-
-  AddLibrary(g_src_root.AppendASCII("chrome")
-                       .AppendASCII("third_party")
-                       .AppendASCII("mock4js")
-                       .AppendASCII("mock4js.js"));
-
-  AddLibrary(g_src_root.AppendASCII("third_party")
-                       .AppendASCII("chaijs")
-                       .AppendASCII("chai.js"));
-
-  AddLibrary(g_src_root.AppendASCII("third_party")
-                       .AppendASCII("accessibility-audit")
-                       .AppendASCII("axs_testing.js"));
-
-  AddLibrary(g_test_data_directory.AppendASCII("test_api.js"));
 }
 
 void V8UnitTest::SetUp() {
@@ -228,7 +211,7 @@ void V8UnitTest::SetUp() {
           .ToLocalChecked(),
       send_function);
 
-  context_.Reset(isolate, v8::Context::New(isolate, NULL, global));
+  context_.Reset(isolate, v8::Context::New(isolate, nullptr, global));
 
   // Set up console object for console.log(), etc.
   v8::Local<v8::ObjectTemplate> console = v8::ObjectTemplate::New(isolate);
@@ -255,6 +238,8 @@ void V8UnitTest::SetUp() {
   {
     v8::Local<v8::Context> context = context_.Get(isolate);
     v8::Context::Scope context_scope(context);
+    v8::MicrotasksScope microtasks(isolate,
+                                   v8::MicrotasksScope::kDoNotRunMicrotasks);
     context->Global()
         ->Set(context,
               v8::String::NewFromUtf8(isolate, "console",
@@ -271,6 +256,8 @@ void V8UnitTest::SetGlobalStringVar(const std::string& var_name,
   v8::Local<v8::Context> context =
       v8::Local<v8::Context>::New(isolate, context_);
   v8::Context::Scope context_scope(context);
+  v8::MicrotasksScope microtasks(isolate,
+                                 v8::MicrotasksScope::kDoNotRunMicrotasks);
   context->Global()
       ->Set(context,
             v8::String::NewFromUtf8(isolate, var_name.c_str(),
@@ -302,7 +289,7 @@ void V8UnitTest::ExecuteScriptInContext(const base::StringPiece& script_source,
           .ToLocalChecked();
 
   v8::TryCatch try_catch(isolate);
-  v8::ScriptOrigin origin(name);
+  v8::ScriptOrigin origin(isolate, name);
   v8::Local<v8::Script> script;
   // Ensure the script compiled without errors.
   if (!v8::Script::Compile(context, source, &origin).ToLocal(&script))
@@ -359,7 +346,7 @@ void V8UnitTest::TestFunction(const std::string& function_name) {
 
   v8::TryCatch try_catch(isolate);
   v8::Local<v8::Value> result =
-      function->Call(context, context->Global(), 0, NULL)
+      function->Call(context, context->Global(), 0, nullptr)
           .FromMaybe(v8::Local<v8::Value>());
   // The test fails if an exception was thrown.
   if (result.IsEmpty())
@@ -400,8 +387,8 @@ void V8UnitTest::ChromeSend(const v8::FunctionCallbackInfo<v8::Value>& args) {
   g_test_result_ok =
       test_result->Get(context, 0).ToLocalChecked()->BooleanValue(isolate);
   if (!g_test_result_ok) {
-    v8::String::Utf8Value message(
+    v8::String::Utf8Value error_message(
         isolate, test_result->Get(context, 1).ToLocalChecked());
-    LOG(ERROR) << *message;
+    LOG(ERROR) << *error_message;
   }
 }

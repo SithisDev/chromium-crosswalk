@@ -1,21 +1,21 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/resource_coordinator/tab_memory_metrics_reporter.h"
 
-#include "base/task/post_task.h"
-#include "base/test/scoped_feature_list.h"
+#include <memory>
+
+#include "base/memory/raw_ptr.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/timer/timer.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_web_contents_factory.h"
 #include "content/public/test/web_contents_tester.h"
-#include "services/resource_coordinator/public/cpp/resource_coordinator_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -80,13 +80,14 @@ class TabMemoryMetricsReporterTest : public testing::Test {
  public:
   TabMemoryMetricsReporterTest()
       : task_runner_(new base::TestMockTimeTaskRunner()) {
-    observer_.reset(
-        new TestTabMemoryMetricsReporter(task_runner_->GetMockTickClock()));
+    observer_ = std::make_unique<TestTabMemoryMetricsReporter>(
+        task_runner_->GetMockTickClock());
     observer_->InstallTaskRunner(task_runner_);
   }
 
   void SetUp() override {
-    test_web_contents_factory_.reset(new content::TestWebContentsFactory);
+    test_web_contents_factory_ =
+        std::make_unique<content::TestWebContentsFactory>();
 
     contents1_ =
         test_web_contents_factory_->CreateWebContents(&testing_profile_);
@@ -115,11 +116,11 @@ class TabMemoryMetricsReporterTest : public testing::Test {
   scoped_refptr<base::TestMockTimeTaskRunner> task_runner_;
 
   std::unique_ptr<content::TestWebContentsFactory> test_web_contents_factory_;
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfile testing_profile_;
-  content::WebContents* contents1_;
-  content::WebContents* contents2_;
-  content::WebContents* contents3_;
+  raw_ptr<content::WebContents> contents1_;
+  raw_ptr<content::WebContents> contents2_;
+  raw_ptr<content::WebContents> contents3_;
 };
 
 TEST_F(TabMemoryMetricsReporterTest, StartTrackingWithUnloaded) {
@@ -175,10 +176,10 @@ TEST_F(TabMemoryMetricsReporterTest, TrackingThreeWithLoaded) {
   ScopedSetTickClockForTesting scoped_set_tick_clock_for_testing_(tick_clock());
   observer().OnLoadingStateChange(contents1(), LoadingState::LOADING,
                                   LoadingState::LOADED);
-  task_runner()->AdvanceMockTickClock(base::TimeDelta::FromMinutes(1));
+  task_runner()->AdvanceMockTickClock(base::Minutes(1));
   observer().OnLoadingStateChange(contents2(), LoadingState::LOADING,
                                   LoadingState::LOADED);
-  task_runner()->AdvanceMockTickClock(base::TimeDelta::FromMinutes(1));
+  task_runner()->AdvanceMockTickClock(base::Minutes(1));
   observer().OnLoadingStateChange(contents3(), LoadingState::LOADING,
                                   LoadingState::LOADED);
 
@@ -202,7 +203,7 @@ TEST_F(TabMemoryMetricsReporterTest, EmitMemoryDumpAfterOneMinute) {
   ScopedSetTickClockForTesting scoped_set_tick_clock_for_testing_(tick_clock());
   observer().OnLoadingStateChange(contents1(), LoadingState::LOADING,
                                   LoadingState::LOADED);
-  task_runner()->FastForwardBy(base::TimeDelta::FromMinutes(1));
+  task_runner()->FastForwardBy(base::Minutes(1));
   EXPECT_EQ(1U, observer().emit_count());
   EXPECT_TRUE(observer().update_timer_for_testing().IsRunning());
   EXPECT_EQ(contents1(), observer().TopMonitoredContent());
@@ -213,7 +214,7 @@ TEST_F(TabMemoryMetricsReporterTest, EmitMemoryDumpAfterFiveMinutes) {
   ScopedSetTickClockForTesting scoped_set_tick_clock_for_testing_(tick_clock());
   observer().OnLoadingStateChange(contents1(), LoadingState::LOADING,
                                   LoadingState::LOADED);
-  task_runner()->FastForwardBy(base::TimeDelta::FromMinutes(5));
+  task_runner()->FastForwardBy(base::Minutes(5));
   EXPECT_EQ(2U, observer().emit_count());
   EXPECT_TRUE(observer().update_timer_for_testing().IsRunning());
   EXPECT_EQ(contents1(), observer().TopMonitoredContent());
@@ -224,7 +225,7 @@ TEST_F(TabMemoryMetricsReporterTest, EmitMemoryDumpAfterTenMinutes) {
   ScopedSetTickClockForTesting scoped_set_tick_clock_for_testing_(tick_clock());
   observer().OnLoadingStateChange(contents1(), LoadingState::LOADING,
                                   LoadingState::LOADED);
-  task_runner()->FastForwardBy(base::TimeDelta::FromMinutes(10));
+  task_runner()->FastForwardBy(base::Minutes(10));
   EXPECT_EQ(3U, observer().emit_count());
   EXPECT_TRUE(observer().update_timer_for_testing().IsRunning());
   EXPECT_EQ(contents1(), observer().TopMonitoredContent());
@@ -235,7 +236,7 @@ TEST_F(TabMemoryMetricsReporterTest, EmitMemoryDumpAfterFifteenMinutes) {
   ScopedSetTickClockForTesting scoped_set_tick_clock_for_testing_(tick_clock());
   observer().OnLoadingStateChange(contents1(), LoadingState::LOADING,
                                   LoadingState::LOADED);
-  task_runner()->FastForwardBy(base::TimeDelta::FromMinutes(15));
+  task_runner()->FastForwardBy(base::Minutes(15));
   EXPECT_EQ(4U, observer().emit_count());
   EXPECT_FALSE(observer().update_timer_for_testing().IsRunning());
   EXPECT_FALSE(observer().TopMonitoredContent());
@@ -245,8 +246,8 @@ TEST_F(TabMemoryMetricsReporterTest, EmitMemoryDumpSkipFiveMinutes) {
   ScopedSetTickClockForTesting scoped_set_tick_clock_for_testing_(tick_clock());
   observer().OnLoadingStateChange(contents1(), LoadingState::LOADING,
                                   LoadingState::LOADED);
-  task_runner()->AdvanceMockTickClock(base::TimeDelta::FromMinutes(5));
-  task_runner()->FastForwardBy(base::TimeDelta::FromMinutes(1));
+  task_runner()->AdvanceMockTickClock(base::Minutes(5));
+  task_runner()->FastForwardBy(base::Minutes(1));
   EXPECT_EQ(1U, observer().emit_count());
   EXPECT_TRUE(observer().update_timer_for_testing().IsRunning());
   EXPECT_EQ(contents1(), observer().TopMonitoredContent());
@@ -257,8 +258,8 @@ TEST_F(TabMemoryMetricsReporterTest, EmitMemoryDumpSkipTenMinutes) {
   ScopedSetTickClockForTesting scoped_set_tick_clock_for_testing_(tick_clock());
   observer().OnLoadingStateChange(contents1(), LoadingState::LOADING,
                                   LoadingState::LOADED);
-  task_runner()->AdvanceMockTickClock(base::TimeDelta::FromMinutes(10));
-  task_runner()->FastForwardBy(base::TimeDelta::FromMinutes(1));
+  task_runner()->AdvanceMockTickClock(base::Minutes(10));
+  task_runner()->FastForwardBy(base::Minutes(1));
   EXPECT_EQ(1U, observer().emit_count());
   EXPECT_TRUE(observer().update_timer_for_testing().IsRunning());
   EXPECT_EQ(contents1(), observer().TopMonitoredContent());
@@ -269,8 +270,8 @@ TEST_F(TabMemoryMetricsReporterTest, EmitMemoryDumpSkipFifteenMinutes) {
   ScopedSetTickClockForTesting scoped_set_tick_clock_for_testing_(tick_clock());
   observer().OnLoadingStateChange(contents1(), LoadingState::LOADING,
                                   LoadingState::LOADED);
-  task_runner()->AdvanceMockTickClock(base::TimeDelta::FromMinutes(15));
-  task_runner()->FastForwardBy(base::TimeDelta::FromMinutes(1));
+  task_runner()->AdvanceMockTickClock(base::Minutes(15));
+  task_runner()->FastForwardBy(base::Minutes(1));
   EXPECT_EQ(1U, observer().emit_count());
   EXPECT_FALSE(observer().update_timer_for_testing().IsRunning());
   EXPECT_FALSE(observer().TopMonitoredContent());
@@ -280,8 +281,7 @@ TEST_F(TabMemoryMetricsReporterTest, SecondContentComeAfter9_5Minutes) {
   ScopedSetTickClockForTesting scoped_set_tick_clock_for_testing_(tick_clock());
   observer().OnLoadingStateChange(contents1(), LoadingState::LOADING,
                                   LoadingState::LOADED);
-  task_runner()->FastForwardBy(base::TimeDelta::FromMinutes(9) +
-                               base::TimeDelta::FromSeconds(30));
+  task_runner()->FastForwardBy(base::Minutes(9) + base::Seconds(30));
   EXPECT_EQ(2U, observer().emit_count());
   EXPECT_EQ(30, observer().NextEmitTimeFromNow().InSeconds());
   EXPECT_EQ(contents1(), observer().TopMonitoredContent());
@@ -296,10 +296,10 @@ TEST_F(TabMemoryMetricsReporterTest, EmitMemoryDumpForDiscardedContent) {
   ScopedSetTickClockForTesting scoped_set_tick_clock_for_testing_(tick_clock());
   observer().OnLoadingStateChange(contents1(), LoadingState::LOADING,
                                   LoadingState::LOADED);
-  task_runner()->FastForwardBy(base::TimeDelta::FromMinutes(1));
+  task_runner()->FastForwardBy(base::Minutes(1));
   EXPECT_EQ(1U, observer().emit_count());
   observer().DiscardContent(contents1());
-  task_runner()->FastForwardBy(base::TimeDelta::FromMinutes(4));
+  task_runner()->FastForwardBy(base::Minutes(4));
   EXPECT_EQ(1U, observer().emit_count());
   EXPECT_FALSE(observer().update_timer_for_testing().IsRunning());
   EXPECT_FALSE(observer().TopMonitoredContent());

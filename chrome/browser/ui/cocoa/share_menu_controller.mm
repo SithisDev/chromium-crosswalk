@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsobject.h"
-#include "base/mac/sdk_forward_declarations.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -19,6 +18,7 @@
 #import "chrome/browser/ui/cocoa/accelerators_cocoa.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/omnibox/browser/location_bar_model.h"
 #include "net/base/mac/url_conversions.h"
 #include "ui/base/accelerators/platform_accelerator_cocoa.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -49,18 +49,29 @@ NSString* const kOpenSharingSubpaneProtocolValue = @"com.apple.share-services";
 NSString* const kRemindersSharingServiceName =
     @"com.apple.reminders.RemindersShareExtension";
 
+bool CanShare() {
+  Browser* last_active_browser = chrome::FindLastActive();
+  return last_active_browser &&
+         last_active_browser->location_bar_model()->ShouldDisplayURL() &&
+         last_active_browser->tab_strip_model()->GetActiveWebContents() &&
+         last_active_browser->tab_strip_model()
+             ->GetActiveWebContents()
+             ->GetLastCommittedURL()
+             .is_valid();
+}
+
 }  // namespace
 
 @implementation ShareMenuController {
   // The following three ivars are provided to the system via NSSharingService
   // delegates. They're needed for the transition animation, and to provide a
   // screenshot of the shared site for services that support it.
-  NSWindow* windowForShare_;  // weak
-  NSRect rectForShare_;
-  base::scoped_nsobject<NSImage> snapshotForShare_;
+  NSWindow* _windowForShare;  // weak
+  NSRect _rectForShare;
+  base::scoped_nsobject<NSImage> _snapshotForShare;
   // The Reminders share extension reads title/URL from the currently active
   // activity.
-  base::scoped_nsobject<NSUserActivity> activity_;
+  base::scoped_nsobject<NSUserActivity> _activity;
 }
 
 // NSMenuDelegate
@@ -83,12 +94,7 @@ NSString* const kRemindersSharingServiceName =
   [menu removeAllItems];
   [menu setAutoenablesItems:NO];
 
-  Browser* lastActiveBrowser = chrome::FindLastActive();
-  BOOL canShare =
-      lastActiveBrowser != nullptr &&
-      // Avoid |CanEmailPageLocation| segfault in interactive UI tests
-      lastActiveBrowser->tab_strip_model()->GetActiveWebContents() != nullptr &&
-      chrome::CanEmailPageLocation(lastActiveBrowser);
+  bool canShare = CanShare();
   // Using a real URL instead of empty string to avoid system log about relative
   // URLs in the pasteboard. This URL will not actually be shared to, just used
   // to fetch sharing services that can handle the NSURL type.
@@ -116,40 +122,40 @@ NSString* const kRemindersSharingServiceName =
 
 - (void)sharingService:(NSSharingService*)service
          didShareItems:(NSArray*)items {
-  UMA_HISTOGRAM_BOOLEAN("OSX.NativeShare", true);
+  UMA_HISTOGRAM_BOOLEAN("Mac.FileMenuNativeShare", true);
   [self clearTransitionData];
 }
 
 - (void)sharingService:(NSSharingService*)service
     didFailToShareItems:(NSArray*)items
                   error:(NSError*)error {
-  UMA_HISTOGRAM_BOOLEAN("OSX.NativeShare", false);
+  UMA_HISTOGRAM_BOOLEAN("Mac.FileMenuNativeShare", false);
   [self clearTransitionData];
 }
 
 - (NSRect)sharingService:(NSSharingService*)service
     sourceFrameOnScreenForShareItem:(id)item {
-  return rectForShare_;
+  return _rectForShare;
 }
 
 - (NSWindow*)sharingService:(NSSharingService*)service
     sourceWindowForShareItems:(NSArray*)items
           sharingContentScope:(NSSharingContentScope*)scope {
   *scope = NSSharingContentScopeFull;
-  return windowForShare_;
+  return _windowForShare;
 }
 
 - (NSImage*)sharingService:(NSSharingService*)service
     transitionImageForShareItem:(id)item
                     contentRect:(NSRect*)contentRect {
-  return snapshotForShare_;
+  return _snapshotForShare;
 }
 
 // Private methods
 
 // Saves details required by delegate methods for the transition animation.
 - (void)saveTransitionDataFromBrowser:(Browser*)browser {
-  windowForShare_ = browser->window()->GetNativeWindow().GetNativeNSWindow();
+  _windowForShare = browser->window()->GetNativeWindow().GetNativeNSWindow();
   BrowserView* browserView = BrowserView::GetBrowserViewForBrowser(browser);
   if (!browserView)
     return;
@@ -161,26 +167,27 @@ NSString* const kRemindersSharingServiceName =
   gfx::Rect screenRect = contentsView->bounds();
   views::View::ConvertRectToScreen(browserView, &screenRect);
 
-  rectForShare_ = ScreenRectToNSRect(screenRect);
+  _rectForShare = ScreenRectToNSRect(screenRect);
 
   gfx::Rect rectInWidget =
       browserView->ConvertRectToWidget(contentsView->bounds());
   gfx::Image image;
-  if (ui::GrabWindowSnapshot(windowForShare_, rectInWidget, &image)) {
-    snapshotForShare_.reset([image.ToNSImage() retain]);
+  if (ui::GrabWindowSnapshot(_windowForShare, rectInWidget, &image)) {
+    _snapshotForShare.reset([image.ToNSImage() retain]);
   }
 }
 
 - (void)clearTransitionData {
-  windowForShare_ = nil;
-  rectForShare_ = NSZeroRect;
-  snapshotForShare_.reset();
-  [activity_ invalidate];
-  activity_.reset();
+  _windowForShare = nil;
+  _rectForShare = NSZeroRect;
+  _snapshotForShare.reset();
+  [_activity invalidate];
+  _activity.reset();
 }
 
 // Performs the share action using the sharing service represented by |sender|.
 - (void)performShare:(NSMenuItem*)sender {
+  DCHECK(CanShare());
   Browser* browser = chrome::FindLastActive();
   DCHECK(browser);
   [self saveTransitionDataFromBrowser:browser];
@@ -204,14 +211,14 @@ NSString* const kRemindersSharingServiceName =
     itemsToShare = @[ url ];
   }
   if ([[service name] isEqual:kRemindersSharingServiceName]) {
-    activity_.reset([[NSUserActivity alloc]
+    _activity.reset([[NSUserActivity alloc]
         initWithActivityType:NSUserActivityTypeBrowsingWeb]);
     // webpageURL must be http or https or an exception is thrown.
     if ([url.scheme hasPrefix:@"http"]) {
-      [activity_ setWebpageURL:url];
+      [_activity setWebpageURL:url];
     }
-    [activity_ setTitle:title];
-    [activity_ becomeCurrent];
+    [_activity setTitle:title];
+    [_activity becomeCurrent];
   }
   [service performWithItems:itemsToShare];
 }

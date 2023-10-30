@@ -1,15 +1,19 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/search/new_tab_page_navigation_throttle.h"
+
+#include <utility>
 
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "url/gurl.h"
 
@@ -31,8 +35,7 @@ NewTabPageNavigationThrottle::MaybeCreateThrottleFor(
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   if (web_contents->GetVisibleURL() != chrome::kChromeUINewTabURL ||
-      !search::IsInstantNTPURL(handle->GetURL(), profile) ||
-      handle->GetURL() == chrome::kChromeSearchLocalNtpUrl) {
+      !search::IsInstantNTPURL(handle->GetURL(), profile)) {
     return nullptr;
   }
 
@@ -60,12 +63,10 @@ NewTabPageNavigationThrottle::WillFailRequest() {
 
 content::NavigationThrottle::ThrottleCheckResult
 NewTabPageNavigationThrottle::OpenLocalNewTabPage() {
-  navigation_handle()->GetWebContents()->OpenURL(
-      content::OpenURLParams(GURL(chrome::kChromeSearchLocalNtpUrl),
-                             navigation_handle()->GetReferrer(),
-                             navigation_handle()->GetFrameTreeNodeId(),
-                             WindowOpenDisposition::CURRENT_TAB,
-                             navigation_handle()->GetPageTransition(),
-                             false /* is_renderer_initiated */));
+  content::OpenURLParams params =
+      content::OpenURLParams::FromNavigationHandle(navigation_handle());
+  params.url = GURL(chrome::kChromeUINewTabPageThirdPartyURL);
+  params.is_renderer_initiated = false;
+  navigation_handle()->GetWebContents()->OpenURL(std::move(params));
   return content::NavigationThrottle::CANCEL_AND_IGNORE;
 }

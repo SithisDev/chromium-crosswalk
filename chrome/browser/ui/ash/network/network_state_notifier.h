@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,20 +10,21 @@
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observation.h"
 #include "base/time/time.h"
-#include "chromeos/network/network_connection_observer.h"
-#include "chromeos/network/network_state_handler_observer.h"
+#include "base/values.h"
+#include "chromeos/ash/components/network/network_connection_observer.h"
+#include "chromeos/ash/components/network/network_state_handler.h"
+#include "chromeos/ash/components/network/network_state_handler_observer.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
-namespace base {
-class DictionaryValue;
-}
+namespace ash {
+class NetworkState;
+class SystemTrayClient;
+}  // namespace ash
 
 namespace chromeos {
-
-class NetworkState;
 
 // This class provides user notifications in the following cases:
 // 1. ShowNetworkConnectError() gets called after any user initiated connect
@@ -38,6 +39,10 @@ class NetworkStateNotifier : public NetworkConnectionObserver,
                              public NetworkStateHandlerObserver {
  public:
   NetworkStateNotifier();
+
+  NetworkStateNotifier(const NetworkStateNotifier&) = delete;
+  NetworkStateNotifier& operator=(const NetworkStateNotifier&) = delete;
+
   ~NetworkStateNotifier() override;
 
   // Show a connection error notification. If |error_name| matches an error
@@ -50,11 +55,24 @@ class NetworkStateNotifier : public NetworkConnectionObserver,
   // Show a mobile activation error notification.
   void ShowMobileActivationErrorForGuid(const std::string& guid);
 
+  void set_system_tray_client(ash::SystemTrayClient* system_tray_client) {
+    system_tray_client_ = system_tray_client;
+  }
+
   static const char kNetworkConnectNotificationId[];
   static const char kNetworkActivateNotificationId[];
   static const char kNetworkOutOfCreditsNotificationId[];
 
  private:
+  friend class NetworkStateNotifierTest;
+
+  struct VpnDetails {
+    VpnDetails(const std::string& guid, const std::string& name)
+        : guid(guid), name(name) {}
+    std::string guid;
+    std::string name;
+  };
+
   // NetworkConnectionObserver
   void ConnectToNetworkRequested(const std::string& service_path) override;
   void ConnectSucceeded(const std::string& service_path) override;
@@ -64,44 +82,50 @@ class NetworkStateNotifier : public NetworkConnectionObserver,
 
   // NetworkStateHandlerObserver
   void ActiveNetworksChanged(
-      const std::vector<const NetworkState*>& active_networks) override;
-  void NetworkPropertiesUpdated(const NetworkState* network) override;
+      const std::vector<const ash::NetworkState*>& active_networks) override;
+  void NetworkPropertiesUpdated(const ash::NetworkState* network) override;
+  void NetworkConnectionStateChanged(const ash::NetworkState* network) override;
+  void NetworkIdentifierTransitioned(const std::string& old_service_path,
+                                     const std::string& new_service_path,
+                                     const std::string& old_guid,
+                                     const std::string& new_guid) override;
+  void OnShuttingDown() override;
 
-  void ConnectErrorPropertiesSucceeded(
+  void OnConnectErrorGetProperties(
       const std::string& error_name,
       const std::string& service_path,
-      const base::DictionaryValue& shill_properties);
-  void ConnectErrorPropertiesFailed(
-      const std::string& error_name,
-      const std::string& service_path,
-      const std::string& shill_connect_error,
-      std::unique_ptr<base::DictionaryValue> shill_error_data);
+      absl::optional<base::Value> shill_properties);
+
   void ShowConnectErrorNotification(
       const std::string& error_name,
       const std::string& service_path,
-      const base::DictionaryValue& shill_properties);
-  void ShowVpnDisconnectedNotification(const NetworkState* vpn);
+      absl::optional<base::Value> shill_properties);
+
+  void ShowVpnDisconnectedNotification(VpnDetails* vpn);
 
   // Removes any existing connect notifications.
   void RemoveConnectNotification();
 
   // Returns true if the default network changed.
-  bool UpdateDefaultNetwork(const NetworkState* network);
+  bool UpdateDefaultNetwork(const ash::NetworkState* network);
 
   // Helper methods to update state and check for notifications.
-  void UpdateVpnConnectionState(const NetworkState* vpn);
+  void UpdateVpnConnectionState(const ash::NetworkState* active_vpn);
   void UpdateCellularOutOfCredits();
-  void UpdateCellularActivating(const NetworkState* cellular);
+  void UpdateCellularActivating(const ash::NetworkState* cellular);
 
   // Shows the network settings for |network_id|.
   void ShowNetworkSettings(const std::string& network_id);
+  void ShowSimUnlockSettings();
 
-  // Shows the mobile setup dialog for |network_id|.
-  void ShowMobileSetup(const std::string& network_id);
+  // Shows the carrier account detail page for |network_id|.
+  void ShowCarrierAccountDetail(const std::string& network_id);
 
-  // Set to the GUID of the connected VPN network if any, otherwise empty.
-  // Used for displaying VPN disconnected notification.
-  std::string connected_vpn_guid_;
+  ash::SystemTrayClient* system_tray_client_ = nullptr;
+
+  // The details of the connected VPN network if any, otherwise null.
+  // Used for displaying the VPN disconnected notification.
+  std::unique_ptr<VpnDetails> connected_vpn_;
 
   // Tracks state for out of credits notification.
   bool did_show_out_of_credits_ = false;
@@ -109,12 +133,18 @@ class NetworkStateNotifier : public NetworkConnectionObserver,
   // Set to the GUID of the active non VPN network if any, otherwise empty.
   std::string active_non_vpn_network_guid_;
 
+  // Set to the GUID of the current network which spawned a connection error
+  // notification if any, otherwise empty.
+  std::string connect_error_notification_network_guid_;
+
   // Tracks GUIDs of activating cellular networks for activation notification.
   std::set<std::string> cellular_activating_guids_;
 
-  base::WeakPtrFactory<NetworkStateNotifier> weak_ptr_factory_;
+  base::ScopedObservation<ash::NetworkStateHandler,
+                          ash::NetworkStateHandlerObserver>
+      network_state_handler_observer_{this};
 
-  DISALLOW_COPY_AND_ASSIGN(NetworkStateNotifier);
+  base::WeakPtrFactory<NetworkStateNotifier> weak_ptr_factory_{this};
 };
 
 }  // namespace chromeos

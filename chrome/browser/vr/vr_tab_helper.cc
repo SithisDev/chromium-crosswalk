@@ -1,31 +1,30 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/vr/vr_tab_helper.h"
 
-#include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
-#include "chrome/browser/vr/service/xr_runtime_manager.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/common/web_preferences.h"
+#include "content/public/browser/xr_runtime_manager.h"
 #include "device/vr/buildflags/buildflags.h"
+#include "third_party/blink/public/common/web_preferences/web_preferences.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/feature_list.h"
-#include "chrome/browser/android/chrome_feature_list.h"
+#include "chrome/browser/flags/android/chrome_feature_list.h"
 #else
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #endif
 
+using blink::web_pref::WebPreferences;
 using content::WebContents;
-using content::WebPreferences;
 
 namespace vr {
 
 VrTabHelper::VrTabHelper(content::WebContents* contents)
-    : web_contents_(contents) {}
+    : content::WebContentsUserData<VrTabHelper>(*contents) {}
 
 VrTabHelper::~VrTabHelper() {}
 
@@ -35,10 +34,10 @@ void VrTabHelper::SetIsInVr(bool is_in_vr) {
 
   is_in_vr_ = is_in_vr;
 
-  WebPreferences web_prefs =
-      web_contents_->GetRenderViewHost()->GetWebkitPreferences();
+  blink::web_pref::WebPreferences web_prefs =
+      GetWebContents().GetOrCreateWebPreferences();
   web_prefs.immersive_mode_enabled = is_in_vr_;
-  web_contents_->GetRenderViewHost()->UpdateWebkitPreferences(web_prefs);
+  GetWebContents().SetWebPreferences(web_prefs);
 }
 
 /* static */
@@ -81,7 +80,7 @@ void VrTabHelper::SetIsContentDisplayedInHeadset(content::WebContents* contents,
   bool old_state = vr_tab_helper->IsContentDisplayedInHeadset(contents);
   vr_tab_helper->SetIsContentDisplayedInHeadset(state);
   if (old_state != state) {
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
     Browser* browser = chrome::FindBrowserWithWebContents(contents);
     if (browser) {
       TabStripModel* tab_strip_model = browser->tab_strip_model();
@@ -97,8 +96,8 @@ void VrTabHelper::SetIsContentDisplayedInHeadset(content::WebContents* contents,
 
 /* static */
 void VrTabHelper::ExitVrPresentation() {
-#if defined(OS_WIN) && BUILDFLAG(ENABLE_VR)
-  XRRuntimeManager::ExitImmersivePresentation();
+#if BUILDFLAG(IS_WIN) && BUILDFLAG(ENABLE_VR)
+  content::XRRuntimeManager::ExitImmersivePresentation();
 #endif
 }
 
@@ -111,7 +110,6 @@ bool VrTabHelper::IsUiSuppressedInVr(content::WebContents* contents,
   if (!IsInVr(contents))
     return false;
 
-  bool suppress = false;
   switch (element) {
     // The following are suppressed if in VR.
     case UiSuppressedElement::kHttpAuth:
@@ -131,21 +129,14 @@ bool VrTabHelper::IsUiSuppressedInVr(content::WebContents* contents,
     // suppression.
     case UiSuppressedElement::kFileAccessPermission:
     case UiSuppressedElement::kContextMenu:
-      suppress = true;
-      break;
+      return true;
     case UiSuppressedElement::kPlaceholderForPreviousHighValue:
     case UiSuppressedElement::kCount:
-      suppress = false;
       NOTREACHED();
-      break;
+      return false;
   }
-  if (suppress) {
-    UMA_HISTOGRAM_ENUMERATION("VR.Shell.EncounteredSuppressedUI", element,
-                              UiSuppressedElement::kCount);
-  }
-  return suppress;
 }
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(VrTabHelper)
+WEB_CONTENTS_USER_DATA_KEY_IMPL(VrTabHelper);
 
 }  // namespace vr

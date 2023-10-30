@@ -1,17 +1,21 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/metrics/upgrade_metrics_provider.h"
 
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/upgrade_detector/upgrade_detector.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class UpgradeMetricsProviderTest : public testing::Test {
  public:
   UpgradeMetricsProviderTest() {}
+
+  UpgradeMetricsProviderTest(const UpgradeMetricsProviderTest&) = delete;
+  UpgradeMetricsProviderTest& operator=(const UpgradeMetricsProviderTest&) =
+      delete;
 
   void TestHistogramLevel(
       UpgradeDetector::UpgradeNotificationAnnoyanceLevel level) {
@@ -24,12 +28,10 @@ class UpgradeMetricsProviderTest : public testing::Test {
 
  private:
   UpgradeMetricsProvider metrics_provider_;
-
-  DISALLOW_COPY_AND_ASSIGN(UpgradeMetricsProviderTest);
 };
 
 TEST_F(UpgradeMetricsProviderTest, HistogramCheck) {
-  base::test::ScopedTaskEnvironment task_environment;
+  base::test::TaskEnvironment task_environment;
   TestHistogramLevel(UpgradeDetector::UPGRADE_ANNOYANCE_NONE);
   TestHistogramLevel(UpgradeDetector::UPGRADE_ANNOYANCE_VERY_LOW);
   TestHistogramLevel(UpgradeDetector::UPGRADE_ANNOYANCE_LOW);

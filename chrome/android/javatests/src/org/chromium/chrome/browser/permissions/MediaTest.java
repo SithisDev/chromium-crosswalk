@@ -1,10 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.permissions;
 
-import android.support.test.filters.MediumTest;
+import androidx.test.filters.MediumTest;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -13,13 +13,11 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.Restriction;
-import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.permissions.PermissionTestRule.PermissionUpdateWaiter;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.ChromeRestriction;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.common.ContentSwitches;
 
 /**
@@ -27,7 +25,6 @@ import org.chromium.content_public.common.ContentSwitches;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
-@RetryOnFailure
 public class MediaTest {
     @Rule
     public PermissionTestRule mPermissionRule = new PermissionTestRule();
@@ -47,23 +44,10 @@ public class MediaTest {
         Tab tab = mPermissionRule.getActivity().getActivityTab();
         PermissionUpdateWaiter updateWaiter =
                 new PermissionUpdateWaiter(prefix, mPermissionRule.getActivity());
-        tab.addObserver(updateWaiter);
+        TestThreadUtils.runOnUiThreadBlocking(() -> tab.addObserver(updateWaiter));
         mPermissionRule.runAllowTest(
                 updateWaiter, TEST_FILE, script, numUpdates, withGesture, isDialog);
-        tab.removeObserver(updateWaiter);
-    }
-
-    /**
-     * Verify asking for microphone creates an InfoBar and works when the permission is granted.
-     * @throws Exception
-     */
-    @Test
-    @MediumTest
-    @Feature({"MediaPermissions", "Main"})
-    @CommandLineFlags.Add({FAKE_DEVICE, "disable-features=" + PermissionTestRule.MODAL_FLAG})
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
-    public void testMicrophonePermissionsPlumbingInfoBar() throws Exception {
-        testMediaPermissionsPlumbing("Mic count:", "initiate_getMicrophone()", 1, false, false);
+        TestThreadUtils.runOnUiThreadBlocking(() -> tab.removeObserver(updateWaiter));
     }
 
     /**
@@ -73,49 +57,22 @@ public class MediaTest {
     @Test
     @MediumTest
     @Feature({"MediaPermissions", "Main"})
-    @CommandLineFlags.Add({FAKE_DEVICE, "enable-features=" + PermissionTestRule.MODAL_FLAG})
+    @CommandLineFlags.Add({FAKE_DEVICE})
     public void testMicrophoneMediaPermissionsPlumbingDialog() throws Exception {
         testMediaPermissionsPlumbing("Mic count:", "initiate_getMicrophone()", 1, true, true);
     }
 
     /**
-     * Verify asking for camera creates an InfoBar and works when the permission is granted.
+     * Verify asking for camera with no gesture creates a dialog and works when the permission is
+     * granted.
      * @throws Exception
      */
     @Test
     @MediumTest
     @Feature({"MediaPermissions", "Main"})
-    @CommandLineFlags.Add({FAKE_DEVICE, "disable-features=" + PermissionTestRule.MODAL_FLAG})
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
-    public void testCameraPermissionsPlumbingInfoBar() throws Exception {
-        testMediaPermissionsPlumbing("Camera count:", "initiate_getCamera()", 1, false, false);
-    }
-
-    /**
-     * Verify asking for camera with no gesture creates a dialog when the modal flag is turned on,
-     * and works when the permission is granted.
-     * @throws Exception
-     */
-    @Test
-    @MediumTest
-    @Feature({"MediaPermissions", "Main"})
-    @CommandLineFlags.Add({FAKE_DEVICE, "enable-features=" + PermissionTestRule.MODAL_FLAG})
+    @CommandLineFlags.Add({FAKE_DEVICE})
     public void testCameraPermissionsPlumbingDialog() throws Exception {
         testMediaPermissionsPlumbing("Camera count:", "initiate_getCamera()", 1, false, true);
-    }
-
-    /**
-     * Verify asking for both mic and camera creates a combined InfoBar and works when the
-     * permissions are granted.
-     * @throws Exception
-     */
-    @Test
-    @MediumTest
-    @Feature({"MediaPermissions", "Main"})
-    @CommandLineFlags.Add({FAKE_DEVICE, "disable-features=" + PermissionTestRule.MODAL_FLAG})
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
-    public void testCombinedPermissionsPlumbing() throws Exception {
-        testMediaPermissionsPlumbing("Combined count:", "initiate_getCombined()", 1, false, false);
     }
 
     /**
@@ -126,7 +83,7 @@ public class MediaTest {
     @Test
     @MediumTest
     @Feature({"MediaPermissions", "Main"})
-    @CommandLineFlags.Add({FAKE_DEVICE, "enable-features=" + PermissionTestRule.MODAL_FLAG})
+    @CommandLineFlags.Add({FAKE_DEVICE})
     public void testCombinedPermissionsPlumbingDialog() throws Exception {
         testMediaPermissionsPlumbing("Combined count:", "initiate_getCombined()", 1, true, true);
     }

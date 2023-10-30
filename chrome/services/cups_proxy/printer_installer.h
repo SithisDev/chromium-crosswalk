@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,12 +28,10 @@ using InstallPrinterCallback = base::OnceCallback<void(InstallPrinterResult)>;
 
 // This CupsProxyService internal manager ensures that any printers referenced
 // by an incoming IPP request are installed into the CUPS daemon prior to
-// proxying. This class can be created anywhere, but must be accessed from a
-// sequenced context.
+// proxying. This class must be created and accessed from a sequenced context.
 class PrinterInstaller {
  public:
-  explicit PrinterInstaller(
-      base::WeakPtr<chromeos::printing::CupsProxyServiceDelegate> delegate);
+  explicit PrinterInstaller(CupsProxyServiceDelegate* const delegate);
   ~PrinterInstaller();
 
   // Pre-installs any printers required by |ipp| into the CUPS daemon, as
@@ -41,11 +39,13 @@ class PrinterInstaller {
   void InstallPrinter(std::string printer_id, InstallPrinterCallback cb);
 
  private:
-  void OnInstallPrinter(InstallPrinterCallback cb, bool success);
+  void OnInstallPrinter(InstallPrinterCallback cb,
+                        const chromeos::Printer& printer,
+                        bool success);
   void Finish(InstallPrinterCallback cb, InstallPrinterResult res);
 
-  // Service delegate granting access to printing stack dependencies.
-  base::WeakPtr<chromeos::printing::CupsProxyServiceDelegate> delegate_;
+  // Unowned delegate granting access to printing stack dependencies.
+  CupsProxyServiceDelegate* const delegate_;
 
   SEQUENCE_CHECKER(sequence_checker_);
   base::WeakPtrFactory<PrinterInstaller> weak_factory_{this};

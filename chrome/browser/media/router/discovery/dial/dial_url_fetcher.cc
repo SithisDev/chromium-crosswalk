@@ -1,16 +1,20 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/media/router/discovery/dial/dial_url_fetcher.h"
 
 #include "base/bind.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/net/system_network_context_manager.h"
+#include "chrome/browser/net/system_network_context_manager.h"  // nogncheck
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
@@ -19,11 +23,13 @@
 #include "net/url_request/redirect_info.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 // The maximum number of retries allowed for GET requests.
 constexpr int kMaxRetries = 2;
 
-// DIAL devices are unlikely to expose uPnP functions other than DIAL, so 256kb
+// DIAL devices are unlikely to expose uPnP functions other than DIAL, so 256KB
 // should be more than sufficient.
 constexpr int kMaxResponseSizeBytes = 262144;
 
@@ -61,12 +67,22 @@ constexpr net::NetworkTrafficAnnotationTag kDialUrlFetcherTrafficAnnotation =
           }
         })");
 
-void BindURLLoaderFactoryRequestOnUIThread(
-    network::mojom::URLLoaderFactoryRequest request) {
+void BindURLLoaderFactoryReceiverOnUIThread(
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver) {
   network::mojom::URLLoaderFactory* factory =
       g_browser_process->system_network_context_manager()
           ->GetURLLoaderFactory();
-  factory->Clone(std::move(request));
+  factory->Clone(std::move(receiver));
+}
+
+std::string GetFakeOriginForDialLaunch() {
+  // Syntax: package:Google-Chrome.87.Mac-OS-X
+  std::string product_name(version_info::GetProductName());
+  base::ReplaceChars(product_name, " ", "-", &product_name);
+  std::string os_type(version_info::GetOSType());
+  base::ReplaceChars(os_type, " ", "-", &os_type);
+  return base::StrCat({"package:", product_name, ".",
+                       version_info::GetMajorVersionNumber(), ".", os_type});
 }
 
 }  // namespace
@@ -79,44 +95,60 @@ DialURLFetcher::~DialURLFetcher() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
-const network::ResourceResponseHead* DialURLFetcher::GetResponseHead() const {
+const network::mojom::URLResponseHead* DialURLFetcher::GetResponseHead() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return loader_ ? loader_->ResponseInfo() : nullptr;
 }
 
-void DialURLFetcher::Get(const GURL& url) {
+void DialURLFetcher::Get(const GURL& url, bool set_origin_header) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  Start(url, "GET", base::nullopt, kMaxRetries);
+  Start(url, "GET", absl::nullopt, kMaxRetries, set_origin_header);
 }
 
 void DialURLFetcher::Delete(const GURL& url) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  Start(url, "DELETE", base::nullopt, 0);
+  Start(url, "DELETE", absl::nullopt, 0, true);
 }
 
 void DialURLFetcher::Post(const GURL& url,
-                          const base::Optional<std::string>& post_data) {
+                          const absl::optional<std::string>& post_data) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  Start(url, "POST", post_data, 0);
+  Start(url, "POST", post_data, 0, true);
 }
 
 void DialURLFetcher::Start(const GURL& url,
                            const std::string& method,
-                           const base::Optional<std::string>& post_data,
-                           int max_retries) {
+                           const absl::optional<std::string>& post_data,
+                           int max_retries,
+                           bool set_origin_header) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!loader_);
 
   auto request = std::make_unique<network::ResourceRequest>();
   request->url = url;
   request->method = method;
+  // DIAL requests are made by the browser to a fixed set of URLs in response to
+  // user actions, not by Web frames.  They require an Origin header, to prevent
+  // arbitrary Web frames from issuing site-controlled DIAL requests via Fetch
+  // or XHR.  We set a fake Origin that is only used by the browser to satisfy
+  // this requirement.  Rather than attempt to coerce this fake origin into a
+  // url::Origin, set the header directly.
+  //
+  // TODO(crbug.com/1136284): Pass through an actual Origin, which improves
+  // compatibility with certain DIAL applications (e.g., Netflix).
+  if (set_origin_header)
+    request->headers.SetHeader("Origin", GetFakeOriginForDialLaunch());
+
   method_ = method;
 
   // net::LOAD_BYPASS_PROXY: Proxies almost certainly hurt more cases than they
   //     help.
   // net::LOAD_DISABLE_CACHE: The request should not touch the cache.
   request->load_flags = net::LOAD_BYPASS_PROXY | net::LOAD_DISABLE_CACHE;
-  request->allow_credentials = false;
+  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
+  if (saved_request_for_test_) {
+    *saved_request_for_test_ = *request;
+  }
 
   loader_ = network::SimpleURLLoader::Create(std::move(request),
                                              kDialUrlFetcherTrafficAnnotation);
@@ -141,37 +173,42 @@ void DialURLFetcher::Start(const GURL& url,
   StartDownload();
 }
 
-void DialURLFetcher::ReportError(int response_code,
-                                 const std::string& message) {
-  std::move(error_cb_).Run(response_code, message);
+void DialURLFetcher::ReportError(const std::string& message) {
+  std::move(error_cb_).Run(message, GetHttpResponseCode());
+}
+
+absl::optional<int> DialURLFetcher::GetHttpResponseCode() const {
+  if (GetResponseHead() && GetResponseHead()->headers) {
+    int code = GetResponseHead()->headers->response_code();
+    return code == -1 ? absl::nullopt : absl::optional<int>(code);
+  }
+  return absl::nullopt;
 }
 
 void DialURLFetcher::ReportRedirectError(
     const net::RedirectInfo& redirect_info,
-    const network::ResourceResponseHead& response_head,
+    const network::mojom::URLResponseHead& response_head,
     std::vector<std::string>* to_be_removed_headers) {
   // Cancel the request.
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   loader_.reset();
 
-  // Returning |OK| on error will be treated as unavailable.
-  ReportError(net::Error::OK, "Redirect not allowed");
+  ReportError("Redirect not allowed");
 }
 
 void DialURLFetcher::StartDownload() {
   // Bind the request to the system URLLoaderFactory obtained on UI thread.
   // Currently this is the only way to guarantee a live URLLoaderFactory.
   // TOOD(mmenke): Figure out a way to do this transparently on IO thread.
-  network::mojom::URLLoaderFactoryPtr loader_factory;
+  mojo::Remote<network::mojom::URLLoaderFactory> loader_factory;
 
   // TODO(https://crbug.com/823869): Fix DeviceDescriptionServiceTest and remove
   // this conditional.
-  auto mojo_request = mojo::MakeRequest(&loader_factory);
+  auto mojo_receiver = loader_factory.BindNewPipeAndPassReceiver();
   if (content::BrowserThread::IsThreadInitialized(content::BrowserThread::UI)) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::UI},
-        base::BindOnce(&BindURLLoaderFactoryRequestOnUIThread,
-                       std::move(mojo_request)));
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&BindURLLoaderFactoryReceiverOnUIThread,
+                                  std::move(mojo_receiver)));
   }
 
   loader_->DownloadToString(
@@ -184,19 +221,18 @@ void DialURLFetcher::ProcessResponse(std::unique_ptr<std::string> response) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   int response_code = loader_->NetError();
   if (response_code != net::Error::OK) {
-    ReportError(response_code,
-                base::StringPrintf("HTTP response error: %d", response_code));
+    ReportError(base::StringPrintf("Internal net::Error: %d", response_code));
     return;
   }
 
   // Response for POST and DELETE may be empty.
   if (!response || (method_ == "GET" && response->empty())) {
-    ReportError(response_code, "Missing or empty response");
+    ReportError("Missing or empty response");
     return;
   }
 
   if (!base::IsStringUTF8(*response)) {
-    ReportError(response_code, "Invalid response encoding");
+    ReportError("Invalid response encoding");
     return;
   }
 

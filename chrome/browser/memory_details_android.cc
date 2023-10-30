@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "base/bind.h"
 #include "base/process/process_iterator.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/grit/chromium_strings.h"
@@ -23,8 +22,6 @@
 
 using base::ProcessEntry;
 using base::ProcessId;
-using content::BrowserThread;
-
 namespace {
 
 // A helper for |CollectProcessData()| to include the chrome sandboxed
@@ -145,7 +142,7 @@ void MemoryDetails::CollectProcessData(
   process_data_.push_back(current_browser);
 
   // Finally return to the browser thread.
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&MemoryDetails::CollectChildInfoOnUIThread, this));
 }

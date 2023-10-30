@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,12 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "chrome/browser/ui/views/page_action/omnibox_page_action_icon_container_view.h"
+#include "chrome/browser/ui/views/page_action/page_action_icon_view.h"
 #include "chrome/browser/ui/views/page_info/page_info_bubble_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 
 namespace {
@@ -19,21 +20,15 @@ namespace {
 class LocationIconViewTest : public InProcessBrowserTest {
  public:
   LocationIconViewTest() = default;
-  ~LocationIconViewTest() override = default;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(LocationIconViewTest);
+  LocationIconViewTest(const LocationIconViewTest&) = delete;
+  LocationIconViewTest& operator=(const LocationIconViewTest&) = delete;
+
+  ~LocationIconViewTest() override = default;
 };
 
-#if defined(OS_MACOSX)
-// TODO(robliao): https://crbug.com/824418  Focusing or input is not completely
-// working on Mac.
-#define MAYBE_HideOnSecondClick DISABLED_HideOnSecondClick
-#else
-#define MAYBE_HideOnSecondClick HideOnSecondClick
-#endif
 // Verify that clicking the location icon a second time hides the bubble.
-IN_PROC_BROWSER_TEST_F(LocationIconViewTest, MAYBE_HideOnSecondClick) {
+IN_PROC_BROWSER_TEST_F(LocationIconViewTest, HideOnSecondClick) {
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
   views::View* location_icon_view =
       browser_view->toolbar()->location_bar()->location_icon_view();
@@ -62,9 +57,9 @@ IN_PROC_BROWSER_TEST_F(LocationIconViewTest, MAYBE_HideOnSecondClick) {
             PageInfoBubbleView::GetShownBubbleType());
 }
 
-#if defined(OS_MACOSX)
-// TODO(robliao): https://crbug.com/823543  Widget activation doesn't work on
-// Mac.
+#if BUILDFLAG(IS_MAC)
+// TODO(jongkwon.lee): https://crbug.com/825834 NativeWidgetMac::Deactivate is
+// not implemented on Mac.
 #define MAYBE_ActivateFirstInactiveBubbleForAccessibility \
   DISABLED_ActivateFirstInactiveBubbleForAccessibility
 #else
@@ -86,7 +81,6 @@ IN_PROC_BROWSER_TEST_F(LocationIconViewTest,
 
   PageActionIconView* icon_view =
       browser_view->toolbar_button_provider()
-          ->GetOmniboxPageActionIconContainerView()
           ->GetPageActionIconView(PageActionIconType::kTranslate);
   ASSERT_TRUE(icon_view);
   EXPECT_TRUE(icon_view->GetVisible());

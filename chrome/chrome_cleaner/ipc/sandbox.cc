@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 
 #include "base/base_switches.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
@@ -44,43 +43,40 @@ namespace {
 
 // Switches to propagate to the sandbox target process.
 const char* kSwitchesToPropagate[] = {
-    kEnableCrashReportingSwitch, kExecutionModeSwitch,
-    kExtendedSafeBrowsingEnabledSwitch, switches::kTestChildProcess,
+    kEnableCrashReportingSwitch,
+    kExecutionModeSwitch,
+    kExtendedSafeBrowsingEnabledSwitch,
+    switches::kTestChildProcess,
+    kTestingSwitch,
+    kTestLoggingPathSwitch,
 };
 
 std::map<SandboxType, base::Process>* g_target_processes = nullptr;  // Leaked.
 
-scoped_refptr<sandbox::TargetPolicy> GetSandboxPolicy(
+std::unique_ptr<sandbox::TargetPolicy> GetSandboxPolicy(
     sandbox::BrokerServices* sandbox_broker_services) {
-  scoped_refptr<sandbox::TargetPolicy> policy(
-      sandbox_broker_services->CreatePolicy());
+  auto policy = sandbox_broker_services->CreatePolicy();
 
-  sandbox::ResultCode sandbox_result = policy->SetTokenLevel(
+  sandbox::TargetConfig* config = policy->GetConfig();
+  if (config->IsConfigured())
+    return policy;
+
+  config->SetDesktop(sandbox::Desktop::kAlternateWinstation);
+
+  sandbox::ResultCode sandbox_result = config->SetTokenLevel(
       sandbox::USER_RESTRICTED_SAME_ACCESS, sandbox::USER_LOCKDOWN);
   CHECK_EQ(sandbox::SBOX_ALL_OK, sandbox_result);
 
-  sandbox_result = policy->SetJobLevel(sandbox::JOB_LOCKDOWN, 0);
+  sandbox_result = config->SetJobLevel(sandbox::JobLevel::kLockdown, 0);
   CHECK_EQ(sandbox::SBOX_ALL_OK, sandbox_result);
 
-#ifdef NDEBUG
-  // Chromium ignores failures on this function but logs a warning. Do the same
-  // here.
-  // https://chromium.googlesource.com/chromium/src/+/b6a4ff86c730756a73d63cc882ef818fb7818a53/content/common/sandbox_win.cc#420
-  // TODO(crbug.com/893740): SetAlternateDesktop can cause DCHECK's in unit
-  // tests if called more than once. Until we get to the bottom of why, it's
-  // only enabled in release builds.
-  sandbox::ResultCode result = policy->SetAlternateDesktop(true);
-  LOG_IF(WARNING, result != sandbox::SBOX_ALL_OK)
-      << "Failed to apply desktop security";
-#endif
-
   sandbox_result =
-      policy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_UNTRUSTED);
+      config->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_UNTRUSTED);
   CHECK_EQ(sandbox::SBOX_ALL_OK, sandbox_result);
 
   // This is all the mitigations from security_level.h, except those that need
   // to be enabled later (set in SetDelayedProcessMitigations below).
-  sandbox_result = policy->SetProcessMitigations(
+  sandbox_result = config->SetProcessMitigations(
       sandbox::MITIGATION_DEP | sandbox::MITIGATION_DEP_NO_ATL_THUNK |
       sandbox::MITIGATION_SEHOP | sandbox::MITIGATION_HEAP_TERMINATE |
       sandbox::MITIGATION_BOTTOM_UP_ASLR |
@@ -97,7 +93,7 @@ scoped_refptr<sandbox::TargetPolicy> GetSandboxPolicy(
   // SetProcessMitigations above, but they need to be delayed in Debug builds.
   // It's easier to just set them up as delayed for both Debug and Release
   // builds.
-  sandbox_result = policy->SetDelayedProcessMitigations(
+  sandbox_result = config->SetDelayedProcessMitigations(
       sandbox::MITIGATION_RELOCATE_IMAGE |
       sandbox::MITIGATION_RELOCATE_IMAGE_REQUIRED |
       sandbox::MITIGATION_STRICT_HANDLE_CHECKS |
@@ -106,9 +102,8 @@ scoped_refptr<sandbox::TargetPolicy> GetSandboxPolicy(
 
   // This rule is needed to allow user32.dll and gdi32.dll to initialize during
   // load, while still blocking other WIN32K calls.
-  sandbox_result =
-      policy->AddRule(sandbox::TargetPolicy::SUBSYS_WIN32K_LOCKDOWN,
-                      sandbox::TargetPolicy::FAKE_USER_GDI_INIT, nullptr);
+  sandbox_result = config->AddRule(sandbox::SubSystem::kWin32kLockdown,
+                                   sandbox::Semantics::kFakeGdiInit, nullptr);
   CHECK_EQ(sandbox::SBOX_ALL_OK, sandbox_result);
 
 #if !BUILDFLAG(IS_OFFICIAL_CHROME_CLEANER_BUILD)
@@ -117,21 +112,35 @@ scoped_refptr<sandbox::TargetPolicy> GetSandboxPolicy(
   if (!product_path.value().empty()) {
     // In developer builds, let the sandbox target process write logs to the
     // product directory.
-    sandbox_result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
-                                     sandbox::TargetPolicy::FILES_ALLOW_ANY,
+    sandbox_result = config->AddRule(sandbox::SubSystem::kFiles,
+                                     sandbox::Semantics::kFilesAllowAny,
                                      product_path.Append(L"*").value().c_str());
     LOG_IF(ERROR, sandbox_result != sandbox::SBOX_ALL_OK)
         << "Failed to give the target process access to the product directory";
   }
 #endif
 
-  policy->SetLockdownDefaultDacl();
+  config->SetLockdownDefaultDacl();
 
   // Do not include SetDisconnectCsrss because the signature validator uses
   // wincrypt, which uses a garbage-collected connection to csrss.exe that may
   // not be cleaned up yet when we call LowerToken.
 
   return policy;
+}
+
+// One-time actions to call on the broker.
+sandbox::ResultCode InitializeSandboxBroker(sandbox::BrokerServices* broker) {
+  sandbox::ResultCode result = broker->Init();
+  if (result != sandbox::SBOX_ALL_OK)
+    return result;
+  result = broker->CreatePolicy()->CreateAlternateDesktop(
+      sandbox::Desktop::kAlternateWinstation);
+  // Matches Chrome behavior. Silently ignore failures unless we're
+  // in a bad state.
+  if (result == sandbox::SBOX_ERROR_FAILED_TO_SWITCH_BACK_WINSTATION)
+    return result;
+  return sandbox::SBOX_ALL_OK;
 }
 
 }  // namespace
@@ -168,7 +177,7 @@ ResultCode SandboxTargetHooks::TargetStartedWithHighPrivileges() {
 
 SandboxType SandboxProcessType() {
   // This should only be called by children processes.
-  DCHECK(sandbox::SandboxFactory::GetTargetServices() != nullptr);
+  DCHECK(sandbox::SandboxFactory::GetTargetServices());
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   int val = -1;
@@ -219,7 +228,7 @@ ResultCode StartSandboxTarget(const base::CommandLine& sandbox_command_line,
   if (g_target_processes->erase(type))
     DCHECK_EQ(SandboxType::kTest, type);
 
-  base::ScopedClosureRunner notify_hooks_on_failure(base::DoNothing::Once());
+  base::ScopedClosureRunner notify_hooks_on_failure;
 
   if (hooks) {
     // Unretained is safe because |hooks| lives for the entire enclosing scope.
@@ -234,15 +243,14 @@ ResultCode StartSandboxTarget(const base::CommandLine& sandbox_command_line,
   // Make init_result static so broker services will only be initialized once.
   // Otherwise, it could be initialized multiple times during tests.
   static const sandbox::ResultCode init_result =
-      sandbox_broker_services->Init();
+      InitializeSandboxBroker(sandbox_broker_services);
   if (init_result != sandbox::SBOX_ALL_OK) {
     LOG(FATAL) << "Failed to initialize sandbox BrokerServices: "
                << init_result;
     return RESULT_CODE_FAILED_TO_START_SANDBOX_PROCESS;
   }
 
-  scoped_refptr<sandbox::TargetPolicy> policy =
-      GetSandboxPolicy(sandbox_broker_services);
+  auto policy = GetSandboxPolicy(sandbox_broker_services);
   base::CommandLine command_line = sandbox_command_line;
 
   // Create an event so the sandboxed process can notify the broker when it
@@ -254,7 +262,7 @@ ResultCode StartSandboxTarget(const base::CommandLine& sandbox_command_line,
           base::WaitableEvent::InitialState::NOT_SIGNALED);
   command_line.AppendSwitchNative(
       chrome_cleaner::kInitDoneNotifierSwitch,
-      base::NumberToString16(
+      base::NumberToWString(
           base::win::HandleToUint32(init_done_event->handle())));
   policy->AddHandleToShare(init_done_event->handle());
 
@@ -273,12 +281,13 @@ ResultCode StartSandboxTarget(const base::CommandLine& sandbox_command_line,
             << command_line.GetArgumentsString();
   sandbox::ResultCode sandbox_result = sandbox_broker_services->SpawnTarget(
       command_line.GetProgram().value().c_str(),
-      command_line.GetCommandLineString().c_str(), policy, &last_sbox_warning,
-      &last_win_error, &temp_process_info);
+      command_line.GetCommandLineString().c_str(), std::move(policy),
+      &last_sbox_warning, &last_win_error, &temp_process_info);
   if (sandbox_result != sandbox::SBOX_ALL_OK) {
     LOG(DFATAL) << "Failed to spawn sandbox target: " << sandbox_result
-                << " , last sandbox warning : " << last_sbox_warning
-                << " , last windows error: " << last_win_error;
+                << ", last sandbox warning: " << last_sbox_warning
+                << ", last windows error: "
+                << logging::SystemErrorCodeToString(last_win_error);
     return RESULT_CODE_FAILED_TO_START_SANDBOX_PROCESS;
   }
 
@@ -319,10 +328,21 @@ ResultCode StartSandboxTarget(const base::CommandLine& sandbox_command_line,
       DWORD exit_code = -1;
       BOOL result = ::GetExitCodeProcess(process_handle.Handle(), &exit_code);
       DCHECK(result);
-      LOG(ERROR)
-          << "Sandboxed process exited before signaling it was initialized, "
-             "exit code: "
-          << exit_code;
+      // Windows error codes such as 0xC0000005 and 0xC0000409 are much easier
+      // to recognize and differentiate in hex.
+      if (static_cast<int>(exit_code) < -100) {
+        LOG(ERROR)
+            << "Sandboxed process exited before signaling it was initialized, "
+               "exit code: 0x"
+            << std::hex << exit_code;
+      } else {
+        // Print other error codes as a signed integer so that small negative
+        // numbers are also recognizable.
+        LOG(ERROR)
+            << "Sandboxed process exited before signaling it was initialized, "
+               "exit code: "
+            << static_cast<int>(exit_code);
+      }
     } else {
       PLOG(ERROR) << "::WaitForMultipleObjects returned an unexpected error, "
                   << wait_result;
@@ -341,8 +361,8 @@ ResultCode StartSandboxTarget(const base::CommandLine& sandbox_command_line,
   // global that will be cleaned up by the OS on exit, so that it can be polled
   // in |IsSandboxTargetRunning|.
   g_target_processes->emplace(type, base::Process(std::move(process_handle)));
-  terminate_process_on_failure.ReplaceClosure(base::DoNothing::Once());
-  notify_hooks_on_failure.ReplaceClosure(base::DoNothing::Once());
+  terminate_process_on_failure.ReplaceClosure(base::NullCallback());
+  notify_hooks_on_failure.ReplaceClosure(base::NullCallback());
 
   return RESULT_CODE_SUCCESS;
 }

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "chrome/browser/sync/test/integration/sync_arc_package_helper.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
+#include "content/public/test/browser_test.h"
 
 namespace arc {
 
@@ -21,12 +22,8 @@ bool AllProfilesHaveSameArcPackageDetails() {
 
 class TwoClientArcPackageSyncTest : public SyncTest {
  public:
-  TwoClientArcPackageSyncTest() : SyncTest(TWO_CLIENT) { DisableVerifier(); }
-
-  ~TwoClientArcPackageSyncTest() override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TwoClientArcPackageSyncTest);
+  TwoClientArcPackageSyncTest() : SyncTest(TWO_CLIENT) {}
+  ~TwoClientArcPackageSyncTest() override = default;
 };
 
 IN_PROC_BROWSER_TEST_F(TwoClientArcPackageSyncTest, StartWithNoPackages) {

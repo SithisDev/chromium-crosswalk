@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,14 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "build/build_config.h"
+#include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "services/network/public/cpp/network_connection_tracker.h"
+#include "services/network/public/mojom/host_resolver.mojom.h"
 #include "url/gurl.h"
 
 namespace network {
@@ -22,6 +25,11 @@ class SimpleURLLoader;
 }
 
 class PrefRegistrySimple;
+
+#if !(BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || \
+      BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA))
+#error "IntranetRedirectDetector should only be built on Desktop platforms."
+#endif
 
 // This object is responsible for determining whether the user is on a network
 // that redirects requests for intranet hostnames to another site, and if so,
@@ -40,7 +48,8 @@ class PrefRegistrySimple;
 // return a value at all times (even during startup or in unittest mode).  If no
 // redirection is in place, the returned GURL will be empty.
 class IntranetRedirectDetector
-    : public network::NetworkConnectionTracker::NetworkConnectionObserver {
+    : public network::NetworkConnectionTracker::NetworkConnectionObserver,
+      public network::mojom::DnsConfigChangeManagerClient {
  public:
   // Only the main browser process loop should call this, when setting up
   // g_browser_process->intranet_redirect_detector_.  No code other than the
@@ -49,6 +58,10 @@ class IntranetRedirectDetector
   // since there aren't useful public functions on this object for consumers to
   // access anyway).
   IntranetRedirectDetector();
+
+  IntranetRedirectDetector(const IntranetRedirectDetector&) = delete;
+  IntranetRedirectDetector& operator=(const IntranetRedirectDetector&) = delete;
+
   ~IntranetRedirectDetector() override;
 
   // Returns the current redirect origin.  This will be empty if no redirection
@@ -58,8 +71,12 @@ class IntranetRedirectDetector
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
  private:
-  // Called when the seven second startup sleep or the one second network
-  // switch sleep has finished.  Runs any pending fetch.
+  // Called on connection or config change to ensure detector runs again (after
+  // a delay).
+  void Restart();
+
+  // Called when the startup or restart sleep has finished.  Runs any pending
+  // fetch.
   void FinishSleep();
 
   // Invoked from SimpleURLLoader after download is complete.
@@ -69,16 +86,27 @@ class IntranetRedirectDetector
   // NetworkConnectionTracker::NetworkConnectionObserver
   void OnConnectionChanged(network::mojom::ConnectionType type) override;
 
+  // network::mojom::DnsConfigChangeManagerClient
+  void OnDnsConfigChanged() override;
+
+  void SetupDnsConfigClient();
+  void OnDnsConfigClientConnectionError();
+
+  // Whether the IntranetRedirectDetector is enabled by policy. Disabled by
+  // default.
+  bool IsEnabledByPolicy();
+
   GURL redirect_origin_;
   std::map<network::SimpleURLLoader*, std::unique_ptr<network::SimpleURLLoader>>
       simple_loaders_;
   std::vector<GURL> resulting_origins_;
-  bool in_sleep_;  // True if we're in the seven-second "no fetching" period
-                   // that begins at browser start, or the one-second "no
-                   // fetching" period that begins after network switches.
+  bool in_sleep_ = true;  // True if we're in the seven-second "no fetching"
+                          // period that begins at browser start, or the
+                          // one-second "no fetching" period that begins after
+                          // network switches.
+  mojo::Receiver<network::mojom::DnsConfigChangeManagerClient>
+      dns_config_client_receiver_{this};
   base::WeakPtrFactory<IntranetRedirectDetector> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(IntranetRedirectDetector);
 };
 
 #endif  // CHROME_BROWSER_INTRANET_REDIRECT_DETECTOR_H_

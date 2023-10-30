@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 
 #include <memory>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/json/json_reader.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/ui/autofill/payments/save_card_ui.h"
 #include "chrome/browser/ui/browser.h"
@@ -18,20 +18,26 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
+#include "components/autofill/core/browser/payments/legal_message_line.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace autofill {
 
 class SaveCardBubbleControllerImplTest : public DialogBrowserTest {
  public:
-  SaveCardBubbleControllerImplTest() {}
+  SaveCardBubbleControllerImplTest() = default;
+  SaveCardBubbleControllerImplTest(const SaveCardBubbleControllerImplTest&) =
+      delete;
+  SaveCardBubbleControllerImplTest& operator=(
+      const SaveCardBubbleControllerImplTest&) = delete;
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     DialogBrowserTest::SetUpCommandLine(command_line);
   }
 
-  std::unique_ptr<base::DictionaryValue> GetTestLegalMessage() {
-    std::unique_ptr<base::Value> value(base::JSONReader::ReadDeprecated(
+  LegalMessageLines GetTestLegalMessage() {
+    absl::optional<base::Value> value(base::JSONReader::Read(
         "{"
         "  \"line\" : [ {"
         "     \"template\": \"The legal documents are: {0} and {1}.\","
@@ -44,9 +50,11 @@ class SaveCardBubbleControllerImplTest : public DialogBrowserTest {
         "     } ]"
         "  } ]"
         "}"));
-    base::DictionaryValue* dictionary;
-    value->GetAsDictionary(&dictionary);
-    return dictionary->CreateDeepCopy();
+    EXPECT_TRUE(value->is_dict());
+    LegalMessageLines legal_message_lines;
+    LegalMessageLine::Parse(*value, &legal_message_lines,
+                            /*escape_apostrophes=*/true);
+    return legal_message_lines;
   }
 
   // DialogBrowserTest:
@@ -74,8 +82,6 @@ class SaveCardBubbleControllerImplTest : public DialogBrowserTest {
       bubble_type = BubbleType::LOCAL_SAVE;
     if (name.find("Server") != std::string::npos)
       bubble_type = BubbleType::UPLOAD_SAVE;
-    if (name.find("Promo") != std::string::npos)
-      bubble_type = BubbleType::SIGN_IN_PROMO;
     if (name.find("Manage") != std::string::npos)
       bubble_type = BubbleType::MANAGE_CARDS;
     if (name.find("Failure") != std::string::npos)
@@ -93,15 +99,13 @@ class SaveCardBubbleControllerImplTest : public DialogBrowserTest {
                                      GetTestLegalMessage(), options,
                                      base::DoNothing());
         break;
-      case BubbleType::SIGN_IN_PROMO:
-        controller_->ShowBubbleForSignInPromo();
-        break;
       case BubbleType::MANAGE_CARDS:
         controller_->ShowBubbleForManageCardsForTesting(test::GetCreditCard());
         break;
       case BubbleType::FAILURE:
         controller_->ShowBubbleForSaveCardFailureForTesting();
         break;
+      case BubbleType::UPLOAD_IN_PROGRESS:
       case BubbleType::INACTIVE:
         break;
     }
@@ -110,9 +114,7 @@ class SaveCardBubbleControllerImplTest : public DialogBrowserTest {
   SaveCardBubbleControllerImpl* controller() { return controller_; }
 
  private:
-  SaveCardBubbleControllerImpl* controller_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(SaveCardBubbleControllerImplTest);
+  raw_ptr<SaveCardBubbleControllerImpl> controller_ = nullptr;
 };
 
 // Invokes a bubble asking the user if they want to save a credit card locally.
@@ -163,14 +165,14 @@ IN_PROC_BROWSER_TEST_F(SaveCardBubbleControllerImplTest, InvokeUi_Failure) {
 // Tests that opening a new tab will hide the save card bubble.
 IN_PROC_BROWSER_TEST_F(SaveCardBubbleControllerImplTest, NewTabHidesDialog) {
   ShowUi("Local");
-  EXPECT_NE(nullptr, controller()->save_card_bubble_view());
+  EXPECT_NE(nullptr, controller()->GetSaveCardBubbleView());
   // Open a new tab page in the foreground.
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), GURL(chrome::kChromeUINewTabURL),
       WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB |
-          ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
-  EXPECT_EQ(nullptr, controller()->save_card_bubble_view());
+          ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+  EXPECT_EQ(nullptr, controller()->GetSaveCardBubbleView());
 }
 
 }  // namespace autofill

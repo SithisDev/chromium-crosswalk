@@ -1,10 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/fileapi/file_access_permissions.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 
 namespace chromeos {
 
@@ -12,17 +12,18 @@ FileAccessPermissions::FileAccessPermissions() {}
 
 FileAccessPermissions::~FileAccessPermissions() {}
 
-void FileAccessPermissions::GrantAccessPermission(
-    const std::string& extension_id, const base::FilePath& path) {
+void FileAccessPermissions::GrantAccessPermission(const url::Origin& origin,
+                                                  const base::FilePath& path) {
   DCHECK(!path.empty());
   base::AutoLock locker(lock_);
-  path_map_[extension_id].insert(path);
+  path_map_[origin].insert(path);
 }
 
 bool FileAccessPermissions::HasAccessPermission(
-    const std::string& extension_id, const base::FilePath& path) const {
+    const url::Origin& origin,
+    const base::FilePath& path) const {
   base::AutoLock locker(lock_);
-  PathAccessMap::const_iterator path_map_iter = path_map_.find(extension_id);
+  PathAccessMap::const_iterator path_map_iter = path_map_.find(origin);
   if (path_map_iter == path_map_.end())
     return false;
   const PathSet& path_set = path_map_iter->second;
@@ -40,10 +41,9 @@ bool FileAccessPermissions::HasAccessPermission(
   return false;
 }
 
-void FileAccessPermissions::RevokePermissions(
-    const std::string& extension_id) {
+void FileAccessPermissions::RevokePermissions(const url::Origin& origin) {
   base::AutoLock locker(lock_);
-  path_map_.erase(extension_id);
+  path_map_.erase(origin);
 }
 
 }  // namespace chromeos

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,6 @@
 
 namespace vr {
 
-// Ensure that this stays in sync with VRUnsupportedMode in enums.xml
-// These values are written to logs.  New enum values can be added, but existing
-// enums must never be renumbered or deleted and reused.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.vr
 enum class UiUnsupportedMode : int {
   kUnhandledCodePoint = 0,

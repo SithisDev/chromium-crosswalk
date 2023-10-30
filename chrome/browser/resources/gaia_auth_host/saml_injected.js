@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,7 @@ APICallForwarder.prototype = {
    * Initialize the API call forwarder.
    * @param {!Object} channel Channel to which API calls should be forwarded.
    */
-  init: function(channel) {
+  init(channel) {
     this.channel_ = channel;
     this.channel_.registerMessage(
         'apiResponse', this.onAPIResponse_.bind(this));
@@ -39,21 +39,21 @@ APICallForwarder.prototype = {
     window.addEventListener('message', this.onMessage_.bind(this));
   },
 
-  onMessage_: function(event) {
-    if (event.source != window || typeof event.data != 'object' ||
+  onMessage_(event) {
+    if (event.source !== window || typeof event.data !== 'object' ||
         !event.data.hasOwnProperty('type') ||
-        event.data.type != 'gaia_saml_api') {
+        event.data.type !== 'gaia_saml_api') {
       return;
     }
     // Forward API calls to the background script.
     this.channel_.send({name: 'apiCall', call: event.data.call});
   },
 
-  onAPIResponse_: function(msg) {
+  onAPIResponse_(msg) {
     // Forward API responses to the SAML page.
     window.postMessage(
         {type: 'gaia_saml_api_reply', response: msg.response}, '/');
-  }
+  },
 };
 
 /**
@@ -87,7 +87,7 @@ PasswordInputScraper.prototype = {
    * @param {!HTMLElement} docRoot The root element of the DOM tree that
    *     contains the password fields of interest.
    */
-  init: function(channel, pageURL, docRoot) {
+  init(channel, pageURL, docRoot) {
     this.pageURL_ = pageURL;
     this.channel_ = channel;
 
@@ -99,7 +99,7 @@ PasswordInputScraper.prototype = {
     this.passwordFieldsObserver = new MutationObserver(function(mutations) {
       mutations.forEach(function(mutation) {
         Array.prototype.forEach.call(mutation.addedNodes, function(addedNode) {
-          if (addedNode.nodeType != Node.ELEMENT_NODE) {
+          if (addedNode.nodeType !== Node.ELEMENT_NODE) {
             return;
           }
 
@@ -119,7 +119,7 @@ PasswordInputScraper.prototype = {
    * Find and track password fields that are descendants of the given element.
    * @param {!HTMLElement} element The parent element to search from.
    */
-  findAndTrackChildren: function(element) {
+  findAndTrackChildren(element) {
     Array.prototype.forEach.call(
         element.querySelectorAll('input[type=password]'), function(field) {
           this.trackPasswordField(field);
@@ -131,11 +131,11 @@ PasswordInputScraper.prototype = {
    * not being tracked yet.
    * @param {!HTMLInputElement} passworField The password field to track.
    */
-  trackPasswordField: function(passwordField) {
+  trackPasswordField(passwordField) {
     const existing = this.passwordFields_.filter(function(element) {
       return element === passwordField;
     });
-    if (existing.length != 0) {
+    if (existing.length !== 0) {
       return;
     }
 
@@ -151,9 +151,9 @@ PasswordInputScraper.prototype = {
    * Check if the password field at |index| has changed. If so, sends back
    * the updated value.
    */
-  maybeSendUpdatedPassword: function(index, fieldId) {
+  maybeSendUpdatedPassword(index, fieldId) {
     const newValue = this.passwordFields_[index].value;
-    if (newValue == this.passwordValues_[index]) {
+    if (newValue === this.passwordValues_[index]) {
       return;
     }
 
@@ -174,9 +174,9 @@ PasswordInputScraper.prototype = {
    *     |passwordFields_|.
    * @param {string} fieldId The id or name of the password field or blank.
    */
-  onPasswordChanged_: function(index, fieldId) {
+  onPasswordChanged_(index, fieldId) {
     this.maybeSendUpdatedPassword(index, fieldId);
-  }
+  },
 };
 
 function onGetSAMLFlag(channel, isSAMLPage) {
@@ -192,9 +192,9 @@ function onGetSAMLFlag(channel, isSAMLPage) {
     passwordScraper.init(channel, pageURL, document.documentElement);
   };
 
-  if (document.readyState == 'loading') {
+  if (document.readyState === 'loading') {
     window.addEventListener('readystatechange', function listener(event) {
-      if (document.readyState == 'loading') {
+      if (document.readyState === 'loading') {
         return;
       }
       initPasswordScraper();
@@ -212,4 +212,11 @@ channel.sendWithCallback(
 
 const apiCallForwarder = new APICallForwarder();
 apiCallForwarder.init(channel);
+
+// Send scroll information from the topmost frame.
+if (window.top === window.self) {
+  const scrollHelper = WebviewScrollShadowsHelperConstructor();
+  scrollHelper.init(channel);
+}
+
 })();

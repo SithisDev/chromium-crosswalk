@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,16 +11,15 @@
 #include "base/location.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/task/post_task.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/certificate_reporting_service.h"
 #include "chrome/browser/safe_browsing/certificate_reporting_service_factory.h"
-#include "chrome/browser/ssl/certificate_error_report.h"
 #include "chrome/common/channel_info.h"
-#include "chrome/common/chrome_features.h"
-#include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
+#include "components/security_interstitials/content/certificate_error_report.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/features.h"
@@ -57,7 +56,7 @@ TrialComparisonCertVerifierController::
 bool TrialComparisonCertVerifierController::MaybeAllowedForProfile(
     Profile* profile) {
   bool is_official_build = g_is_fake_official_build_for_cert_verifier_testing;
-#if defined(OFFICIAL_BUILD) && defined(GOOGLE_CHROME_BUILD)
+#if defined(OFFICIAL_BUILD) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
   is_official_build = true;
 #endif
 
@@ -68,18 +67,28 @@ bool TrialComparisonCertVerifierController::MaybeAllowedForProfile(
     return false;
 #endif
 
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+  // If the Chrome Root Store is enabled as part of the default verifier, the
+  // trial does not make sense.
+  if (base::FeatureList::IsEnabled(net::features::kChromeRootStoreUsed))
+    return false;
+#endif
+
   return is_official_build &&
          base::FeatureList::IsEnabled(
-             features::kCertDualVerificationTrialFeature) &&
+             net::features::kCertDualVerificationTrialFeature) &&
          !profile->IsOffTheRecord();
 }
 
 void TrialComparisonCertVerifierController::AddClient(
-    network::mojom::TrialComparisonCertVerifierConfigClientPtr config_client,
-    network::mojom::TrialComparisonCertVerifierReportClientRequest
-        report_client_request) {
-  binding_set_.AddBinding(this, std::move(report_client_request));
-  config_client_set_.AddPtr(std::move(config_client));
+    mojo::PendingRemote<
+        cert_verifier::mojom::TrialComparisonCertVerifierConfigClient>
+        config_client,
+    mojo::PendingReceiver<
+        cert_verifier::mojom::TrialComparisonCertVerifierReportClient>
+        report_client_receiver) {
+  receiver_set_.Add(this, std::move(report_client_receiver));
+  config_client_set_.Add(std::move(config_client));
 }
 
 bool TrialComparisonCertVerifierController::IsAllowed() const {
@@ -103,18 +112,24 @@ void TrialComparisonCertVerifierController::SendTrialReport(
     bool require_rev_checking_local_anchors,
     bool enable_sha1_local_anchors,
     bool disable_symantec_enforcement,
+    const std::vector<uint8_t>& stapled_ocsp,
+    const std::vector<uint8_t>& sct_list,
     const net::CertVerifyResult& primary_result,
-    const net::CertVerifyResult& trial_result) {
-  if (!IsAllowed() ||
-      base::GetFieldTrialParamByFeatureAsBool(
-          features::kCertDualVerificationTrialFeature, "uma_only", false)) {
+    const net::CertVerifyResult& trial_result,
+    cert_verifier::mojom::CertVerifierDebugInfoPtr debug_info) {
+  if (!IsAllowed() || base::GetFieldTrialParamByFeatureAsBool(
+                          net::features::kCertDualVerificationTrialFeature,
+                          "uma_only", false)) {
     return;
   }
 
   CertificateErrorReport report(
       hostname, *unverified_cert, enable_rev_checking,
       require_rev_checking_local_anchors, enable_sha1_local_anchors,
-      disable_symantec_enforcement, primary_result, trial_result);
+      disable_symantec_enforcement,
+      std::string(stapled_ocsp.begin(), stapled_ocsp.end()),
+      std::string(sct_list.begin(), sct_list.end()), primary_result,
+      trial_result, std::move(debug_info));
 
   report.AddNetworkTimeInfo(g_browser_process->network_time_tracker());
   report.AddChromeChannel(chrome::GetChannel());
@@ -135,9 +150,6 @@ void TrialComparisonCertVerifierController::SetFakeOfficialBuildForTesting(
 
 void TrialComparisonCertVerifierController::RefreshState() {
   const bool is_allowed = IsAllowed();
-  config_client_set_.ForAllPtrs(
-      [is_allowed](
-          network::mojom::TrialComparisonCertVerifierConfigClient* client) {
-        client->OnTrialConfigUpdated(is_allowed);
-      });
+  for (auto& client : config_client_set_)
+    client->OnTrialConfigUpdated(is_allowed);
 }

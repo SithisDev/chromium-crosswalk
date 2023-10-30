@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,18 +15,19 @@
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/time/time.h"
-#include "chrome/browser/chromeos/file_manager/path_util.h"
+#include "chrome/browser/ash/file_manager/path_util.h"
 #include "chrome/browser/chromeos/fileapi/recent_disk_source.h"
 #include "chrome/browser/chromeos/fileapi/recent_file.h"
 #include "chrome/browser/chromeos/fileapi/recent_source.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "storage/browser/fileapi/external_mount_points.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "content/public/test/browser_task_environment.h"
+#include "storage/browser/file_system/external_mount_points.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_url.h"
+#include "storage/browser/quota/quota_manager_proxy.h"
 #include "storage/browser/test/test_file_system_context.h"
-#include "storage/common/fileapi/file_system_mount_option.h"
-#include "storage/common/fileapi/file_system_types.h"
+#include "storage/common/file_system/file_system_mount_option.h"
+#include "storage/common/file_system/file_system_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -41,22 +42,25 @@ class RecentDiskSourceTest : public testing::Test {
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
-    file_system_context_ = content::CreateFileSystemContextForTesting(
-        nullptr, temp_dir_.GetPath());
+    file_system_context_ = storage::CreateFileSystemContextForTesting(
+        /*quota_manager_proxy=*/nullptr, temp_dir_.GetPath());
 
     mount_point_name_ =
         file_manager::util::GetDownloadsMountPointName(profile_.get());
-    storage::ExternalMountPoints* mount_points =
-        storage::ExternalMountPoints::GetSystemInstance();
 
-    mount_points->RevokeFileSystem(mount_point_name_);
-    ASSERT_TRUE(mount_points->RegisterFileSystem(
-        mount_point_name_, storage::kFileSystemTypeTest,
-        storage::FileSystemMountOption(), base::FilePath()));
+    ASSERT_TRUE(
+        storage::ExternalMountPoints::GetSystemInstance()->RegisterFileSystem(
+            mount_point_name_, storage::kFileSystemTypeTest,
+            storage::FileSystemMountOption(), base::FilePath()));
 
     source_ = std::make_unique<RecentDiskSource>(
         mount_point_name_, false /* ignore_dotfiles */, 0 /* max_depth */,
         uma_histogram_name_);
+  }
+
+  void TearDown() override {
+    storage::ExternalMountPoints::GetSystemInstance()->RevokeFileSystem(
+        mount_point_name_);
   }
 
  protected:
@@ -69,14 +73,16 @@ class RecentDiskSourceTest : public testing::Test {
     return file.SetTimes(time, time);
   }
 
-  std::vector<RecentFile> GetRecentFiles(size_t max_files,
-                                         const base::Time& cutoff_time) {
+  std::vector<RecentFile> GetRecentFiles(
+      size_t max_files,
+      const base::Time& cutoff_time,
+      RecentSource::FileType file_type = RecentSource::FileType::kAll) {
     std::vector<RecentFile> files;
 
     base::RunLoop run_loop;
 
     source_->GetRecentFiles(RecentSource::Params(
-        file_system_context_.get(), origin_, max_files, cutoff_time,
+        file_system_context_.get(), origin_, max_files, cutoff_time, file_type,
         base::BindOnce(
             [](base::RunLoop* run_loop, std::vector<RecentFile>* out_files,
                std::vector<RecentFile> files) {
@@ -90,7 +96,7 @@ class RecentDiskSourceTest : public testing::Test {
     return files;
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   const GURL origin_;
   std::unique_ptr<TestingProfile> profile_;
   base::ScopedTempDir temp_dir_;
@@ -210,6 +216,116 @@ TEST_F(RecentDiskSourceTest, MaxDepth) {
   EXPECT_EQ(base::Time::FromJavaTime(2000), files[0].last_modified());
   EXPECT_EQ("1.jpg", files[1].url().path().BaseName().value());
   EXPECT_EQ(base::Time::FromJavaTime(1000), files[1].last_modified());
+}
+
+TEST_F(RecentDiskSourceTest, GetAudioFiles) {
+  // Oldest
+  ASSERT_TRUE(CreateEmptyFile("1.jpg", base::Time::FromJavaTime(1000)));
+  ASSERT_TRUE(CreateEmptyFile("2.mp4", base::Time::FromJavaTime(2000)));
+  ASSERT_TRUE(CreateEmptyFile("3.png", base::Time::FromJavaTime(3000)));
+  ASSERT_TRUE(CreateEmptyFile("4.mp3", base::Time::FromJavaTime(4000)));
+  ASSERT_TRUE(CreateEmptyFile("5.gif", base::Time::FromJavaTime(5000)));
+  ASSERT_TRUE(CreateEmptyFile("6.webm", base::Time::FromJavaTime(6000)));
+  ASSERT_TRUE(CreateEmptyFile("7.amr", base::Time::FromJavaTime(7000)));
+  // Newest
+
+  std::vector<RecentFile> files =
+      GetRecentFiles(7, base::Time(), RecentSource::FileType::kAudio);
+
+  std::sort(files.begin(), files.end(), RecentFileComparator());
+
+  ASSERT_EQ(2u, files.size());
+  EXPECT_EQ("7.amr", files[0].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(7000), files[0].last_modified());
+  EXPECT_EQ("4.mp3", files[1].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(4000), files[1].last_modified());
+}
+
+TEST_F(RecentDiskSourceTest, GetImageFiles) {
+  // Oldest
+  ASSERT_TRUE(CreateEmptyFile("1.jpg", base::Time::FromJavaTime(1000)));
+  ASSERT_TRUE(CreateEmptyFile("2.mp4", base::Time::FromJavaTime(2000)));
+  ASSERT_TRUE(CreateEmptyFile("3.png", base::Time::FromJavaTime(3000)));
+  ASSERT_TRUE(CreateEmptyFile("4.mp3", base::Time::FromJavaTime(4000)));
+  ASSERT_TRUE(CreateEmptyFile("5.gif", base::Time::FromJavaTime(5000)));
+  ASSERT_TRUE(CreateEmptyFile("6.webm", base::Time::FromJavaTime(6000)));
+  // RAW images are supported
+  ASSERT_TRUE(CreateEmptyFile("7.dng", base::Time::FromJavaTime(7000)));
+  ASSERT_TRUE(CreateEmptyFile("8.nef", base::Time::FromJavaTime(8000)));
+  // Newest
+
+  std::vector<RecentFile> files =
+      GetRecentFiles(8, base::Time(), RecentSource::FileType::kImage);
+
+  std::sort(files.begin(), files.end(), RecentFileComparator());
+
+  ASSERT_EQ(5u, files.size());
+  EXPECT_EQ("8.nef", files[0].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(8000), files[0].last_modified());
+  EXPECT_EQ("7.dng", files[1].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(7000), files[1].last_modified());
+  EXPECT_EQ("5.gif", files[2].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(5000), files[2].last_modified());
+  EXPECT_EQ("3.png", files[3].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(3000), files[3].last_modified());
+  EXPECT_EQ("1.jpg", files[4].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(1000), files[4].last_modified());
+}
+
+TEST_F(RecentDiskSourceTest, GetVideoFiles) {
+  // Oldest
+  ASSERT_TRUE(CreateEmptyFile("1.jpg", base::Time::FromJavaTime(1000)));
+  ASSERT_TRUE(CreateEmptyFile("2.mp4", base::Time::FromJavaTime(2000)));
+  ASSERT_TRUE(CreateEmptyFile("3.png", base::Time::FromJavaTime(3000)));
+  ASSERT_TRUE(CreateEmptyFile("4.mp3", base::Time::FromJavaTime(4000)));
+  ASSERT_TRUE(CreateEmptyFile("5.gif", base::Time::FromJavaTime(5000)));
+  ASSERT_TRUE(CreateEmptyFile("6.webm", base::Time::FromJavaTime(6000)));
+  ASSERT_TRUE(CreateEmptyFile("7.avi", base::Time::FromJavaTime(7000)));
+  ASSERT_TRUE(CreateEmptyFile("8.mov", base::Time::FromJavaTime(8000)));
+  // *.wmv is not supported yet.
+  ASSERT_TRUE(CreateEmptyFile("9.wmv", base::Time::FromJavaTime(9000)));
+  // Newest
+
+  std::vector<RecentFile> files =
+      GetRecentFiles(9, base::Time(), RecentSource::FileType::kVideo);
+
+  std::sort(files.begin(), files.end(), RecentFileComparator());
+
+  ASSERT_EQ(4u, files.size());
+  EXPECT_EQ("8.mov", files[0].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(8000), files[0].last_modified());
+  EXPECT_EQ("7.avi", files[1].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(7000), files[1].last_modified());
+  EXPECT_EQ("6.webm", files[2].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(6000), files[2].last_modified());
+  EXPECT_EQ("2.mp4", files[3].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(2000), files[3].last_modified());
+}
+
+TEST_F(RecentDiskSourceTest, GetDocumentFiles) {
+  // Oldest
+  ASSERT_TRUE(CreateEmptyFile("1.jpg", base::Time::FromJavaTime(1000)));
+  ASSERT_TRUE(CreateEmptyFile("2.mp4", base::Time::FromJavaTime(2000)));
+  ASSERT_TRUE(CreateEmptyFile("3.png", base::Time::FromJavaTime(3000)));
+  ASSERT_TRUE(CreateEmptyFile("4.doc", base::Time::FromJavaTime(4000)));
+  ASSERT_TRUE(CreateEmptyFile("5.gif", base::Time::FromJavaTime(5000)));
+  ASSERT_TRUE(CreateEmptyFile("6.txt", base::Time::FromJavaTime(6000)));
+  ASSERT_TRUE(CreateEmptyFile("7.avi", base::Time::FromJavaTime(7000)));
+  ASSERT_TRUE(CreateEmptyFile("8.gdoc", base::Time::FromJavaTime(8000)));
+  // Newest
+
+  std::vector<RecentFile> files =
+      GetRecentFiles(8, base::Time(), RecentSource::FileType::kDocument);
+
+  std::sort(files.begin(), files.end(), RecentFileComparator());
+
+  ASSERT_EQ(3u, files.size());
+  EXPECT_EQ("8.gdoc", files[0].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(8000), files[0].last_modified());
+  EXPECT_EQ("6.txt", files[1].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(6000), files[1].last_modified());
+  EXPECT_EQ("4.doc", files[2].url().path().BaseName().value());
+  EXPECT_EQ(base::Time::FromJavaTime(4000), files[2].last_modified());
 }
 
 TEST_F(RecentDiskSourceTest, GetRecentFiles_UmaStats) {

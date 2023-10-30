@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,32 +9,31 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
-#include "components/guest_view/browser/guest_view_base.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/models/table_model.h"
 #include "ui/base/models/table_model_observer.h"
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/table/table_view.h"
-#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/box_layout.h"
 #include "ui/views/widget/widget.h"
-#include "ui/views/window/dialog_client_view.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/certificate_provider/certificate_provider_service.h"
-#include "chrome/browser/chromeos/certificate_provider/certificate_provider_service_factory.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/certificate_provider/certificate_provider_service.h"
+#include "chrome/browser/certificate_provider/certificate_provider_service_factory.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_factory.h"
 #endif
@@ -50,21 +49,22 @@ class CertificateSelector::CertificateTableModel : public ui::TableModel {
   CertificateTableModel(const net::ClientCertIdentityList& identities,
                         const std::vector<std::string>& provider_names);
 
+  CertificateTableModel(const CertificateTableModel&) = delete;
+  CertificateTableModel& operator=(const CertificateTableModel&) = delete;
+
   // ui::TableModel:
-  int RowCount() override;
-  base::string16 GetText(int index, int column_id) override;
+  size_t RowCount() override;
+  std::u16string GetText(size_t index, int column_id) override;
   void SetObserver(ui::TableModelObserver* observer) override;
 
  private:
   struct Row {
-    base::string16 subject;
-    base::string16 issuer;
-    base::string16 provider;
-    base::string16 serial;
+    std::u16string subject;
+    std::u16string issuer;
+    std::u16string provider;
+    std::u16string serial;
   };
   std::vector<Row> rows_;
-
-  DISALLOW_COPY_AND_ASSIGN(CertificateTableModel);
 };
 
 CertificateSelector::CertificateTableModel::CertificateTableModel(
@@ -85,15 +85,14 @@ CertificateSelector::CertificateTableModel::CertificateTableModel(
   }
 }
 
-int CertificateSelector::CertificateTableModel::RowCount() {
+size_t CertificateSelector::CertificateTableModel::RowCount() {
   return rows_.size();
 }
 
-base::string16 CertificateSelector::CertificateTableModel::GetText(
-    int index,
+std::u16string CertificateSelector::CertificateTableModel::GetText(
+    size_t index,
     int column_id) {
-  DCHECK_GE(index, 0);
-  DCHECK_LT(static_cast<size_t>(index), rows_.size());
+  DCHECK_LT(index, rows_.size());
 
   const Row& row = rows_[index];
   switch (column_id) {
@@ -108,7 +107,7 @@ base::string16 CertificateSelector::CertificateTableModel::GetText(
     default:
       NOTREACHED();
   }
-  return base::string16();
+  return std::u16string();
 }
 
 void CertificateSelector::CertificateTableModel::SetObserver(
@@ -117,15 +116,22 @@ void CertificateSelector::CertificateTableModel::SetObserver(
 CertificateSelector::CertificateSelector(net::ClientCertIdentityList identities,
                                          content::WebContents* web_contents)
     : web_contents_(web_contents) {
+  SetCanResize(true);
+  SetModalType(ui::MODAL_TYPE_CHILD);
   CHECK(web_contents_);
 
+  view_cert_button_ = SetExtraView(std::make_unique<views::MdTextButton>(
+      base::BindRepeating(&CertificateSelector::ViewCertButtonPressed,
+                          base::Unretained(this)),
+      l10n_util::GetStringUTF16(IDS_PAGE_INFO_CERT_INFO_BUTTON)));
+
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
-      views::TEXT, views::CONTROL));
+      views::DialogContentType::kText, views::DialogContentType::kControl));
 
   // |provider_names| and |identities_| are parallel arrays.
   // The entry at index |i| is the provider name for |identities_[i]|.
   std::vector<std::string> provider_names;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   chromeos::CertificateProviderService* service =
       chromeos::CertificateProviderServiceFactory::GetForBrowserContext(
           web_contents->GetBrowserContext());
@@ -163,7 +169,7 @@ CertificateSelector::CertificateSelector(net::ClientCertIdentityList identities,
   identities_ = std::move(identities);
 #endif
 
-  model_.reset(new CertificateTableModel(identities_, provider_names));
+  model_ = std::make_unique<CertificateTableModel>(identities_, provider_names);
 }
 
 CertificateSelector::~CertificateSelector() {
@@ -172,9 +178,8 @@ CertificateSelector::~CertificateSelector() {
 
 // static
 bool CertificateSelector::CanShow(content::WebContents* web_contents) {
-  // GetTopLevelWebContents returns |web_contents| if it is not a guest.
   content::WebContents* top_level_web_contents =
-      guest_view::GuestViewBase::GetTopLevelWebContents(web_contents);
+      constrained_window::GetTopLevelWebContents(web_contents);
   return web_modal::WebContentsModalDialogManager::FromWebContents(
              top_level_web_contents) != nullptr;
 }
@@ -201,22 +206,14 @@ void CertificateSelector::Show() {
 
 void CertificateSelector::InitWithText(
     std::unique_ptr<views::View> text_label) {
-  views::GridLayout* const layout =
-      SetLayoutManager(std::make_unique<views::GridLayout>());
-
-  const int kColumnSetId = 0;
-  views::ColumnSet* const column_set = layout->AddColumnSet(kColumnSetId);
-  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1.0,
-                        views::GridLayout::USE_PREF, 0, 0);
-
-  layout->StartRow(views::GridLayout::kFixedSize, kColumnSetId);
-  layout->AddView(std::move(text_label));
-
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
-  const int vertical_spacing = provider->GetDistanceMetric(
-      views::DISTANCE_RELATED_CONTROL_VERTICAL);
+  const int vertical_spacing =
+      provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL);
+  SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::Orientation::kVertical, gfx::Insets(),
+      vertical_spacing));
 
-  layout->AddPaddingRow(views::GridLayout::kFixedSize, vertical_spacing);
+  AddChildView(std::move(text_label));
 
   std::vector<ui::TableColumn> columns;
   columns.push_back(ui::TableColumn(IDS_CERT_SELECTOR_SUBJECT_COLUMN,
@@ -229,16 +226,16 @@ void CertificateSelector::InitWithText(
   }
   columns.push_back(ui::TableColumn(IDS_CERT_SELECTOR_SERIAL_COLUMN,
                                     ui::TableColumn::LEFT, -1, 0.2f));
+  for (auto& column : columns) {
+    column.sortable = true;
+  }
   auto table = std::make_unique<views::TableView>(
       model_.get(), columns, views::TEXT_ONLY, true /* single_selection */);
   table_ = table.get();
   table->set_observer(this);
-  layout->StartRow(1.0, kColumnSetId);
-  layout->AddView(views::TableView::CreateScrollViewWithTable(std::move(table)),
-                  1, 1, views::GridLayout::FILL, views::GridLayout::FILL,
-                  kTableViewWidth, kTableViewHeight);
 
-  layout->AddPaddingRow(views::GridLayout::kFixedSize, vertical_spacing);
+  AddChildView(views::TableView::CreateScrollViewWithTable(std::move(table)))
+      ->SetPreferredSize(gfx::Size(kTableViewWidth, kTableViewHeight));
 }
 
 ui::TableModel* CertificateSelector::table_model_for_testing() const {
@@ -246,33 +243,29 @@ ui::TableModel* CertificateSelector::table_model_for_testing() const {
 }
 
 net::ClientCertIdentity* CertificateSelector::GetSelectedCert() const {
-  const int selected = table_->FirstSelectedRow();
-  if (selected < 0)  // Nothing is selected in |table_|.
+  const absl::optional<size_t> selected = table_->GetFirstSelectedRow();
+  if (!selected.has_value())
     return nullptr;
-  DCHECK_LT(static_cast<size_t>(selected), identities_.size());
-  return identities_[selected].get();
+  DCHECK_LT(selected.value(), identities_.size());
+  return identities_[selected.value()].get();
 }
 
 bool CertificateSelector::Accept() {
-  const int selected = table_->FirstSelectedRow();
-  if (selected < 0)  // Nothing is selected in |table_|.
+  const absl::optional<size_t> selected = table_->GetFirstSelectedRow();
+  if (!selected.has_value())
     return false;
 
-  DCHECK_LT(static_cast<size_t>(selected), identities_.size());
-  AcceptCertificate(std::move(identities_[selected]));
+  DCHECK_LT(selected.value(), identities_.size());
+  AcceptCertificate(std::move(identities_[selected.value()]));
   return true;
 }
 
-bool CertificateSelector::CanResize() const {
-  return true;
-}
-
-base::string16 CertificateSelector::GetWindowTitle() const {
+std::u16string CertificateSelector::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_CLIENT_CERT_DIALOG_TITLE);
 }
 
 bool CertificateSelector::IsDialogButtonEnabled(ui::DialogButton button) const {
-  return button != ui::DIALOG_BUTTON_OK || GetSelectedCert() != nullptr;
+  return button != ui::DIALOG_BUTTON_OK || GetSelectedCert();
 }
 
 views::View* CertificateSelector::GetInitiallyFocusedView() {
@@ -280,37 +273,25 @@ views::View* CertificateSelector::GetInitiallyFocusedView() {
   return table_;
 }
 
-std::unique_ptr<views::View> CertificateSelector::CreateExtraView() {
-  DCHECK(!view_cert_button_);
-  auto view_cert_button = views::MdTextButton::CreateSecondaryUiButton(
-      this, l10n_util::GetStringUTF16(IDS_PAGE_INFO_CERT_INFO_BUTTON));
-  view_cert_button_ = view_cert_button.get();
-  return view_cert_button;
-}
-
-ui::ModalType CertificateSelector::GetModalType() const {
-  return ui::MODAL_TYPE_CHILD;
-}
-
-void CertificateSelector::ButtonPressed(views::Button* sender,
-                                        const ui::Event& event) {
-  if (sender == view_cert_button_) {
-    net::ClientCertIdentity* const cert = GetSelectedCert();
-    if (cert) {
-      ShowCertificateViewer(web_contents_,
-                            web_contents_->GetTopLevelNativeWindow(),
-                            cert->certificate());
-    }
-  }
+void CertificateSelector::ViewCertButtonPressed() {
+  net::ClientCertIdentity* const cert = GetSelectedCert();
+  if (!cert)
+    return;
+  ShowCertificateViewerForClientAuth(web_contents_,
+                                     web_contents_->GetTopLevelNativeWindow(),
+                                     cert->certificate());
 }
 
 void CertificateSelector::OnSelectionChanged() {
-  GetDialogClientView()->ok_button()->SetEnabled(GetSelectedCert() != nullptr);
+  GetOkButton()->SetEnabled(GetSelectedCert() != nullptr);
 }
 
 void CertificateSelector::OnDoubleClick() {
   if (GetSelectedCert())
-    GetDialogClientView()->AcceptWindow();
+    AcceptDialog();
 }
+
+BEGIN_METADATA(CertificateSelector, views::DialogDelegateView)
+END_METADATA
 
 }  // namespace chrome

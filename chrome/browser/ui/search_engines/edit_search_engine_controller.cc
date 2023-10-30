@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,7 @@ EditSearchEngineController::EditSearchEngineController(
 }
 
 bool EditSearchEngineController::IsTitleValid(
-    const base::string16& title_input) const {
+    const std::u16string& title_input) const {
   return !base::CollapseWhitespace(title_input, true).empty();
 }
 
@@ -41,8 +41,8 @@ bool EditSearchEngineController::IsURLValid(
 
   // Convert |url| to a TemplateURLRef so we can check its validity even if it
   // contains replacement strings.  We do this by constructing a dummy
-  // TemplateURL owner because |template_url_| might be NULL and we can't call
-  // TemplateURLRef::IsValid() when its owner is NULL.
+  // TemplateURL owner because |template_url_| might be nullptr and we can't
+  // call TemplateURLRef::IsValid() when its owner is nullptr.
   TemplateURLData data;
   data.SetURL(url);
   TemplateURL t_url(data);
@@ -62,25 +62,33 @@ bool EditSearchEngineController::IsURLValid(
   // Replace any search term with a placeholder string and make sure the
   // resulting URL is valid.
   return GURL(template_ref.ReplaceSearchTerms(
-      TemplateURLRef::SearchTermsArgs(base::ASCIIToUTF16("x")),
-      service->search_terms_data())).is_valid();
+                  TemplateURLRef::SearchTermsArgs(u"x"),
+                  service->search_terms_data()))
+      .is_valid();
 }
 
 bool EditSearchEngineController::IsKeywordValid(
-    const base::string16& keyword_input) const {
-  base::string16 keyword_input_trimmed(
+    const std::u16string& keyword_input) const {
+  std::u16string keyword_input_trimmed(
       base::CollapseWhitespace(keyword_input, true));
   if (keyword_input_trimmed.empty())
     return false;  // Do not allow empty keyword.
+
+  // The omnibox doesn't properly handle search keywords with whitespace,
+  // so do not allow such keywords.
+  if (keyword_input_trimmed.find_first_of(base::kWhitespaceUTF16) !=
+      std::u16string::npos)
+    return false;
+
   const TemplateURL* turl_with_keyword =
       TemplateURLServiceFactory::GetForProfile(profile_)->
       GetTemplateURLForKeyword(keyword_input_trimmed);
-  return (turl_with_keyword == NULL || turl_with_keyword == template_url_);
+  return (!turl_with_keyword || turl_with_keyword == template_url_);
 }
 
 void EditSearchEngineController::AcceptAddOrEdit(
-    const base::string16& title_input,
-    const base::string16& keyword_input,
+    const std::u16string& title_input,
+    const std::u16string& keyword_input,
     const std::string& url_input) {
   DCHECK(!keyword_input.empty());
   std::string url_string = GetFixedUpURL(url_input);
@@ -105,9 +113,9 @@ void EditSearchEngineController::AcceptAddOrEdit(
     // Confiming an entry we got from JS. We have a template_url_, but it
     // hasn't yet been added to the model.
     DCHECK(template_url_);
-    template_url_service->AddWithOverrides(base::WrapUnique(template_url_),
-                                           title_input, keyword_input,
-                                           url_string);
+    template_url_service->AddWithOverrides(
+        base::WrapUnique(template_url_.get()), title_input, keyword_input,
+        url_string);
     base::RecordAction(UserMetricsAction("KeywordEditor_AddKeywordJS"));
   } else {
     // Adding or modifying an entry via the Delegate.
@@ -121,18 +129,17 @@ void EditSearchEngineController::CleanUpCancelledAdd() {
     // When we have no Delegate, we know that the template_url_ hasn't yet been
     // added to the model, so we need to clean it up.
     delete template_url_;
-    template_url_ = NULL;
+    template_url_ = nullptr;
   }
 }
 
 std::string EditSearchEngineController::GetFixedUpURL(
     const std::string& url_input) const {
-  std::string url;
-  base::TrimWhitespaceASCII(
-      TemplateURLRef::DisplayURLToURLRef(base::UTF8ToUTF16(url_input)),
-      base::TRIM_ALL, &url);
-  if (url.empty())
-    return url;
+  std::u16string url16;
+  base::TrimWhitespace(base::UTF8ToUTF16(url_input), base::TRIM_ALL, &url16);
+  if (url16.empty())
+    return std::string();
+  std::string url = TemplateURLRef::DisplayURLToURLRef(url16);
 
   // Parse the string as a URL to determine the scheme. If we need to, add the
   // scheme. As the scheme may be expanded (as happens with {google:baseURL})
@@ -141,7 +148,7 @@ std::string EditSearchEngineController::GetFixedUpURL(
   data.SetURL(url);
   TemplateURL t_url(data);
   std::string expanded_url(t_url.url_ref().ReplaceSearchTerms(
-      TemplateURLRef::SearchTermsArgs(base::ASCIIToUTF16("x")),
+      TemplateURLRef::SearchTermsArgs(u"x"),
       TemplateURLServiceFactory::GetForProfile(profile_)->search_terms_data()));
   url::Parsed parts;
   std::string scheme(url_formatter::SegmentURL(expanded_url, &parts));

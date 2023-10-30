@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "base/callback_forward.h"
 #include "extensions/browser/api/media_perception_private/media_perception_api_delegate.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 
 namespace extensions {
 
@@ -14,24 +15,30 @@ class MediaPerceptionAPIDelegateChromeOS
     : public extensions::MediaPerceptionAPIDelegate {
  public:
   MediaPerceptionAPIDelegateChromeOS();
+
+  MediaPerceptionAPIDelegateChromeOS(
+      const MediaPerceptionAPIDelegateChromeOS&) = delete;
+  MediaPerceptionAPIDelegateChromeOS& operator=(
+      const MediaPerceptionAPIDelegateChromeOS&) = delete;
+
   ~MediaPerceptionAPIDelegateChromeOS() override;
 
   // extensions::MediaPerceptionAPIDelegate:
   void LoadCrOSComponent(
       const api::media_perception_private::ComponentType& type,
       LoadCrOSComponentCallback load_callback) override;
-  void BindDeviceFactoryProviderToVideoCaptureService(
-      video_capture::mojom::DeviceFactoryProviderPtr* provider) override;
+  void BindVideoSourceProvider(
+      mojo::PendingReceiver<video_capture::mojom::VideoSourceProvider> receiver)
+      override;
   void SetMediaPerceptionRequestHandler(
       MediaPerceptionRequestHandler handler) override;
-  void ForwardMediaPerceptionRequest(
-      chromeos::media_perception::mojom::MediaPerceptionRequest request,
-      content::RenderFrameHost* render_frame_host) override;
+  void ForwardMediaPerceptionReceiver(
+      content::RenderFrameHost* render_frame_host,
+      mojo::PendingReceiver<chromeos::media_perception::mojom::MediaPerception>
+          receiver) override;
 
  private:
   MediaPerceptionRequestHandler handler_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaPerceptionAPIDelegateChromeOS);
 };
 
 }  // namespace extensions

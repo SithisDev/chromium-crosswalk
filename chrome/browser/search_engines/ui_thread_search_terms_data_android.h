@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,10 @@
 #include <string>
 
 #include "base/lazy_instance.h"
-#include "base/strings/string16.h"
 
 // Additional data needed by TemplateURLRef::ReplaceSearchTerms on Android.
 struct SearchTermsDataAndroid {
-  static base::LazyInstance<base::string16>::Leaky rlz_parameter_value_;
+  static base::LazyInstance<std::u16string>::Leaky rlz_parameter_value_;
   static base::LazyInstance<std::string>::Leaky search_client_;
 };
 

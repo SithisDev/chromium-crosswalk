@@ -1,19 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/status_icons/status_tray_win.h"
 
 #include <commctrl.h>
+#include <wrl/client.h>
 
 #include <utility>
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/sequence_checker.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread.h"
+#include "base/win/windows_types.h"
 #include "base/win/wrapped_window_proc.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/views/status_icons/status_icon_win.h"
@@ -42,11 +43,14 @@ UINT ReservedIconId(StatusTray::StatusIconType type) {
 class StatusTrayStateChangerProxyImpl : public StatusTrayStateChangerProxy {
  public:
   StatusTrayStateChangerProxyImpl()
-      : pending_requests_(0),
-        worker_thread_("StatusIconCOMWorkerThread"),
-        weak_factory_(this) {
+      : pending_requests_(0), worker_thread_("StatusIconCOMWorkerThread") {
     worker_thread_.init_com_with_mta(false);
   }
+
+  StatusTrayStateChangerProxyImpl(const StatusTrayStateChangerProxyImpl&) =
+      delete;
+  StatusTrayStateChangerProxyImpl& operator=(
+      const StatusTrayStateChangerProxyImpl&) = delete;
 
   ~StatusTrayStateChangerProxyImpl() override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -60,23 +64,20 @@ class StatusTrayStateChangerProxyImpl : public StatusTrayStateChangerProxy {
     ++pending_requests_;
     worker_thread_.task_runner()->PostTaskAndReply(
         FROM_HERE,
-        base::Bind(
+        base::BindOnce(
             &StatusTrayStateChangerProxyImpl::EnqueueChangeOnWorkerThread,
             icon_id, window),
-        base::Bind(&StatusTrayStateChangerProxyImpl::ChangeDone,
-                   weak_factory_.GetWeakPtr()));
+        base::BindOnce(&StatusTrayStateChangerProxyImpl::ChangeDone,
+                       weak_factory_.GetWeakPtr()));
   }
 
  private:
   // Must be called only on |worker_thread_|, to ensure the correct COM
   // apartment.
   static void EnqueueChangeOnWorkerThread(UINT icon_id, HWND window) {
-    // It appears that IUnknowns are coincidentally compatible with
-    // scoped_refptr.  Normally I wouldn't depend on that but it seems that
-    // base::win::IUnknownImpl itself depends on that coincidence so it's
-    // already being assumed elsewhere.
-    scoped_refptr<StatusTrayStateChangerWin> status_tray_state_changer(
-        new StatusTrayStateChangerWin(icon_id, window));
+    Microsoft::WRL::ComPtr<StatusTrayStateChangerWin>
+        status_tray_state_changer =
+            Microsoft::WRL::Make<StatusTrayStateChangerWin>(icon_id, window);
     status_tray_state_changer->EnsureTrayIconVisible();
   }
 
@@ -95,9 +96,7 @@ class StatusTrayStateChangerProxyImpl : public StatusTrayStateChangerProxy {
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  base::WeakPtrFactory<StatusTrayStateChangerProxyImpl> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(StatusTrayStateChangerProxyImpl);
+  base::WeakPtrFactory<StatusTrayStateChangerProxyImpl> weak_factory_{this};
 };
 
 StatusTrayWin::StatusTrayWin()
@@ -126,7 +125,7 @@ StatusTrayWin::StatusTrayWin()
   // "TaskbarCreated".
   window_ = CreateWindow(MAKEINTATOM(atom_),
                          0, WS_POPUP, 0, 0, 0, 0, 0, 0, instance_, 0);
-  gfx::CheckWindowCreated(window_);
+  gfx::CheckWindowCreated(window_, ::GetLastError());
   gfx::SetWindowUserData(window_, this);
 }
 
@@ -141,7 +140,7 @@ StatusTrayWin::~StatusTrayWin() {
 void StatusTrayWin::UpdateIconVisibilityInBackground(
     StatusIconWin* status_icon) {
   if (!state_changer_proxy_.get())
-    state_changer_proxy_.reset(new StatusTrayStateChangerProxyImpl);
+    state_changer_proxy_ = std::make_unique<StatusTrayStateChangerProxyImpl>();
 
   state_changer_proxy_->EnqueueChange(status_icon->icon_id(),
                                       status_icon->window());
@@ -218,7 +217,7 @@ LRESULT CALLBACK StatusTrayWin::WndProc(HWND hwnd,
 std::unique_ptr<StatusIcon> StatusTrayWin::CreatePlatformStatusIcon(
     StatusTray::StatusIconType type,
     const gfx::ImageSkia& image,
-    const base::string16& tool_tip) {
+    const std::u16string& tool_tip) {
   UINT next_icon_id;
   if (type == StatusTray::OTHER_ICON)
     next_icon_id = NextIconId();

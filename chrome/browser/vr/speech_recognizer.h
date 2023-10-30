@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/vr/vr_base_export.h"
@@ -18,7 +18,7 @@ class SpeechRecognitionManager;
 }
 
 namespace network {
-class SharedURLLoaderFactoryInfo;
+class PendingSharedURLLoaderFactory;
 }
 
 namespace vr {
@@ -50,18 +50,10 @@ enum SpeechRecognitionState {
   SPEECH_RECOGNITION_NETWORK_ERROR,
 };
 
-// These enums are used for histogram. Do NOT renumber or delete these enums.
-enum VoiceSearchEndState {
-  VOICE_SEARCH_OPEN_SEARCH_PAGE = 0,
-  VOICE_SEARCH_CANCEL = 1,
-  VOICE_SEARCH_TRY_AGAIN = 2,
-  COUNT,
-};
-
 class VoiceResultDelegate {
  public:
   virtual ~VoiceResultDelegate() {}
-  virtual void OnVoiceResults(const base::string16& result) = 0;
+  virtual void OnVoiceResults(const std::u16string& result) = 0;
 };
 
 class BrowserUiInterface;
@@ -74,7 +66,7 @@ class IOBrowserUIInterface {
   // Receive a speech recognition result. |is_final| indicated whether the
   // result is an intermediate or final result. If |is_final| is true, then the
   // recognizer stops and no more results will be returned.
-  virtual void OnSpeechResult(const base::string16& query, bool is_final) = 0;
+  virtual void OnSpeechResult(const std::u16string& query, bool is_final) = 0;
 
   // Invoked regularly to indicate the average sound volume.
   virtual void OnSpeechSoundLevelChanged(float level) = 0;
@@ -92,14 +84,18 @@ class IOBrowserUIInterface {
 // collection of results, error cases, and threading.
 class VR_BASE_EXPORT SpeechRecognizer : public IOBrowserUIInterface {
  public:
-  // |shared_url_loader_factory_info| must be for a creating a
+  // |pending_shared_url_loader_factory| must be for a creating a
   // SharedURLLoaderFactory that can be used on the IO Thread.
   SpeechRecognizer(VoiceResultDelegate* delegate,
                    BrowserUiInterface* ui,
-                   std::unique_ptr<network::SharedURLLoaderFactoryInfo>
-                       shared_url_loader_factory_info,
+                   std::unique_ptr<network::PendingSharedURLLoaderFactory>
+                       pending_shared_url_loader_factory,
                    const std::string& accept_language,
                    const std::string& locale);
+
+  SpeechRecognizer(const SpeechRecognizer&) = delete;
+  SpeechRecognizer& operator=(const SpeechRecognizer&) = delete;
+
   ~SpeechRecognizer() override;
 
   // Start/stop the speech recognizer.
@@ -108,7 +104,7 @@ class VR_BASE_EXPORT SpeechRecognizer : public IOBrowserUIInterface {
   void Stop();
 
   // Overridden from vr::IOBrowserUIInterface:
-  void OnSpeechResult(const base::string16& query, bool is_final) override;
+  void OnSpeechResult(const std::u16string& query, bool is_final) override;
   void OnSpeechSoundLevelChanged(float level) override;
   void OnSpeechRecognitionStateChanged(
       vr::SpeechRecognitionState new_state) override;
@@ -120,23 +116,21 @@ class VR_BASE_EXPORT SpeechRecognizer : public IOBrowserUIInterface {
   void SetSpeechTimerForTest(std::unique_ptr<base::OneShotTimer> speech_timer);
 
  private:
-  VoiceResultDelegate* delegate_;
-  BrowserUiInterface* ui_;
+  raw_ptr<VoiceResultDelegate> delegate_;
+  raw_ptr<BrowserUiInterface> ui_;
 
   // Non-null until first Start() call, at which point it's moved to the IO
   // thread.
-  std::unique_ptr<network::SharedURLLoaderFactoryInfo>
-      shared_url_loader_factory_info_;
+  std::unique_ptr<network::PendingSharedURLLoaderFactory>
+      pending_shared_url_loader_factory_;
 
   const std::string accept_language_;
   std::string locale_;
-  base::string16 final_result_;
+  std::u16string final_result_;
 
   // Note that this object is destroyed on IO thread.
   std::unique_ptr<SpeechRecognizerOnIO> speech_recognizer_on_io_;
   base::WeakPtrFactory<SpeechRecognizer> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SpeechRecognizer);
 };
 
 }  // namespace vr

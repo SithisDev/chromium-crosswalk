@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,79 +13,110 @@
 
 #include "base/barrier_closure.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
+#include "base/feature_list.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
-#include "base/task/post_task.h"
+#include "base/strings/strcat.h"
+#include "base/task/bind_post_task.h"
+#include "base/task/thread_pool.h"
+#include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "chrome/browser/android/feed/feed_host_service_factory.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/autofill/strike_database_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browsing_data/browsing_data_helper.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_constants.h"
 #include "chrome/browser/browsing_data/navigation_entry_remover.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/crash_upload_list/crash_upload_list.h"
-#include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
-#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
+#include "chrome/browser/downgrade/user_data_downgrade.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
+#include "chrome/browser/heavy_ad_intervention/heavy_ad_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/language/url_language_histogram_factory.h"
+#include "chrome/browser/login_detection/login_detection_prefs.h"
+#include "chrome/browser/media/history/media_history_keyed_service.h"
+#include "chrome/browser/media/history/media_history_keyed_service_factory.h"
 #include "chrome/browser/media/media_device_id_salt.h"
 #include "chrome/browser/media/media_engagement_service.h"
 #include "chrome/browser/media/webrtc/webrtc_event_log_manager.h"
-#include "chrome/browser/ntp_snippets/content_suggestions_service_factory.h"
+#include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
+#include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
+#include "chrome/browser/password_manager/account_password_store_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
-#include "chrome/browser/permissions/permission_decision_auto_blocker.h"
-#include "chrome/browser/prerender/prerender_manager.h"
-#include "chrome/browser/prerender/prerender_manager_factory.h"
-#include "chrome/browser/previews/previews_service.h"
-#include "chrome/browser/previews/previews_service_factory.h"
+#include "chrome/browser/permissions/permission_actions_history_factory.h"
+#include "chrome/browser/permissions/permission_decision_auto_blocker_factory.h"
+#include "chrome/browser/preloading/prefetch/no_state_prefetch/no_state_prefetch_manager_factory.h"
+#include "chrome/browser/preloading/prefetch/prefetch_proxy/prefetch_proxy_origin_decider.h"
+#include "chrome/browser/preloading/prefetch/prefetch_proxy/prefetch_proxy_service.h"
+#include "chrome/browser/preloading/prefetch/prefetch_proxy/prefetch_proxy_service_factory.h"
+#include "chrome/browser/preloading/prefetch/search_prefetch/search_prefetch_service.h"
+#include "chrome/browser/preloading/prefetch/search_prefetch/search_prefetch_service_factory.h"
+#include "chrome/browser/privacy_sandbox/privacy_sandbox_settings_factory.h"
+#include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
+#include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/browser/safe_browsing/verdict_cache_manager_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/share/share_history.h"
+#include "chrome/browser/share/share_ranking.h"
+#include "chrome/browser/spellchecker/spellcheck_factory.h"
+#include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
+#include "chrome/browser/ui/find_bar/find_bar_state.h"
+#include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/web_data_service_factory.h"
 #include "chrome/browser/webauthn/chrome_authenticator_request_delegate.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/autofill/core/browser/payments/strike_database.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/browser/strike_database.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_payments_features.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/browsing_data/content/browsing_data_helper.h"
 #include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
-#include "components/crash/content/app/crashpad.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
+#include "components/crash/core/app/crashpad.h"
+#include "components/custom_handlers/protocol_handler_registry.h"
 #include "components/device_event_log/device_event_log.h"
-#include "components/feed/content/feed_host_service.h"
+#include "components/feed/buildflags.h"
+#include "components/heavy_ad_intervention/heavy_ad_blocklist.h"
+#include "components/heavy_ad_intervention/heavy_ad_service.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/keyed_service/core/service_access_type.h"
 #include "components/language/core/browser/url_language_histogram.h"
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/nacl/browser/pnacl_host.h"
-#include "components/ntp_snippets/content_suggestions_service.h"
-#include "components/omnibox/browser/omnibox_pref_names.h"
+#include "components/no_state_prefetch/browser/no_state_prefetch_manager.h"
+#include "components/omnibox/browser/omnibox_prefs.h"
 #include "components/open_from_clipboard/clipboard_recent_content.h"
-#include "components/password_manager/core/browser/password_store.h"
+#include "components/password_manager/core/browser/field_info_store.h"
+#include "components/password_manager/core/browser/password_manager_features_util.h"
+#include "components/password_manager/core/browser/password_store_interface.h"
+#include "components/password_manager/core/browser/smart_bubble_stats_store.h"
+#include "components/password_manager/core/common/password_manager_features.h"
+#include "components/payments/content/payment_manifest_web_data_service.h"
+#include "components/permissions/permission_actions_history.h"
+#include "components/permissions/permission_decision_auto_blocker.h"
 #include "components/prefs/pref_service.h"
-#include "components/previews/content/previews_ui_service.h"
+#include "components/privacy_sandbox/privacy_sandbox_settings.h"
+#include "components/safe_browsing/core/browser/verdict_cache_manager.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/web_cache/browser/web_cache_manager.h"
 #include "components/webrtc_logging/browser/log_cleanup.h"
@@ -94,28 +125,40 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/browsing_data_filter_builder.h"
 #include "content/public/browser/host_zoom_map.h"
-#include "content/public/browser/plugin_data_remover.h"
+#include "content/public/browser/prefetch_service_delegate.h"
 #include "content/public/browser/ssl_host_state_delegate.h"
 #include "content/public/browser/storage_partition.h"
+#include "google_apis/gaia/gaia_urls.h"
+#include "media/base/media_switches.h"
 #include "media/mojo/services/video_decode_perf_history.h"
+#include "media/mojo/services/webrtc_video_perf_history.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/http/http_transaction_factory.h"
+#include "net/net_buildflags.h"
 
-#if defined(OS_ANDROID)
-#include "chrome/browser/android/customtabs/origin_verifier.h"
+#if BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/android/customtabs/chrome_origin_verifier.h"
 #include "chrome/browser/android/explore_sites/explore_sites_service_factory.h"
-#include "chrome/browser/android/feed/feed_lifecycle_bridge.h"
 #include "chrome/browser/android/oom_intervention/oom_intervention_decider.h"
-#include "chrome/browser/android/search_permissions/search_permissions_service.h"
 #include "chrome/browser/android/webapps/webapp_registry.h"
-#include "chrome/browser/media/android/cdm/media_drm_license_manager.h"
+#include "chrome/browser/feed/feed_service_factory.h"
 #include "chrome/browser/offline_pages/offline_page_model_factory.h"
-#include "components/feed/buildflags.h"
+#include "chrome/browser/profiles/profile_android.h"
+#include "components/cdm/browser/media_drm_storage_impl.h"  // nogncheck crbug.com/1125897
+#include "components/feed/core/v2/public/feed_service.h"
 #include "components/feed/feed_feature_list.h"
+#include "components/installedapp/android/jni_headers/PackageHash_jni.h"
 #include "components/offline_pages/core/offline_page_feature.h"
 #include "components/offline_pages/core/offline_page_model.h"
-#include "sql/database.h"
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
+
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/web_applications/commands/clear_browsing_data_command.h"
+#include "chrome/browser/web_applications/web_app_provider.h"
+#include "chrome/browser/web_applications/web_app_utils.h"
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/activity_log/activity_log.h"
@@ -123,47 +166,46 @@
 #include "extensions/common/constants.h"
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chromeos/cryptohome/cryptohome_parameters.h"
-#include "chromeos/dbus/constants/attestation_constants.h"
-#include "chromeos/dbus/cryptohome/cryptohome_client.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/net/system_proxy_manager.h"
+#include "chrome/browser/ash/profiles/profile_helper.h"
+#include "chrome/browser/browser_process_platform_part.h"
+#include "chromeos/ash/components/cryptohome/cryptohome_parameters.h"
+#include "chromeos/ash/components/dbus/attestation/attestation_client.h"
+#include "chromeos/ash/components/dbus/attestation/interface.pb.h"
+#include "chromeos/ash/components/dbus/constants/attestation_constants.h"  // nogncheck
+#include "chromeos/ash/components/dbus/dbus_thread_manager.h"  // nogncheck
 #include "components/user_manager/user.h"
-#endif  // defined(OS_CHROMEOS)
+#include "device/fido/cros/credential_store.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
-#if defined(OS_MACOSX)
-#include "components/os_crypt/os_crypt_pref_names_mac.h"
+#if BUILDFLAG(IS_MAC)
 #include "device/fido/mac/credential_store.h"
-#endif  // defined(OS_MACOSX)
+#endif  // BUILDFLAG(IS_MAC)
 
-#if BUILDFLAG(ENABLE_PLUGINS)
-#include "chrome/browser/browsing_data/browsing_data_flash_lso_helper.h"
-#endif  // BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(IS_WIN)
+#include "chrome/browser/media/cdm_document_service_impl.h"
+#endif  // BUILDFLAG(IS_WIN)
 
 using base::UserMetricsAction;
 using content::BrowserContext;
 using content::BrowserThread;
 using content::BrowsingDataFilterBuilder;
 
+namespace constants = chrome_browsing_data_remover;
+
 namespace {
 
 // Timeout after which the histogram for slow tasks is recorded.
-const base::TimeDelta kSlowTaskTimeout = base::TimeDelta::FromSeconds(180);
+const base::TimeDelta kSlowTaskTimeout = base::Seconds(180);
 
 // Generic functions but currently only used when ENABLE_NACL.
 #if BUILDFLAG(ENABLE_NACL)
-void UIThreadTrampolineHelper(base::OnceClosure callback) {
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI}, std::move(callback));
-}
-
 // Convenience method to create a callback that can be run on any thread and
 // will post the given |callback| back to the UI thread.
 base::OnceClosure UIThreadTrampoline(base::OnceClosure callback) {
-  // We could directly bind &base::PostTaskWithTraits, but that would require
-  // evaluating FROM_HERE when this method is called, as opposed to when the
-  // task is actually posted.
-  return base::BindOnce(&UIThreadTrampolineHelper, std::move(callback));
+  return base::BindPostTask(content::GetUIThreadTaskRunner({}),
+                            std::move(callback));
 }
 #endif  // BUILDFLAG(ENABLE_NACL)
 
@@ -179,68 +221,22 @@ base::OnceCallback<void(T)> IgnoreArgument(base::OnceClosure callback) {
   return base::BindOnce(&IgnoreArgumentHelper<T>, std::move(callback));
 }
 
-bool WebsiteSettingsFilterAdapter(
-    const base::RepeatingCallback<bool(const GURL&)> predicate,
-    const ContentSettingsPattern& primary_pattern,
-    const ContentSettingsPattern& secondary_pattern) {
-  // Ignore the default setting.
-  if (primary_pattern == ContentSettingsPattern::Wildcard())
-    return false;
-
-  // Website settings only use origin-scoped patterns. The only content setting
-  // this filter is used for is DURABLE_STORAGE, which also only uses
-  // origin-scoped patterns. Such patterns can be directly translated to a GURL.
-  GURL url(primary_pattern.ToString());
-  DCHECK(url.is_valid());
-  return predicate.Run(url);
-}
-
-#if BUILDFLAG(ENABLE_NACL)
-void ClearNaClCacheOnIOThread(base::OnceClosure callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  nacl::NaClBrowser::GetInstance()->ClearValidationCache(std::move(callback));
-}
-
-void ClearPnaclCacheOnIOThread(base::Time begin,
-                               base::Time end,
-                               base::OnceClosure callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  pnacl::PnaclHost::GetInstance()->ClearTranslationCacheEntriesBetween(
-      begin, end, std::move(callback));
-}
-#endif
-
-#if defined(OS_ANDROID)
-void ClearPrecacheInBackground(content::BrowserContext* browser_context) {
-  // Precache code was removed in M61 but the sqlite database file could be
-  // still here.
-  base::FilePath db_path(browser_context->GetPath().Append(
-      base::FilePath(FILE_PATH_LITERAL("PrecacheDatabase"))));
-  sql::Database::Delete(db_path);
-}
-#endif
-
 // Returned by ChromeBrowsingDataRemoverDelegate::GetOriginTypeMatcher().
-bool DoesOriginMatchEmbedderMask(int origin_type_mask,
+bool DoesOriginMatchEmbedderMask(uint64_t origin_type_mask,
                                  const url::Origin& origin,
                                  storage::SpecialStoragePolicy* policy) {
-  DCHECK_EQ(
-      0,
-      origin_type_mask &
-          (ChromeBrowsingDataRemoverDelegate::ORIGIN_TYPE_EMBEDDER_BEGIN - 1))
+  DCHECK_EQ(0ULL,
+            origin_type_mask & (constants::ORIGIN_TYPE_EMBEDDER_BEGIN - 1))
       << "|origin_type_mask| can only contain origin types defined in "
       << "the embedder.";
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   // Packaged apps and extensions match iff EXTENSION.
   if ((origin.scheme() == extensions::kExtensionScheme) &&
-      (origin_type_mask &
-       ChromeBrowsingDataRemoverDelegate::ORIGIN_TYPE_EXTENSION)) {
+      (origin_type_mask & constants::ORIGIN_TYPE_EXTENSION)) {
     return true;
   }
-  origin_type_mask &= ~ChromeBrowsingDataRemoverDelegate::ORIGIN_TYPE_EXTENSION;
+  origin_type_mask &= ~constants::ORIGIN_TYPE_EXTENSION;
 #endif
 
   DCHECK(!origin_type_mask)
@@ -249,30 +245,17 @@ bool DoesOriginMatchEmbedderMask(int origin_type_mask,
   return false;
 }
 
-// Callback for when cookies have been deleted. Invokes NotifyIfDone.
-// Receiving |cookie_manager| as a parameter so that the receive pipe is
-// not deleted before the response is received.
-void OnClearedCookies(base::OnceClosure done,
-                      network::mojom::CookieManagerPtr cookie_manager,
-                      uint32_t num_deleted) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  std::move(done).Run();
-}
-
 }  // namespace
 
 ChromeBrowsingDataRemoverDelegate::ChromeBrowsingDataRemoverDelegate(
     BrowserContext* browser_context)
     : profile_(Profile::FromBrowserContext(browser_context))
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(IS_ANDROID)
       ,
-      flash_lso_helper_(BrowsingDataFlashLSOHelper::Create(browser_context))
+      webapp_registry_(std::make_unique<WebappRegistry>())
 #endif
-#if defined(OS_ANDROID)
       ,
-      webapp_registry_(new WebappRegistry())
-#endif
-{
+      credential_store_(MakeCredentialStore()) {
   domain_reliability_clearer_ = base::BindRepeating(
       [](BrowserContext* browser_context,
          content::BrowsingDataFilterBuilder* filter_builder,
@@ -280,8 +263,7 @@ ChromeBrowsingDataRemoverDelegate::ChromeBrowsingDataRemoverDelegate(
          network::mojom::NetworkContext::ClearDomainReliabilityCallback
              callback) {
         network::mojom::NetworkContext* network_context =
-            BrowserContext::GetDefaultStoragePartition(browser_context)
-                ->GetNetworkContext();
+            browser_context->GetDefaultStoragePartition()->GetNetworkContext();
         network_context->ClearDomainReliability(
             filter_builder->BuildNetworkServiceFilter(), mode,
             std::move(callback));
@@ -289,11 +271,15 @@ ChromeBrowsingDataRemoverDelegate::ChromeBrowsingDataRemoverDelegate(
       browser_context);
 }
 
-ChromeBrowsingDataRemoverDelegate::~ChromeBrowsingDataRemoverDelegate() {}
+ChromeBrowsingDataRemoverDelegate::~ChromeBrowsingDataRemoverDelegate() =
+    default;
 
 void ChromeBrowsingDataRemoverDelegate::Shutdown() {
+  auto* remover = profile_->GetBrowsingDataRemover();
+  DCHECK(remover);
+  remover->SetEmbedderDelegate(nullptr);
+  profile_keep_alive_.reset();
   history_task_tracker_.TryCancelAll();
-  template_url_sub_.reset();
 }
 
 content::BrowsingDataRemoverDelegate::EmbedderOriginTypeMatcher
@@ -305,35 +291,61 @@ bool ChromeBrowsingDataRemoverDelegate::MayRemoveDownloadHistory() {
   return profile_->GetPrefs()->GetBoolean(prefs::kAllowDeletingBrowserHistory);
 }
 
+std::vector<std::string>
+ChromeBrowsingDataRemoverDelegate::GetDomainsForDeferredCookieDeletion(
+    uint64_t remove_mask) {
+  if (!base::FeatureList::IsEnabled(
+          password_manager::features::kEnablePasswordsAccountStorage)) {
+    return {};
+  }
+  if ((remove_mask & constants::DEFERRED_COOKIE_DELETION_DATA_TYPES) == 0) {
+    return {};
+  }
+
+  // Return Google and Gaia domains, so Google signout is deferred until
+  // account-scoped data is deleted.
+  auto urls = {GaiaUrls::GetInstance()->google_url(),
+               GaiaUrls::GetInstance()->gaia_url()};
+  std::set<std::string> domains;
+  for (const GURL& url : urls) {
+    std::string domain = GetDomainAndRegistry(
+        url, net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
+    if (domain.empty())
+      domain = url.host();
+    domains.insert(domain);
+  }
+  return {domains.begin(), domains.end()};
+}
+
 void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
     const base::Time& delete_begin,
     const base::Time& delete_end,
-    int remove_mask,
+    uint64_t remove_mask,
     BrowsingDataFilterBuilder* filter_builder,
-    int origin_type_mask,
-    base::OnceClosure callback) {
+    uint64_t origin_type_mask,
+    base::OnceCallback<void(uint64_t)> callback) {
   DCHECK(((remove_mask &
            ~content::BrowsingDataRemover::DATA_TYPE_AVOID_CLOSING_CONNECTIONS &
-           ~FILTERABLE_DATA_TYPES) == 0) ||
-         filter_builder->IsEmptyBlacklist());
+           ~constants::FILTERABLE_DATA_TYPES) == 0) ||
+         filter_builder->MatchesAllOriginsAndDomains());
+  DCHECK(!should_clear_password_account_storage_settings_);
 
   TRACE_EVENT0("browsing_data",
                "ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData");
 
   // To detect tasks that are causing slow deletions, record running sub tasks
   // after a delay.
-  slow_pending_tasks_closure_.Reset(base::BindRepeating(
+  slow_pending_tasks_closure_.Reset(base::BindOnce(
       &ChromeBrowsingDataRemoverDelegate::RecordUnfinishedSubTasks,
       weak_ptr_factory_.GetWeakPtr()));
-  base::PostDelayedTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                                  slow_pending_tasks_closure_.callback(),
-                                  kSlowTaskTimeout);
+  content::GetUIThreadTaskRunner({})->PostDelayedTask(
+      FROM_HERE, slow_pending_tasks_closure_.callback(), kSlowTaskTimeout);
 
   // Embedder-defined DOM-accessible storage currently contains only
   // one datatype, which is the durable storage permission.
   if (remove_mask &
       content::BrowsingDataRemover::DATA_TYPE_EMBEDDER_DOM_STORAGE) {
-    remove_mask |= DATA_TYPE_DURABLE_PERMISSION;
+    remove_mask |= constants::DATA_TYPE_DURABLE_PERMISSION;
   }
 
   if (origin_type_mask &
@@ -347,7 +359,7 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
         UserMetricsAction("ClearBrowsingData_MaskContainsProtectedWeb"));
   }
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  if (origin_type_mask & ORIGIN_TYPE_EXTENSION) {
+  if (origin_type_mask & constants::ORIGIN_TYPE_EXTENSION) {
     base::RecordAction(
         UserMetricsAction("ClearBrowsingData_MaskContainsExtension"));
   }
@@ -355,10 +367,10 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
   // If this fires, we added a new BrowsingDataHelper::OriginTypeMask without
   // updating the user metrics above.
   static_assert(
-      ALL_ORIGIN_TYPES ==
+      constants::ALL_ORIGIN_TYPES ==
           (content::BrowsingDataRemover::ORIGIN_TYPE_UNPROTECTED_WEB |
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-           ORIGIN_TYPE_EXTENSION |
+           constants::ORIGIN_TYPE_EXTENSION |
 #endif
            content::BrowsingDataRemover::ORIGIN_TYPE_PROTECTED_WEB),
       "OriginTypeMask has been updated without updating user metrics");
@@ -372,32 +384,32 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
   delete_begin_ = delete_begin;
   delete_end_ = delete_end;
 
+  failed_data_types_ = 0;
+
   base::RepeatingCallback<bool(const GURL& url)> filter =
-      filter_builder->BuildGeneralFilter();
+      filter_builder->BuildUrlFilter();
 
   // Some backends support a filter that |is_null()| to make complete deletion
   // more efficient.
   base::RepeatingCallback<bool(const GURL&)> nullable_filter =
-      filter_builder->IsEmptyBlacklist()
+      filter_builder->MatchesAllOriginsAndDomains()
           ? base::RepeatingCallback<bool(const GURL&)>()
           : filter;
 
   HostContentSettingsMap::PatternSourcePredicate website_settings_filter =
-      filter_builder->IsEmptyBlacklist()
-          ? HostContentSettingsMap::PatternSourcePredicate()
-          : base::BindRepeating(&WebsiteSettingsFilterAdapter, filter);
+      browsing_data::CreateWebsiteSettingsFilter(filter_builder);
 
   // Managed devices and supervised users can have restrictions on history
   // deletion.
   PrefService* prefs = profile_->GetPrefs();
-  bool may_delete_history = prefs->GetBoolean(
-      prefs::kAllowDeletingBrowserHistory);
+  bool may_delete_history =
+      prefs->GetBoolean(prefs::kAllowDeletingBrowserHistory);
 
   // All the UI entry points into the BrowsingDataRemoverImpl should be
   // disabled, but this will fire if something was missed or added.
   DCHECK(may_delete_history ||
          (remove_mask & content::BrowsingDataRemover::DATA_TYPE_NO_CHECKS) ||
-         (!(remove_mask & DATA_TYPE_HISTORY) &&
+         (!(remove_mask & constants::DATA_TYPE_HISTORY) &&
           !(remove_mask & content::BrowsingDataRemover::DATA_TYPE_DOWNLOADS)));
 
   HostContentSettingsMap* host_content_settings_map_ =
@@ -405,7 +417,7 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
 
   //////////////////////////////////////////////////////////////////////////////
   // DATA_TYPE_HISTORY
-  if ((remove_mask & DATA_TYPE_HISTORY) && may_delete_history) {
+  if ((remove_mask & constants::DATA_TYPE_HISTORY) && may_delete_history) {
     history::HistoryService* history_service =
         HistoryServiceFactory::GetForProfile(
             profile_, ServiceAccessType::EXPLICIT_ACCESS);
@@ -414,21 +426,11 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
       base::RecordAction(UserMetricsAction("ClearBrowsingData_History"));
       history_service->DeleteLocalAndRemoteHistoryBetween(
           WebHistoryServiceFactory::GetForProfile(profile_), delete_begin_,
-          delete_end_,
-          base::AdaptCallbackForRepeating(
-              CreateTaskCompletionClosure(TracingDataType::kHistory)),
+          delete_end_, CreateTaskCompletionClosure(TracingDataType::kHistory),
           &history_task_tracker_);
     }
     if (ClipboardRecentContent::GetInstance())
       ClipboardRecentContent::GetInstance()->SuppressClipboardContent();
-
-    // Currently, ContentSuggestionService instance exists only on Android.
-    ntp_snippets::ContentSuggestionsService* content_suggestions_service =
-        ContentSuggestionsServiceFactory::GetForProfileIfExists(profile_);
-    if (content_suggestions_service) {
-      content_suggestions_service->ClearHistory(delete_begin_, delete_end_,
-                                                filter);
-    }
 
     language::UrlLanguageHistogram* language_histogram =
         UrlLanguageHistogramFactory::GetForBrowserContext(profile_);
@@ -446,10 +448,11 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
 
     // Clear launch times as they are a form of history.
     // BrowsingDataFilterBuilder currently doesn't support extension origins.
-    // Therefore, clearing history for a small set of origins (WHITELIST) should
-    // never delete any extension launch times, while clearing for almost all
-    // origins (BLACKLIST) should always delete all of extension launch times.
-    if (filter_builder->IsEmptyBlacklist()) {
+    // Therefore, clearing history for a small set of origins (deletelist)
+    // should never delete any extension launch times, while clearing for almost
+    // all origins (preservelist) should always delete all of extension launch
+    // times.
+    if (filter_builder->MatchesAllOriginsAndDomains()) {
       extensions::ExtensionPrefs* extension_prefs =
           extensions::ExtensionPrefs::Get(profile_);
       extension_prefs->ClearLastLaunchTimes();
@@ -459,41 +462,22 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
     // Need to clear the host cache and accumulated speculative data, as it also
     // reveals some history. We have no mechanism to track when these items were
     // created, so we'll not honor the time range.
-    BrowserContext::GetDefaultStoragePartition(profile_)
-        ->GetNetworkContext()
-        ->ClearHostCache(
-            filter_builder->BuildNetworkServiceFilter(),
-            CreateTaskCompletionClosureForMojo(TracingDataType::kHostCache));
+    profile_->GetDefaultStoragePartition()->GetNetworkContext()->ClearHostCache(
+        filter_builder->BuildNetworkServiceFilter(),
+        CreateTaskCompletionClosureForMojo(TracingDataType::kHostCache));
 
-    // As part of history deletion we also delete the auto-generated keywords.
-    TemplateURLService* keywords_model =
-        TemplateURLServiceFactory::GetForProfile(profile_);
-
-    if (keywords_model && !keywords_model->loaded()) {
-      // TODO(msramek): Store filters from the currently executed task on the
-      // object to avoid having to copy them to callback methods.
-      template_url_sub_ = keywords_model->RegisterOnLoadedCallback(
-          base::AdaptCallbackForRepeating(base::BindOnce(
-              &ChromeBrowsingDataRemoverDelegate::OnKeywordsLoaded,
-              weak_ptr_factory_.GetWeakPtr(), nullable_filter,
-              CreateTaskCompletionClosure(TracingDataType::kKeywordsModel))));
-      keywords_model->Load();
-    } else if (keywords_model) {
-      keywords_model->RemoveAutoGeneratedForUrlsBetween(
-          nullable_filter, delete_begin_, delete_end_);
-    }
-
-    // The PrerenderManager keeps history of prerendered pages, so clear that.
-    // It also may have a prerendered page. If so, the page could be
+    // The NoStatePrefetchManager keeps history of pages scanned for prefetch,
+    // so clear that. It also may have a scanned page. If so, the page could be
     // considered to have a small amount of historical information, so delete
     // it, too.
-    prerender::PrerenderManager* prerender_manager =
-        prerender::PrerenderManagerFactory::GetForBrowserContext(profile_);
-    if (prerender_manager) {
+    prerender::NoStatePrefetchManager* no_state_prefetch_manager =
+        prerender::NoStatePrefetchManagerFactory::GetForBrowserContext(
+            profile_);
+    if (no_state_prefetch_manager) {
       // TODO(dmurph): Support all backends with filter (crbug.com/113621).
-      prerender_manager->ClearData(
-          prerender::PrerenderManager::CLEAR_PRERENDER_CONTENTS |
-          prerender::PrerenderManager::CLEAR_PRERENDER_HISTORY);
+      no_state_prefetch_manager->ClearData(
+          prerender::NoStatePrefetchManager::CLEAR_PRERENDER_CONTENTS |
+          prerender::NoStatePrefetchManager::CLEAR_PRERENDER_HISTORY);
     }
 
     // The saved Autofill profiles and credit cards can include the origin from
@@ -504,8 +488,8 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
         WebDataServiceFactory::GetAutofillWebDataForProfile(
             profile_, ServiceAccessType::EXPLICIT_ACCESS);
     if (web_data_service.get()) {
-      web_data_service->RemoveOriginURLsModifiedBetween(
-          delete_begin_, delete_end_);
+      web_data_service->RemoveOriginURLsModifiedBetween(delete_begin_,
+                                                        delete_end_);
       // Ask for a call back when the above call is finished.
       web_data_service->GetDBTaskRunner()->PostTaskAndReply(
           FROM_HERE, base::DoNothing(),
@@ -517,7 +501,7 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
         data_manager->Refresh();
     }
 
-    base::PostTaskWithTraitsAndReply(
+    base::ThreadPool::PostTaskAndReply(
         FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
         base::BindOnce(
             &webrtc_logging::DeleteOldAndRecentWebRtcLogFiles,
@@ -526,44 +510,37 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
             delete_begin_),
         CreateTaskCompletionClosure(TracingDataType::kWebrtcLogs));
 
-#if defined(OS_ANDROID)
-    base::PostTaskWithTraitsAndReply(
-        FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
-        base::BindOnce(&ClearPrecacheInBackground, profile_),
-        CreateTaskCompletionClosure(TracingDataType::kPrecache));
-
+#if BUILDFLAG(IS_ANDROID)
     // Clear the history information (last launch time and origin URL) of any
     // registered webapps.
     webapp_registry_->ClearWebappHistoryForUrls(filter);
 
-    // The OriginVerifier caches origins for Trusted Web Activities that have
-    // been verified and stores them in Android Preferences.
-    customtabs::OriginVerifier::ClearBrowsingData();
+    // The ChromeOriginVerifier caches origins for Trusted Web Activities that
+    // have been verified and stores them in Android Preferences.
+    customtabs::ChromeOriginVerifier::ClearBrowsingData();
 #endif
 
-    data_reduction_proxy::DataReductionProxySettings*
-        data_reduction_proxy_settings =
-            DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
-                profile_);
-    // |data_reduction_proxy_settings| is null if |profile_| is off the record.
-    if (data_reduction_proxy_settings) {
-      data_reduction_proxy::DataReductionProxyService*
-          data_reduction_proxy_service =
-              data_reduction_proxy_settings->data_reduction_proxy_service();
-      if (data_reduction_proxy_service) {
-        data_reduction_proxy_service->compression_stats()
-            ->DeleteBrowsingHistory(delete_begin_, delete_end_);
-      }
+    heavy_ad_intervention::HeavyAdService* heavy_ad_service =
+        HeavyAdServiceFactory::GetForBrowserContext(profile_);
+    if (heavy_ad_service && heavy_ad_service->heavy_ad_blocklist()) {
+      heavy_ad_service->heavy_ad_blocklist()->ClearBlockList(delete_begin_,
+                                                             delete_end_);
     }
 
-    // |previews_service| is null if |profile_| is off the record.
-    PreviewsService* previews_service =
-        PreviewsServiceFactory::GetForProfile(profile_);
-    if (previews_service)
-      previews_service->ClearBlackList(delete_begin_, delete_end_);
+    OptimizationGuideKeyedService* optimization_guide_keyed_service =
+        OptimizationGuideKeyedServiceFactory::GetForProfile(profile_);
+    if (optimization_guide_keyed_service)
+      optimization_guide_keyed_service->ClearData();
 
+    PrefetchProxyService* prefetch_proxy_service =
+        PrefetchProxyServiceFactory::GetForProfile(profile_);
+    if (prefetch_proxy_service) {
+      prefetch_proxy_service->origin_decider()->OnBrowsingDataCleared();
+    }
 
-#if defined(OS_ANDROID)
+    content::PrefetchServiceDelegate::ClearData(profile_);
+
+#if BUILDFLAG(IS_ANDROID)
     OomInterventionDecider* oom_intervention_decider =
         OomInterventionDecider::GetForBrowserContext(profile_);
     if (oom_intervention_decider)
@@ -577,15 +554,15 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
     // Rename the method to indicate its more general usage.
     if (profile_->GetSSLHostStateDelegate()) {
       profile_->GetSSLHostStateDelegate()->Clear(
-          filter_builder->IsEmptyBlacklist()
+          filter_builder->MatchesAllOriginsAndDomains()
               ? base::RepeatingCallback<bool(const std::string&)>()
               : filter_builder->BuildPluginFilter());
     }
 
-    // Clear VideoDecodePerfHistory only if asked to clear from the beginning of
-    // time. The perf history is a simple summing of decode statistics with no
-    // record of when the stats were written nor what site the video was played
-    // on.
+    // Clear VideoDecodePerfHistory and WebrtcVideoPerfHistory only if asked to
+    // clear from the beginning of time. The perf history is a simple summing of
+    // decode/encode statistics with no record of when the stats were written
+    // nor what site the video was played on.
     if (IsForAllTime()) {
       // TODO(chcunningham): Add UMA to track how often this gets deleted.
       media::VideoDecodePerfHistory* video_decode_perf_history =
@@ -594,11 +571,18 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
         video_decode_perf_history->ClearHistory(
             CreateTaskCompletionClosure(TracingDataType::kVideoDecodeHistory));
       }
+
+      media::WebrtcVideoPerfHistory* webrtc_video_perf_history =
+          profile_->GetWebrtcVideoPerfHistory();
+      if (webrtc_video_perf_history) {
+        webrtc_video_perf_history->ClearHistory(CreateTaskCompletionClosure(
+            TracingDataType::kWebrtcVideoPerfHistory));
+      }
     }
 
     device_event_log::Clear(delete_begin_, delete_end_);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     explore_sites::ExploreSitesService* explore_sites_service =
         explore_sites::ExploreSitesServiceFactory::GetForBrowserContext(
             profile_);
@@ -610,14 +594,34 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
 #endif
 
     CreateCrashUploadList()->Clear(delete_begin_, delete_end_);
+
+    FindBarStateFactory::GetForBrowserContext(profile_)->SetLastSearchText(
+        std::u16string());
+
+#if BUILDFLAG(IS_ANDROID)
+    if (auto* share_history = sharing::ShareHistory::Get(profile_))
+      share_history->Clear(delete_begin_, delete_end_);
+    if (auto* share_ranking = sharing::ShareRanking::Get(profile_))
+      share_ranking->Clear(delete_begin_, delete_end_);
+#endif
+
+    // Also clear the last used time in bookmarks.
+    auto* bookmark_model = BookmarkModelFactory::GetForBrowserContext(profile_);
+    if (bookmark_model && bookmark_model->loaded()) {
+      bookmark_model->ClearLastUsedTimeInRange(delete_begin, delete_end);
+    }
+
+    // Cleared for DATA_TYPE_HISTORY, DATA_TYPE_COOKIES and DATA_TYPE_PASSWORDS.
+    browsing_data::RemoveFederatedSiteSettingsData(delete_begin_, delete_end_,
+                                                   host_content_settings_map_);
   }
 
   //////////////////////////////////////////////////////////////////////////////
   // DATA_TYPE_DOWNLOADS
   if ((remove_mask & content::BrowsingDataRemover::DATA_TYPE_DOWNLOADS) &&
       may_delete_history) {
-    DownloadPrefs* download_prefs = DownloadPrefs::FromDownloadManager(
-        BrowserContext::GetDownloadManager(profile_));
+    DownloadPrefs* download_prefs =
+        DownloadPrefs::FromDownloadManager(profile_->GetDownloadManager());
     download_prefs->SetSaveFilePath(download_prefs->DownloadPath());
   }
 
@@ -633,58 +637,59 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
        content::BrowsingDataRemover::ORIGIN_TYPE_UNPROTECTED_WEB)) {
     base::RecordAction(UserMetricsAction("ClearBrowsingData_Cookies"));
 
-    host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
-        CONTENT_SETTINGS_TYPE_CLIENT_HINTS, base::Time(), base::Time::Max(),
-        website_settings_filter);
+    network::mojom::NetworkContext* safe_browsing_context = nullptr;
+    safe_browsing::SafeBrowsingService* sb_service =
+        g_browser_process->safe_browsing_service();
+    if (sb_service)
+      safe_browsing_context = sb_service->GetNetworkContext(profile_);
 
-    // Clear the safebrowsing cookies only if time period is for "all time".  It
-    // doesn't make sense to apply the time period of deleting in the last X
-    // hours/days to the safebrowsing cookies since they aren't the result of
-    // any user action.
-    if (IsForAllTime()) {
-      safe_browsing::SafeBrowsingService* sb_service =
-          g_browser_process->safe_browsing_service();
-      if (sb_service) {
-        network::mojom::CookieManagerPtr cookie_manager;
-        sb_service->GetNetworkContext()->GetCookieManager(
-            mojo::MakeRequest(&cookie_manager));
+    // Cleared for DATA_TYPE_HISTORY, DATA_TYPE_COOKIES and DATA_TYPE_PASSWORDS.
+    browsing_data::RemoveFederatedSiteSettingsData(delete_begin_, delete_end_,
+                                                   host_content_settings_map_);
 
-        network::mojom::CookieManager* manager_ptr = cookie_manager.get();
-
-        network::mojom::CookieDeletionFilterPtr deletion_filter =
-            filter_builder->BuildCookieDeletionFilter();
-        if (!delete_begin_.is_null())
-          deletion_filter->created_after_time = delete_begin_;
-        if (!delete_end_.is_null())
-          deletion_filter->created_before_time = delete_end_;
-
-        manager_ptr->DeleteCookies(
-            std::move(deletion_filter),
-            base::BindOnce(
-                &OnClearedCookies,
-                CreateTaskCompletionClosure(TracingDataType::kCookies),
-                std::move(cookie_manager)));
-      }
+    if (!filter_builder->IsCrossSiteClearSiteDataForCookies()) {
+      browsing_data::RemoveEmbedderCookieData(
+          delete_begin, delete_end, filter_builder, host_content_settings_map_,
+          safe_browsing_context,
+          base::BindOnce(
+              &ChromeBrowsingDataRemoverDelegate::CreateTaskCompletionClosure,
+              base::Unretained(this), TracingDataType::kCookies));
+      safe_browsing::VerdictCacheManagerFactory::GetForProfile(profile_)
+          ->OnCookiesDeleted();
     }
 
-    MediaDeviceIDSalt::Reset(profile_->GetPrefs());
+    if (filter_builder->GetMode() ==
+        BrowsingDataFilterBuilder::Mode::kPreserve) {
+      auto* privacy_sandbox_settings =
+          PrivacySandboxSettingsFactory::GetForProfile(profile_);
+      if (privacy_sandbox_settings)
+        privacy_sandbox_settings->OnCookiesCleared();
+
+      MediaDeviceIDSalt::Reset(profile_->GetPrefs());
+
+#if BUILDFLAG(IS_ANDROID)
+      Java_PackageHash_onCookiesDeleted(
+          base::android::AttachCurrentThread(),
+          ProfileAndroid::FromProfile(profile_)->GetJavaObject());
+#endif
+    }
+
+    if (nullable_filter.is_null() ||
+        (!filter_builder->IsCrossSiteClearSiteDataForCookies() &&
+         nullable_filter.Run(GaiaUrls::GetInstance()->google_url()))) {
+      // Set a flag to clear account storage settings later instead of clearing
+      // it now as we can not reset this setting before passwords are deleted.
+      should_clear_password_account_storage_settings_ = true;
+    }
   }
 
   //////////////////////////////////////////////////////////////////////////////
   // DATA_TYPE_CONTENT_SETTINGS
-  if (remove_mask & DATA_TYPE_CONTENT_SETTINGS) {
+  if (remove_mask & constants::DATA_TYPE_CONTENT_SETTINGS) {
     base::RecordAction(UserMetricsAction("ClearBrowsingData_ContentSettings"));
-    const auto* registry =
-        content_settings::ContentSettingsRegistry::GetInstance();
-    for (const content_settings::ContentSettingsInfo* info : *registry) {
-      host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
-          info->website_settings_info()->type(), delete_begin_, delete_end_,
-          HostContentSettingsMap::PatternSourcePredicate());
-    }
 
-    host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
-        CONTENT_SETTINGS_TYPE_USB_CHOOSER_DATA, delete_begin_, delete_end_,
-        HostContentSettingsMap::PatternSourcePredicate());
+    browsing_data::RemoveSiteSettingsData(delete_begin, delete_end,
+                                          host_content_settings_map_);
 
     auto* handler_registry =
         ProtocolHandlerRegistryFactory::GetForBrowserContext(profile_);
@@ -692,33 +697,30 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
       handler_registry->ClearUserDefinedHandlers(delete_begin_, delete_end_);
 
     ChromeTranslateClient::CreateTranslatePrefs(prefs)
-        ->DeleteBlacklistedSitesBetween(delete_begin_, delete_end_);
+        ->DeleteNeverPromptSitesBetween(delete_begin_, delete_end_);
 
-#if !defined(OS_ANDROID)
+    host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
+        ContentSettingsType::PERMISSION_AUTOREVOCATION_DATA, delete_begin,
+        delete_end, website_settings_filter);
+
+    if (auto* privacy_sandbox_settings =
+            PrivacySandboxSettingsFactory::GetForProfile(profile_)) {
+      privacy_sandbox_settings->ClearFledgeJoiningAllowedSettings(delete_begin_,
+                                                                  delete_end_);
+    }
+
+#if !BUILDFLAG(IS_ANDROID)
     content::HostZoomMap* zoom_map =
         content::HostZoomMap::GetDefaultForBrowserContext(profile_);
-    zoom_map->ClearZoomLevels(delete_begin_, delete_end_);
-
-    host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
-        CONTENT_SETTINGS_TYPE_SERIAL_CHOOSER_DATA, delete_begin_, delete_end_,
-        HostContentSettingsMap::PatternSourcePredicate());
-
-    host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
-        CONTENT_SETTINGS_TYPE_HID_CHOOSER_DATA, delete_begin_, delete_end_,
-        HostContentSettingsMap::PatternSourcePredicate());
-#else
-    // Reset the Default Search Engine permissions to their default.
-    SearchPermissionsService* search_permissions_service =
-        SearchPermissionsService::Factory::GetForBrowserContext(profile_);
-    search_permissions_service->ResetDSEPermissions();
-#endif
+    zoom_map->ClearZoomLevels(delete_begin, delete_end_);
+#endif  // !BUILDFLAG(IS_ANDROID)
   }
 
   //////////////////////////////////////////////////////////////////////////////
   // DATA_TYPE_BOOKMARKS
-  if (remove_mask & DATA_TYPE_BOOKMARKS) {
+  if (remove_mask & constants::DATA_TYPE_BOOKMARKS) {
     auto* bookmark_model = BookmarkModelFactory::GetForBrowserContext(profile_);
-    if (bookmark_model) {
+    if (bookmark_model && bookmark_model->loaded()) {
       if (delete_begin_.is_null() &&
           (delete_end_.is_null() || delete_end_.is_max())) {
         bookmark_model->RemoveAllUserBookmarks();
@@ -732,109 +734,185 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
   }
 
   //////////////////////////////////////////////////////////////////////////////
+  // DATA_TYPE_LOCAL_CUSTOM_DICTIONARY
+  if (remove_mask & constants::DATA_TYPE_LOCAL_CUSTOM_DICTIONARY) {
+    auto* spellcheck = SpellcheckServiceFactory::GetForContext(profile_);
+    if (spellcheck) {
+      auto* dict = spellcheck->GetCustomDictionary();
+      if (dict)
+        dict->Clear();
+    }
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
   // DATA_TYPE_DURABLE_PERMISSION
-  if (remove_mask & DATA_TYPE_DURABLE_PERMISSION) {
+  if (remove_mask & constants::DATA_TYPE_DURABLE_PERMISSION) {
     host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
-        CONTENT_SETTINGS_TYPE_DURABLE_STORAGE, base::Time(), base::Time::Max(),
+        ContentSettingsType::DURABLE_STORAGE, base::Time(), base::Time::Max(),
         website_settings_filter);
   }
 
   //////////////////////////////////////////////////////////////////////////////
   // DATA_TYPE_SITE_USAGE_DATA
-  if (remove_mask & DATA_TYPE_SITE_USAGE_DATA) {
+  if (remove_mask & constants::DATA_TYPE_SITE_USAGE_DATA) {
     base::RecordAction(UserMetricsAction("ClearBrowsingData_SiteUsageData"));
 
     host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
-        CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, base::Time(), base::Time::Max(),
+        ContentSettingsType::SITE_ENGAGEMENT, base::Time(), base::Time::Max(),
         website_settings_filter);
 
     if (MediaEngagementService::IsEnabled()) {
       MediaEngagementService::Get(profile_)->ClearDataBetweenTime(delete_begin_,
                                                                   delete_end_);
     }
+
+    PermissionActionsHistoryFactory::GetForProfile(profile_)->ClearHistory(
+        delete_begin_, delete_end_);
   }
 
-  if ((remove_mask & DATA_TYPE_SITE_USAGE_DATA) ||
-      (remove_mask & DATA_TYPE_HISTORY)) {
+  if ((remove_mask & constants::DATA_TYPE_SITE_USAGE_DATA) ||
+      (remove_mask & constants::DATA_TYPE_HISTORY)) {
     host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
-        CONTENT_SETTINGS_TYPE_APP_BANNER, base::Time(), base::Time::Max(),
+        ContentSettingsType::FORMFILL_METADATA, delete_begin_, delete_end_,
         website_settings_filter);
 
-#if !defined(OS_ANDROID)
     host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
-        CONTENT_SETTINGS_TYPE_INTENT_PICKER_DISPLAY, delete_begin_, delete_end_,
+        ContentSettingsType::APP_BANNER, base::Time(), base::Time::Max(),
         website_settings_filter);
+
+#if !BUILDFLAG(IS_ANDROID)
+    host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
+        ContentSettingsType::INTENT_PICKER_DISPLAY, delete_begin_, delete_end_,
+        website_settings_filter);
+
+    host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
+        ContentSettingsType::FILE_SYSTEM_LAST_PICKED_DIRECTORY, delete_begin,
+        delete_end, website_settings_filter);
 #endif
 
-    PermissionDecisionAutoBlocker::GetForProfile(profile_)->RemoveCountsByUrl(
-        filter);
-
-#if BUILDFLAG(ENABLE_PLUGINS)
     host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
-        CONTENT_SETTINGS_TYPE_PLUGINS_DATA, base::Time(), base::Time::Max(),
-        website_settings_filter);
-#endif
+        ContentSettingsType::NOTIFICATION_INTERACTIONS, base::Time(),
+        base::Time::Max(), website_settings_filter);
+
+    PermissionDecisionAutoBlockerFactory::GetForProfile(profile_)
+        ->RemoveEmbargoAndResetCounts(filter);
   }
 
   //////////////////////////////////////////////////////////////////////////////
   // Password manager
-  if (remove_mask & DATA_TYPE_PASSWORDS) {
+  if (remove_mask & constants::DATA_TYPE_PASSWORDS) {
     base::RecordAction(UserMetricsAction("ClearBrowsingData_Passwords"));
-    password_manager::PasswordStore* password_store =
-        PasswordStoreFactory::GetForProfile(
-            profile_, ServiceAccessType::EXPLICIT_ACCESS).get();
+    auto password_store = PasswordStoreFactory::GetForProfile(
+        profile_, ServiceAccessType::EXPLICIT_ACCESS);
 
     if (password_store) {
+      // TODO:(crbug.com/1167715) - Test that associated compromised credentials
+      // are removed.
       password_store->RemoveLoginsByURLAndTime(
           filter, delete_begin_, delete_end_,
-          base::AdaptCallbackForRepeating(
-              CreateTaskCompletionClosure(TracingDataType::kPasswords)));
+          CreateTaskCompletionClosure(TracingDataType::kPasswords));
     }
 
-    BrowserContext::GetDefaultStoragePartition(profile_)
+    profile_->GetDefaultStoragePartition()
         ->GetNetworkContext()
-        ->ClearHttpAuthCache(delete_begin_,
-                             CreateTaskCompletionClosureForMojo(
-                                 TracingDataType::kHttpAuthCache));
+        ->ClearHttpAuthCache(
+            delete_begin_.is_null() ? base::Time::Min() : delete_begin_,
+            delete_end_.is_null() ? base::Time::Max() : delete_end_,
+            CreateTaskCompletionClosureForMojo(
+                TracingDataType::kHttpAuthCache));
 
-#if defined(OS_MACOSX)
-    device::fido::mac::TouchIdCredentialStore(
-        ChromeAuthenticatorRequestDelegate::
-            TouchIdAuthenticatorConfigForProfile(profile_))
-        .DeleteCredentials(delete_begin_, delete_end_);
-#endif  // defined(OS_MACOSX)
+    scoped_refptr<payments::PaymentManifestWebDataService> web_data_service =
+        webdata_services::WebDataServiceWrapperFactory::
+            GetPaymentManifestWebDataServiceForBrowserContext(
+                profile_, ServiceAccessType::EXPLICIT_ACCESS);
+    if (web_data_service) {
+      web_data_service->ClearSecurePaymentConfirmationCredentials(
+          delete_begin_, delete_end_,
+          CreateTaskCompletionClosure(
+              TracingDataType::kSecurePaymentConfirmationCredentials));
+    }
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    if (ash::SystemProxyManager::Get()) {
+      // Sends a request to the System-proxy daemon to clear the proxy user
+      // credentials. System-proxy retrieves proxy username and password from
+      // the NetworkService, but not the creation time of the credentials. The
+      // |ClearUserCredentials| request will remove all the cached proxy
+      // credentials. If credentials prior to |delete_begin_| are removed from
+      // System-proxy, the daemon will send a D-Bus request to Chrome to fetch
+      // them from the NetworkService when needed.
+      ash::SystemProxyManager::Get()->ClearUserCredentials();
+    }
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+    if (credential_store_) {
+      credential_store_->DeleteCredentials(
+          delete_begin_, delete_end_,
+          CreateTaskCompletionClosure(TracingDataType::kWebAuthnCredentials));
+    }
+
+    // Cleared for DATA_TYPE_HISTORY, DATA_TYPE_COOKIES and DATA_TYPE_PASSWORDS.
+    browsing_data::RemoveFederatedSiteSettingsData(delete_begin_, delete_end_,
+                                                   host_content_settings_map_);
+  }
+
+  if (remove_mask & constants::DATA_TYPE_ACCOUNT_PASSWORDS) {
+    auto account_store = AccountPasswordStoreFactory::GetForProfile(
+        profile_, ServiceAccessType::EXPLICIT_ACCESS);
+
+    if (account_store) {
+      // TODO:(crbug.com/1167715) - Test that associated compromised credentials
+      // are removed.
+      account_store->RemoveLoginsByURLAndTime(
+          filter, delete_begin_, delete_end_,
+          CreateTaskCompletionClosure(TracingDataType::kAccountPasswords),
+          CreateTaskCompletionCallback(TracingDataType::kAccountPasswordsSynced,
+                                       constants::DATA_TYPE_ACCOUNT_PASSWORDS));
+    }
   }
 
   if (remove_mask & content::BrowsingDataRemover::DATA_TYPE_COOKIES) {
-    password_manager::PasswordStore* password_store =
+    password_manager::PasswordStoreInterface* password_store =
+        PasswordStoreFactory::GetForProfile(profile_,
+                                            ServiceAccessType::EXPLICIT_ACCESS)
+            .get();
+
+    if (password_store &&
+        !filter_builder->IsCrossSiteClearSiteDataForCookies()) {
+      password_store->DisableAutoSignInForOrigins(
+          filter,
+          CreateTaskCompletionClosure(TracingDataType::kDisableAutoSignin));
+    }
+  }
+
+  if (remove_mask & constants::DATA_TYPE_HISTORY) {
+    password_manager::PasswordStoreInterface* password_store =
         PasswordStoreFactory::GetForProfile(profile_,
                                             ServiceAccessType::EXPLICIT_ACCESS)
             .get();
 
     if (password_store) {
-      password_store->DisableAutoSignInForOrigins(
-          filter, base::AdaptCallbackForRepeating(CreateTaskCompletionClosure(
-                      TracingDataType::kDisableAutoSignin)));
-    }
-  }
-
-  if (remove_mask & DATA_TYPE_HISTORY) {
-    password_manager::PasswordStore* password_store =
-        PasswordStoreFactory::GetForProfile(
-            profile_, ServiceAccessType::EXPLICIT_ACCESS).get();
-
-    if (password_store) {
-      password_store->RemoveStatisticsByOriginAndTime(
-          nullable_filter, delete_begin_, delete_end_,
-          base::AdaptCallbackForRepeating(CreateTaskCompletionClosure(
-              TracingDataType::kPasswordsStatistics)));
+      password_manager::SmartBubbleStatsStore* stats_store =
+          password_store->GetSmartBubbleStatsStore();
+      if (stats_store) {
+        stats_store->RemoveStatisticsByOriginAndTime(
+            nullable_filter, delete_begin_, delete_end_,
+            CreateTaskCompletionClosure(TracingDataType::kPasswordsStatistics));
+      }
+      password_manager::FieldInfoStore* field_store =
+          password_store->GetFieldInfoStore();
+      if (field_store) {
+        field_store->RemoveFieldInfoByTime(
+            delete_begin_, delete_end_,
+            CreateTaskCompletionClosure(TracingDataType::kFieldInfo));
+      }
     }
   }
 
   //////////////////////////////////////////////////////////////////////////////
   // DATA_TYPE_FORM_DATA
   // TODO(dmurph): Support all backends with filter (crbug.com/113621).
-  if (remove_mask & DATA_TYPE_FORM_DATA) {
+  if (remove_mask & constants::DATA_TYPE_FORM_DATA) {
     base::RecordAction(UserMetricsAction("ClearBrowsingData_Autofill"));
     scoped_refptr<autofill::AutofillWebDataService> web_data_service =
         WebDataServiceFactory::GetAutofillWebDataForProfile(
@@ -842,9 +920,9 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
 
     if (web_data_service.get()) {
       web_data_service->RemoveFormElementsAddedBetween(delete_begin_,
-          delete_end_);
-      web_data_service->RemoveAutofillDataModifiedBetween(
-          delete_begin_, delete_end_);
+                                                       delete_end_);
+      web_data_service->RemoveAutofillDataModifiedBetween(delete_begin_,
+                                                          delete_end_);
       // Clear out the Autofill StrikeDatabase in its entirety.
       // TODO(crbug.com/884817): Respect |delete_begin_| and |delete_end_| and
       // only clear out entries whose last strikes were created in that
@@ -869,82 +947,63 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
   //////////////////////////////////////////////////////////////////////////////
   // DATA_TYPE_CACHE
   if (remove_mask & content::BrowsingDataRemover::DATA_TYPE_CACHE) {
-    // Tell the renderers to clear their cache.
+    // Tell the renderers associated with |profile_| to clear their cache.
     // TODO(crbug.com/668114): Renderer cache is a platform concept, and should
     // live in BrowsingDataRemoverImpl. However, WebCacheManager itself is
     // a component with dependency on content/browser. Untangle these
     // dependencies or reimplement the relevant part of WebCacheManager
     // in content/browser.
-    web_cache::WebCacheManager::GetInstance()->ClearCache();
-
-#if BUILDFLAG(ENABLE_NACL)
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::IO},
-        base::BindOnce(&ClearNaClCacheOnIOThread,
-                       UIThreadTrampoline(CreateTaskCompletionClosure(
-                           TracingDataType::kNaclCache))));
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::IO},
-        base::BindOnce(&ClearPnaclCacheOnIOThread, delete_begin_, delete_end_,
-                       UIThreadTrampoline(CreateTaskCompletionClosure(
-                           TracingDataType::kPnaclCache))));
-#endif
-
-    // The PrerenderManager may have a page actively being prerendered, which
-    // is essentially a preemptively cached page.
-    prerender::PrerenderManager* prerender_manager =
-        prerender::PrerenderManagerFactory::GetForBrowserContext(profile_);
-    if (prerender_manager) {
-      prerender_manager->ClearData(
-          prerender::PrerenderManager::CLEAR_PRERENDER_CONTENTS);
-    }
-
-    ntp_snippets::ContentSuggestionsService* content_suggestions_service =
-        ContentSuggestionsServiceFactory::GetForProfileIfExists(profile_);
-    if (content_suggestions_service)
-      content_suggestions_service->ClearAllCachedSuggestions();
-
-#if defined(OS_ANDROID)
-#if BUILDFLAG(ENABLE_FEED_IN_CHROME)
-    if (base::FeatureList::IsEnabled(feed::kInterestFeedContentSuggestions))
-      feed::FeedLifecycleBridge::ClearCachedData();
-#endif  // BUILDFLAG(ENABLE_FEED_IN_CHROME)
-#endif  // defined(OS_ANDROID)
-
-    // Notify data reduction component.
-    data_reduction_proxy::DataReductionProxySettings*
-        data_reduction_proxy_settings =
-            DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
-                profile_);
-    // |data_reduction_proxy_settings| is null if |profile_| is off the record.
-    // Skip notification if the user clears cache for only a finite set of
-    // sites.
-    if (data_reduction_proxy_settings &&
-        filter_builder->GetMode() != BrowsingDataFilterBuilder::WHITELIST) {
-      data_reduction_proxy::DataReductionProxyService*
-          data_reduction_proxy_service =
-              data_reduction_proxy_settings->data_reduction_proxy_service();
-      if (data_reduction_proxy_service) {
-        data_reduction_proxy_service->OnCacheCleared(delete_begin_,
-                                                     delete_end_);
+    // TODO(crbug.com/1022757): add a test for this.
+    for (content::RenderProcessHost::iterator iter =
+             content::RenderProcessHost::AllHostsIterator();
+         !iter.IsAtEnd(); iter.Advance()) {
+      content::RenderProcessHost* render_process_host = iter.GetCurrentValue();
+      if (render_process_host->GetBrowserContext() == profile_ &&
+          render_process_host->IsInitializedAndNotDead()) {
+        web_cache::WebCacheManager::GetInstance()->ClearCacheForProcess(
+            render_process_host->GetID());
       }
     }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ENABLE_NACL)
+    nacl::NaClBrowser::GetInstance()->ClearValidationCache(UIThreadTrampoline(
+        CreateTaskCompletionClosure(TracingDataType::kNaclCache)));
+
+    pnacl::PnaclHost::GetInstance()->ClearTranslationCacheEntriesBetween(
+        delete_begin_, delete_end_,
+        UIThreadTrampoline(
+            CreateTaskCompletionClosure(TracingDataType::kPnaclCache)));
+#endif
+
+    browsing_data::RemovePrerenderCacheData(
+        prerender::NoStatePrefetchManagerFactory::GetForBrowserContext(
+            profile_));
+
+#if BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(ENABLE_FEED_V2)
+    // Don't bridge through if the service isn't present, which means we're
+    // probably running in a native unit test.
+    feed::FeedService* service =
+        feed::FeedServiceFactory::GetForBrowserContext(profile_);
+    if (service) {
+      service->ClearCachedData();
+    }
+#endif  // BUILDFLAG(ENABLE_FEED_V2)
+
+#endif  // BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_ANDROID)
     // For now we're considering offline pages as cache, so if we're removing
     // cache we should remove offline pages as well.
-    if ((remove_mask & content::BrowsingDataRemover::DATA_TYPE_CACHE) &&
-        offline_pages::IsOfflinePagesEnabled()) {
+    if (remove_mask & content::BrowsingDataRemover::DATA_TYPE_CACHE) {
       auto* offline_page_model =
           offline_pages::OfflinePageModelFactory::GetForBrowserContext(
               profile_);
       if (offline_page_model)
         offline_page_model->DeleteCachedPagesByURLPredicate(
-            filter, base::AdaptCallbackForRepeating(
-                        IgnoreArgument<
-                            offline_pages::OfflinePageModel::DeletePageResult>(
-                            CreateTaskCompletionClosure(
-                                TracingDataType::kOfflinePages))));
+            filter,
+            IgnoreArgument<offline_pages::OfflinePageModel::DeletePageResult>(
+                CreateTaskCompletionClosure(TracingDataType::kOfflinePages)));
     }
 #endif
 
@@ -957,47 +1016,34 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
     } else {
       LOG(ERROR) << "WebRtcEventLogManager not instantiated.";
     }
+
+    // Mark cached favicons as expired to force redownload on next visit.
+    if (filter_builder->GetMode() ==
+        BrowsingDataFilterBuilder::Mode::kPreserve) {
+      history::HistoryService* history_service =
+          HistoryServiceFactory::GetForProfile(
+              profile_, ServiceAccessType::EXPLICIT_ACCESS);
+      if (history_service) {
+        history_service->SetFaviconsOutOfDateBetween(
+            delete_begin_, delete_end_,
+            CreateTaskCompletionClosure(
+                TracingDataType::kFaviconCacheExpiration),
+            &history_task_tracker_);
+      }
+    }
   }
 
-//////////////////////////////////////////////////////////////////////////////
-// DATA_TYPE_PLUGINS
-// Plugins are known to //content and their bulk deletion is implemented in
-// PluginDataRemover. However, the filtered deletion uses
-// BrowsingDataFlashLSOHelper which (currently) has strong dependencies
-// on //chrome.
-// TODO(msramek): Investigate these dependencies and move the plugin deletion
-// to BrowsingDataRemoverImpl in //content. Note that code in //content
-// can simply take advantage of PluginDataRemover directly to delete plugin
-// data in bulk.
 #if BUILDFLAG(ENABLE_PLUGINS)
   // Plugin is data not separated for protected and unprotected web origins. We
   // check the origin_type_mask_ to prevent unintended deletion.
-  if ((remove_mask & DATA_TYPE_PLUGIN_DATA) &&
+  if ((remove_mask & constants::DATA_TYPE_PLUGIN_DATA) &&
       (origin_type_mask &
        content::BrowsingDataRemover::ORIGIN_TYPE_UNPROTECTED_WEB)) {
     base::RecordAction(UserMetricsAction("ClearBrowsingData_LSOData"));
 
-    if (filter_builder->IsEmptyBlacklist()) {
-      DCHECK(!plugin_data_remover_);
-      plugin_data_remover_.reset(
-          content::PluginDataRemover::Create(profile_));
-      base::WaitableEvent* event =
-          plugin_data_remover_->StartRemoving(delete_begin_);
-
-      base::WaitableEventWatcher::EventCallback watcher_callback =
-          base::BindOnce(
-              &ChromeBrowsingDataRemoverDelegate::OnWaitableEventSignaled,
-              weak_ptr_factory_.GetWeakPtr(),
-              CreateTaskCompletionClosure(TracingDataType::kPluginData));
-      watcher_.StartWatching(event, std::move(watcher_callback),
-                             base::SequencedTaskRunnerHandle::Get());
-    } else {
-      // TODO(msramek): Store filters from the currently executed task on the
-      // object to avoid having to copy them to callback methods.
-      flash_lso_helper_->StartFetching(base::BindOnce(
-          &ChromeBrowsingDataRemoverDelegate::OnSitesWithFlashDataFetched,
-          weak_ptr_factory_.GetWeakPtr(), filter_builder->BuildPluginFilter(),
-          CreateTaskCompletionClosure(TracingDataType::kFlashLsoHelper)));
+    if (filter_builder->MatchesAllOriginsAndDomains()) {
+      // TODO(bbudge) Figure out how to delete Flash plugin data without a
+      // Flash plugin.
     }
   }
 #endif
@@ -1009,66 +1055,103 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
     // Licenses.
     base::RecordAction(UserMetricsAction("ClearBrowsingData_ContentLicenses"));
 
-#if BUILDFLAG(ENABLE_PLUGINS)
-    // Flash does not support filtering by domain, so skip this if clearing only
-    // a specified set of sites.
-    if (filter_builder->GetMode() != BrowsingDataFilterBuilder::WHITELIST) {
-      // Will be completed in OnDeauthorizeFlashContentLicensesCompleted()
-      OnTaskStarted(TracingDataType::kFlashDeauthorization);
-      if (!pepper_flash_settings_manager_.get()) {
-        pepper_flash_settings_manager_.reset(
-            new PepperFlashSettingsManager(this, profile_));
-      }
-      deauthorize_flash_content_licenses_request_id_ =
-          pepper_flash_settings_manager_->DeauthorizeContentLicenses(prefs);
-    }
-#endif  // BUILDFLAG(ENABLE_PLUGINS)
-
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     // On Chrome OS, delete any content protection platform keys.
     // Platform keys do not support filtering by domain, so skip this if
     // clearing only a specified set of sites.
-    if (filter_builder->GetMode() != BrowsingDataFilterBuilder::WHITELIST) {
+    if (filter_builder->GetMode() != BrowsingDataFilterBuilder::Mode::kDelete) {
       const user_manager::User* user =
-          chromeos::ProfileHelper::Get()->GetUserByProfile(profile_);
+          ash::ProfileHelper::Get()->GetUserByProfile(profile_);
       if (!user) {
         LOG(WARNING) << "Failed to find user for current profile.";
       } else {
-        chromeos::CryptohomeClient::Get()->TpmAttestationDeleteKeys(
-            chromeos::attestation::KEY_USER,
-            cryptohome::CreateAccountIdentifierFromAccountId(
-                user->GetAccountId()),
-            chromeos::attestation::kContentProtectionKeyPrefix,
-            base::BindOnce(
-                &ChromeBrowsingDataRemoverDelegate::OnClearPlatformKeys,
-                weak_ptr_factory_.GetWeakPtr(),
-                CreateTaskCompletionClosure(
-                    TracingDataType::kTpmAttestationKeys)));
+        ::attestation::DeleteKeysRequest request;
+        request.set_username(cryptohome::CreateAccountIdentifierFromAccountId(
+                                 user->GetAccountId())
+                                 .account_id());
+        request.set_key_label_match(
+            ash::attestation::kContentProtectionKeyPrefix);
+        request.set_match_behavior(
+            ::attestation::DeleteKeysRequest::MATCH_BEHAVIOR_PREFIX);
+
+        auto callback = base::BindOnce(
+            &ChromeBrowsingDataRemoverDelegate::OnClearPlatformKeys,
+            weak_ptr_factory_.GetWeakPtr(),
+            CreateTaskCompletionClosure(TracingDataType::kTpmAttestationKeys));
+        ash::AttestationClient::Get()->DeleteKeys(
+            request, base::BindOnce(
+                         [](decltype(callback) cb,
+                            const ::attestation::DeleteKeysReply& reply) {
+                           std::move(cb).Run(reply.status() ==
+                                             ::attestation::STATUS_SUCCESS);
+                         },
+                         std::move(callback)));
       }
     }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
-#if defined(OS_ANDROID)
-    ClearMediaDrmLicenses(
+#if BUILDFLAG(IS_ANDROID)
+    cdm::MediaDrmStorageImpl::ClearMatchingLicenses(
         prefs, delete_begin_, delete_end, nullable_filter,
-        CreateTaskCompletionClosure(TracingDataType::kDrmLicenses));
-#endif  // defined(OS_ANDROID);
+        CreateTaskCompletionClosure(TracingDataType::kCdmLicenses));
+#endif  // BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_WIN)
+    CdmDocumentServiceImpl::ClearCdmData(
+        profile_, delete_begin, delete_end, nullable_filter,
+        CreateTaskCompletionClosure(TracingDataType::kCdmLicenses));
+#endif  // BUILDFLAG(IS_WIN)
   }
 
   //////////////////////////////////////////////////////////////////////////////
-  // Zero suggest.
-  // Remove omnibox zero-suggest cache results. Filtering is not supported.
-  // This is not a problem, as deleting more data than necessary will just cause
-  // another server round-trip; no data is actually lost.
+  // Zero suggest, Search prefetch, and search session token.
+  // Remove omnibox zero-suggest cache results and Search Prefetch cached
+  // results only when their respective URLs are in the filter.
   if ((remove_mask & (content::BrowsingDataRemover::DATA_TYPE_CACHE |
-                      content::BrowsingDataRemover::DATA_TYPE_COOKIES))) {
-    prefs->SetString(omnibox::kZeroSuggestCachedResults, std::string());
+                      content::BrowsingDataRemover::DATA_TYPE_COOKIES)) &&
+      !filter_builder->IsCrossSiteClearSiteDataForCookies()) {
+    // If there is no template service or DSE, clear the caches.
+    bool should_clear_zero_suggest_and_session_token = true;
+    bool should_clear_search_prefetch = true;
+
+    auto* template_url_service =
+        TemplateURLServiceFactory::GetForProfile(profile_);
+
+    // If there is no default search engine, clearing the cache is fine.
+    if (template_url_service &&
+        template_url_service->GetDefaultSearchProvider()) {
+      // The suggest URL is used for zero suggest.
+      GURL suggest_url(
+          template_url_service->GetDefaultSearchProvider()->suggestions_url());
+      should_clear_zero_suggest_and_session_token =
+          nullable_filter.is_null() || nullable_filter.Run(suggest_url);
+
+      // The search URL is used for search prefetch.
+      GURL search_url(template_url_service->GetDefaultSearchProvider()->url());
+      should_clear_search_prefetch =
+          nullable_filter.is_null() || nullable_filter.Run(search_url);
+    }
+
+    if (should_clear_zero_suggest_and_session_token) {
+      prefs->SetString(omnibox::kZeroSuggestCachedResults, std::string());
+      prefs->SetDict(omnibox::kZeroSuggestCachedResultsWithURL,
+                     base::Value::Dict());
+    }
+
+    // |search_prefetch_service| is null if |profile_| is off the record.
+    auto* search_prefetch_service =
+        SearchPrefetchServiceFactory::GetForProfile(profile_);
+    if (should_clear_search_prefetch && search_prefetch_service)
+      search_prefetch_service->ClearPrefetches();
+
+    if (should_clear_zero_suggest_and_session_token && template_url_service)
+      template_url_service->ClearSessionToken();
   }
 
   //////////////////////////////////////////////////////////////////////////////
   // Domain reliability.
-  if (remove_mask &
-      (content::BrowsingDataRemover::DATA_TYPE_COOKIES | DATA_TYPE_HISTORY)) {
+  if (remove_mask & (content::BrowsingDataRemover::DATA_TYPE_COOKIES |
+                     constants::DATA_TYPE_HISTORY)) {
     network::mojom::NetworkContext_DomainReliabilityClearMode mode;
     if (remove_mask & content::BrowsingDataRemover::DATA_TYPE_COOKIES)
       mode = network::mojom::NetworkContext::DomainReliabilityClearMode::
@@ -1095,19 +1178,13 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
   //
   // TODO(alexmos): Support finer-grained filtering based on time ranges and
   // |filter|. For now, conservatively delete all saved isolated origins.
-  if (remove_mask & (DATA_TYPE_ISOLATED_ORIGINS | DATA_TYPE_HISTORY)) {
-    prefs->ClearPref(prefs::kUserTriggeredIsolatedOrigins);
-    // Note that this does not clear these sites from the in-memory map in
-    // ChildProcessSecurityPolicy, since that is not supported at runtime. That
-    // list of isolated sites is not directly exposed to users, though, and
-    // will be cleared on next restart.
-  }
+  if (remove_mask &
+      (constants::DATA_TYPE_ISOLATED_ORIGINS | constants::DATA_TYPE_HISTORY))
+    browsing_data::RemoveSiteIsolationData(prefs);
 
-#if BUILDFLAG(ENABLE_REPORTING)
-  if (remove_mask & DATA_TYPE_HISTORY) {
+  if (remove_mask & constants::DATA_TYPE_HISTORY) {
     network::mojom::NetworkContext* network_context =
-        BrowserContext::GetDefaultStoragePartition(profile_)
-            ->GetNetworkContext();
+        profile_->GetDefaultStoragePartition()->GetNetworkContext();
     network_context->ClearReportingCacheReports(
         filter_builder->BuildNetworkServiceFilter(),
         CreateTaskCompletionClosureForMojo(TracingDataType::kReportingCache));
@@ -1116,20 +1193,55 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
         CreateTaskCompletionClosureForMojo(
             TracingDataType::kNetworkErrorLogging));
   }
-#endif  // BUILDFLAG(ENABLE_REPORTING)
 
 //////////////////////////////////////////////////////////////////////////////
 // DATA_TYPE_WEB_APP_DATA
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Clear all data associated with registered webapps.
-  if (remove_mask & DATA_TYPE_WEB_APP_DATA)
+  if (remove_mask & constants::DATA_TYPE_WEB_APP_DATA)
     webapp_registry_->UnregisterWebappsForUrls(filter);
 #endif
 
+//////////////////////////////////////////////////////////////////////////////
+// Remove web app history.
+#if !BUILDFLAG(IS_ANDROID)
+  if (remove_mask & constants::DATA_TYPE_HISTORY &&
+      web_app::AreWebAppsEnabled(profile_)) {
+    auto* web_app_provider =
+        web_app::WebAppProvider::GetForLocalAppsUnchecked(profile_);
+    web_app::ClearWebAppBrowsingData(
+        delete_begin, delete_end, web_app_provider,
+        CreateTaskCompletionClosure(TracingDataType::kWebAppHistory));
+  }
+#endif  // !BUILDFLAG(IS_ANDROID)
+
   //////////////////////////////////////////////////////////////////////////////
   // Remove external protocol data.
-  if (remove_mask & DATA_TYPE_EXTERNAL_PROTOCOL_DATA)
+  if (remove_mask & constants::DATA_TYPE_EXTERNAL_PROTOCOL_DATA)
     ExternalProtocolHandler::ClearData(profile_);
+
+#if BUILDFLAG(ENABLE_DOWNGRADE_PROCESSING)
+  //////////////////////////////////////////////////////////////////////////////
+  // Remove data for this profile contained in any snapshots.
+  if (remove_mask &&
+      filter_builder->GetMode() == BrowsingDataFilterBuilder::Mode::kPreserve) {
+    base::ThreadPool::PostTaskAndReply(
+        FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
+        base::BindOnce(&downgrade::RemoveDataForProfile, delete_begin_,
+                       profile_->GetPath(), remove_mask),
+        CreateTaskCompletionClosure(TracingDataType::kUserDataSnapshot));
+  }
+#endif  // BUILDFLAG(ENABLE_DOWNGRADE_PROCESSING)
+
+  //////////////////////////////////////////////////////////////////////////////
+  // Login detection data:
+  // Clear the origins where login has been detected, when cookies and other
+  // site data are cleared, or when history is cleared. This is because clearing
+  // cookies or history implies forgetting that the user has logged into sites.
+  if (remove_mask &
+      (constants::DATA_TYPE_SITE_DATA | constants::DATA_TYPE_HISTORY)) {
+    login_detection::prefs::RemoveLoginDetectionData(prefs);
+  }
 }
 
 void ChromeBrowsingDataRemoverDelegate::OnTaskStarted(
@@ -1138,34 +1250,173 @@ void ChromeBrowsingDataRemoverDelegate::OnTaskStarted(
   auto result = pending_sub_tasks_.insert(data_type);
   DCHECK(result.second) << "Task already started: "
                         << static_cast<int>(data_type);
-  TRACE_EVENT_ASYNC_BEGIN1("browsing_data", "ChromeBrowsingDataRemoverDelegate",
-                           static_cast<int>(data_type), "data_type",
-                           static_cast<int>(data_type));
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN1(
+      "browsing_data", "ChromeBrowsingDataRemoverDelegate",
+      TRACE_ID_WITH_SCOPE("ChromeBrowsingDataRemoverDelegate",
+                          static_cast<int>(data_type)),
+      "data_type", static_cast<int>(data_type));
 }
 
 void ChromeBrowsingDataRemoverDelegate::OnTaskComplete(
-    TracingDataType data_type) {
+    TracingDataType data_type,
+    uint64_t data_type_mask,
+    base::TimeTicks started,
+    bool success) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   size_t num_erased = pending_sub_tasks_.erase(data_type);
   DCHECK_EQ(num_erased, 1U);
-  TRACE_EVENT_ASYNC_END1("browsing_data", "ChromeBrowsingDataRemoverDelegate",
-                         static_cast<int>(data_type), "data_type",
-                         static_cast<int>(data_type));
+  TRACE_EVENT_NESTABLE_ASYNC_END1(
+      "browsing_data", "ChromeBrowsingDataRemoverDelegate",
+      TRACE_ID_WITH_SCOPE("ChromeBrowsingDataRemoverDelegate",
+                          static_cast<int>(data_type)),
+      "data_type", static_cast<int>(data_type));
+  base::UmaHistogramMediumTimes(
+      base::StrCat({"History.ClearBrowsingData.Duration.ChromeTask.",
+                    GetHistogramSuffix(data_type)}),
+      base::TimeTicks::Now() - started);
+
+  if (!success) {
+    base::UmaHistogramEnumeration("History.ClearBrowsingData.FailedTasksChrome",
+                                  data_type);
+    failed_data_types_ |= data_type_mask;
+  }
+
   if (!pending_sub_tasks_.empty())
     return;
+
+  // Explicitly clear any opt-ins to the account-scoped password storage
+  // when cookies are being cleared. This needs to happen after passwords
+  // have been deleted, so it is performed when all other tasks are completed.
+  // TODO(crbug.com/1052005, crbug.com/1078762): These *should* get cleared
+  // automatically when the Google cookies are deleted, but currently this
+  // doesn't always work reliably. When these bugs get resolved, the
+  // following line and associated code can be removed.
+  if (should_clear_password_account_storage_settings_) {
+    should_clear_password_account_storage_settings_ = false;
+    password_manager::features_util::ClearAccountStorageSettingsForAllUsers(
+        profile_->GetPrefs());
+  }
 
   slow_pending_tasks_closure_.Cancel();
 
   DCHECK(!callback_.is_null());
-  std::move(callback_).Run();
+  std::move(callback_).Run(failed_data_types_);
+}
+
+const char* ChromeBrowsingDataRemoverDelegate::GetHistogramSuffix(
+    TracingDataType task) {
+  switch (task) {
+    case TracingDataType::kSynchronous:
+      return "Synchronous";
+    case TracingDataType::kHistory:
+      return "History";
+    case TracingDataType::kHostNameResolution:
+      return "HostNameResolution";
+    case TracingDataType::kNaclCache:
+      return "NaclCache";
+    case TracingDataType::kPnaclCache:
+      return "PnaclCache";
+    case TracingDataType::kAutofillData:
+      return "AutofillData";
+    case TracingDataType::kAutofillOrigins:
+      return "AutofillOrigins";
+    case TracingDataType::kPluginData:
+      return "PluginData";
+    case TracingDataType::kDomainReliability:
+      return "DomainReliability";
+    case TracingDataType::kNetworkPredictor:
+      return "NetworkPredictor";
+    case TracingDataType::kWebrtcLogs:
+      return "WebrtcLogs";
+    case TracingDataType::kVideoDecodeHistory:
+      return "VideoDecodeHistory";
+    case TracingDataType::kCookies:
+      return "Cookies";
+    case TracingDataType::kPasswords:
+      return "Passwords";
+    case TracingDataType::kHttpAuthCache:
+      return "HttpAuthCache";
+    case TracingDataType::kDisableAutoSignin:
+      return "DisableAutoSignin";
+    case TracingDataType::kPasswordsStatistics:
+      return "PasswordsStatistics";
+    case TracingDataType::kKeywordsModel:
+      return "KeywordsModel";
+    case TracingDataType::kReportingCache:
+      return "ReportingCache";
+    case TracingDataType::kNetworkErrorLogging:
+      return "NetworkErrorLogging";
+    case TracingDataType::kFlashDeauthorization:
+      return "FlashDeauthorization";
+    case TracingDataType::kOfflinePages:
+      return "OfflinePages";
+    case TracingDataType::kExploreSites:
+      return "ExploreSites";
+    case TracingDataType::kLegacyStrikes:
+      return "LegacyStrikes";
+    case TracingDataType::kWebrtcEventLogs:
+      return "WebrtcEventLogs";
+    case TracingDataType::kCdmLicenses:
+      return "CdmLicenses";
+    case TracingDataType::kHostCache:
+      return "HostCache";
+    case TracingDataType::kTpmAttestationKeys:
+      return "TpmAttestationKeys";
+    case TracingDataType::kStrikes:
+      return "Strikes";
+    case TracingDataType::kFieldInfo:
+      return "FieldInfo";
+    case TracingDataType::kCompromisedCredentials:
+      return "CompromisedCredentials";
+    case TracingDataType::kUserDataSnapshot:
+      return "UserDataSnapshot";
+    case TracingDataType::kMediaFeeds:
+      return "MediaFeeds";
+    case TracingDataType::kAccountPasswords:
+      return "AccountPasswords";
+    case TracingDataType::kAccountPasswordsSynced:
+      return "AccountPasswordsSynced";
+    case TracingDataType::kAccountCompromisedCredentials:
+      return "AccountCompromisedCredentials";
+    case TracingDataType::kFaviconCacheExpiration:
+      return "FaviconCacheExpiration";
+    case TracingDataType::kSecurePaymentConfirmationCredentials:
+      return "SecurePaymentConfirmationCredentials";
+    case TracingDataType::kWebAppHistory:
+      return "WebAppHistory";
+    case TracingDataType::kWebAuthnCredentials:
+      return "WebAuthnCredentials";
+    case TracingDataType::kWebrtcVideoPerfHistory:
+      return "WebrtcVideoPerfHistory";
+  }
+}
+
+void ChromeBrowsingDataRemoverDelegate::OnStartRemoving() {
+  profile_keep_alive_ = std::make_unique<ScopedProfileKeepAlive>(
+      profile_->GetOriginalProfile(),
+      ProfileKeepAliveOrigin::kClearingBrowsingData);
+}
+
+void ChromeBrowsingDataRemoverDelegate::OnDoneRemoving() {
+  profile_keep_alive_.reset();
 }
 
 base::OnceClosure
 ChromeBrowsingDataRemoverDelegate::CreateTaskCompletionClosure(
     TracingDataType data_type) {
+  return base::BindOnce(
+      CreateTaskCompletionCallback(data_type, /*data_type_mask=*/0),
+      /*success=*/true);
+}
+
+base::OnceCallback<void(bool)>
+ChromeBrowsingDataRemoverDelegate::CreateTaskCompletionCallback(
+    TracingDataType data_type,
+    uint64_t data_type_mask) {
   OnTaskStarted(data_type);
   return base::BindOnce(&ChromeBrowsingDataRemoverDelegate::OnTaskComplete,
-                        weak_ptr_factory_.GetWeakPtr(), data_type);
+                        weak_ptr_factory_.GetWeakPtr(), data_type,
+                        data_type_mask, base::TimeTicks::Now());
 }
 
 base::OnceClosure
@@ -1177,7 +1428,9 @@ ChromeBrowsingDataRemoverDelegate::CreateTaskCompletionClosureForMojo(
   return mojo::WrapCallbackWithDropHandler(
       CreateTaskCompletionClosure(data_type),
       base::BindOnce(&ChromeBrowsingDataRemoverDelegate::OnTaskComplete,
-                     weak_ptr_factory_.GetWeakPtr(), data_type));
+                     weak_ptr_factory_.GetWeakPtr(), data_type,
+                     /*data_type_mask=*/0, base::TimeTicks::Now(),
+                     /*success=*/true));
 }
 
 void ChromeBrowsingDataRemoverDelegate::RecordUnfinishedSubTasks() {
@@ -1188,17 +1441,10 @@ void ChromeBrowsingDataRemoverDelegate::RecordUnfinishedSubTasks() {
   }
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 void ChromeBrowsingDataRemoverDelegate::OverrideWebappRegistryForTesting(
     std::unique_ptr<WebappRegistry> webapp_registry) {
   webapp_registry_ = std::move(webapp_registry);
-}
-#endif
-
-#if BUILDFLAG(ENABLE_PLUGINS)
-void ChromeBrowsingDataRemoverDelegate::OverrideFlashLSOHelperForTesting(
-    scoped_refptr<BrowsingDataFlashLSOHelper> flash_lso_helper) {
-  flash_lso_helper_ = flash_lso_helper;
 }
 #endif
 
@@ -1208,64 +1454,30 @@ void ChromeBrowsingDataRemoverDelegate::
   domain_reliability_clearer_ = std::move(clearer);
 }
 
-void ChromeBrowsingDataRemoverDelegate::OnKeywordsLoaded(
-    base::RepeatingCallback<bool(const GURL&)> url_filter,
-    base::OnceClosure done) {
-  // Deletes the entries from the model.
-  TemplateURLService* model =
-      TemplateURLServiceFactory::GetForProfile(profile_);
-  model->RemoveAutoGeneratedForUrlsBetween(url_filter, delete_begin_,
-                                           delete_end_);
-  template_url_sub_.reset();
-  std::move(done).Run();
-}
-
 bool ChromeBrowsingDataRemoverDelegate::IsForAllTime() const {
   return delete_begin_ == base::Time() && delete_end_ == base::Time::Max();
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void ChromeBrowsingDataRemoverDelegate::OnClearPlatformKeys(
     base::OnceClosure done,
-    base::Optional<bool> result) {
-  LOG_IF(ERROR, !result.has_value() || !result.value())
-      << "Failed to clear platform keys.";
+    bool result) {
+  LOG_IF(ERROR, !result) << "Failed to clear platform keys.";
   std::move(done).Run();
 }
 #endif
 
-#if BUILDFLAG(ENABLE_PLUGINS)
-void ChromeBrowsingDataRemoverDelegate::OnWaitableEventSignaled(
-    base::OnceClosure done,
-    base::WaitableEvent* waitable_event) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  plugin_data_remover_.reset();
-  watcher_.StopWatching();
-  std::move(done).Run();
-}
-
-void ChromeBrowsingDataRemoverDelegate::OnSitesWithFlashDataFetched(
-    base::RepeatingCallback<bool(const std::string&)> plugin_filter,
-    base::OnceClosure done,
-    const std::vector<std::string>& sites) {
-  std::vector<std::string> sites_to_delete;
-  for (const std::string& site : sites) {
-    if (plugin_filter.Run(site))
-      sites_to_delete.push_back(site);
-  }
-
-  base::RepeatingClosure barrier =
-      base::BarrierClosure(sites_to_delete.size(), std::move(done));
-
-  for (const std::string& site : sites_to_delete) {
-    flash_lso_helper_->DeleteFlashLSOsForSite(site, barrier);
-  }
-}
-
-void ChromeBrowsingDataRemoverDelegate::
-    OnDeauthorizeFlashContentLicensesCompleted(uint32_t request_id,
-                                               bool /* success */) {
-  DCHECK_EQ(request_id, deauthorize_flash_content_licenses_request_id_);
-  OnTaskComplete(TracingDataType::kFlashDeauthorization);
-}
+std::unique_ptr<device::fido::PlatformCredentialStore>
+ChromeBrowsingDataRemoverDelegate::MakeCredentialStore() {
+  return
+#if BUILDFLAG(IS_MAC)
+      std::make_unique<device::fido::mac::TouchIdCredentialStore>(
+          ChromeWebAuthenticationDelegate::TouchIdAuthenticatorConfigForProfile(
+              profile_));
+#elif BUILDFLAG(IS_CHROMEOS_ASH)
+      std::make_unique<
+          device::fido::cros::PlatformAuthenticatorCredentialStore>();
+#else
+      nullptr;
 #endif
+}

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "net/base/net_errors.h"
 
 namespace media_router {
+
 using ::testing::_;
 using ::testing::Invoke;
 using ::testing::Return;
@@ -267,4 +268,5 @@ TEST(NetworkServiceQuicPacketWriterTest, TooManyPacketsCausesWriteBlockage) {
 
   ASSERT_FALSE(test_writer.writer->IsWriteBlocked());
 }
+
 }  // namespace media_router

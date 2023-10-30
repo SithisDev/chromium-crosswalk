@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,13 @@
 #include "base/bind.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/api/image_writer_private/removable_storage_provider.h"
-#include "chromeos/disks/mock_disk_mount_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "chromeos/ash/components/disks/mock_disk_mount_manager.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
 
 namespace {
-
-using namespace chromeos::disks;
-using namespace api::image_writer_private;
 
 const char kDevicePathUSB[] = "/dev/test-usb";
 const char kDevicePathSD[] = "/dev/test-sd";
@@ -36,19 +33,20 @@ class RemovableStorageProviderChromeOsUnitTest : public testing::Test {
  public:
   RemovableStorageProviderChromeOsUnitTest() {}
   void SetUp() override {
-    disk_mount_manager_mock_ = new MockDiskMountManager();
-    DiskMountManager::InitializeForTesting(disk_mount_manager_mock_);
+    disk_mount_manager_mock_ = new ash::disks::MockDiskMountManager();
+    ash::disks::DiskMountManager::InitializeForTesting(
+        disk_mount_manager_mock_);
     disk_mount_manager_mock_->SetupDefaultReplies();
   }
 
-  void TearDown() override { DiskMountManager::Shutdown(); }
+  void TearDown() override { ash::disks::DiskMountManager::Shutdown(); }
 
   void DevicesCallback(scoped_refptr<StorageDeviceList> devices) {
     devices_ = devices;
   }
 
   void CreateDisk(const std::string& device_path,
-                  chromeos::DeviceType device_type,
+                  ash::DeviceType device_type,
                   bool is_parent,
                   bool has_media,
                   bool on_boot_device) {
@@ -64,15 +62,12 @@ class RemovableStorageProviderChromeOsUnitTest : public testing::Test {
   void CreateDisk(const std::string& device_path,
                   const std::string& vendor_name,
                   const std::string& product_name,
-                  chromeos::DeviceType device_type,
+                  ash::DeviceType device_type,
                   bool is_parent,
                   bool has_media,
                   bool on_boot_device) {
-    DiskMountManager::MountPointInfo mount_info(
-        device_path,
-        kMountPath,
-        chromeos::MOUNT_TYPE_DEVICE,
-        chromeos::disks::MOUNT_CONDITION_NONE);
+    ash::disks::DiskMountManager::MountPoint mount_info{
+        device_path, kMountPath, ash::MountType::kDevice};
     disk_mount_manager_mock_->CreateDiskEntryForMountDevice(
         mount_info, kDeviceId, kDeviceName, vendor_name, product_name,
         device_type, kDeviceSize, is_parent, has_media, on_boot_device,
@@ -80,13 +75,14 @@ class RemovableStorageProviderChromeOsUnitTest : public testing::Test {
   }
 
   // Checks if the DeviceList has a specific entry.
-  RemovableStorageDevice* FindDevice(StorageDeviceList* list,
-                                     const std::string& file_path) {
-    for (RemovableStorageDevice& device : list->data) {
+  api::image_writer_private::RemovableStorageDevice* FindDevice(
+      StorageDeviceList* list,
+      const std::string& file_path) {
+    for (auto& device : list->data) {
       if (device.storage_unit_id == file_path)
         return &device;
     }
-    return NULL;
+    return nullptr;
   }
 
   void ExpectDevice(StorageDeviceList* list,
@@ -94,9 +90,9 @@ class RemovableStorageProviderChromeOsUnitTest : public testing::Test {
                     const std::string& vendor,
                     const std::string& model,
                     uint64_t capacity) {
-    RemovableStorageDevice* device = FindDevice(devices_.get(), device_path);
+    auto* device = FindDevice(devices_.get(), device_path);
 
-    ASSERT_TRUE(device != NULL);
+    ASSERT_TRUE(device);
 
     EXPECT_EQ(device_path, device->storage_unit_id);
     EXPECT_EQ(vendor, device->vendor);
@@ -104,8 +100,8 @@ class RemovableStorageProviderChromeOsUnitTest : public testing::Test {
     EXPECT_EQ(capacity, device->capacity);
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
-  MockDiskMountManager* disk_mount_manager_mock_;
+  content::BrowserTaskEnvironment task_environment_;
+  ash::disks::MockDiskMountManager* disk_mount_manager_mock_;
   scoped_refptr<StorageDeviceList> devices_;
 };
 
@@ -115,17 +111,17 @@ class RemovableStorageProviderChromeOsUnitTest : public testing::Test {
 // that are parents, have media and are not boot devices.  Other flags are
 // uninteresting or should not occur for these device types.
 TEST_F(RemovableStorageProviderChromeOsUnitTest, GetAllDevices) {
-  CreateDisk(kDevicePathUSB, chromeos::DEVICE_TYPE_USB, true, true, false);
-  CreateDisk(kDevicePathSD, chromeos::DEVICE_TYPE_SD, true, true, false);
-  CreateDisk("/dev/NotParent", chromeos::DEVICE_TYPE_USB, false, true, false);
-  CreateDisk("/dev/NoMedia", chromeos::DEVICE_TYPE_USB, true, false, false);
-  CreateDisk("/dev/OnBootDevice", chromeos::DEVICE_TYPE_USB, true, true, true);
+  CreateDisk(kDevicePathUSB, ash::DeviceType::kUSB, true, true, false);
+  CreateDisk(kDevicePathSD, ash::DeviceType::kSD, true, true, false);
+  CreateDisk("/dev/NotParent", ash::DeviceType::kUSB, false, true, false);
+  CreateDisk("/dev/NoMedia", ash::DeviceType::kUSB, true, false, false);
+  CreateDisk("/dev/OnBootDevice", ash::DeviceType::kUSB, true, true, true);
 
   RemovableStorageProvider::GetAllDevices(
-      base::Bind(&RemovableStorageProviderChromeOsUnitTest::DevicesCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&RemovableStorageProviderChromeOsUnitTest::DevicesCallback,
+                     base::Unretained(this)));
 
-  thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   ASSERT_EQ(2U, devices_->data.size());
 
@@ -137,16 +133,14 @@ TEST_F(RemovableStorageProviderChromeOsUnitTest, GetAllDevices) {
 
 // Tests that a USB drive with an empty vendor and product gets a generic name.
 TEST_F(RemovableStorageProviderChromeOsUnitTest, EmptyProductAndModel) {
-  CreateDisk(
-      kDevicePathUSB, "", "", chromeos::DEVICE_TYPE_USB, true, true, false);
-  CreateDisk(
-      kDevicePathSD, "", "", chromeos::DEVICE_TYPE_SD, true, true, false);
+  CreateDisk(kDevicePathUSB, "", "", ash::DeviceType::kUSB, true, true, false);
+  CreateDisk(kDevicePathSD, "", "", ash::DeviceType::kSD, true, true, false);
 
   RemovableStorageProvider::GetAllDevices(
-      base::Bind(&RemovableStorageProviderChromeOsUnitTest::DevicesCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&RemovableStorageProviderChromeOsUnitTest::DevicesCallback,
+                     base::Unretained(this)));
 
-  thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   ASSERT_EQ(2U, devices_->data.size());
 

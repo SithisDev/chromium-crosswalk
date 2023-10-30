@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@ package org.chromium.chrome.browser.vr;
 
 import android.content.Context;
 import android.os.SystemClock;
-import android.support.annotation.IntDef;
+
+import androidx.annotation.IntDef;
 
 import com.google.vr.testframework.controller.ControllerTestApi;
 
@@ -141,7 +142,10 @@ public class EmulatedVrController {
      *        numbers resulting in a faster scroll.
      */
     public void scroll(@ScrollDirection int direction, int steps, int speed) {
-        float startX, startY, endX, endY;
+        float startX;
+        float startY;
+        float endX;
+        float endY;
         startX = startY = endX = endY = 0.5f;
         switch (direction) {
             case ScrollDirection.UP:

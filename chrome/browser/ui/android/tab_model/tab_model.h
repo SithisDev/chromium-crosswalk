@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,14 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/android/scoped_java_ref.h"
+#include "base/memory/raw_ptr.h"
+#include "chrome/browser/flags/android/chrome_session_state.h"
 #include "chrome/browser/ui/android/tab_model/android_live_tab_context.h"
 #include "components/omnibox/browser/location_bar_model.h"
 #include "components/omnibox/browser/location_bar_model_delegate.h"
 #include "components/sessions/core/session_id.h"
 #include "components/sync_sessions/synced_window_delegate.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 
 struct NavigateParams;
 
@@ -37,11 +37,11 @@ class TabModelObserver;
 // Abstract representation of a Tab Model for Android.  Since Android does
 // not use Browser/BrowserList, this is required to allow Chrome to interact
 // with Android's Tabs and Tab Model.
-class TabModel : public content::NotificationObserver {
+class TabModel {
  public:
   // Various ways tabs can be launched.
   // Values must be numbered from 0 and can't have gaps.
-  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.tabmodel
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.tab
   enum class TabLaunchType {
     // Opened from a link. Sets up a relationship between the newly created tab
     // and its parent.
@@ -82,13 +82,36 @@ class TabModel : public content::NotificationObserver {
     FROM_BROWSER_ACTIONS,
     // Opened by an external application launching a new Chrome incognito tab.
     FROM_LAUNCH_NEW_INCOGNITO_TAB,
+    // Opened a non-restored tab during the startup process
+    FROM_STARTUP,
+    // Opened from the start surface.
+    FROM_START_SURFACE,
+    // Opened from Tab group UI.
+    // Tab group UI include:
+    // - "+" button in the bottom tab strip
+    // - "+" button in the tab grid dialog
+    FROM_TAB_GROUP_UI,
+    // Open from the long press context menu item 'Open in new tab in group'.
+    // Will not be brought to the foreground.
+    FROM_LONGPRESS_BACKGROUND_IN_GROUP,
+    // Opened from an app widget.
+    FROM_APP_WIDGET,
+    // Open from the long press context menu item 'Open in Incognito Tab'.
+    FROM_LONGPRESS_INCOGNITO,
+    // Opened in background from Recent Tabs. This is a non-link launch with no
+    // parent/child relationship. The tab is added to the end of the TabModel.
+    // This does not include opening in the current tab.
+    FROM_RECENT_TABS,
+    // Opened from a Reading list. When going "back" on Android, the Reading
+    // list should be reopened.
+    FROM_READING_LIST,
     // Must be last.
     SIZE
   };
 
   // Various ways tabs can be selected.
   // Values must be numbered from 0 and can't have gaps.
-  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.tabmodel
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.tab
   enum class TabSelectionType {
     // Selection of adjacent tab when the active tab is closed in foreground.
     FROM_CLOSE,
@@ -99,9 +122,34 @@ class TabModel : public content::NotificationObserver {
     // User-originated switch to existing tab or selection of main tab on app
     // startup.
     FROM_USER,
+    // User-originated switch to existing tab from Omnibox tab switch
+    // suggestions.
+    FROM_OMNIBOX,
+    // Selection of a previously closed tab when closure is undone.
+    FROM_UNDO,
     // Must be last.
     SIZE
   };
+
+  // Various types of user agent.
+  // Values must be numbered from 0 and can't have gaps.
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.tab
+  enum class TabUserAgent {
+    // Choose user agent based on default setting.
+    DEFAULT,
+    // Use mobile user agent.
+    MOBILE,
+    // Use desktop user agent.
+    DESKTOP,
+    // User agent not set, due to an earlier version not having the user agent
+    // bit.
+    UNSET,
+    // Must be last.
+    SIZE
+  };
+
+  TabModel(const TabModel&) = delete;
+  TabModel& operator=(const TabModel&) = delete;
 
   virtual Profile* GetProfile() const;
   virtual bool IsOffTheRecord() const;
@@ -115,6 +163,7 @@ class TabModel : public content::NotificationObserver {
   virtual content::WebContents* GetWebContentsAt(int index) const = 0;
   // This will return NULL if the tab has not yet been initialized.
   virtual TabAndroid* GetTabAt(int index) const = 0;
+  virtual base::android::ScopedJavaLocalRef<jobject> GetJavaObject() const = 0;
 
   virtual void SetActiveIndex(int index) = 0;
   virtual void CloseTabAt(int index) = 0;
@@ -135,7 +184,7 @@ class TabModel : public content::NotificationObserver {
 
   // Return true if this class is the currently selected in the correspond
   // tab model selector.
-  virtual bool IsCurrentModel() const = 0;
+  virtual bool IsActiveModel() const = 0;
 
   // Adds an observer to this TabModel.
   virtual void AddObserver(TabModelObserver* observer) = 0;
@@ -143,9 +192,11 @@ class TabModel : public content::NotificationObserver {
   // Removes an observer from this TabModel.
   virtual void RemoveObserver(TabModelObserver* observer) = 0;
 
+  chrome::android::ActivityType activity_type() const { return activity_type_; }
+
  protected:
-  explicit TabModel(Profile* profile, bool is_tabbed_activity);
-  ~TabModel() override;
+  TabModel(Profile* profile, chrome::android::ActivityType activity_type);
+  virtual ~TabModel();
 
   // Instructs the TabModel to broadcast a notification that all tabs are now
   // loaded from storage.
@@ -154,20 +205,13 @@ class TabModel : public content::NotificationObserver {
   LocationBarModel* GetLocationBarModel();
 
  private:
-  // Determines how TabModel will interact with the profile.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  raw_ptr<Profile> profile_;
 
-  // The profile associated with this TabModel.
-  Profile* profile_;
+  chrome::android::ActivityType activity_type_;
 
   // The LiveTabContext associated with TabModel.
   // Used to restore closed tabs through the TabRestoreService.
   std::unique_ptr<AndroidLiveTabContext> live_tab_context_;
-
-  // Describes if this TabModel contains an off-the-record profile.
-  bool is_off_the_record_;
 
   // The SyncedWindowDelegate associated with this TabModel.
   std::unique_ptr<browser_sync::SyncedWindowDelegateAndroid>
@@ -177,11 +221,6 @@ class TabModel : public content::NotificationObserver {
   // unique within the current session, and is not guaranteed to be unique
   // across sessions.
   SessionID session_id_;
-
-  // The Registrar used to register TabModel for notifications.
-  content::NotificationRegistrar registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabModel);
 };
 
 #endif  // CHROME_BROWSER_UI_ANDROID_TAB_MODEL_TAB_MODEL_H_

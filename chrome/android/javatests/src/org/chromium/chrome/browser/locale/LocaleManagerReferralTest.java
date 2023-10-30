@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,7 @@ package org.chromium.chrome.browser.locale;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.not;
 
-import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -16,7 +15,6 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
@@ -38,22 +36,23 @@ public class LocaleManagerReferralTest {
     private String mYandexReferralId = "";
 
     @Before
-    public void setUp() throws ExecutionException, ProcessInitException {
+    public void setUp() throws ExecutionException {
         mDefaultLocale = Locale.getDefault();
         Locale.setDefault(new Locale("ru", "RU"));
 
-        LocaleManager.setInstanceForTest(new LocaleManager() {
-            @Override
-            protected String getYandexReferralId() {
-                return mYandexReferralId;
-            }
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            LocaleManager.getInstance().setDelegateForTest(new LocaleManagerDelegate() {
+                @Override
+                public String getYandexReferralId() {
+                    return mYandexReferralId;
+                }
+            });
         });
 
         TestThreadUtils.runOnUiThreadBlocking(new Callable<Void>() {
             @Override
-            public Void call() throws ProcessInitException {
-                ChromeBrowserInitializer.getInstance(InstrumentationRegistry.getTargetContext())
-                        .handleSynchronousStartup();
+            public Void call() {
+                ChromeBrowserInitializer.getInstance().handleSynchronousStartup();
                 return null;
             }
         });
@@ -66,7 +65,7 @@ public class LocaleManagerReferralTest {
 
     @SmallTest
     @Test
-    public void testYandexReferralId() throws InterruptedException, TimeoutException {
+    public void testYandexReferralId() throws TimeoutException {
         final CallbackHelper templateUrlServiceLoaded = new CallbackHelper();
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             TemplateUrlService templateUrlService = TemplateUrlServiceFactory.get();

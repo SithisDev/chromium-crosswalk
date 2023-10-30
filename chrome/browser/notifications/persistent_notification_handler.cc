@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,29 +6,33 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/metrics/histogram_macros.h"
-#include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/notifications/metrics/notification_metrics_logger.h"
 #include "chrome/browser/notifications/metrics/notification_metrics_logger_factory.h"
 #include "chrome/browser/notifications/notification_common.h"
 #include "chrome/browser/notifications/notification_permission_context.h"
 #include "chrome/browser/notifications/platform_notification_service_factory.h"
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
-#include "chrome/browser/permissions/permission_uma_util.h"
-#include "chrome/browser/permissions/permission_util.h"
+#include "chrome/browser/permissions/notifications_engagement_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "components/permissions/features.h"
+#include "components/permissions/permission_uma_util.h"
+#include "components/permissions/permission_util.h"
+#include "components/site_engagement/content/site_engagement_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_event_dispatcher.h"
 #include "content/public/browser/permission_controller.h"
-#include "content/public/browser/permission_type.h"
+#include "content/public/browser/permission_result.h"
 #include "content/public/common/persistent_notification_status.h"
+#include "third_party/blink/public/common/permissions/permission_utils.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 #if BUILDFLAG(ENABLE_BACKGROUND_MODE)
-#include "components/keep_alive_registry/keep_alive_types.h"
+#include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
-#endif
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
 
 using content::BrowserThread;
 
@@ -54,6 +58,10 @@ void PersistentNotificationHandler::OnClose(
     return;
   }
 
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
+  close_event_keep_alive_state_.AddKeepAlive(profile);
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
+
   NotificationMetricsLogger* metrics_logger =
       NotificationMetricsLoggerFactory::GetForBrowserContext(profile);
   if (by_user)
@@ -65,15 +73,20 @@ void PersistentNotificationHandler::OnClose(
       ->DispatchNotificationCloseEvent(
           profile, notification_id, origin, by_user,
           base::BindOnce(&PersistentNotificationHandler::OnCloseCompleted,
-                         weak_ptr_factory_.GetWeakPtr(),
+                         weak_ptr_factory_.GetWeakPtr(), profile,
                          std::move(completed_closure)));
 }
 
 void PersistentNotificationHandler::OnCloseCompleted(
+    Profile* profile,
     base::OnceClosure completed_closure,
     content::PersistentNotificationStatus status) {
   UMA_HISTOGRAM_ENUMERATION(
       "Notifications.PersistentWebNotificationCloseResult", status);
+
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
+  close_event_keep_alive_state_.RemoveKeepAlive(profile);
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
 
   std::move(completed_closure).Run();
 }
@@ -82,8 +95,8 @@ void PersistentNotificationHandler::OnClick(
     Profile* profile,
     const GURL& origin,
     const std::string& notification_id,
-    const base::Optional<int>& action_index,
-    const base::Optional<base::string16>& reply,
+    const absl::optional<int>& action_index,
+    const absl::optional<std::u16string>& reply,
     base::OnceClosure completed_closure) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(origin.is_valid());
@@ -92,19 +105,14 @@ void PersistentNotificationHandler::OnClick(
       NotificationMetricsLoggerFactory::GetForBrowserContext(profile);
 
 #if BUILDFLAG(ENABLE_BACKGROUND_MODE)
-  // Ensure the browser stays alive while the event is processed. The keep alive
-  // will be reset when all click events have been acknowledged.
-  if (pending_click_dispatch_events_++ == 0) {
-    click_dispatch_keep_alive_ = std::make_unique<ScopedKeepAlive>(
-        KeepAliveOrigin::PENDING_NOTIFICATION_CLICK_EVENT,
-        KeepAliveRestartOption::DISABLED);
-  }
-#endif
+  click_event_keep_alive_state_.AddKeepAlive(profile);
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
 
   blink::mojom::PermissionStatus permission_status =
-      content::BrowserContext::GetPermissionController(profile)
-          ->GetPermissionStatus(content::PermissionType::NOTIFICATIONS, origin,
-                                origin);
+      profile->GetPermissionController()
+          ->GetPermissionResultForOriginWithoutContext(
+              blink::PermissionType::NOTIFICATIONS, url::Origin::Create(origin))
+          .status;
 
   // Don't process click events when the |origin| doesn't have permission. This
   // can't be a DCHECK because of potential races with native notifications.
@@ -123,7 +131,17 @@ void PersistentNotificationHandler::OnClick(
 
   // Notification clicks are considered a form of engagement with the |origin|,
   // thus we log the interaction with the Site Engagement service.
-  SiteEngagementService::Get(profile)->HandleNotificationInteraction(origin);
+  site_engagement::SiteEngagementService::Get(profile)
+      ->HandleNotificationInteraction(origin);
+
+  if (base::FeatureList::IsEnabled(
+          permissions::features::kNotificationInteractionHistory)) {
+    auto* service =
+        NotificationsEngagementServiceFactory::GetForProfile(profile);
+    // This service might be missing for incognito profiles and in tests.
+    if (service)
+      service->RecordNotificationInteraction(origin);
+  }
 
   content::NotificationEventDispatcher::GetInstance()
       ->DispatchNotificationClickEvent(
@@ -159,21 +177,18 @@ void PersistentNotificationHandler::OnClickCompleted(
   }
 
 #if BUILDFLAG(ENABLE_BACKGROUND_MODE)
-  DCHECK_GT(pending_click_dispatch_events_, 0);
-
-  // Reset the keep alive if all in-flight events have been processed.
-  if (--pending_click_dispatch_events_ == 0)
-    click_dispatch_keep_alive_.reset();
-#endif
+  click_event_keep_alive_state_.RemoveKeepAlive(profile);
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
 
   std::move(completed_closure).Run();
 }
 
 void PersistentNotificationHandler::DisableNotifications(Profile* profile,
                                                          const GURL& origin) {
-  PermissionUtil::ScopedRevocationReporter scoped_revocation_reporter(
-      profile, origin, origin, CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
-      PermissionSourceUI::INLINE_SETTINGS);
+  permissions::PermissionUmaUtil::ScopedRevocationReporter
+      scoped_revocation_reporter(
+          profile, origin, origin, ContentSettingsType::NOTIFICATIONS,
+          permissions::PermissionSourceUI::INLINE_SETTINGS);
   NotificationPermissionContext::UpdatePermission(profile, origin,
                                                   CONTENT_SETTING_BLOCK);
 }
@@ -182,3 +197,41 @@ void PersistentNotificationHandler::OpenSettings(Profile* profile,
                                                  const GURL& origin) {
   NotificationCommon::OpenNotificationSettings(profile, origin);
 }
+
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
+
+PersistentNotificationHandler::NotificationKeepAliveState::
+    NotificationKeepAliveState(KeepAliveOrigin keep_alive_origin,
+                               ProfileKeepAliveOrigin profile_keep_alive_origin)
+    : keep_alive_origin_(keep_alive_origin),
+      profile_keep_alive_origin_(profile_keep_alive_origin) {}
+
+PersistentNotificationHandler::NotificationKeepAliveState::
+    ~NotificationKeepAliveState() = default;
+
+void PersistentNotificationHandler::NotificationKeepAliveState::AddKeepAlive(
+    Profile* profile) {
+  // Ensure the browser and Profile stay alive while the event is processed. The
+  // keep alives will be reset when all events have been acknowledged.
+  if (pending_dispatch_events_++ == 0) {
+    event_dispatch_keep_alive_ = std::make_unique<ScopedKeepAlive>(
+        keep_alive_origin_, KeepAliveRestartOption::DISABLED);
+  }
+  if (profile_pending_dispatch_events_[profile]++ == 0) {
+    event_dispatch_profile_keep_alives_[profile] =
+        std::make_unique<ScopedProfileKeepAlive>(profile,
+                                                 profile_keep_alive_origin_);
+  }
+}
+
+void PersistentNotificationHandler::NotificationKeepAliveState::RemoveKeepAlive(
+    Profile* profile) {
+  DCHECK_GT(pending_dispatch_events_, 0);
+  // Reset the keep alive if all in-flight events have been processed.
+  if (--pending_dispatch_events_ == 0)
+    event_dispatch_keep_alive_.reset();
+  if (--profile_pending_dispatch_events_[profile] == 0)
+    event_dispatch_profile_keep_alives_[profile].reset();
+}
+
+#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)

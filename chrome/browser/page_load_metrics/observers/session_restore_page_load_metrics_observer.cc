@@ -1,14 +1,14 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/page_load_metrics/observers/session_restore_page_load_metrics_observer.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
 #include "chrome/browser/resource_coordinator/tab_manager.h"
-#include "chrome/common/page_load_metrics/page_load_metrics.mojom.h"
+#include "components/page_load_metrics/browser/page_load_metrics_util.h"
+#include "components/page_load_metrics/common/page_load_metrics.mojom.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/restore_type.h"
 #include "content/public/browser/web_contents.h"
@@ -42,19 +42,34 @@ SessionRestorePageLoadMetricsObserver::OnStart(
     return STOP_OBSERVING;
   }
 
-  // The navigation should be from the last session.
-  DCHECK(navigation_handle->GetRestoreType() ==
-             content::RestoreType::LAST_SESSION_EXITED_CLEANLY ||
-         navigation_handle->GetRestoreType() ==
-             content::RestoreType::LAST_SESSION_CRASHED);
-
+  // The navigation should be from restoring the last session or restoring a
+  // tab.
+  DCHECK_EQ(content::RestoreType::kRestored,
+            navigation_handle->GetRestoreType());
   return CONTINUE_OBSERVING;
 }
 
 page_load_metrics::PageLoadMetricsObserver::ObservePolicy
-SessionRestorePageLoadMetricsObserver::OnCommit(
+SessionRestorePageLoadMetricsObserver::OnFencedFramesStart(
     content::NavigationHandle* navigation_handle,
-    ukm::SourceId source_id) {
+    const GURL& currently_committed_url) {
+  // This class is interested only in preprocessed lifecycle events that are
+  // already dispatched also to the outermost page observer.
+  return STOP_OBSERVING;
+}
+
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+SessionRestorePageLoadMetricsObserver::OnPrerenderStart(
+    content::NavigationHandle* navigation_handle,
+    const GURL& currently_committed_url) {
+  // This class is interested in performance on session restore. Prerendering
+  // doesn't occur in such a case.
+  return STOP_OBSERVING;
+}
+
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+SessionRestorePageLoadMetricsObserver::OnCommit(
+    content::NavigationHandle* navigation_handle) {
   // Session restores use transition reload, so we only observe loads with a
   // reload transition type.
   DCHECK(ui::PageTransitionCoreTypeIs(navigation_handle->GetPageTransition(),
@@ -63,10 +78,9 @@ SessionRestorePageLoadMetricsObserver::OnCommit(
 }
 
 void SessionRestorePageLoadMetricsObserver::OnFirstPaintInPage(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& extra_info) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
   if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_paint.value(), extra_info)) {
+          timing.paint_timing->first_paint.value(), GetDelegate())) {
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramSessionRestoreForegroundTabFirstPaint,
         timing.paint_timing->first_paint.value());
@@ -75,7 +89,7 @@ void SessionRestorePageLoadMetricsObserver::OnFirstPaintInPage(
     // is no need to record again in FCP or FMP, because FP comes first.
     ukm::builders::
         TabManager_Experimental_SessionRestore_ForegroundTab_PageLoad(
-            extra_info.source_id)
+            GetDelegate().GetPageUkmSourceId())
             .SetSessionRestoreTabCount(
                 g_browser_process->GetTabManager()->restored_tab_count())
             .SetSystemTabCount(
@@ -85,10 +99,9 @@ void SessionRestorePageLoadMetricsObserver::OnFirstPaintInPage(
 }
 
 void SessionRestorePageLoadMetricsObserver::OnFirstContentfulPaintInPage(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& extra_info) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
   if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_contentful_paint.value(), extra_info)) {
+          timing.paint_timing->first_contentful_paint.value(), GetDelegate())) {
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramSessionRestoreForegroundTabFirstContentfulPaint,
         timing.paint_timing->first_contentful_paint.value());
@@ -97,10 +110,9 @@ void SessionRestorePageLoadMetricsObserver::OnFirstContentfulPaintInPage(
 
 void SessionRestorePageLoadMetricsObserver::
     OnFirstMeaningfulPaintInMainFrameDocument(
-        const page_load_metrics::mojom::PageLoadTiming& timing,
-        const page_load_metrics::PageLoadExtraInfo& extra_info) {
+        const page_load_metrics::mojom::PageLoadTiming& timing) {
   if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_meaningful_paint.value(), extra_info)) {
+          timing.paint_timing->first_meaningful_paint.value(), GetDelegate())) {
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramSessionRestoreForegroundTabFirstMeaningfulPaint,
         timing.paint_timing->first_meaningful_paint.value());

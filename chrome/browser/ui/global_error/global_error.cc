@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,8 @@
 #include "chrome/grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_types.h"
-#include "ui/gfx/image/image.h"
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/paint_vector_icon.h"
@@ -26,22 +25,22 @@ GlobalError::~GlobalError() {}
 
 GlobalError::Severity GlobalError::GetSeverity() { return SEVERITY_MEDIUM; }
 
-gfx::Image GlobalError::MenuItemIcon() {
-#if defined(OS_ANDROID)
-  return ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      IDR_INPUT_ALERT_MENU);
+ui::ImageModel GlobalError::MenuItemIcon() {
+#if BUILDFLAG(IS_ANDROID)
+  return ui::ImageModel(
+      ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+          IDR_INPUT_ALERT_MENU));
 #else
-  return gfx::Image(
-      gfx::CreateVectorIcon(kBrowserToolsErrorIcon, gfx::kGoogleYellow700));
+  return ui::ImageModel::FromVectorIcon(kBrowserToolsErrorIcon,
+                                        ui::kColorAlertMediumSeverity);
 #endif
 }
 
 // GlobalErrorWithStandardBubble ---------------------------------------------
 
-GlobalErrorWithStandardBubble::GlobalErrorWithStandardBubble()
-    : has_shown_bubble_view_(false), bubble_view_(NULL) {}
+GlobalErrorWithStandardBubble::GlobalErrorWithStandardBubble() = default;
 
-GlobalErrorWithStandardBubble::~GlobalErrorWithStandardBubble() {}
+GlobalErrorWithStandardBubble::~GlobalErrorWithStandardBubble() = default;
 
 bool GlobalErrorWithStandardBubble::HasBubbleView() { return true; }
 
@@ -63,20 +62,17 @@ bool GlobalErrorWithStandardBubble::ShouldCloseOnDeactivate() const {
   return true;
 }
 
-gfx::Image GlobalErrorWithStandardBubble::GetBubbleViewIcon() {
-  // If you change this make sure to also change the menu icon and the app menu
-  // icon color.
-  return ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      IDR_INPUT_ALERT);
-}
-
 bool GlobalErrorWithStandardBubble::ShouldShowCloseButton() const {
   return false;
 }
 
-bool GlobalErrorWithStandardBubble::ShouldUseExtraView() const {
-  return false;
+std::u16string
+GlobalErrorWithStandardBubble::GetBubbleViewDetailsButtonLabel() {
+  return {};
 }
+
+void GlobalErrorWithStandardBubble::BubbleViewDetailsButtonPressed(
+    Browser* browser) {}
 
 bool GlobalErrorWithStandardBubble::ShouldAddElevationIconToAcceptButton() {
   return false;
@@ -88,6 +84,6 @@ int GlobalErrorWithStandardBubble::GetDefaultDialogButton() const {
 
 void GlobalErrorWithStandardBubble::BubbleViewDidClose(Browser* browser) {
   DCHECK(browser);
-  bubble_view_ = NULL;
+  bubble_view_ = nullptr;
   OnBubbleViewDidClose(browser);
 }

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -9,36 +9,41 @@
 
 #include "base/files/file.h"
 #include "base/i18n/streaming_utf8_validator.h"
+#include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/stl_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "build/build_config.h"
 #include "chrome/common/safe_browsing/archive_analyzer_results.h"
 #include "chrome/common/safe_browsing/binary_feature_extractor.h"
 #include "chrome/common/safe_browsing/download_type_util.h"
-#include "chrome/common/safe_browsing/file_type_policies.h"
+#include "components/safe_browsing/content/common/file_type_policies.h"
 #include "crypto/secure_hash.h"
 #include "crypto/sha2.h"
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
 #include "base/containers/span.h"
 #include "chrome/common/safe_browsing/disk_image_type_sniffer_mac.h"
 #include "chrome/common/safe_browsing/mach_o_image_reader_mac.h"
-#endif  // OS_MACOSX
+#endif  // BUILDFLAG(IS_MAC)
 
 namespace safe_browsing {
 
 namespace {
 
-void SetLengthAndDigestForContainedFile(
+void SetNameForContainedFile(
     const base::FilePath& path,
-    base::File* temp_file,
-    int file_length,
     ClientDownloadRequest::ArchivedBinary* archived_binary) {
   std::string file_basename(path.BaseName().AsUTF8Unsafe());
   if (base::StreamingUtf8Validator::Validate(file_basename))
     archived_binary->set_file_basename(file_basename);
+}
+
+void SetLengthAndDigestForContainedFile(
+    base::File* temp_file,
+    int file_length,
+    ClientDownloadRequest::ArchivedBinary* archived_binary) {
   archived_binary->set_length(file_length);
 
   std::unique_ptr<crypto::SecureHash> hasher =
@@ -63,8 +68,8 @@ void SetLengthAndDigestForContainedFile(
   }
 
   uint8_t digest[crypto::kSHA256Length];
-  hasher->Finish(digest, base::size(digest));
-  archived_binary->mutable_digests()->set_sha256(digest, base::size(digest));
+  hasher->Finish(digest, std::size(digest));
+  archived_binary->mutable_digests()->set_sha256(digest, std::size(digest));
 }
 
 void AnalyzeContainedBinary(
@@ -86,13 +91,7 @@ void AnalyzeContainedBinary(
 
 }  // namespace
 
-ArchiveAnalyzerResults::ArchiveAnalyzerResults()
-    : success(false),
-      has_executable(false),
-      has_archive(false),
-      file_count(0),
-      directory_count(0) {}
-
+ArchiveAnalyzerResults::ArchiveAnalyzerResults() = default;
 ArchiveAnalyzerResults::ArchiveAnalyzerResults(
     const ArchiveAnalyzerResults& other) = default;
 
@@ -107,13 +106,13 @@ void UpdateArchiveAnalyzerResultsWithFile(base::FilePath path,
       new BinaryFeatureExtractor());
   bool current_entry_is_executable;
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
   uint32_t magic;
   file->Read(0, reinterpret_cast<char*>(&magic), sizeof(uint32_t));
 
-  char dmg_header[DiskImageTypeSnifferMac::AppleDiskImageTrailerSize()];
+  char dmg_header[DiskImageTypeSnifferMac::kAppleDiskImageTrailerSize];
   file->Read(0, dmg_header,
-             DiskImageTypeSnifferMac::AppleDiskImageTrailerSize());
+             DiskImageTypeSnifferMac::kAppleDiskImageTrailerSize);
 
   current_entry_is_executable =
       FileTypePolicies::GetInstance()->IsCheckedBinaryFile(path) ||
@@ -121,26 +120,26 @@ void UpdateArchiveAnalyzerResultsWithFile(base::FilePath path,
       DiskImageTypeSnifferMac::IsAppleDiskImageTrailer(
           base::span<const uint8_t>(
               reinterpret_cast<const uint8_t*>(dmg_header),
-              DiskImageTypeSnifferMac::AppleDiskImageTrailerSize()));
+              DiskImageTypeSnifferMac::kAppleDiskImageTrailerSize));
 
   // We can skip checking the trailer if we already know the file is executable.
   if (!current_entry_is_executable) {
-    char trailer[DiskImageTypeSnifferMac::AppleDiskImageTrailerSize()];
+    char trailer[DiskImageTypeSnifferMac::kAppleDiskImageTrailerSize];
     file->Seek(base::File::Whence::FROM_END,
-               DiskImageTypeSnifferMac::AppleDiskImageTrailerSize());
-    file->ReadAtCurrentPos(
-        trailer, DiskImageTypeSnifferMac::AppleDiskImageTrailerSize());
+               DiskImageTypeSnifferMac::kAppleDiskImageTrailerSize);
+    file->ReadAtCurrentPos(trailer,
+                           DiskImageTypeSnifferMac::kAppleDiskImageTrailerSize);
     current_entry_is_executable =
         DiskImageTypeSnifferMac::IsAppleDiskImageTrailer(
             base::span<const uint8_t>(
                 reinterpret_cast<const uint8_t*>(trailer),
-                DiskImageTypeSnifferMac::AppleDiskImageTrailerSize()));
+                DiskImageTypeSnifferMac::kAppleDiskImageTrailerSize));
   }
 
 #else
   current_entry_is_executable =
       FileTypePolicies::GetInstance()->IsCheckedBinaryFile(path);
-#endif  // OS_MACOSX
+#endif  // BUILDFLAG(IS_MAC)
 
   if (FileTypePolicies::GetInstance()->IsArchiveFile(path)) {
     DVLOG(2) << "Downloaded a zipped archive: " << path.value();
@@ -150,32 +149,38 @@ void UpdateArchiveAnalyzerResultsWithFile(base::FilePath path,
         results->archived_binary.Add();
     archived_archive->set_download_type(ClientDownloadRequest::ARCHIVE);
     archived_archive->set_is_encrypted(is_encrypted);
-    SetLengthAndDigestForContainedFile(path, file, file_length,
-                                       archived_archive);
-  } else if (current_entry_is_executable) {
-#if defined(OS_MACOSX)
+    archived_archive->set_is_archive(true);
+    SetNameForContainedFile(path, archived_archive);
+    if (!is_encrypted) {
+      SetLengthAndDigestForContainedFile(file, file_length, archived_archive);
+    }
+  } else {
+#if BUILDFLAG(IS_MAC)
     // This check prevents running analysis on .app files since they are
     // really just directories and will cause binary feature extraction
     // to fail.
     if (path.Extension().compare(".app") == 0) {
       DVLOG(2) << "Downloaded a zipped .app directory: " << path.value();
     } else {
-#endif  // OS_MACOSX
+#endif  // BUILDFLAG(IS_MAC)
       DVLOG(2) << "Downloaded a zipped executable: " << path.value();
-      results->has_executable = true;
+      results->has_executable |= current_entry_is_executable;
       ClientDownloadRequest::ArchivedBinary* archived_binary =
           results->archived_binary.Add();
       archived_binary->set_is_encrypted(is_encrypted);
       archived_binary->set_download_type(
           download_type_util::GetDownloadType(path));
-      SetLengthAndDigestForContainedFile(path, file, file_length,
-                                         archived_binary);
-      AnalyzeContainedBinary(binary_feature_extractor, file, archived_binary);
-#if defined(OS_MACOSX)
+      archived_binary->set_is_executable(current_entry_is_executable);
+      SetNameForContainedFile(path, archived_binary);
+      if (!is_encrypted) {
+        SetLengthAndDigestForContainedFile(file, file_length, archived_binary);
+      }
+      if (current_entry_is_executable) {
+        AnalyzeContainedBinary(binary_feature_extractor, file, archived_binary);
+      }
+#if BUILDFLAG(IS_MAC)
     }
-#endif  // OS_MACOSX
-  } else {
-    DVLOG(3) << "Ignoring non-binary file: " << path.value();
+#endif  // BUILDFLAG(IS_MAC)
   }
 }
 

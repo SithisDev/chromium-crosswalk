@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include <sstream>
 #include <utility>
 
-#include "base/format_macros.h"
+#include "base/containers/contains.h"
+#include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/notifications/scheduler/internal/notification_entry.h"
 #include "chrome/browser/notifications/scheduler/public/notification_data.h"
@@ -17,13 +18,19 @@ namespace test {
 
 ImpressionTestData::ImpressionTestData(
     SchedulerClientType type,
-    int current_max_daily_show,
+    size_t current_max_daily_show,
     std::vector<Impression> impressions,
-    base::Optional<SuppressionInfo> suppression_info)
+    absl::optional<SuppressionInfo> suppression_info,
+    size_t negative_events_count,
+    absl::optional<base::Time> last_negative_event_ts,
+    absl::optional<base::Time> last_shown_ts)
     : type(type),
       current_max_daily_show(current_max_daily_show),
       impressions(std::move(impressions)),
-      suppression_info(std::move(suppression_info)) {}
+      suppression_info(std::move(suppression_info)),
+      negative_events_count(negative_events_count),
+      last_negative_event_ts(last_negative_event_ts),
+      last_shown_ts(last_shown_ts) {}
 
 ImpressionTestData::ImpressionTestData(const ImpressionTestData& other) =
     default;
@@ -39,13 +46,16 @@ void AddImpressionTestData(const ImpressionTestData& data,
     client_state->impressions.emplace_back(impression);
   }
   client_state->suppression_info = data.suppression_info;
+  client_state->negative_events_count = data.negative_events_count;
+  client_state->last_shown_ts = data.last_shown_ts;
+  client_state->last_negative_event_ts = data.last_negative_event_ts;
 }
 
 void AddImpressionTestData(
-    const std::vector<ImpressionTestData>& test_data,
+    const std::vector<ImpressionTestData>& test_data_vec,
     ImpressionHistoryTracker::ClientStates* client_states) {
   DCHECK(client_states);
-  for (const auto& test_data : test_data) {
+  for (const auto& test_data : test_data_vec) {
     auto client_state = std::make_unique<ClientState>();
     AddImpressionTestData(test_data, client_state.get());
     client_states->emplace(test_data.type, std::move(client_state));
@@ -53,10 +63,10 @@ void AddImpressionTestData(
 }
 
 void AddImpressionTestData(
-    const std::vector<ImpressionTestData>& test_data,
+    const std::vector<ImpressionTestData>& test_data_vec,
     std::vector<std::unique_ptr<ClientState>>* client_states) {
   DCHECK(client_states);
-  for (const auto& test_data : test_data) {
+  for (const auto& test_data : test_data_vec) {
     auto client_state = std::make_unique<ClientState>();
     AddImpressionTestData(test_data, client_state.get());
     client_states->emplace_back(std::move(client_state));
@@ -67,14 +77,12 @@ Impression CreateImpression(const base::Time& create_time,
                             UserFeedback feedback,
                             ImpressionResult impression_result,
                             bool integrated,
-                            SchedulerTaskTime task_start_time,
                             const std::string& guid,
                             SchedulerClientType type) {
   Impression impression(type, guid, create_time);
   impression.feedback = feedback;
   impression.impression = impression_result;
   impression.integrated = integrated;
-  impression.task_start_time = task_start_time;
   return impression;
 }
 
@@ -105,9 +113,12 @@ std::string DebugString(const NotificationEntry* entry) {
            << " : " << static_cast<int>(mapping.second);
   }
 
-  stream << " \n icons_id:";
-  for (const auto& icon_id : entry->icons_uuid)
-    stream << icon_id << "  ";
+  if (base::Contains(entry->icons_uuid, IconType::kSmallIcon))
+    stream << " \n small_icons_id:"
+           << entry->icons_uuid.at(IconType::kSmallIcon);
+  if (base::Contains(entry->icons_uuid, IconType::kLargeIcon))
+    stream << " \n large_icons_id:"
+           << entry->icons_uuid.at(IconType::kLargeIcon);
 
   return stream.str();
 }
@@ -117,13 +128,30 @@ std::string DebugString(const ClientState* client_state) {
   std::string log = base::StringPrintf(
       "Client state: type: %d \n"
       "current_max_daily_show: %d \n"
-      "impressions.size(): %zu \n",
+      "impressions.size(): %zu \n"
+      "negative_events_count: %zu \n",
       static_cast<int>(client_state->type),
-      client_state->current_max_daily_show, client_state->impressions.size());
+      client_state->current_max_daily_show, client_state->impressions.size(),
+      client_state->negative_events_count);
+
+  if (client_state->last_negative_event_ts.has_value()) {
+    std::ostringstream stream;
+    stream << "last negative event timestamp: ",
+        client_state->last_negative_event_ts.value();
+    log += stream.str();
+  }
+
+  if (client_state->last_shown_ts.has_value()) {
+    std::ostringstream stream;
+    stream << "last shown notification timestamp: ",
+        client_state->last_shown_ts.value();
+    log += stream.str();
+  }
 
   for (const auto& impression : client_state->impressions) {
     std::ostringstream stream;
-    stream << "Impression, create_time:" << impression.create_time << "\n"
+    stream << "\n"
+           << "Impression, create_time:" << impression.create_time << "\n"
            << " create_time in microseconds:"
            << impression.create_time.ToDeltaSinceWindowsEpoch().InMicroseconds()
            << "\n"
@@ -131,8 +159,6 @@ std::string DebugString(const ClientState* client_state) {
            << "impression result: " << static_cast<int>(impression.impression)
            << " \n"
            << "integrated: " << impression.integrated << "\n"
-           << "task start time: "
-           << static_cast<int>(impression.task_start_time) << "\n"
            << "guid: " << impression.guid << "\n"
            << "type: " << static_cast<int>(impression.type);
 
@@ -141,18 +167,22 @@ std::string DebugString(const ClientState* client_state) {
              << " : " << static_cast<int>(mapping.second);
     }
 
+    for (const auto& pair : impression.custom_data) {
+      stream << " \n custom data, key: " << pair.first
+             << " value: " << pair.second;
+    }
+
     log += stream.str();
   }
 
   if (client_state->suppression_info.has_value()) {
     std::ostringstream stream;
-    stream << "Suppression info, last_trigger_time:"
+    stream << "\n Suppression info, last_trigger_time: "
            << client_state->suppression_info->last_trigger_time << "\n"
            << "duration:" << client_state->suppression_info->duration << "\n"
            << "recover_goal:" << client_state->suppression_info->recover_goal;
     log += stream.str();
   }
-
   return log;
 }
 

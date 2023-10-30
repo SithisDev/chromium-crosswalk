@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,8 +36,7 @@ DesktopBrowserFrameAura::DesktopBrowserFrameAura(
 ///////////////////////////////////////////////////////////////////////////////
 // DesktopBrowserFrameAura, protected:
 
-DesktopBrowserFrameAura::~DesktopBrowserFrameAura() {
-}
+DesktopBrowserFrameAura::~DesktopBrowserFrameAura() = default;
 
 ///////////////////////////////////////////////////////////////////////////////
 // DesktopBrowserFrameAura, views::DesktopNativeWidgetAura overrides:
@@ -48,19 +47,18 @@ void DesktopBrowserFrameAura::OnHostClosed() {
 }
 
 void DesktopBrowserFrameAura::InitNativeWidget(
-    const views::Widget::InitParams& params) {
+    views::Widget::InitParams params) {
   browser_desktop_window_tree_host_ =
       BrowserDesktopWindowTreeHost::CreateBrowserDesktopWindowTreeHost(
           browser_frame_,
           this,
           browser_view_,
           browser_frame_);
-  views::Widget::InitParams modified_params = params;
-  modified_params.desktop_window_tree_host =
+  params.desktop_window_tree_host =
       browser_desktop_window_tree_host_->AsDesktopWindowTreeHost();
-  DesktopNativeWidgetAura::InitNativeWidget(modified_params);
+  DesktopNativeWidgetAura::InitNativeWidget(std::move(params));
 
-  visibility_controller_.reset(new wm::VisibilityController);
+  visibility_controller_ = std::make_unique<wm::VisibilityController>();
   aura::client::SetVisibilityClient(GetNativeView()->GetRootWindow(),
                                     visibility_controller_.get());
   wm::SetChildWindowVisibilityChangesAnimated(
@@ -114,4 +112,12 @@ DesktopBrowserFrameAura::PreHandleKeyboardEvent(
 bool DesktopBrowserFrameAura::HandleKeyboardEvent(
     const content::NativeWebKeyboardEvent& event) {
   return false;
+}
+
+bool DesktopBrowserFrameAura::ShouldRestorePreviousBrowserWidgetState() const {
+  return true;
+}
+
+bool DesktopBrowserFrameAura::ShouldUseInitialVisibleOnAllWorkspaces() const {
+  return true;
 }

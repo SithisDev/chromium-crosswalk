@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/sequence_checker.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/media/router/discovery/dial/dial_device_data.h"
 #include "chrome/browser/media/router/discovery/dial/parsed_dial_device_description.h"
@@ -19,7 +19,6 @@
 
 namespace media_router {
 
-class DataDecoder;
 class DeviceDescriptionFetcher;
 class SafeDialDeviceDescriptionParser;
 
@@ -61,9 +60,12 @@ class DeviceDescriptionService {
                                    const std::string& error_message)>;
 
   DeviceDescriptionService(
-      DataDecoder* data_decoder,
       const DeviceDescriptionParseSuccessCallback& success_cb,
       const DeviceDescriptionParseErrorCallback& error_cb);
+
+  DeviceDescriptionService(const DeviceDescriptionService&) = delete;
+  DeviceDescriptionService& operator=(const DeviceDescriptionService&) = delete;
+
   virtual ~DeviceDescriptionService();
 
   // For each device in |devices|, if there is a valid cache entry for it, call
@@ -162,8 +164,6 @@ class DeviceDescriptionService {
   SafeDialDeviceDescriptionParser device_description_parser_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(DeviceDescriptionService);
 };
 
 }  // namespace media_router

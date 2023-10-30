@@ -1,87 +1,74 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.test;
 
 import android.app.Activity;
-import android.app.Instrumentation;
 import android.content.ComponentName;
-import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-import android.provider.Browser;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.internal.runner.listener.InstrumentationResultPrinter;
-import android.support.test.rule.ActivityTestRule;
-import android.text.TextUtils;
-import android.view.Menu;
 
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
-import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
-import org.chromium.base.ApplicationStatus.ActivityStateListener;
-import org.chromium.base.Log;
+import org.chromium.base.CommandLine;
+import org.chromium.base.ThreadUtils;
+import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.test.BaseActivityTestRule;
 import org.chromium.base.test.util.CallbackHelper;
-import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.ScalableTimeout;
 import org.chromium.chrome.browser.DeferredStartupHandler;
-import org.chromium.chrome.browser.appmenu.AppMenuTestSupport;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
-import org.chromium.chrome.browser.infobar.InfoBar;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
-import org.chromium.chrome.browser.ntp.NewTabPage;
-import org.chromium.chrome.browser.omnibox.UrlBar;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
-import org.chromium.chrome.browser.preferences.Preferences;
-import org.chromium.chrome.browser.preferences.PreferencesLauncher;
+import org.chromium.chrome.browser.prefetch.settings.PreloadPagesSettingsBridge;
+import org.chromium.chrome.browser.prefetch.settings.PreloadPagesState;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
-import org.chromium.chrome.browser.tabmodel.TabLaunchType;
-import org.chromium.chrome.browser.tabmodel.TabModel;
-import org.chromium.chrome.browser.tabmodel.TabModelObserver;
-import org.chromium.chrome.browser.tabmodel.TabSelectionType;
-import org.chromium.chrome.test.util.ApplicationTestUtils;
+import org.chromium.chrome.browser.tab.TabLaunchType;
+import org.chromium.chrome.browser.ui.appmenu.AppMenuCoordinator;
+import org.chromium.chrome.test.util.ChromeApplicationTestUtils;
 import org.chromium.chrome.test.util.ChromeTabUtils;
-import org.chromium.chrome.test.util.MenuUtils;
 import org.chromium.chrome.test.util.NewTabPageTestUtils;
 import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.components.embedder_support.util.UrlUtilities;
+import org.chromium.components.infobars.InfoBar;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.Coordinates;
 import org.chromium.content_public.browser.test.util.JavaScriptUtils;
-import org.chromium.content_public.browser.test.util.RenderProcessLimit;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
+import org.chromium.content_public.common.ContentSwitches;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.net.test.EmbeddedTestServerRule;
 import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.base.PageTransition;
+import org.chromium.url.GURL;
 
-import java.lang.reflect.AnnotatedElement;
-import java.lang.reflect.Method;
 import java.util.Calendar;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Custom  {@link ActivityTestRule} for test using  {@link ChromeActivity}.
  *
  * @param <T> The {@link Activity} class under test.
  */
-public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTestRule<T> {
+public class ChromeActivityTestRule<T extends ChromeActivity> extends BaseActivityTestRule<T> {
     private static final String TAG = "ChromeATR";
 
     // The number of ms to wait for the rendering activity to be started.
@@ -90,20 +77,13 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
     private static final long OMNIBOX_FIND_SUGGESTION_TIMEOUT_MS = 10 * 1000;
 
     private Thread.UncaughtExceptionHandler mDefaultUncaughtExceptionHandler;
-    private Class<T> mChromeActivityClass;
-    private T mSetActivity;
     private String mCurrentTestName;
 
     @Rule
     private EmbeddedTestServerRule mTestServerRule = new EmbeddedTestServerRule();
 
-    public ChromeActivityTestRule(Class<T> activityClass) {
-        this(activityClass, false);
-    }
-
-    public ChromeActivityTestRule(Class<T> activityClass, boolean initialTouchMode) {
-        super(activityClass, initialTouchMode, false);
-        mChromeActivityClass = activityClass;
+    protected ChromeActivityTestRule(Class<T> activityClass) {
+        super(activityClass);
     }
 
     @Override
@@ -114,7 +94,10 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
             public void evaluate() throws Throwable {
                 mDefaultUncaughtExceptionHandler = Thread.getDefaultUncaughtExceptionHandler();
                 Thread.setDefaultUncaughtExceptionHandler(new ChromeUncaughtExceptionHandler());
-                ApplicationTestUtils.setUp(InstrumentationRegistry.getTargetContext());
+                ChromeApplicationTestUtils.setUp(InstrumentationRegistry.getTargetContext());
+                // Instrumentation infrastructure and tests often access variables from the
+                // instrumentation thread for asserts. See crbug.com/1173814 for more details.
+                ObservableSupplierImpl.setIgnoreThreadChecksForTesting(true);
 
                 // Preload Calendar so that it does not trigger ReadFromDisk Strict mode violations
                 // if called on the UI Thread. See https://crbug.com/705477 and
@@ -124,8 +107,20 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
                 // Disable offline indicator UI to prevent it from popping up to obstruct other UI
                 // views that may make tests flaky.
                 Features.getInstance().disable(ChromeFeatureList.OFFLINE_INDICATOR);
+                // Tests are run on bots that are offline by default. This might cause offline UI
+                // to show and cause flakiness or failures in tests. Using this switch will prevent
+                // that.
+                // TODO(crbug.com/1093085): Remove this once we disable the offline indicator for
+                // specific tests.
+                CommandLine.getInstance().appendSwitch(
+                        ContentSwitches.FORCE_ONLINE_CONNECTION_STATE_FOR_INDICATOR);
 
-                base.evaluate();
+                try {
+                    base.evaluate();
+                } finally {
+                    Thread.setDefaultUncaughtExceptionHandler(mDefaultUncaughtExceptionHandler);
+                    ObservableSupplierImpl.setIgnoreThreadChecksForTesting(false);
+                }
             }
         };
         Statement testServerStatement = mTestServerRule.apply(chromeActivityStatement, description);
@@ -139,31 +134,27 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
         return ACTIVITY_START_TIMEOUT_MS;
     }
 
+    // This has to be here or getActivity will return a T that extends Activity, not a T that
+    // extends ChromeActivity.
     @Override
-    protected void afterActivityFinished() {
-        try {
-            ApplicationTestUtils.tearDown(InstrumentationRegistry.getTargetContext());
-            Thread.setDefaultUncaughtExceptionHandler(mDefaultUncaughtExceptionHandler);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to tearDown", e);
-        }
-        super.afterActivityFinished();
-    }
-
-    // TODO(yolandyan): remove this once startActivityCompletely is refactored out of
-    // ChromeActivityTestRule
-    @Override
+    @SuppressWarnings("RedundantOverride")
     public T getActivity() {
-        if (mSetActivity != null) {
-            return mSetActivity;
-        }
         return super.getActivity();
     }
 
-    /** Retrieves the application Menu */
-    public Menu getMenu() throws ExecutionException {
-        return TestThreadUtils.runOnUiThreadBlocking(
-                () -> AppMenuTestSupport.getMenu(getActivity()));
+    /**
+     * TODO(https://crbug.com/1146574): This only exists here because legacy ActivityTestRule
+     * inherited from UiThreadTestRule. This function should be removed.
+     */
+    public void runOnUiThread(Runnable r) {
+        ThreadUtils.runOnUiThreadBlocking(r);
+    }
+
+    /**
+     * @return The {@link AppMenuCoordinator} for the activity.
+     */
+    public AppMenuCoordinator getAppMenuCoordinator() {
+        return getActivity().getRootUiCoordinatorForTesting().getAppMenuCoordinatorForTesting();
     }
 
     /**
@@ -182,12 +173,12 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
 
     /**
      * Waits for the activity to fully finish its native initialization.
-     * @param The {@link ChromeActivity} to wait for.
+     * @param activity The {@link ChromeActivity} to wait for.
      */
     public static void waitForActivityNativeInitializationComplete(ChromeActivity activity) {
-        CriteriaHelper.pollUiThread(()
-                                            -> ChromeBrowserInitializer.getInstance(activity)
-                                                       .hasNativeInitializationCompleted(),
+        CriteriaHelper.pollUiThread(
+                ()
+                        -> ChromeBrowserInitializer.getInstance().isFullBrowserInitialized(),
                 "Native initialization never finished",
                 20 * CriteriaHelper.DEFAULT_MAX_TIME_TO_POLL,
                 CriteriaHelper.DEFAULT_POLLING_INTERVAL);
@@ -204,49 +195,48 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
     }
 
     /**
-     * Invokes {@link Instrumentation#startActivitySync(Intent)} and sets the
-     * test case's activity to the result. See the documentation for
-     * {@link Instrumentation#startActivitySync(Intent)} on the timing of the
-     * return, but generally speaking the activity's "onCreate" has completed
-     * and the activity's main looper has become idle.
-     *
-     * TODO(yolandyan): very similar to ActivityTestRule#launchActivity(Intent),
-     * yet small differences remains (e.g. launchActivity() uses FLAG_ACTIVITY_NEW_TASK while
-     * startActivityCompletely doesn't), need to refactor and use only launchActivity
-     * after the JUnit4 migration
+     * Similar to #launchActivity(Intent), but waits for the Activity tab to be initialized.
      */
     public void startActivityCompletely(Intent intent) {
-        Features.ensureCommandLineIsUpToDate();
+        launchActivity(intent);
+        waitForActivityNativeInitializationComplete();
+        waitForActivityCompletelyLoaded();
+    }
 
-        final CallbackHelper activityCallback = new CallbackHelper();
-        final AtomicReference<T> activityRef = new AtomicReference<>();
-        ActivityStateListener stateListener = new ActivityStateListener() {
-            @SuppressWarnings("unchecked")
-            @Override
-            public void onActivityStateChange(Activity activity, int newState) {
-                if (newState == ActivityState.RESUMED) {
-                    if (!mChromeActivityClass.isAssignableFrom(activity.getClass())) return;
+    /** Wait until the activity is completely loaded, and a tab is shown. */
+    public void waitForActivityCompletelyLoaded() {
+        CriteriaHelper.pollUiThread(
+                () -> getActivity().getActivityTab() != null, "Tab never selected/initialized.");
+        Tab tab = getActivity().getActivityTab();
 
-                    activityRef.set((T) activity);
-                    activityCallback.notifyCalled();
-                    ApplicationStatus.unregisterActivityStateListener(this);
-                }
-            }
-        };
-        ApplicationStatus.registerStateListenerForAllActivities(stateListener);
+        ChromeTabUtils.waitForTabPageLoaded(tab, (String) null);
 
-        try {
-            InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
-            activityCallback.waitForCallback("Activity did not start as expected", 0);
-            T activity = activityRef.get();
-            Assert.assertNotNull("Activity reference is null.", activity);
-            setActivity(activity);
-            Log.d(TAG, "startActivityCompletely <<");
-        } catch (InterruptedException | TimeoutException e) {
-            throw new RuntimeException(e);
-        } finally {
-            ApplicationStatus.unregisterActivityStateListener(stateListener);
+        if (tab != null && UrlUtilities.isNTPUrl(ChromeTabUtils.getUrlStringOnUiThread(tab))
+                && !getActivity().isInOverviewMode()) {
+            NewTabPageTestUtils.waitForNtpLoaded(tab);
         }
+
+        Assert.assertTrue(waitForDeferredStartup());
+
+        Assert.assertNotNull(tab);
+        Assert.assertNotNull(tab.getView());
+    }
+
+    public boolean waitForDeferredStartup() {
+        CriteriaHelper.pollUiThread(() -> {
+            getActivity().deferredStartupPostedForTesting();
+        }, 20000L, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
+        return DeferredStartupHandler.waitForDeferredStartupCompleteForTesting(
+                ScalableTimeout.scaleTimeout(CriteriaHelper.DEFAULT_MAX_TIME_TO_POLL));
+    }
+
+    @Override
+    public void launchActivity(Intent startIntent) {
+        // Avoid relying on explicit intents, bypassing LaunchIntentDispatcher, created by null
+        // startIntent launch behavior.
+        Assert.assertNotNull(startIntent);
+        Features.getInstance().ensureCommandLineIsUpToDate();
+        super.launchActivity(startIntent);
     }
 
     /**
@@ -257,7 +247,11 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
-                PrefServiceBridge.getInstance().setNetworkPredictionEnabled(enabled);
+                if (enabled) {
+                    PreloadPagesSettingsBridge.setState(PreloadPagesState.STANDARD_PRELOADING);
+                } else {
+                    PreloadPagesSettingsBridge.setState(PreloadPagesState.NO_PRELOADING);
+                }
             }
         });
     }
@@ -267,11 +261,9 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
      * preloading mechanism of the UrlBar.
      * @param url            The URL to load in the current tab.
      * @param secondsToWait  The number of seconds to wait for the page to be loaded.
-     * @return FULL_PRERENDERED_PAGE_LOAD or PARTIAL_PRERENDERED_PAGE_LOAD if the page has been
-     *         prerendered. DEFAULT_PAGE_LOAD if it had not.
+     * @return PAGE_LOAD_FAILED if the URL could not be loaded, otherwise DEFAULT_PAGE_LOAD.
      */
-    public int loadUrl(String url, long secondsToWait)
-            throws IllegalArgumentException, InterruptedException {
+    public int loadUrl(String url, long secondsToWait) throws IllegalArgumentException {
         return loadUrlInTab(url, PageTransition.TYPED | PageTransition.FROM_ADDRESS_BAR,
                 getActivity().getActivityTab(), secondsToWait);
     }
@@ -280,12 +272,16 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
      * Navigates to a URL directly without going through the UrlBar. This bypasses the page
      * preloading mechanism of the UrlBar.
      * @param url The URL to load in the current tab.
-     * @return FULL_PRERENDERED_PAGE_LOAD or PARTIAL_PRERENDERED_PAGE_LOAD if the page has been
-     *         prerendered. DEFAULT_PAGE_LOAD if it had not.
+     * @return PAGE_LOAD_FAILED if the URL could not be loaded, otherwise DEFAULT_PAGE_LOAD.
      */
-    public int loadUrl(String url) throws IllegalArgumentException, InterruptedException {
+    public int loadUrl(String url) throws IllegalArgumentException {
         return loadUrlInTab(url, PageTransition.TYPED | PageTransition.FROM_ADDRESS_BAR,
                 getActivity().getActivityTab());
+    }
+
+    /** {@link #loadUrl(String) */
+    public int loadUrl(GURL url) throws IllegalArgumentException {
+        return loadUrl(url.getSpec());
     }
 
     /**
@@ -295,11 +291,10 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
      *                       for valid values.
      * @param tab            The tab to load the URL into.
      * @param secondsToWait  The number of seconds to wait for the page to be loaded.
-     * @return               FULL_PRERENDERED_PAGE_LOAD or PARTIAL_PRERENDERED_PAGE_LOAD if the
-     *                       page has been prerendered. DEFAULT_PAGE_LOAD if it had not.
+     * @return               PAGE_LOAD_FAILED if the URL could not be loaded, otherwise
+     *                       DEFAULT_PAGE_LOAD.
      */
-    public int loadUrlInTab(String url, int pageTransition, Tab tab, long secondsToWait)
-            throws InterruptedException {
+    public int loadUrlInTab(String url, int pageTransition, Tab tab, long secondsToWait) {
         Assert.assertNotNull("Cannot load the URL in a null tab", tab);
         final AtomicInteger result = new AtomicInteger();
 
@@ -321,10 +316,10 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
      *                       {@link org.chromium.ui.base.PageTransition}
      *                       for valid values.
      * @param tab            The tab to load the URL into.
-     * @return               FULL_PRERENDERED_PAGE_LOAD or PARTIAL_PRERENDERED_PAGE_LOAD if the
-     *                       page has been prerendered. DEFAULT_PAGE_LOAD if it had not.
+     * @return               PAGE_LOAD_FAILED if the URL could not be loaded, otherwise
+     *                       DEFAULT_PAGE_LOAD.
      */
-    public int loadUrlInTab(String url, int pageTransition, Tab tab) throws InterruptedException {
+    public int loadUrlInTab(String url, int pageTransition, Tab tab) {
         return loadUrlInTab(url, pageTransition, tab, CallbackHelper.WAIT_TIMEOUT_SECONDS);
     }
 
@@ -332,7 +327,7 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
      * Load a URL in a new tab. The {@link Tab} will pretend to be created from a link.
      * @param url The URL of the page to load.
      */
-    public Tab loadUrlInNewTab(String url) throws InterruptedException {
+    public Tab loadUrlInNewTab(String url) {
         return loadUrlInNewTab(url, false);
     }
 
@@ -341,8 +336,7 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
      * @param url The URL of the page to load.
      * @param incognito Whether the new tab should be incognito.
      */
-    public Tab loadUrlInNewTab(final String url, final boolean incognito)
-            throws InterruptedException {
+    public Tab loadUrlInNewTab(final String url, final boolean incognito) {
         return loadUrlInNewTab(url, incognito, TabLaunchType.FROM_LINK);
     }
 
@@ -352,94 +346,23 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
      * @param incognito Whether the new tab should be incognito.
      * @param launchType The type of Tab Launch.
      */
-    public Tab loadUrlInNewTab(final String url, final boolean incognito,
-            final @TabLaunchType int launchType) throws InterruptedException {
+    public Tab loadUrlInNewTab(
+            final String url, final boolean incognito, final @TabLaunchType int launchType) {
         Tab tab = null;
         try {
             tab = TestThreadUtils.runOnUiThreadBlocking(new Callable<Tab>() {
                 @Override
-                public Tab call() throws Exception {
+                public Tab call() {
                     return getActivity().getTabCreator(incognito).launchUrl(url, launchType);
                 }
             });
         } catch (ExecutionException e) {
-            Assert.fail("Failed to create new tab");
+            throw new AssertionError("Failed to create new tab", e);
         }
         ChromeTabUtils.waitForTabPageLoaded(tab, url);
         ChromeTabUtils.waitForInteractable(tab);
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         return tab;
-    }
-
-    /**
-     * Simulates starting Main Activity from launcher, blocks until it is started.
-     */
-    public void startMainActivityFromLauncher() throws InterruptedException {
-        startMainActivityWithURL(null);
-    }
-
-    /**
-     * Starts the Main activity on the specified URL. Passing a null URL ensures the default page is
-     * loaded, which is the NTP with a new profile .
-     */
-    public void startMainActivityWithURL(String url) throws InterruptedException {
-        // Only launch Chrome.
-        Intent intent =
-                new Intent(TextUtils.isEmpty(url) ? Intent.ACTION_MAIN : Intent.ACTION_VIEW);
-        intent.addCategory(Intent.CATEGORY_LAUNCHER);
-        startMainActivityFromIntent(intent, url);
-    }
-
-    /**
-     * Starts the Main activity and open a blank page.
-     * This is faster and less flakyness-prone than starting on the NTP.
-     */
-    public void startMainActivityOnBlankPage() throws InterruptedException {
-        startMainActivityWithURL("about:blank");
-    }
-
-    /**
-     * Starts the Main activity as if it was started from an external application, on the
-     * specified URL.
-     */
-    public void startMainActivityFromExternalApp(String url, String appId)
-            throws InterruptedException {
-        Intent intent = new Intent(Intent.ACTION_VIEW);
-        if (appId != null) {
-            intent.putExtra(Browser.EXTRA_APPLICATION_ID, appId);
-        }
-        startMainActivityFromIntent(intent, url);
-    }
-
-    /**
-     * Starts the Main activity using the passed intent, and using the specified URL.
-     * This method waits for DEFERRED_STARTUP to fire as well as a subsequent
-     * idle-sync of the main looper thread, and the initial tab must either
-     * complete its load or it must crash before this method will return.
-     */
-    public void startMainActivityFromIntent(Intent intent, String url) throws InterruptedException {
-        prepareUrlIntent(intent, url);
-
-        startActivityCompletely(intent);
-        waitForActivityNativeInitializationComplete();
-
-        CriteriaHelper.pollUiThread(
-                () -> getActivity().getActivityTab() != null, "Tab never selected/initialized.");
-        Tab tab = getActivity().getActivityTab();
-
-        ChromeTabUtils.waitForTabPageLoaded(tab, (String) null);
-
-        if (tab != null && NewTabPage.isNTPUrl(tab.getUrl()) && !getActivity().isInOverviewMode()) {
-            NewTabPageTestUtils.waitForNtpLoaded(tab);
-        }
-
-        CriteriaHelper.pollUiThread(
-                () -> DeferredStartupHandler.getInstance().isDeferredStartupCompleteForApp(),
-                "Deferred startup never completed");
-
-        Assert.assertNotNull(tab);
-        Assert.assertNotNull(tab.getView());
-        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 
     /**
@@ -457,80 +380,7 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
         if (url != null) {
             intent.setData(Uri.parse(url));
         }
-
-        try {
-            Method method = getClass().getMethod(mCurrentTestName, (Class[]) null);
-            if (((AnnotatedElement) method).isAnnotationPresent(RenderProcessLimit.class)) {
-                RenderProcessLimit limit = method.getAnnotation(RenderProcessLimit.class);
-                intent.putExtra(
-                        ChromeTabbedActivity.INTENT_EXTRA_TEST_RENDER_PROCESS_LIMIT, limit.value());
-            }
-        } catch (NoSuchMethodException ex) {
-            // Ignore exception.
-        }
         return intent;
-    }
-
-    /**
-     * Open an incognito tab by invoking the 'new incognito' menu item.
-     * Returns when receiving the 'PAGE_LOAD_FINISHED' notification.
-     *
-     * TODO(yolandyan): split this into the seperate test rule, this only applies to tabbed mode
-     */
-    public void newIncognitoTabFromMenu() throws InterruptedException {
-        Tab tab = null;
-
-        final CallbackHelper createdCallback = new CallbackHelper();
-        final CallbackHelper selectedCallback = new CallbackHelper();
-
-        TabModel incognitoTabModel = getActivity().getTabModelSelector().getModel(true);
-        TabModelObserver observer = new EmptyTabModelObserver() {
-            @Override
-            public void didAddTab(Tab tab, @TabLaunchType int type) {
-                createdCallback.notifyCalled();
-            }
-
-            @Override
-            public void didSelectTab(Tab tab, @TabSelectionType int type, int lastId) {
-                selectedCallback.notifyCalled();
-            }
-        };
-        incognitoTabModel.addObserver(observer);
-
-        MenuUtils.invokeCustomMenuActionSync(InstrumentationRegistry.getInstrumentation(),
-                getActivity(), R.id.new_incognito_tab_menu_id);
-
-        try {
-            createdCallback.waitForCallback(0);
-        } catch (TimeoutException ex) {
-            Assert.fail("Never received tab created event");
-        }
-        try {
-            selectedCallback.waitForCallback(0);
-        } catch (TimeoutException ex) {
-            Assert.fail("Never received tab selected event");
-        }
-        incognitoTabModel.removeObserver(observer);
-
-        tab = getActivity().getActivityTab();
-
-        ChromeTabUtils.waitForTabPageLoaded(tab, (String) null);
-        NewTabPageTestUtils.waitForNtpLoaded(tab);
-        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-        Log.d(TAG, "newIncognitoTabFromMenu <<");
-    }
-
-    /**
-     * New multiple incognito tabs by invoking the 'new incognito' menu item n times.
-     * @param n The number of tabs you want to create.
-     *
-     * TODO(yolandyan): split this into the seperate test rule, this only applies to tabbed mode
-     */
-    public void newIncognitoTabsFromMenu(int n) throws InterruptedException {
-        while (n > 0) {
-            newIncognitoTabFromMenu();
-            --n;
-        }
     }
 
     /**
@@ -546,44 +396,12 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
     }
 
     /**
-     * Looks up the Omnibox in the view hierarchy and types the specified
-     * text into it, requesting focus and using an inter-character delay of
-     * 200ms.
-     *
-     * @param oneCharAtATime Whether to type text one character at a time or all at once.
-     *
-     * @throws InterruptedException
-     *
-     * TODO(yolandyan): split this into the seperate test rule, this only applies to tabbed mode
-     */
-    public void typeInOmnibox(String text, boolean oneCharAtATime) throws InterruptedException {
-        final UrlBar urlBar = (UrlBar) getActivity().findViewById(R.id.url_bar);
-        Assert.assertNotNull(urlBar);
-
-        TestThreadUtils.runOnUiThreadBlocking(() -> {
-            urlBar.requestFocus();
-            if (!oneCharAtATime) {
-                urlBar.setText(text);
-            }
-        });
-
-        if (oneCharAtATime) {
-            final Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
-            for (int i = 0; i < text.length(); ++i) {
-                instrumentation.sendStringSync(text.substring(i, i + 1));
-                // Let's put some delay between key strokes to simulate a user pressing the keys.
-                Thread.sleep(20);
-            }
-        }
-    }
-
-    /**
      * Returns the infobars being displayed by the current tab, or null if they don't exist.
      */
     public List<InfoBar> getInfoBars() {
         return TestThreadUtils.runOnUiThreadBlockingNoException(new Callable<List<InfoBar>>() {
             @Override
-            public List<InfoBar> call() throws Exception {
+            public List<InfoBar> call() {
                 Tab currentTab = getActivity().getActivityTab();
                 Assert.assertNotNull(currentTab);
                 Assert.assertNotNull(InfoBarContainer.get(currentTab));
@@ -593,25 +411,21 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
     }
 
     /**
-     * Launches the preferences menu and starts the preferences activity named fragmentName.
-     * Returns the activity that was started.
+     * Executes the given snippet of JavaScript code within the current tab. Returns the result of
+     * its execution in JSON format.
      */
-    public Preferences startPreferences(String fragmentName) {
-        Context context = InstrumentationRegistry.getTargetContext();
-        Intent intent = PreferencesLauncher.createIntentForSettingsPage(context, fragmentName);
-        Activity activity = InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
-        Assert.assertTrue(activity instanceof Preferences);
-        return (Preferences) activity;
+    public String runJavaScriptCodeInCurrentTab(String code) throws TimeoutException {
+        return JavaScriptUtils.executeJavaScriptAndWaitForResult(
+                getActivity().getCurrentWebContents(), code);
     }
 
     /**
-     * Executes the given snippet of JavaScript code within the current tab. Returns the result of
-     * its execution in JSON format.
-     * @throws InterruptedException
+     * Executes the given snippet of JavaScript code within the current tab, acting as if a user
+     * gesture has been made. Returns the result of its execution in JSON format.
      */
-    public String runJavaScriptCodeInCurrentTab(String code)
-            throws InterruptedException, TimeoutException {
-        return JavaScriptUtils.executeJavaScriptAndWaitForResult(
+    public String runJavaScriptCodeWithUserGestureInCurrentTab(String code)
+            throws TimeoutException {
+        return JavaScriptUtils.executeJavaScriptWithUserGestureAndWaitForResult(
                 getActivity().getCurrentWebContents(), code);
     }
 
@@ -620,7 +434,15 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
      * from the compositor and asserts that this happens.
      */
     public void assertWaitForPageScaleFactorMatch(float expectedScale) {
-        ApplicationTestUtils.assertWaitForPageScaleFactorMatch(getActivity(), expectedScale);
+        ChromeApplicationTestUtils.assertWaitForPageScaleFactorMatch(getActivity(), expectedScale);
+    }
+
+    /**
+     * Waits till the WebContents receives a page scale factor different
+     * from the specified value and asserts that this happens.
+     */
+    public void assertWaitForPageScaleFactorChange(float initialScale) {
+        ChromeApplicationTestUtils.assertWaitForPageScaleFactorChange(getActivity(), initialScale);
     }
 
     public String getName() {
@@ -673,26 +495,44 @@ public class ChromeActivityTestRule<T extends ChromeActivity> extends ActivityTe
         return getActivity().getWindowAndroid().getKeyboardDelegate();
     }
 
-    public void setActivity(T chromeActivity) {
-        mSetActivity = chromeActivity;
-    }
-
     /**
      * Waits for an Activity of the given class to be started.
      * @return The Activity.
      */
     @SuppressWarnings("unchecked")
     public static <T extends ChromeActivity> T waitFor(final Class<T> expectedClass) {
+        return waitFor(expectedClass, CriteriaHelper.DEFAULT_MAX_TIME_TO_POLL);
+    }
+
+    /**
+     * Waits for an Activity of the given class to be started.
+     * @param expectedClass The class of the Activity being waited on.
+     * @param maxTimeToPoll Maximum time in milliseconds to poll.
+     * @return The Activity.
+     */
+    @SuppressWarnings("unchecked")
+    public static <T extends ChromeActivity> T waitFor(
+            final Class<T> expectedClass, long maxTimeToPoll) {
         final Activity[] holder = new Activity[1];
-        CriteriaHelper.pollUiThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                holder[0] = ApplicationStatus.getLastTrackedFocusedActivity();
-                return holder[0] != null && expectedClass.isAssignableFrom(holder[0].getClass())
-                        && ((ChromeActivity) holder[0]).getActivityTab() != null;
-            }
-        });
+        CriteriaHelper.pollUiThread(() -> {
+            holder[0] = ApplicationStatus.getLastTrackedFocusedActivity();
+            Criteria.checkThat(holder[0], Matchers.notNullValue());
+            Criteria.checkThat(holder[0].getClass(), Matchers.typeCompatibleWith(expectedClass));
+            Criteria.checkThat(
+                    ((ChromeActivity) holder[0]).getActivityTab(), Matchers.notNullValue());
+        }, maxTimeToPoll, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
         return (T) holder[0];
+    }
+
+    /**
+     * Waits for the first frame so that the page scale factor is set. Skipping this causes
+     * flakiness when clicking DOM objects since the page scale factor might not have been set yet,
+     * and coordinates can be wrong.
+     */
+    protected void waitForFirstFrame() {
+        final Coordinates coord = Coordinates.createFor(getWebContents());
+        CriteriaHelper.pollUiThread(
+                coord::frameInfoUpdated, "FrameInfo has not been updated in time.");
     }
 
     private class ChromeUncaughtExceptionHandler implements Thread.UncaughtExceptionHandler {

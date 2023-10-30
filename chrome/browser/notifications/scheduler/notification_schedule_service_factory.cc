@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,29 +7,63 @@
 #include <memory>
 #include <utility>
 
+#include "base/memory/singleton.h"
 #include "build/build_config.h"
+#include "chrome/browser/feature_guide/notifications/feature_notification_guide_service.h"
+#include "chrome/browser/feature_guide/notifications/feature_notification_guide_service_factory.h"
 #include "chrome/browser/notifications/scheduler/notification_background_task_scheduler_impl.h"
 #include "chrome/browser/notifications/scheduler/public/display_agent.h"
 #include "chrome/browser/notifications/scheduler/public/notification_schedule_service.h"
 #include "chrome/browser/notifications/scheduler/public/notification_scheduler_client_registrar.h"
 #include "chrome/browser/notifications/scheduler/schedule_service_factory_helper.h"
-#include "chrome/browser/profiles/incognito_helpers.h"
-#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
-#include "components/keyed_service/content/browser_context_dependency_manager.h"
-#include "components/leveldb_proto/content/proto_database_provider_factory.h"
+#include "components/keyed_service/core/simple_dependency_manager.h"
+#include "content/public/browser/storage_partition.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/android/reading_list/reading_list_notification_service_factory.h"
 #include "chrome/browser/notifications/scheduler/display_agent_android.h"
 #include "chrome/browser/notifications/scheduler/notification_background_task_scheduler_android.h"
-#endif
+#include "chrome/browser/reading_list/android/reading_list_notification_client.h"
+#include "chrome/browser/reading_list/android/reading_list_notification_service.h"
+#endif  // BUILDFLAG(IS_ANDROID)
 
 namespace {
+
 std::unique_ptr<notifications::NotificationSchedulerClientRegistrar>
-RegisterClients() {
+RegisterClients(ProfileKey* key) {
   auto client_registrar =
       std::make_unique<notifications::NotificationSchedulerClientRegistrar>();
-  // TODO(xingliu): Register clients here.
+#if BUILDFLAG(IS_ANDROID)
+  // Register reading list client.
+  if (ReadingListNotificationService::IsEnabled()) {
+    Profile* profile = ProfileManager::GetProfileFromProfileKey(key);
+    auto reading_list_service_getter = base::BindRepeating(
+        &ReadingListNotificationServiceFactory::GetForBrowserContext, profile);
+
+    auto reading_list_client = std::make_unique<ReadingListNotificationClient>(
+        reading_list_service_getter);
+    client_registrar->RegisterClient(
+        notifications::SchedulerClientType::kReadingList,
+        std::move(reading_list_client));
+  }
+
+  if (base::FeatureList::IsEnabled(
+          feature_guide::features::kFeatureNotificationGuide)) {
+    Profile* profile = ProfileManager::GetProfileFromProfileKey(key);
+    auto feature_guide_service_getter = base::BindRepeating(
+        &feature_guide::FeatureNotificationGuideServiceFactory::GetForProfile,
+        profile);
+
+    client_registrar->RegisterClient(
+        notifications::SchedulerClientType::kFeatureGuide,
+        CreateFeatureNotificationGuideNotificationClient(
+            feature_guide_service_getter));
+  }
+
+#endif  // BUILDFLAG(IS_ANDROID)
   return client_registrar;
 }
 
@@ -38,35 +72,31 @@ RegisterClients() {
 // static
 NotificationScheduleServiceFactory*
 NotificationScheduleServiceFactory::GetInstance() {
-  static base::NoDestructor<NotificationScheduleServiceFactory> instance;
-  return instance.get();
+  return base::Singleton<NotificationScheduleServiceFactory>::get();
 }
 
 // static
 notifications::NotificationScheduleService*
-NotificationScheduleServiceFactory::GetForBrowserContext(
-    content::BrowserContext* context) {
+NotificationScheduleServiceFactory::GetForKey(SimpleFactoryKey* key) {
   return static_cast<notifications::NotificationScheduleService*>(
-      GetInstance()->GetServiceForBrowserContext(context, true /* create */));
+      GetInstance()->GetServiceForKey(key, true /* create */));
 }
 
 NotificationScheduleServiceFactory::NotificationScheduleServiceFactory()
-    : BrowserContextKeyedServiceFactory(
-          "notifications::NotificationScheduleService",
-          BrowserContextDependencyManager::GetInstance()) {
-  DependsOn(leveldb_proto::ProtoDatabaseProviderFactory::GetInstance());
-}
+    : SimpleKeyedServiceFactory("notifications::NotificationScheduleService",
+                                SimpleDependencyManager::GetInstance()) {}
 
 NotificationScheduleServiceFactory::~NotificationScheduleServiceFactory() =
     default;
 
-KeyedService* NotificationScheduleServiceFactory::BuildServiceInstanceFor(
-    content::BrowserContext* context) const {
-  auto* profile = Profile::FromBrowserContext(context);
-  base::FilePath storage_dir =
-      profile->GetPath().Append(chrome::kNotificationSchedulerStorageDirname);
-  auto client_registrar = RegisterClients();
-#if defined(OS_ANDROID)
+std::unique_ptr<KeyedService>
+NotificationScheduleServiceFactory::BuildServiceInstanceFor(
+    SimpleFactoryKey* key) const {
+  auto* profile_key = ProfileKey::FromSimpleFactoryKey(key);
+  base::FilePath storage_dir = profile_key->GetPath().Append(
+      chrome::kNotificationSchedulerStorageDirname);
+  auto client_registrar = RegisterClients(profile_key);
+#if BUILDFLAG(IS_ANDROID)
   auto display_agent = std::make_unique<DisplayAgentAndroid>();
   auto background_task_scheduler =
       std::make_unique<NotificationBackgroundTaskSchedulerAndroid>();
@@ -74,18 +104,17 @@ KeyedService* NotificationScheduleServiceFactory::BuildServiceInstanceFor(
   auto display_agent = notifications::DisplayAgent::Create();
   auto background_task_scheduler =
       std::make_unique<NotificationBackgroundTaskSchedulerImpl>();
-#endif
-  auto* db_provider = leveldb_proto::ProtoDatabaseProviderFactory::GetForKey(
-      profile->GetProfileKey());
+#endif  // BUILDFLAG(IS_ANDROID)
+  auto* db_provider = profile_key->GetProtoDatabaseProvider();
   return notifications::CreateNotificationScheduleService(
       std::move(client_registrar), std::move(background_task_scheduler),
       std::move(display_agent), db_provider, storage_dir,
-      context->IsOffTheRecord());
+      profile_key->IsOffTheRecord());
 }
 
-content::BrowserContext*
-NotificationScheduleServiceFactory::GetBrowserContextToUse(
-    content::BrowserContext* context) const {
+SimpleFactoryKey* NotificationScheduleServiceFactory::GetKeyToUse(
+    SimpleFactoryKey* key) const {
   // Separate incognito instance that does nothing.
-  return chrome::GetBrowserContextOwnInstanceInIncognito(context);
+  ProfileKey* profile_key = ProfileKey::FromSimpleFactoryKey(key);
+  return profile_key->GetOriginalKey();
 }

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,8 @@
 #include "extensions/browser/app_window/app_window.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
+#include "ui/gfx/image/image_skia_rep.h"
+#include "ui/gfx/image/image_unittest_util.h"
 
 TestAppWindowIconObserver::TestAppWindowIconObserver(
     content::BrowserContext* context)
@@ -33,8 +35,15 @@ void TestAppWindowIconObserver::WaitForIconUpdates(int updates) {
   expected_icon_updates_ = updates + icon_updates_;
   icon_updated_callback_ = run_loop.QuitClosure();
   run_loop.Run();
-  base::RunLoop().RunUntilIdle();
   DCHECK_EQ(expected_icon_updates_, icon_updates_);
+}
+
+void TestAppWindowIconObserver::WaitForIconUpdates(
+    const gfx::ImageSkia& image_skia) {
+  base::RunLoop run_loop;
+  expected_image_skia_ = image_skia;
+  icon_image_updated_callback_ = run_loop.QuitClosure();
+  run_loop.Run();
 }
 
 void TestAppWindowIconObserver::OnAppWindowAdded(
@@ -94,5 +103,12 @@ void TestAppWindowIconObserver::OnWindowPropertyChanged(aura::Window* window,
   if (icon_updates_ == expected_icon_updates_ &&
       !icon_updated_callback_.is_null()) {
     std::move(icon_updated_callback_).Run();
+  }
+
+  if (!icon_image_updated_callback_.is_null() &&
+      gfx::test::AreBitmapsEqual(
+          expected_image_skia_.GetRepresentation(1.0f).GetBitmap(),
+          image->GetRepresentation(1.0f).GetBitmap())) {
+    std::move(icon_image_updated_callback_).Run();
   }
 }

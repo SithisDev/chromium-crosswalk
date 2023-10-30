@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,9 @@
 #include <jni.h>
 
 #include "base/android/scoped_java_ref.h"
-#include "base/compiler_specific.h"
+#include "base/memory/raw_ptr.h"
 #include "base/supports_user_data.h"
+#include "chrome/browser/profiles/profile.h"
 
 class Profile;
 
@@ -21,7 +22,7 @@ class ProfileAndroid : public base::SupportsUserData::Data {
   static Profile* FromProfileAndroid(
       const base::android::JavaRef<jobject>& obj);
 
-  static base::android::ScopedJavaLocalRef<jobject> GetLastUsedProfile(
+  static base::android::ScopedJavaLocalRef<jobject> GetLastUsedRegularProfile(
       JNIEnv* env);
 
   // Destroys this Profile when possible.
@@ -33,17 +34,32 @@ class ProfileAndroid : public base::SupportsUserData::Data {
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 
-  // Return the incognito profile.
+  // Return the OffTheRecord profile.
   //
-  // WARNING: This will create the OffTheRecord profile if it doesn't already
-  // exist. If this isn't what you want, you need to check
-  // HasOffTheRecordProfile() first.
   base::android::ScopedJavaLocalRef<jobject> GetOffTheRecordProfile(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& j_otr_profile_id,
+      const jboolean j_create_if_needed);
+
+  // Return primary OffTheRecord profile.
+  base::android::ScopedJavaLocalRef<jobject> GetPrimaryOTRProfile(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const jboolean j_create_if_needed);
+
+  // Return whether an OffTheRecord profile with given OTRProfileID exists.
+  jboolean HasOffTheRecordProfile(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& j_otr_profile_id);
+
+  // Returns if the primary OffTheRecord profile exists.
+  jboolean HasPrimaryOTRProfile(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 
-  // Return whether an off the record profile exists.
-  jboolean HasOffTheRecordProfile(
+  base::android::ScopedJavaLocalRef<jobject> GetOTRProfileID(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 
@@ -55,11 +71,17 @@ class ProfileAndroid : public base::SupportsUserData::Data {
   jboolean IsOffTheRecord(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj);
 
+  // Whether this profile is primary off the record profile.
+  jboolean IsPrimaryOTRProfile(JNIEnv* env,
+                               const base::android::JavaParamRef<jobject>& obj);
+
   // Whether this profile is signed in to a child account.
   jboolean IsChild(JNIEnv* env,
                    const base::android::JavaParamRef<jobject>& obj);
 
   void Wipe(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
+
+  jlong GetBrowserContextPointer(JNIEnv* env);
 
   explicit ProfileAndroid(Profile* profile);
   ~ProfileAndroid() override;
@@ -67,7 +89,7 @@ class ProfileAndroid : public base::SupportsUserData::Data {
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject();
 
  private:
-  Profile* profile_;  // weak
+  raw_ptr<Profile> profile_;  // weak
   base::android::ScopedJavaGlobalRef<jobject> obj_;
 };
 

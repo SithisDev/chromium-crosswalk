@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
 
@@ -16,7 +17,6 @@ class AppMenuModel;
 class Browser;
 
 namespace views {
-class MenuButtonListener;
 class MenuButtonController;
 }  // namespace views
 
@@ -25,15 +25,16 @@ class MenuButtonController;
 // displays the app menu.
 class AppMenuButton : public ToolbarButton {
  public:
-  explicit AppMenuButton(views::MenuButtonListener* menu_button_listener);
+  explicit AppMenuButton(PressedCallback callback);
+
+  AppMenuButton(const AppMenuButton&) = delete;
+  AppMenuButton& operator=(const AppMenuButton&) = delete;
+
   ~AppMenuButton() override;
 
   views::MenuButtonController* menu_button_controller() const {
     return menu_button_controller_;
   }
-
-  // ToolbarButton:
-  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
 
   void AddObserver(AppMenuButtonObserver* observer);
   void RemoveObserver(AppMenuButtonObserver* observer);
@@ -57,6 +58,10 @@ class AppMenuButton : public ToolbarButton {
                int run_flags,
                bool alert_reopen_tab_items);
 
+  // Provided for subclasses to handle menu close, before observers are
+  // notified. Default implementation does nothing.
+  virtual void HandleMenuClosed();
+
  private:
   // App model and menu.
   // Note that the menu should be destroyed before the model it uses, so the
@@ -68,9 +73,7 @@ class AppMenuButton : public ToolbarButton {
 
   base::ObserverList<AppMenuButtonObserver>::Unchecked observer_list_;
 
-  views::MenuButtonController* menu_button_controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(AppMenuButton);
+  raw_ptr<views::MenuButtonController> menu_button_controller_;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_APP_MENU_BUTTON_H_

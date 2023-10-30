@@ -1,19 +1,27 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/android/omnibox/omnibox_prerender.h"
 
 #include "base/android/jni_string.h"
-#include "base/logging.h"
-#include "chrome/android/chrome_jni_headers/OmniboxPrerender_jni.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
+#include "chrome/browser/predictors/loading_predictor.h"
+#include "chrome/browser/predictors/loading_predictor_factory.h"
+#include "chrome/browser/preloading/prefetch/search_prefetch/search_prefetch_service.h"
+#include "chrome/browser/preloading/prefetch/search_prefetch/search_prefetch_service_factory.h"
+#include "chrome/browser/preloading/prerender/prerender_manager.h"
+#include "chrome/browser/preloading/prerender/prerender_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
+#include "chrome/browser/ui/android/omnibox/jni_headers/OmniboxPrerender_jni.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_result.h"
+#include "components/omnibox/browser/base_search_provider.h"
 #include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
 
@@ -43,7 +51,7 @@ void OmniboxPrerender::Clear(JNIEnv* env,
     return;
   AutocompleteActionPredictor* action_predictor =
       AutocompleteActionPredictorFactory::GetForProfile(profile);
-  action_predictor->ClearTransitionalMatches();
+  action_predictor->UpdateDatabaseFromTransitionalMatches(GURL());
   action_predictor->CancelPrerender();
 }
 
@@ -68,9 +76,9 @@ void OmniboxPrerender::PrerenderMaybe(
   AutocompleteResult* autocomplete_result =
       reinterpret_cast<AutocompleteResult*>(jsource_match);
   Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile_android);
-  base::string16 url_string =
+  std::u16string url_string =
       base::android::ConvertJavaStringToUTF16(env, j_url);
-  base::string16 current_url_string =
+  std::u16string current_url_string =
       base::android::ConvertJavaStringToUTF16(env, j_current_url);
   content::WebContents* web_contents =
       TabAndroid::GetNativeTab(env, j_tab)->web_contents();
@@ -82,9 +90,15 @@ void OmniboxPrerender::PrerenderMaybe(
   if (!profile)
     return;
 
-  const AutocompleteResult::const_iterator default_match(
-      autocomplete_result->default_match());
-  if (default_match == autocomplete_result->end())
+  // TODO(https://crbug.com/1310147): Consider how to co-work with preconnect.
+  if (SearchPrefetchService* search_prefetch_service =
+          SearchPrefetchServiceFactory::GetForProfile(profile)) {
+    search_prefetch_service->OnResultChanged(web_contents,
+                                             *autocomplete_result);
+  }
+
+  auto* default_match = autocomplete_result->default_match();
+  if (!default_match)
     return;
 
   AutocompleteActionPredictor* action_predictor =
@@ -95,22 +109,21 @@ void OmniboxPrerender::PrerenderMaybe(
   action_predictor->
       RegisterTransitionalMatches(url_string, *autocomplete_result);
   AutocompleteActionPredictor::Action recommended_action =
-      action_predictor->RecommendAction(url_string, *default_match);
+      action_predictor->RecommendAction(url_string, *default_match,
+                                        web_contents);
 
   GURL current_url = GURL(current_url_string);
+  // Ask for prerendering if the destination URL is different than the
+  // current URL.
+  if (default_match->destination_url == current_url)
+    return;
+
   switch (recommended_action) {
     case AutocompleteActionPredictor::ACTION_PRERENDER:
-      // Ask for prerendering if the destination URL is different than the
-      // current URL.
-      if (default_match->destination_url != current_url) {
-        DoPrerender(
-            *default_match,
-            profile,
-            web_contents);
-      }
+      DoPrerender(*default_match, profile, web_contents);
       break;
     case AutocompleteActionPredictor::ACTION_PRECONNECT:
-      // TODO (apiccion) add preconnect logic
+      DoPreconnect(*default_match, profile);
       break;
     case AutocompleteActionPredictor::ACTION_NONE:
       break;
@@ -129,10 +142,26 @@ void OmniboxPrerender::DoPrerender(const AutocompleteMatch& match,
   DCHECK(web_contents);
   if (!web_contents)
     return;
+
+  // AutocompleteActionPredictor does not perform prerendering for search
+  // AutocompleteMatches. See `AutocompleteActionPredictor::RecommendAction` for
+  // more information.
+  // SearchPrefetchService is responsible for handling search
+  // AutocompleteMatches and preloading search result pages when needed.
+  DCHECK(!AutocompleteMatch::IsSearchType(match.type));
   gfx::Rect container_bounds = web_contents->GetContainerBounds();
-  predictors::AutocompleteActionPredictorFactory::GetForProfile(profile)->
-      StartPrerendering(
-          match.destination_url,
-          web_contents->GetController().GetDefaultSessionStorageNamespace(),
-          container_bounds.size());
+  predictors::AutocompleteActionPredictorFactory::GetForProfile(profile)
+      ->StartPrerendering(match.destination_url, *web_contents,
+                          container_bounds.size());
+}
+
+void OmniboxPrerender::DoPreconnect(const AutocompleteMatch& match,
+                                    Profile* profile) {
+  auto* loading_predictor =
+      predictors::LoadingPredictorFactory::GetForProfile(profile);
+  if (loading_predictor) {
+    loading_predictor->PrepareForPageLoad(
+        match.destination_url, predictors::HintOrigin::OMNIBOX,
+        predictors::AutocompleteActionPredictor::IsPreconnectable(match));
+  }
 }

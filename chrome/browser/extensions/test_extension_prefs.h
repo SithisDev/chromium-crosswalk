@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,9 @@
 #include <string>
 
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/test/base/testing_profile.h"
-#include "extensions/common/manifest.h"
+#include "extensions/common/mojom/manifest.mojom-shared.h"
 
 class ExtensionPrefValueMap;
 class PrefService;
@@ -41,6 +40,10 @@ class TestExtensionPrefs {
  public:
   explicit TestExtensionPrefs(
       const scoped_refptr<base::SequencedTaskRunner>& task_runner);
+
+  TestExtensionPrefs(const TestExtensionPrefs&) = delete;
+  TestExtensionPrefs& operator=(const TestExtensionPrefs&) = delete;
+
   virtual ~TestExtensionPrefs();
 
   ExtensionPrefs* prefs();
@@ -66,16 +69,21 @@ class TestExtensionPrefs {
   // As above, but the extension is an app.
   scoped_refptr<Extension> AddApp(const std::string& name);
 
+  // Similar to AddExtension, but with a specified location.
+  scoped_refptr<Extension> AddExtensionWithLocation(
+      const std::string& name,
+      mojom::ManifestLocation location);
+
   // Similar to AddExtension, but takes a dictionary with manifest values.
   scoped_refptr<Extension> AddExtensionWithManifest(
       const base::DictionaryValue& manifest,
-      Manifest::Location location);
+      mojom::ManifestLocation location);
 
   // Similar to AddExtension, but takes a dictionary with manifest values
   // and extension flags.
   scoped_refptr<Extension> AddExtensionWithManifestAndFlags(
       const base::DictionaryValue& manifest,
-      Manifest::Location location,
+      mojom::ManifestLocation location,
       int extra_flags);
 
   // Similar to AddExtension, this adds a new test Extension. This is useful for
@@ -94,6 +102,9 @@ class TestExtensionPrefs {
 
   ChromeAppSorting* app_sorting();
 
+  static void AddDefaultManifestKeys(const std::string& name,
+                                     base::DictionaryValue* dict);
+
  protected:
   class IncrementalClock;
 
@@ -111,7 +122,6 @@ class TestExtensionPrefs {
   std::unique_ptr<IncrementalClock> clock_;
   TestingProfile profile_;
   bool extensions_disabled_;
-  DISALLOW_COPY_AND_ASSIGN(TestExtensionPrefs);
 };
 
 }  // namespace extensions

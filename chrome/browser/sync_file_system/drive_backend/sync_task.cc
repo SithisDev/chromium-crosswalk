@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,7 @@ void ExclusiveTask::RunPreflight(std::unique_ptr<SyncTaskToken> token) {
 
   SyncTaskManager::UpdateTaskBlocker(
       std::move(token), std::move(task_blocker),
-      base::Bind(&CallRunExclusive, weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&CallRunExclusive, weak_ptr_factory_.GetWeakPtr()));
 }
 
 }  // namespace drive_backend

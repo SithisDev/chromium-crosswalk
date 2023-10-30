@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -6,12 +6,15 @@
 
 #include "chrome/browser/download/download_crx_util.h"
 
+#include <memory>
+
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "components/download/public/common/download_item.h"
@@ -33,7 +36,7 @@ bool g_allow_offstore_install_for_testing = false;
 
 // Hold a mock ExtensionInstallPrompt object that will be used when the
 // download system opens a CRX.
-ExtensionInstallPrompt* mock_install_prompt_for_testing = NULL;
+ExtensionInstallPrompt* mock_install_prompt_for_testing = nullptr;
 
 // Called to get an extension install UI object.  In tests, will return
 // a mock if the test calls download_util::SetMockInstallPromptForTesting()
@@ -45,7 +48,7 @@ std::unique_ptr<ExtensionInstallPrompt> CreateExtensionInstallPrompt(
   // install UI.
   if (mock_install_prompt_for_testing) {
     ExtensionInstallPrompt* result = mock_install_prompt_for_testing;
-    mock_install_prompt_for_testing = NULL;
+    mock_install_prompt_for_testing = nullptr;
     return std::unique_ptr<ExtensionInstallPrompt>(result);
   } else {
     content::WebContents* web_contents =
@@ -54,14 +57,19 @@ std::unique_ptr<ExtensionInstallPrompt> CreateExtensionInstallPrompt(
     if (!web_contents) {
       Browser* browser = chrome::FindLastActiveWithProfile(profile);
       if (!browser) {
-        browser = new Browser(
-            Browser::CreateParams(Browser::TYPE_TABBED, profile, true));
+        browser = Browser::Create(
+            Browser::CreateParams(Browser::TYPE_NORMAL, profile, true));
       }
       web_contents = browser->tab_strip_model()->GetActiveWebContents();
     }
-    return std::unique_ptr<ExtensionInstallPrompt>(
-        new ExtensionInstallPrompt(web_contents));
+    return std::make_unique<ExtensionInstallPrompt>(web_contents);
   }
+}
+
+bool OffStoreInstallAllowedByPrefs(Profile* profile, const DownloadItem& item) {
+  return g_allow_offstore_install_for_testing ||
+         extensions::ExtensionManagementFactory::GetForBrowserContext(profile)
+             ->IsOffstoreInstallAllowed(item.GetURL(), item.GetReferrerUrl());
 }
 
 }  // namespace
@@ -134,13 +142,9 @@ bool IsExtensionDownload(const DownloadItem& download_item) {
   }
 }
 
-bool OffStoreInstallAllowedByPrefs(Profile* profile, const DownloadItem& item) {
-  // TODO(aa): RefererURL is cleared in some cases, for example when going
-  // between secure and non-secure URLs. It would be better if DownloadItem
-  // tracked the initiating page explicitly.
-  return g_allow_offstore_install_for_testing ||
-         extensions::ExtensionManagementFactory::GetForBrowserContext(profile)
-             ->IsOffstoreInstallAllowed(item.GetURL(), item.GetReferrerUrl());
+bool IsTrustedExtensionDownload(Profile* profile, const DownloadItem& item) {
+  return IsExtensionDownload(item) &&
+         OffStoreInstallAllowedByPrefs(profile, item);
 }
 
 std::unique_ptr<base::AutoReset<bool>> OverrideOffstoreInstallAllowedForTesting(

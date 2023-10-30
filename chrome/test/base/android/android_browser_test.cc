@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,10 @@
 #include "chrome/test/base/test_launcher_utils.h"
 #include "content/public/test/test_utils.h"
 
-AndroidBrowserTest::AndroidBrowserTest() = default;
+AndroidBrowserTest::AndroidBrowserTest() {
+  CreateTestServer(base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+}
+
 AndroidBrowserTest::~AndroidBrowserTest() = default;
 
 void AndroidBrowserTest::SetUp() {
@@ -33,9 +36,9 @@ void AndroidBrowserTest::PreRunTestOnMainThread() {
 }
 
 void AndroidBrowserTest::PostRunTestOnMainThread() {
-  for (size_t i = 0; i < TabModelList::size(); ++i) {
-    while (TabModelList::get(i)->GetTabCount())
-      TabModelList::get(i)->CloseTabAt(0);
+  for (TabModel* model : TabModelList::models()) {
+    while (model->GetTabCount())
+      model->CloseTabAt(0);
   }
 
   // Run any shutdown events from closing tabs.

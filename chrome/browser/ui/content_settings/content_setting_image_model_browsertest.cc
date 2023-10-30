@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/subresource_filter/core/browser/subresource_filter_constants.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_navigation_observer.h"
 
 using content::WebContents;
@@ -26,8 +27,9 @@ typedef InProcessBrowserTest ContentSettingImageModelBrowserTest;
 IN_PROC_BROWSER_TEST_F(ContentSettingImageModelBrowserTest, CreateBubbleModel) {
   WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(web_contents);
+  content_settings::PageSpecificContentSettings* content_settings =
+      content_settings::PageSpecificContentSettings::GetForFrame(
+          web_contents->GetPrimaryMainFrame());
   content_settings->BlockAllContentForTesting();
 
   // Automatic downloads are handled by DownloadRequestLimiter.
@@ -36,7 +38,7 @@ IN_PROC_BROWSER_TEST_F(ContentSettingImageModelBrowserTest, CreateBubbleModel) {
           web_contents, true);
   tab_download_state->set_download_seen();
   tab_download_state->SetDownloadStatusAndNotify(
-      web_contents->GetVisibleURL().GetOrigin(),
+      url::Origin::Create(web_contents->GetVisibleURL()),
       DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED);
 
   // Test that image models tied to a single content setting create bubbles tied
@@ -46,11 +48,8 @@ IN_PROC_BROWSER_TEST_F(ContentSettingImageModelBrowserTest, CreateBubbleModel) {
           ImageType::COOKIES,
           ImageType::IMAGES,
           ImageType::JAVASCRIPT,
-          ImageType::PLUGINS,
           ImageType::POPUPS,
           ImageType::MIXEDSCRIPT,
-          ImageType::PPAPI_BROKER,
-          ImageType::GEOLOCATION,
           ImageType::PROTOCOL_HANDLERS,
           ImageType::MIDI_SYSEX,
       };

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,8 @@
 #include "chrome/browser/ui/views/apps/glass_app_window_frame_view_win.h"
 #include "ui/base/theme_provider.h"
 #include "ui/display/win/dpi.h"
+#include "ui/gfx/geometry/dip_util.h"
+#include "ui/gfx/geometry/insets_conversions.h"
 #include "ui/views/controls/menu/native_menu_win.h"
 
 AppWindowDesktopWindowTreeHostWin::AppWindowDesktopWindowTreeHostWin(
@@ -57,7 +59,8 @@ bool AppWindowDesktopWindowTreeHostWin::GetDwmFrameInsetsInPixels(
     *insets = app_window_->glass_frame_view()->GetGlassInsets();
     // The DWM API's expect values in pixels. We need to convert from DIP to
     // pixels here.
-    *insets = insets->Scale(display::win::GetDPIScale());
+    *insets = gfx::ToFlooredInsets(
+        gfx::ConvertInsetsToPixels(*insets, display::win::GetDPIScale()));
   }
   return true;
 }

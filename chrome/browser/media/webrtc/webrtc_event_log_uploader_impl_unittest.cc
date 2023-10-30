@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,19 +8,21 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/callback_forward.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/media/webrtc/webrtc_event_log_manager_common.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "net/http/http_status_code.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "services/network/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -28,6 +30,7 @@
 
 namespace webrtc_event_logging {
 
+using ::testing::_;
 using ::testing::StrictMock;
 using BrowserContextId = WebRtcEventLogPeerConnectionKey::BrowserContextId;
 
@@ -51,7 +54,7 @@ class UploadObserver {
   base::OnceClosure on_complete_callback_;
 };
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 void RemovePermissions(const base::FilePath& path, int removed_permissions) {
   int permissions;
   ASSERT_TRUE(base::GetPosixFilePermissions(path, &permissions));
@@ -65,7 +68,7 @@ void RemoveReadPermissions(const base::FilePath& path) {
                                    base::FILE_PERMISSION_READ_BY_OTHERS;
   RemovePermissions(path, read_permissions);
 }
-#endif  // defined(OS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX)
 }  // namespace
 
 class WebRtcEventLogUploaderImplTest : public ::testing::Test {
@@ -81,11 +84,12 @@ class WebRtcEventLogUploaderImplTest : public ::testing::Test {
 
     EXPECT_TRUE(base::Time::FromString("30 Dec 1983", &kReasonableTime));
 
-    uploader_factory_ = std::make_unique<WebRtcEventLogUploaderImpl::Factory>();
+    uploader_factory_ = std::make_unique<WebRtcEventLogUploaderImpl::Factory>(
+        base::SequencedTaskRunnerHandle::Get());
   }
 
   ~WebRtcEventLogUploaderImplTest() override {
-    test_browser_thread_bundle_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   void SetUp() override {
@@ -122,7 +126,7 @@ class WebRtcEventLogUploaderImplTest : public ::testing::Test {
     const std::string kResponseId = "ec1ed029734b8f7e";  // Arbitrary.
     test_url_loader_factory_.AddResponse(
         GURL(WebRtcEventLogUploaderImpl::kUploadURL),
-        network::CreateResourceResponseHead(http_code), kResponseId,
+        network::CreateURLResponseHead(http_code), kResponseId,
         network::URLLoaderCompletionStatus(net_error));
   }
 
@@ -182,7 +186,7 @@ class WebRtcEventLogUploaderImplTest : public ::testing::Test {
                           base::Unretained(&observer_));
   }
 
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   base::Time kReasonableTime;
 
@@ -194,7 +198,7 @@ class WebRtcEventLogUploaderImplTest : public ::testing::Test {
 
   base::ScopedTempDir profiles_dir_;
   std::unique_ptr<TestingProfileManager> testing_profile_manager_;
-  TestingProfile* testing_profile_;  // |testing_profile_manager_| owns.
+  raw_ptr<TestingProfile> testing_profile_;  // |testing_profile_manager_| owns.
   BrowserContextId browser_context_id_;
 
   base::FilePath log_file_;
@@ -233,7 +237,7 @@ TEST_F(WebRtcEventLogUploaderImplTest, UnsuccessfulUploadReportedToObserver2) {
   EXPECT_FALSE(base::PathExists(log_file_));
 }
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 TEST_F(WebRtcEventLogUploaderImplTest, FailureToReadFileReportedToObserver) {
   // Show the failure was independent of the URLLoaderFactory's primed return
   // value.
@@ -253,7 +257,7 @@ TEST_F(WebRtcEventLogUploaderImplTest, NonExistentFileReportedToObserver) {
   EXPECT_CALL(observer_, CompletionCallback(log_file_, false)).Times(1);
   StartAndWaitForUpload();
 }
-#endif  // defined(OS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX)
 
 TEST_F(WebRtcEventLogUploaderImplTest, FilesUpToMaxSizeUploaded) {
   int64_t log_file_size_bytes;
@@ -276,31 +280,34 @@ TEST_F(WebRtcEventLogUploaderImplTest, ExcessivelyLargeFilesNotUploaded) {
 }
 
 TEST_F(WebRtcEventLogUploaderImplTest,
-       CancelBeforeUploadCompletionReturnsTrue) {
+       CancelBeforeUploadCompletionCallsCallbackWithFalse) {
   const base::Time last_modified = base::Time::Now();
   StartUploadThatWillNotTerminate(browser_context_id_, last_modified);
-
-  EXPECT_TRUE(uploader_->Cancel());
+  EXPECT_CALL(observer_, CompletionCallback(log_file_, false)).Times(1);
+  uploader_->Cancel();
 }
 
-TEST_F(WebRtcEventLogUploaderImplTest, CancelOnCancelledUploadReturnsFalse) {
+TEST_F(WebRtcEventLogUploaderImplTest, SecondCallToCancelHasNoEffect) {
   const base::Time last_modified = base::Time::Now();
   StartUploadThatWillNotTerminate(browser_context_id_, last_modified);
 
-  ASSERT_TRUE(uploader_->Cancel());
-  EXPECT_FALSE(uploader_->Cancel());
+  EXPECT_CALL(observer_, CompletionCallback(log_file_, _)).Times(1);
+
+  uploader_->Cancel();
+  uploader_->Cancel();
 }
 
 TEST_F(WebRtcEventLogUploaderImplTest,
-       CancelAfterUploadCompletionReturnsFalse) {
+       CancelAfterUploadCompletionCallbackWasCalledHasNoEffect) {
   SetURLLoaderResponse(net::HTTP_OK, net::OK);
   EXPECT_CALL(observer_, CompletionCallback(log_file_, true)).Times(1);
   StartAndWaitForUpload();
 
-  EXPECT_FALSE(uploader_->Cancel());
+  EXPECT_CALL(observer_, CompletionCallback(_, _)).Times(0);
+  uploader_->Cancel();
 }
 
-TEST_F(WebRtcEventLogUploaderImplTest, CancelOnAbortedUploadReturnsFalse) {
+TEST_F(WebRtcEventLogUploaderImplTest, CancelOnAbortedUploadHasNoEffect) {
   // Show the failure was independent of the URLLoaderFactory's primed return
   // value.
   SetURLLoaderResponse(net::HTTP_OK, net::OK);
@@ -309,13 +316,17 @@ TEST_F(WebRtcEventLogUploaderImplTest, CancelOnAbortedUploadReturnsFalse) {
   EXPECT_CALL(observer_, CompletionCallback(log_file_, false)).Times(1);
   StartAndWaitForUpload();
 
-  EXPECT_FALSE(uploader_->Cancel());
+  EXPECT_CALL(observer_, CompletionCallback(_, _)).Times(0);
+  uploader_->Cancel();
 }
 
 TEST_F(WebRtcEventLogUploaderImplTest, CancelOnOngoingUploadDeletesFile) {
   const base::Time last_modified = base::Time::Now();
   StartUploadThatWillNotTerminate(browser_context_id_, last_modified);
-  ASSERT_TRUE(uploader_->Cancel());
+
+  EXPECT_CALL(observer_, CompletionCallback(log_file_, false)).Times(1);
+  uploader_->Cancel();
+  observer_run_loop_.Run();
 
   EXPECT_FALSE(base::PathExists(log_file_));
 }
@@ -331,7 +342,8 @@ TEST_F(WebRtcEventLogUploaderImplTest,
   EXPECT_EQ(info.last_modified, last_modified);
 
   // Test tear-down.
-  ASSERT_TRUE(uploader_->Cancel());
+  EXPECT_CALL(observer_, CompletionCallback(log_file_, false)).Times(1);
+  uploader_->Cancel();
 }
 
 TEST_F(WebRtcEventLogUploaderImplTest,
@@ -352,7 +364,8 @@ TEST_F(WebRtcEventLogUploaderImplTest,
        GetWebRtcLogFileInfoReturnsCorrectInfoWhenCalledOnCancelledUpload) {
   const base::Time last_modified = base::Time::Now();
   StartUploadThatWillNotTerminate(browser_context_id_, last_modified);
-  ASSERT_TRUE(uploader_->Cancel());
+  EXPECT_CALL(observer_, CompletionCallback(log_file_, false)).Times(1);
+  uploader_->Cancel();
 
   const WebRtcLogFileInfo info = uploader_->GetWebRtcLogFileInfo();
   EXPECT_EQ(info.browser_context_id, browser_context_id_);

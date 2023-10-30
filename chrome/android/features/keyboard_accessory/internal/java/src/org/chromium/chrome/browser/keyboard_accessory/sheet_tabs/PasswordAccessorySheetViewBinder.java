@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,9 @@ package org.chromium.chrome.browser.keyboard_accessory.sheet_tabs;
 import static org.chromium.ui.base.LocalizationUtils.isLayoutRtl;
 
 import android.content.res.TypedArray;
-import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Rect;
-import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.Nullable;
-import android.support.v4.view.ViewCompat;
-import android.support.v7.content.res.AppCompatResources;
-import android.support.v7.widget.RecyclerView;
 import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
 import android.view.View;
@@ -23,10 +17,15 @@ import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.annotation.Nullable;
+import androidx.core.view.ViewCompat;
+import androidx.recyclerview.widget.RecyclerView;
+
 import org.chromium.chrome.browser.keyboard_accessory.R;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.FooterCommand;
 import org.chromium.chrome.browser.keyboard_accessory.data.UserInfoField;
+import org.chromium.chrome.browser.keyboard_accessory.helper.FaviconHelper;
 import org.chromium.chrome.browser.keyboard_accessory.sheet_tabs.AccessorySheetTabModel.AccessorySheetDataPiece;
 import org.chromium.chrome.browser.keyboard_accessory.sheet_tabs.AccessorySheetTabViewBinder.ElementViewHolder;
 import org.chromium.ui.HorizontalListDividerDrawable;
@@ -148,11 +147,10 @@ class PasswordAccessorySheetViewBinder {
             bindTextView(password, info.getFields().get(1));
 
             // Set the default icon for username, then try to get a better one.
-            setIconForBitmap(username, null);
-            if (info.getFaviconProvider() != null) {
-                info.getFaviconProvider().fetchFavicon(
-                        mIconSize, icon -> setIconForBitmap(username, icon));
-            }
+            FaviconHelper faviconHelper = FaviconHelper.create(username.getContext());
+            setIconForBitmap(username, faviconHelper.getDefaultIcon(info.getOrigin()));
+            faviconHelper.fetchFavicon(info.getOrigin(), icon -> setIconForBitmap(username, icon));
+
             ViewCompat.setPaddingRelative(username, mPadding, 0, mPadding, 0);
             // Passwords have no icon, so increase the offset.
             ViewCompat.setPaddingRelative(password, 2 * mPadding + mIconSize, 0, mPadding, 0);
@@ -181,15 +179,8 @@ class PasswordAccessorySheetViewBinder {
             return suggestionBackground;
         }
 
-        private void setIconForBitmap(TextView text, @Nullable Bitmap favicon) {
-            Drawable icon;
-            if (favicon == null) {
-                icon = AppCompatResources.getDrawable(
-                        itemView.getContext(), R.drawable.ic_globe_36dp);
-            } else {
-                icon = new BitmapDrawable(itemView.getContext().getResources(), favicon);
-            }
-            if (icon != null) { // AppCompatResources.getDrawable is @Nullable.
+        private void setIconForBitmap(TextView text, @Nullable Drawable icon) {
+            if (icon != null) {
                 icon.setBounds(0, 0, mIconSize, mIconSize);
             }
             text.setCompoundDrawablePadding(mPadding);

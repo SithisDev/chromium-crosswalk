@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,6 +23,10 @@ bool NotificationEntry::operator==(const NotificationEntry& other) const {
          notification_data == other.notification_data &&
          icons_uuid == other.icons_uuid &&
          schedule_params == other.schedule_params;
+}
+
+bool NotificationEntry::operator!=(const NotificationEntry& other) const {
+  return !(*this == other);
 }
 
 NotificationEntry::~NotificationEntry() = default;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,11 @@
 #include <memory>
 #include <string>
 
-#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/scoped_observer.h"
+#include "base/memory/weak_ptr.h"
+#include "base/scoped_observation.h"
 #include "base/supports_user_data.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
@@ -23,7 +24,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/web_contents_observer.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/manifest_handlers/shared_module_info.h"
 #include "ui/gfx/image/image_skia.h"
@@ -43,14 +44,12 @@ namespace extensions {
 
 class CrxInstaller;
 class Extension;
-class ExtensionRegistry;
 class Manifest;
 
 // Downloads and installs extensions from the web store.
 class WebstoreInstaller : public content::NotificationObserver,
                           public ExtensionRegistryObserver,
                           public download::DownloadItem::Observer,
-                          public content::WebContentsObserver,
                           public base::RefCountedThreadSafe<
                               WebstoreInstaller,
                               content::BrowserThread::DeleteOnUIThread> {
@@ -127,27 +126,27 @@ class WebstoreInstaller : public content::NotificationObserver,
     std::string extension_id;
 
     // The profile the extension should be installed into.
-    Profile* profile;
+    raw_ptr<Profile> profile = nullptr;
 
     // The expected manifest, before localization.
     std::unique_ptr<Manifest> manifest;
 
     // Whether to use a bubble notification when an app is installed, instead of
     // the default behavior of transitioning to the new tab page.
-    bool use_app_installed_bubble;
+    bool use_app_installed_bubble = false;
 
     // Whether to skip the post install UI like the extension installed bubble.
-    bool skip_post_install_ui;
+    bool skip_post_install_ui = false;
 
     // Whether to skip the install dialog once the extension has been downloaded
     // and unpacked. One reason this can be true is that in the normal webstore
     // installation, the dialog is shown earlier, before any download is done,
     // so there's no need to show it again.
-    bool skip_install_dialog;
+    bool skip_install_dialog = false;
 
     // Manifest check level for checking actual manifest against expected
     // manifest.
-    ManifestCheckLevel manifest_check_level;
+    ManifestCheckLevel manifest_check_level = MANIFEST_CHECK_LEVEL_STRICT;
 
     // Used to show the install dialog.
     ExtensionInstallPrompt::ShowDialogCallback show_dialog_callback;
@@ -165,22 +164,27 @@ class WebstoreInstaller : public content::NotificationObserver,
     // the empty string, in which case no authuser parameter is used.
     std::string authuser;
 
+    // Whether the user clicked through the install friction dialog when the
+    // extension is not included in the Enhanced Safe Browsing CRX allowlist and
+    // the user has enabled Enhanced Protection.
+    bool bypassed_safebrowsing_friction = false;
+
    private:
     Approval();
   };
 
-  // Gets the Approval associated with the |download|, or NULL if there's none.
-  // Note that the Approval is owned by |download|.
+  // Gets the Approval associated with the |download|, or nullptr if there's
+  // none. Note that the Approval is owned by |download|.
   static const Approval* GetAssociatedApproval(
       const download::DownloadItem& download);
 
   // Creates a WebstoreInstaller for downloading and installing the extension
-  // with the given |id| from the Chrome Web Store. If |delegate| is not NULL,
-  // it will be notified when the install succeeds or fails. The installer will
-  // use the specified |controller| to download the extension. Only one
-  // WebstoreInstaller can use a specific controller at any given time. This
-  // also associates the |approval| with this install.
-  // Note: the delegate should stay alive until being called back.
+  // with the given |id| from the Chrome Web Store. If |delegate| is not
+  // nullptr, it will be notified when the install succeeds or fails. The
+  // installer will use the specified |controller| to download the extension.
+  // Only one WebstoreInstaller can use a specific controller at any given time.
+  // This also associates the |approval| with this install. Note: the delegate
+  // should stay alive until being called back.
   WebstoreInstaller(Profile* profile,
                     Delegate* delegate,
                     content::WebContents* web_contents,
@@ -262,15 +266,16 @@ class WebstoreInstaller : public content::NotificationObserver,
   void RecordInterrupt(const download::DownloadItem* download) const;
 
   content::NotificationRegistrar registrar_;
-  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
-      extension_registry_observer_;
-  Profile* profile_;
-  Delegate* delegate_;
+  base::ScopedObservation<ExtensionRegistry, ExtensionRegistryObserver>
+      extension_registry_observation_{this};
+  base::WeakPtr<content::WebContents> web_contents_;
+  raw_ptr<Profile> profile_;
+  raw_ptr<Delegate> delegate_;
   std::string id_;
   InstallSource install_source_;
   // The DownloadItem is owned by the DownloadManager and is valid from when
   // OnDownloadStarted is called (with no error) until OnDownloadDestroyed().
-  download::DownloadItem* download_item_;
+  raw_ptr<download::DownloadItem> download_item_ = nullptr;
   // Used to periodically update the extension's download status. This will
   // trigger at least every second, though sometimes more frequently (depending
   // on number of modules, etc).
@@ -283,8 +288,8 @@ class WebstoreInstaller : public content::NotificationObserver,
   std::list<SharedModuleInfo::ImportInfo> pending_modules_;
   // Total extension modules we need download and install (the main module and
   // depedences).
-  int total_modules_;
-  bool download_started_;
+  int total_modules_ = 0;
+  bool download_started_ = false;
 };
 
 }  // namespace extensions

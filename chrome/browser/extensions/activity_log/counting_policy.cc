@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,10 +42,10 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/task_runner_util.h"
+#include "base/task/task_runner_util.h"
 #include "chrome/browser/extensions/activity_log/activity_log_task_runner.h"
 #include "chrome/common/chrome_constants.h"
 #include "sql/statement.h"
@@ -57,13 +57,13 @@ using extensions::Action;
 
 // Delay between cleaning passes (to delete old action records) through the
 // database.
-constexpr base::TimeDelta kCleaningDelay = base::TimeDelta::FromHours(12);
+constexpr base::TimeDelta kCleaningDelay = base::Hours(12);
 
 // We should log the arguments to these API calls.  Be careful when
-// constructing this whitelist to not keep arguments that might compromise
+// constructing this allowlist to not keep arguments that might compromise
 // privacy by logging too much data to the activity log.
 //
-// TODO(mvrable): The contents of this whitelist should be reviewed and
+// TODO(mvrable): The contents of this allowlist should be reviewed and
 // expanded as needed.
 struct ApiList {
   Action::ActionType type;
@@ -170,9 +170,9 @@ CountingPolicy::CountingPolicy(Profile* profile)
           base::FilePath(chrome::kExtensionActivityLogFilename)),
       string_table_("string_ids"),
       url_table_("url_ids"),
-      retention_time_(base::TimeDelta::FromHours(60)) {
-  for (size_t i = 0; i < base::size(kAlwaysLog); i++) {
-    api_arg_whitelist_.insert(
+      retention_time_(base::Hours(60)) {
+  for (size_t i = 0; i < std::size(kAlwaysLog); i++) {
+    api_arg_allowlist_.insert(
         std::make_pair(kAlwaysLog[i].type, kAlwaysLog[i].name));
   }
 }
@@ -188,7 +188,7 @@ bool CountingPolicy::InitDatabase(sql::Database* db) {
   // Create the unified activity log entry table.
   if (!ActivityDatabase::InitializeTable(db, kTableName, kTableContentFields,
                                          kTableFieldTypes,
-                                         base::size(kTableContentFields)))
+                                         std::size(kTableContentFields)))
     return false;
 
   // Create a view for easily accessing the uncompressed form of the data, and
@@ -204,7 +204,7 @@ void CountingPolicy::QueueAction(scoped_refptr<Action> action) {
   if (activity_database()->is_db_valid()) {
     action = action->Clone();
     Util::StripPrivacySensitiveFields(action);
-    Util::StripArguments(api_arg_whitelist_, action);
+    Util::StripArguments(api_arg_allowlist_, action);
 
     // If the current action falls on a different date than the ones in the
     // queue, flush the queue out now to prevent any false merging (actions
@@ -270,14 +270,14 @@ bool CountingPolicy::FlushDatabase(sql::Database* db) {
       " SET count = count + ?, time = max(?, time)"
       " WHERE rowid = ?";
 
-  for (size_t i = 0; i < base::size(matched_columns); i++) {
+  for (size_t i = 0; i < std::size(matched_columns); i++) {
     locate_str = base::StringPrintf(
         "%s AND %s IS ?", locate_str.c_str(), matched_columns[i]);
     insert_str =
         base::StringPrintf("%s, %s", insert_str.c_str(), matched_columns[i]);
   }
   insert_str += ") VALUES (?, ?";
-  for (size_t i = 0; i < base::size(matched_columns); i++) {
+  for (size_t i = 0; i < std::size(matched_columns); i++) {
     insert_str += ", ?";
   }
   locate_str += " ORDER BY time DESC LIMIT 1";
@@ -435,8 +435,8 @@ std::unique_ptr<Action::ActionVector> CountingPolicy::DoReadFilteredData(
     return actions;
 
   // Build up the query based on which parameters were specified.
-  std::string where_str = "";
-  std::string where_next = "";
+  std::string where_str;
+  std::string where_next;
   if (!extension_id.empty()) {
     where_str += "extension_id=?";
     where_next = " AND ";
@@ -489,18 +489,17 @@ std::unique_ptr<Action::ActionVector> CountingPolicy::DoReadFilteredData(
 
   // Execute the query and get results.
   while (query.is_valid() && query.Step()) {
-    scoped_refptr<Action> action =
-        new Action(query.ColumnString(0),
-                   base::Time::FromInternalValue(query.ColumnInt64(1)),
-                   static_cast<Action::ActionType>(query.ColumnInt(2)),
-                   query.ColumnString(3), query.ColumnInt64(10));
+    auto action = base::MakeRefCounted<Action>(
+        query.ColumnString(0),
+        base::Time::FromInternalValue(query.ColumnInt64(1)),
+        static_cast<Action::ActionType>(query.ColumnInt(2)),
+        query.ColumnString(3), query.ColumnInt64(10));
 
     if (query.GetColumnType(4) != sql::ColumnType::kNull) {
-      std::unique_ptr<base::Value> parsed_value =
-          base::JSONReader::ReadDeprecated(query.ColumnString(4));
+      absl::optional<base::Value> parsed_value =
+          base::JSONReader::Read(query.ColumnString(4));
       if (parsed_value && parsed_value->is_list()) {
-        action->set_args(base::WrapUnique(
-            static_cast<base::ListValue*>(parsed_value.release())));
+        action->set_args(std::move(parsed_value->GetList()));
       }
     }
 
@@ -509,11 +508,10 @@ std::unique_ptr<Action::ActionVector> CountingPolicy::DoReadFilteredData(
     action->ParseArgUrl(query.ColumnString(7));
 
     if (query.GetColumnType(8) != sql::ColumnType::kNull) {
-      std::unique_ptr<base::Value> parsed_value =
-          base::JSONReader::ReadDeprecated(query.ColumnString(8));
+      absl::optional<base::Value> parsed_value =
+          base::JSONReader::Read(query.ColumnString(8));
       if (parsed_value && parsed_value->is_dict()) {
-        action->set_other(base::WrapUnique(
-            static_cast<base::DictionaryValue*>(parsed_value.release())));
+        action->set_other(std::move(parsed_value->GetDict()));
       }
     }
     action->set_count(query.ColumnInt(9));

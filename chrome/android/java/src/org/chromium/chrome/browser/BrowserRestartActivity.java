@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@ import android.os.Bundle;
 import android.os.Process;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.base.annotations.MainDex;
-import org.chromium.chrome.browser.util.IntentUtils;
+import org.chromium.base.IntentUtils;
+import org.chromium.build.annotations.MainDex;
 
 /**
  * Kills and (optionally) restarts the main Chrome process, then immediately kills itself.

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,8 @@
 #include "base/callback.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chrome/chrome_cleaner/engines/broker/scanner_sandbox_interface.h"
-#include "mojo/public/cpp/system/platform_handle.h"
 
 namespace chrome_cleaner {
 
@@ -34,16 +33,14 @@ EngineFileRequestsImpl::EngineFileRequestsImpl(
     scoped_refptr<MojoTaskRunner> mojo_task_runner,
     InterfaceMetadataObserver* metadata_observer)
     : mojo_task_runner_(mojo_task_runner),
-      metadata_observer_(metadata_observer),
-      binding_(this) {}
+      metadata_observer_(metadata_observer) {}
 
 void EngineFileRequestsImpl::Bind(
-    mojom::EngineFileRequestsAssociatedPtrInfo* ptr_info) {
-  if (binding_.is_bound())
-    binding_.Unbind();
+    mojo::PendingAssociatedRemote<mojom::EngineFileRequests>* remote) {
+  receiver_.reset();
 
-  binding_.Bind(mojo::MakeRequest(ptr_info));
-  // There's no need to call set_connection_error_handler on this since it's an
+  receiver_.Bind(remote->InitWithNewEndpointAndPassReceiver());
+  // There's no need to call set_disconnect_handler on this since it's an
   // associated interface. Any errors will be handled on the main EngineCommands
   // interface.
 }
@@ -54,7 +51,7 @@ void EngineFileRequestsImpl::SandboxFindFirstFile(
     const base::FilePath& file_name,
     SandboxFindFirstFileCallback result_callback) {
   // Execute the request off of the Mojo thread to unblock it for other calls.
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineFileRequestsImpl::FindFirstFile,
                      base::Unretained(this), file_name,
@@ -70,7 +67,7 @@ void EngineFileRequestsImpl::FindFirstFile(
       file_name, &find_file_data, &handle);
   if (metadata_observer_) {
     std::map<std::string, std::string> arguments = {
-        {"file_name", base::UTF16ToUTF8(file_name.value())},
+        {"file_name", base::WideToUTF8(file_name.value())},
         {"result", base::NumberToString(result)},
         {"handle", base::NumberToString(reinterpret_cast<size_t>(handle))},
     };
@@ -93,7 +90,7 @@ void EngineFileRequestsImpl::FindFirstFile(
 void EngineFileRequestsImpl::SandboxFindNextFile(
     mojom::FindHandlePtr handle_ptr,
     SandboxFindNextFileCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineFileRequestsImpl::FindNextFile,
                      base::Unretained(this), std::move(handle_ptr),
@@ -126,7 +123,7 @@ void EngineFileRequestsImpl::FindNextFile(
 void EngineFileRequestsImpl::SandboxFindClose(
     mojom::FindHandlePtr handle_ptr,
     SandboxFindCloseCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineFileRequestsImpl::FindClose, base::Unretained(this),
                      std::move(handle_ptr), std::move(result_callback)));
@@ -154,7 +151,7 @@ void EngineFileRequestsImpl::SandboxOpenReadOnlyFile(
     const base::FilePath& file_name,
     uint32_t dwFlagsAndAttribute,
     SandboxOpenReadOnlyFileCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineFileRequestsImpl::OpenReadOnlyFile,
                      base::Unretained(this), file_name, dwFlagsAndAttribute,
@@ -170,10 +167,9 @@ void EngineFileRequestsImpl::OpenReadOnlyFile(
   base::win::ScopedHandle handle =
       chrome_cleaner_sandbox::SandboxOpenReadOnlyFile(file_name,
                                                       dwFlagsAndAttribute);
-
   mojo_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(std::move(result_callback),
-                                mojo::WrapPlatformFile(handle.Take())));
+                                mojo::PlatformHandle(std::move(handle))));
 }
 
 }  // namespace chrome_cleaner

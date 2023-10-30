@@ -1,13 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_HISTORY_HISTORY_TAB_HELPER_H_
 #define CHROME_BROWSER_HISTORY_HISTORY_TAB_HELPER_H_
 
-#include "base/macros.h"
-#include "base/memory/ref_counted.h"
+#include "base/scoped_observation.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
+#include "components/sessions/core/serialized_navigation_entry.h"
+#include "components/translate/core/browser/translate_driver.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
@@ -16,13 +18,18 @@ struct HistoryAddPageArgs;
 class HistoryService;
 }
 
-class HistoryTabHelper : public content::WebContentsObserver,
-                         public content::WebContentsUserData<HistoryTabHelper> {
+class HistoryTabHelper
+    : public content::WebContentsObserver,
+      public translate::TranslateDriver::LanguageDetectionObserver,
+      public content::WebContentsUserData<HistoryTabHelper> {
  public:
+  HistoryTabHelper(const HistoryTabHelper&) = delete;
+  HistoryTabHelper& operator=(const HistoryTabHelper&) = delete;
+
   ~HistoryTabHelper() override;
 
   // Updates history with the specified navigation. This is called by
-  // OnMsgNavigate to update history state.
+  // DidFinishNavigation to update history state.
   void UpdateHistoryForNavigation(
       const history::HistoryAddPageArgs& add_page_args);
 
@@ -34,20 +41,62 @@ class HistoryTabHelper : public content::WebContentsObserver,
       int nav_entry_id,
       content::NavigationHandle* navigation_handle);
 
+  // Called by password manager code when the PasswordState in this tab was
+  // updated.
+  void OnPasswordStateUpdated(
+      sessions::SerializedNavigationEntry::PasswordState password_state);
+
+  // Fakes that the WebContents is a tab for testing purposes.
+  void SetForceEligibleTabForTesting(bool force) {
+    force_eligible_tab_for_testing_ = force;
+  }
+
  private:
   explicit HistoryTabHelper(content::WebContents* web_contents);
   friend class content::WebContentsUserData<HistoryTabHelper>;
+  FRIEND_TEST_ALL_PREFIXES(HistoryTabHelperTest,
+                           CreateAddPageArgsHasOpenerWebContentsFirstPage);
+  FRIEND_TEST_ALL_PREFIXES(HistoryTabHelperTest,
+                           CreateAddPageArgsHasOpenerWebContentseNotFirstPage);
+  FRIEND_TEST_ALL_PREFIXES(HistoryFencedFrameBrowserTest,
+                           FencedFrameDoesNotAffectLoadingState);
 
   // content::WebContentsObserver implementation.
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
+  void DidActivatePortal(content::WebContents* predecessor_contents,
+                         base::TimeTicks activation_time) override;
   void DidFinishLoad(content::RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
   void TitleWasSet(content::NavigationEntry* entry) override;
   void WebContentsDestroyed() override;
+  void DidOpenRequestedURL(content::WebContents* new_contents,
+                           content::RenderFrameHost* source_render_frame_host,
+                           const GURL& url,
+                           const content::Referrer& referrer,
+                           WindowOpenDisposition disposition,
+                           ui::PageTransition transition,
+                           bool started_from_context_menu,
+                           bool renderer_initiated) override;
+
+  // TranslateDriver::LanguageDetectionObserver implementation.
+  void OnLanguageDetermined(
+      const translate::LanguageDetectionDetails& details) override;
 
   // Helper function to return the history service.  May return null.
   history::HistoryService* GetHistoryService();
+
+  // Returns true if our observed web contents is an eligible tab.
+  bool IsEligibleTab(const history::HistoryAddPageArgs& add_page_args) const;
+
+  // Observes LanguageDetectionObserver, which notifies us when the language of
+  // the contents of the current page has been determined.
+  base::ScopedObservation<
+      translate::TranslateDriver,
+      translate::TranslateDriver::LanguageDetectionObserver,
+      &translate::TranslateDriver::AddLanguageDetectionObserver,
+      &translate::TranslateDriver::RemoveLanguageDetectionObserver>
+      translate_observation_{this};
 
   // True after navigation to a page is complete and the page is currently
   // loading. Only applies to the main frame of the page.
@@ -61,9 +110,14 @@ class HistoryTabHelper : public content::WebContentsObserver,
   // history system. Only applies to the main frame of the page.
   base::TimeTicks last_load_completion_;
 
-  WEB_CONTENTS_USER_DATA_KEY_DECL();
+  // Set to true in unit tests to avoid need for a Browser instance.
+  bool force_eligible_tab_for_testing_ = false;
 
-  DISALLOW_COPY_AND_ASSIGN(HistoryTabHelper);
+  // The `WebContents` that opened the `WebContents` associated with `this` via
+  // "Open in New Tab", "Open in New Window", window.open(), etc.
+  base::WeakPtr<content::WebContents> opener_web_contents_;
+
+  WEB_CONTENTS_USER_DATA_KEY_DECL();
 };
 
 #endif  // CHROME_BROWSER_HISTORY_HISTORY_TAB_HELPER_H_

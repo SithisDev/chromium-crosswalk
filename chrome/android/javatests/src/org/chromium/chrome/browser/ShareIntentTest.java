@@ -1,35 +1,43 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser;
 
+import android.app.Activity;
 import android.content.ComponentName;
-import android.content.Intent;
+import android.content.Context;
 import android.content.pm.PackageManager;
-import android.net.Uri;
-import android.os.ParcelFileDescriptor;
-import android.support.test.filters.LargeTest;
+import android.content.res.Resources;
+import android.view.Window;
 
-import org.junit.After;
+import androidx.test.filters.LargeTest;
+
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.task.PostTask;
-import org.chromium.base.task.TaskTraits;
+import org.chromium.base.jank_tracker.DummyJankTracker;
+import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.RetryOnFailure;
+import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.fullscreen.BrowserControlsManager;
+import org.chromium.chrome.browser.share.ShareDelegate;
 import org.chromium.chrome.browser.share.ShareHelper;
-import org.chromium.chrome.browser.share.ShareMenuActionHandler;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.ChromeFileProvider;
+import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.ui.RootUiCoordinator;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
+import org.chromium.chrome.test.util.browser.tabmodel.MockTabModelSelector;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
+import org.chromium.ui.base.WindowAndroid;
 
-import java.io.IOException;
+import java.lang.ref.WeakReference;
 import java.util.concurrent.ExecutionException;
 
 /**
@@ -60,40 +68,6 @@ public class ShareIntentTest {
             mCheckCompleted = false;
         }
 
-        /**
-         * Overrides startActivity and notifies check completed when the file from the uri of the
-         * intent is opened.
-         */
-        @Override
-        public void startActivity(Intent intent) {
-            final Uri uri = intent.getClipData().getItemAt(0).getUri();
-            PostTask.postTask(TaskTraits.BEST_EFFORT_MAY_BLOCK, () -> {
-                ChromeFileProvider provider = new ChromeFileProvider();
-                ParcelFileDescriptor file = null;
-                try {
-                    file = provider.openFile(uri, "r");
-                    if (file != null) file.close();
-                } catch (IOException e) {
-                    assert false : "Error while opening the file";
-                }
-                synchronized (mLock) {
-                    mCheckCompleted = true;
-                    mLock.notify();
-                }
-            });
-        }
-
-        /**
-         * Waits till the check for file opening is completed.
-         */
-        public void waitForFileCheck() throws InterruptedException {
-            synchronized (mLock) {
-                while (!mCheckCompleted) {
-                    mLock.wait();
-                }
-            }
-        }
-
         @Override
         public String getPackageName() {
             return mActivity.getPackageName();
@@ -105,47 +79,113 @@ public class ShareIntentTest {
         }
 
         @Override
-        public ChromeApplication getChromeApplication() {
-            return mActivity.getChromeApplication();
+        public PackageManager getPackageManager() {
+            return mActivity.getPackageManager();
         }
 
         @Override
-        public PackageManager getPackageManager() {
-            return mActivity.getPackageManager();
+        public Window getWindow() {
+            return mActivity.getWindow();
+        }
+
+        @Override
+        public ActivityTabProvider getActivityTabProvider() {
+            return mActivity.getActivityTabProvider();
+        }
+
+        @Override
+        public TabModelSelector getTabModelSelector() {
+            // TabModelSelector remains uninitialized for this test. Return a mock instead.
+            return new MockTabModelSelector(1, 0, null);
+        }
+
+        @Override
+        public ObservableSupplier<ShareDelegate> getShareDelegateSupplier() {
+            return mActivity.getShareDelegateSupplier();
+        }
+
+        @Override
+        public Object getSystemService(String name) {
+            // Prevents a scenario where InputMethodManager#hideSoftInput()
+            // gets called before Activity#onCreate() gets called in this test.
+            return name.equals(Context.INPUT_SERVICE) ? null : mActivity.getSystemService(name);
+        }
+
+        @Override
+        public String getSystemServiceName(Class<?> serviceClass) {
+            return mActivity.getSystemServiceName(serviceClass);
+        }
+
+        @Override
+        public Resources getResources() {
+            return mActivity.getResources();
+        }
+
+        @Override
+        public Resources.Theme getTheme() {
+            return mActivity.getTheme();
         }
     }
 
     @Test
     @LargeTest
-    @RetryOnFailure
     public void testShareIntent() throws ExecutionException, InterruptedException {
         MockChromeActivity mockActivity = TestThreadUtils.runOnUiThreadBlocking(() -> {
             // Sets a test component as last shared and "shareDirectly" option is set so that
-            // the share selector menu is not opened. The start activity is overriden, so the
+            // the share selector menu is not opened. The start activity is overridden, so the
             // package and class names do not matter.
             return new MockChromeActivity(mActivityTestRule.getActivity());
         });
-        ShareHelper.setLastShareComponentName(
-                new ComponentName("test.package", "test.activity"), null);
-        // Skips the capture of screenshot and notifies with an empty file.
-        ShareMenuActionHandler.setScreenshotCaptureSkippedForTesting(true);
 
-        TestThreadUtils.runOnUiThreadBlocking(
-                () -> mockActivity.onShareMenuItemSelected(
-                                true /* shareDirectly */, false /* isIncognito */));
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            BrowserControlsManager browserControlsManager = new BrowserControlsManager(
+                    mockActivity, BrowserControlsManager.ControlsPosition.TOP);
+            RootUiCoordinator rootUiCoordinator = new RootUiCoordinator(mockActivity, null,
+                    mockActivity.getShareDelegateSupplier(), mockActivity.getActivityTabProvider(),
+                    null, null, null, null, null, new OneshotSupplierImpl<>(),
+                    new OneshotSupplierImpl<>(), new OneshotSupplierImpl<>(),
+                    new OneshotSupplierImpl<>(),
+                    ()
+                            -> null,
+                    browserControlsManager, mActivityTestRule.getActivity().getWindowAndroid(),
+                    new DummyJankTracker(), mockActivity.getLifecycleDispatcher(),
+                    mockActivity.getLayoutManagerSupplier(),
+                    /* menuOrKeyboardActionController= */ mockActivity,
+                    mockActivity::getActivityThemeColor,
+                    mockActivity.getModalDialogManagerSupplier(),
+                    /* appMenuBlocker= */ mockActivity, mockActivity::supportsAppMenu,
+                    mockActivity::supportsFindInPage, mockActivity.getTabCreatorManagerSupplier(),
+                    browserControlsManager.getFullscreenManager(),
+                    mockActivity.getCompositorViewHolderSupplier(),
+                    mockActivity.getTabContentManagerSupplier(), mockActivity::getSnackbarManager,
+                    mockActivity.getActivityType(), mockActivity::isInOverviewMode,
+                    mockActivity::isWarmOnResume,
+                    /* appMenuDelegate= */ mockActivity,
+                    /* statusBarColorProvider= */ mockActivity,
+                    mockActivity.getIntentRequestTracker(), new OneshotSupplierImpl<>(),
+                    new ObservableSupplierImpl<>(), false, null);
 
-        mockActivity.waitForFileCheck();
+            ShareHelper.setLastShareComponentName(
+                    null, new ComponentName("test.package", "test.activity"));
 
-        ShareHelper.setLastShareComponentName(new ComponentName("", ""), null);
+            WindowAndroid window = new WindowAndroid(mActivityTestRule.getActivity()) {
+                @Override
+                public WeakReference<Activity> getActivity() {
+                    return new WeakReference<>(mockActivity);
+                }
+            };
+            mockActivity.getActivityTab().updateAttachment(window, null);
+            rootUiCoordinator.onShareMenuItemSelected(
+                    true /* shareDirectly */, false /* isIncognito */);
+
+            ShareHelper.setLastShareComponentName(null, new ComponentName("", ""));
+            mockActivity.getActivityTab().updateAttachment(null, null);
+            window.destroy();
+        });
     }
 
     @Before
     public void setUp() throws InterruptedException {
         mActivityTestRule.startMainActivityOnBlankPage();
-    }
-
-    @After
-    public void tearDown() {
-        ShareMenuActionHandler.setScreenshotCaptureSkippedForTesting(false);
     }
 }

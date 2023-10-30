@@ -1,10 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/notifications/scheduler/notification_background_task_scheduler_impl.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 
 NotificationBackgroundTaskSchedulerImpl::
     NotificationBackgroundTaskSchedulerImpl() = default;
@@ -13,7 +13,6 @@ NotificationBackgroundTaskSchedulerImpl::
     ~NotificationBackgroundTaskSchedulerImpl() = default;
 
 void NotificationBackgroundTaskSchedulerImpl::Schedule(
-    notifications::SchedulerTaskTime scheduler_task_time,
     base::TimeDelta window_start,
     base::TimeDelta window_end) {
   // TODO(xingliu): Implements this for non-Android platform.

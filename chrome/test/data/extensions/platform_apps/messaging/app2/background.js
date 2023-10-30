@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,8 @@ chrome.runtime.onConnectExternal.addListener(function(port) {
 chrome.runtime.onMessageExternal.addListener(function(msg, sender, callback) {
   chrome.test.assertEq({
     id: otherId,
-    url: 'chrome-extension://' + otherId + '/_generated_background_page.html'
+    url: 'chrome-extension://' + otherId + '/_generated_background_page.html',
+    origin: 'chrome-extension://' + otherId
   }, sender);
   if (msg == 'hello')
     callback('hello_response');

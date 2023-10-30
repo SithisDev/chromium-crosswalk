@@ -1,13 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.vr;
 
+import android.graphics.PixelFormat;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.IntDef;
 import android.view.Surface;
 import android.view.View;
+
+import androidx.annotation.IntDef;
 
 import org.chromium.chrome.browser.compositor.CompositorSurfaceManager;
 
@@ -74,8 +76,14 @@ public class VrCompositorSurfaceManager implements CompositorSurfaceManager {
 
     @Override
     public void shutDown() {
-        if (mSurfaceState == SurfaceState.PROVIDED) mClient.surfaceDestroyed(mSurface);
+        if (mSurfaceState == SurfaceState.PROVIDED) mClient.surfaceDestroyed(mSurface, true);
         mSurfaceState = SurfaceState.NOT_REQUESTED;
+    }
+
+    @Override
+    public int getFormatOfOwnedSurface() {
+        if (mSurface == null) return PixelFormat.UNKNOWN;
+        return mFormat;
     }
 
     @Override

@@ -1,13 +1,14 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
-#include "chrome/browser/extensions/extension_action.h"
-#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/extension_action.h"
+#include "extensions/browser/extension_action_manager.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/state_store.h"
@@ -26,7 +27,7 @@ const char kBrowserActionStorageKey[] = "browser_action";
 const char kExtensionName[] = "Default Persistence Test Extension";
 
 void QuitMessageLoop(content::MessageLoopRunner* runner,
-                     std::unique_ptr<base::Value> value) {
+                     absl::optional<base::Value> value) {
   runner->Quit();
 }
 
@@ -38,7 +39,7 @@ void WaitForStateStore(Profile* profile, const std::string& extension_id) {
       new content::MessageLoopRunner;
   ExtensionSystem::Get(profile)->state_store()->GetExtensionValue(
       extension_id, kBrowserActionStorageKey,
-      base::Bind(&QuitMessageLoop, base::RetainedRef(runner)));
+      base::BindOnce(&QuitMessageLoop, base::RetainedRef(runner)));
   runner->Run();
 }
 
@@ -48,8 +49,7 @@ void WaitForStateStore(Profile* profile, const std::string& extension_id) {
 // action background to blue.
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest,
                        PRE_BrowserActionDefaultPersistence) {
-  ExtensionTestMessageListener listener("Background Color Set",
-                                        false /* won't send custom reply */);
+  ExtensionTestMessageListener listener("Background Color Set");
 
   const Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("api_test")
@@ -75,7 +75,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest,
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, BrowserActionDefaultPersistence) {
   // Find the extension (it's a shame we don't have an ID for this, but it
   // was generated in the last test).
-  const Extension* extension = NULL;
+  const Extension* extension = nullptr;
   const ExtensionSet& extension_set =
       ExtensionRegistry::Get(profile())->enabled_extensions();
   for (ExtensionSet::const_iterator iter = extension_set.begin();
@@ -94,9 +94,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, BrowserActionDefaultPersistence) {
 
   // If the extension hasn't already set the badge text, then we should wait for
   // it to do so.
-  if (extension_action->GetBadgeText(0) != "Hello") {
-    ExtensionTestMessageListener listener("Badge Text Set",
-                                          false /* won't send custom reply */);
+  if (extension_action->GetExplicitlySetBadgeText(0) != "Hello") {
+    ExtensionTestMessageListener listener("Badge Text Set");
     ASSERT_TRUE(listener.WaitUntilSatisfied());
   }
 

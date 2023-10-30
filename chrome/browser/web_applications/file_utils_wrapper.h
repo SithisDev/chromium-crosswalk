@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,14 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "build/build_config.h"
 
 // Include this to avoid conflicts with CreateDirectory Win macro.
 // It converts CreateDirectory into CreateDirectoryW.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/windows_types.h"
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 namespace base {
 class FilePath;
@@ -28,13 +28,11 @@ namespace web_app {
 // base/files/file_util.h functions.
 // Allows a testing implementation to intercept calls to the file system.
 // TODO(loyso): Add more tests and promote mocked methods to |virtual|.
-class FileUtilsWrapper {
+class FileUtilsWrapper : public base::RefCountedThreadSafe<FileUtilsWrapper> {
  public:
   FileUtilsWrapper() = default;
-  virtual ~FileUtilsWrapper() = default;
 
-  // Create a copy to use in IO task.
-  virtual std::unique_ptr<FileUtilsWrapper> Clone();
+  FileUtilsWrapper& operator=(const FileUtilsWrapper&) = delete;
 
   bool PathExists(const base::FilePath& path);
 
@@ -54,11 +52,16 @@ class FileUtilsWrapper {
 
   bool IsDirectoryEmpty(const base::FilePath& dir_path);
 
-  bool ReadFileToString(const base::FilePath& path, std::string* contents);
+  virtual bool ReadFileToString(const base::FilePath& path,
+                                std::string* contents);
 
   bool DeleteFile(const base::FilePath& path, bool recursive);
 
-  DISALLOW_COPY_AND_ASSIGN(FileUtilsWrapper);
+  virtual bool DeleteFileRecursively(const base::FilePath& path);
+
+ protected:
+  friend class base::RefCountedThreadSafe<FileUtilsWrapper>;
+  virtual ~FileUtilsWrapper() = default;
 };
 
 }  // namespace web_app

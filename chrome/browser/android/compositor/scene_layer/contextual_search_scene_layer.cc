@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,11 @@
 #include "chrome/browser/android/compositor/layer/contextual_search_layer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
-#include "content/public/browser/android/compositor.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/load_flags.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "net/url_request/referrer_policy.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "ui/android/resources/resource_manager_impl.h"
 #include "ui/android/view_android.h"
@@ -43,7 +43,7 @@ ContextualSearchSceneLayer::ContextualSearchSceneLayer(
 
   color_overlay_->SetIsDrawable(true);
   color_overlay_->SetOpacity(0.0f);
-  color_overlay_->SetBackgroundColor(SK_ColorBLACK);
+  color_overlay_->SetBackgroundColor(SkColors::kBlack);
   color_overlay_->SetPosition(gfx::PointF(0.f, 0.f));
   layer()->AddChild(color_overlay_);
 }
@@ -62,8 +62,7 @@ void ContextualSearchSceneLayer::CreateContextualSearchLayer(
   layer()->AddChild(contextual_search_layer_->layer());
 }
 
-ContextualSearchSceneLayer::~ContextualSearchSceneLayer() {
-}
+ContextualSearchSceneLayer::~ContextualSearchSceneLayer() {}
 
 void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     JNIEnv* env,
@@ -76,15 +75,14 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     jint search_bar_shadow_resource_id,
     jint search_provider_icon_resource_id,
     jint quick_action_icon_resource_id,
-    jint arrow_up_resource_id,
     jint drag_handlebar_resource_id,
     jint open_tab_icon_resource_id,
     jint close_icon_resource_id,
     jint progress_bar_background_resource_id,
+    jint progress_bar_background_tint,
     jint progress_bar_resource_id,
+    jint progress_bar_tint,
     jint search_promo_resource_id,
-    jint bar_banner_ripple_resource_id,
-    jint bar_banner_text_resource_id,
     jfloat dp_to_px,
     jfloat layout_width,
     jfloat layout_height,
@@ -95,12 +93,15 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     jfloat search_promo_height,
     jfloat search_promo_opacity,
     jint search_promo_background_color,
-    jboolean search_bar_banner_visible,
-    jfloat search_bar_banner_height,
-    jfloat search_bar_banner_padding,
-    jfloat search_bar_banner_ripple_width,
-    jfloat search_bar_banner_ripple_opacity,
-    jfloat search_bar_banner_text_opacity,
+    // Related Searches
+    jint related_searches_in_content_resource_id,
+    jboolean related_searches_in_content_visible,
+    jfloat related_searches_in_content_height,
+    jint related_searches_in_bar_resource_id,
+    jboolean related_searches_in_bar_visible,
+    jfloat related_searches_in_bar_height,
+    jfloat related_searches_in_bar_redundant_padding,
+    // Panel position etc
     jfloat search_panel_x,
     jfloat search_panel_y,
     jfloat search_panel_width,
@@ -116,8 +117,6 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     jboolean search_caption_visible,
     jboolean search_bar_border_visible,
     jfloat search_bar_border_height,
-    jboolean search_bar_shadow_visible,
-    jfloat search_bar_shadow_opacity,
     jboolean quick_action_icon_visible,
     jboolean thumbnail_visible,
     jstring j_thumbnail_url,
@@ -125,22 +124,17 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     jint bar_image_size,
     jint icon_color,
     jint drag_handlebar_color,
-    jfloat arrow_icon_opacity,
-    jfloat arrow_icon_rotation,
     jfloat close_icon_opacity,
     jboolean progress_bar_visible,
     jfloat progress_bar_height,
     jfloat progress_bar_opacity,
-    jint progress_bar_completion,
-    jfloat divider_line_visibility_percentage,
-    jfloat divider_line_width,
-    jfloat divider_line_height,
-    jint divider_line_color,
-    jfloat divider_line_x_offset,
+    jfloat progress_bar_completion,
     jboolean touch_highlight_visible,
     jfloat touch_highlight_x_offset,
     jfloat touch_highlight_width,
-    const JavaRef<jobject>& j_profile) {
+    const JavaRef<jobject>& j_profile,
+    jint rounded_bar_top_resource_id,
+    jint separator_line_color) {
   // Load the thumbnail if necessary.
   std::string thumbnail_url =
       base::android::ConvertJavaStringToUTF8(env, j_thumbnail_url);
@@ -171,30 +165,28 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
       search_context_resource_id, search_term_resource_id,
       search_caption_resource_id, search_bar_shadow_resource_id,
       search_provider_icon_resource_id, quick_action_icon_resource_id,
-      arrow_up_resource_id, drag_handlebar_resource_id,
-      open_tab_icon_resource_id, close_icon_resource_id,
-      progress_bar_background_resource_id, progress_bar_resource_id,
-      search_promo_resource_id, bar_banner_ripple_resource_id,
-      bar_banner_text_resource_id, dp_to_px, content_layer,
-      search_promo_visible, search_promo_height, search_promo_opacity,
-      search_promo_background_color, search_bar_banner_visible,
-      search_bar_banner_height, search_bar_banner_padding,
-      search_bar_banner_ripple_width, search_bar_banner_ripple_opacity,
-      search_bar_banner_text_opacity, search_panel_x, search_panel_y,
-      search_panel_width, search_panel_height, search_bar_margin_side,
-      search_bar_margin_top, search_bar_height, search_context_opacity,
-      search_text_layer_min_height, search_term_opacity,
+      drag_handlebar_resource_id, open_tab_icon_resource_id,
+      close_icon_resource_id, progress_bar_background_resource_id,
+      progress_bar_background_tint, progress_bar_resource_id, progress_bar_tint,
+      search_promo_resource_id, dp_to_px, content_layer, search_promo_visible,
+      search_promo_height, search_promo_opacity, search_promo_background_color,
+      // Related Searches
+      related_searches_in_content_resource_id,
+      related_searches_in_content_visible, related_searches_in_content_height,
+      related_searches_in_bar_resource_id, related_searches_in_bar_visible,
+      related_searches_in_bar_height, related_searches_in_bar_redundant_padding,
+      // Panel position etc
+      search_panel_x, search_panel_y, search_panel_width, search_panel_height,
+      search_bar_margin_side, search_bar_margin_top, search_bar_height,
+      search_context_opacity, search_text_layer_min_height, search_term_opacity,
       search_term_caption_spacing, search_caption_animation_percentage,
       search_caption_visible, search_bar_border_visible,
-      search_bar_border_height, search_bar_shadow_visible,
-      search_bar_shadow_opacity, quick_action_icon_visible, thumbnail_visible,
+      search_bar_border_height, quick_action_icon_visible, thumbnail_visible,
       custom_image_visibility_percentage, bar_image_size, icon_color,
-      drag_handlebar_color, arrow_icon_opacity, arrow_icon_rotation,
-      close_icon_opacity, progress_bar_visible, progress_bar_height,
-      progress_bar_opacity, progress_bar_completion,
-      divider_line_visibility_percentage, divider_line_width,
-      divider_line_height, divider_line_color, divider_line_x_offset,
-      touch_highlight_visible, touch_highlight_x_offset, touch_highlight_width);
+      drag_handlebar_color, close_icon_opacity, progress_bar_visible,
+      progress_bar_height, progress_bar_opacity, progress_bar_completion,
+      touch_highlight_visible, touch_highlight_x_offset, touch_highlight_width,
+      rounded_bar_top_resource_id, separator_line_color);
 
   // Make the layer visible if it is not already.
   contextual_search_layer_->layer()->SetHideLayerAndSubtree(false);
@@ -207,16 +199,46 @@ void ContextualSearchSceneLayer::FetchThumbnail(
 
   GURL gurl(thumbnail_url_);
   Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile);
+  // Semantic details for this "Thumbnail" request.
+  // The URLs processed access gstatic.com, which is considered a Google-owned
+  // service.
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("contextual_search_thumbnail",
+                                          R"(
+            semantics {
+              sender: "Contextual Search"
+              description:
+                "This request is for a thumbnail image to show in the "
+                "Contextual Search bottom sheet for an entity or similar "
+                "object identified by the selected text."
+              trigger:
+                "Triggered by a server response to the "
+                "contextual_search_resolve request which contains a thumbnail "
+                "URL."
+              data:
+                "The URL of the thumbnail."
+              destination: GOOGLE_OWNED_SERVICE
+            }
+            policy {
+              cookies_allowed: NO
+              setting:
+                "This feature can be disabled by turning off 'Touch to Search' "
+                "in Chrome for Android settings."
+              chrome_policy {
+                ContextualSearchEnabled {
+                    policy_options {mode: MANDATORY}
+                    ContextualSearchEnabled: false
+                }
+              }
+            })");
   network::mojom::URLLoaderFactory* loader_factory =
-      content::BrowserContext::GetDefaultStoragePartition(profile)
+      profile->GetDefaultStoragePartition()
           ->GetURLLoaderFactoryForBrowserProcess()
           .get();
-  fetcher_ =
-      std::make_unique<BitmapFetcher>(gurl, this, NO_TRAFFIC_ANNOTATION_YET);
+  fetcher_ = std::make_unique<BitmapFetcher>(gurl, this, traffic_annotation);
   fetcher_->Init(
-      std::string(),
-      net::URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
-      net::LOAD_NORMAL);
+      net::ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+      network::mojom::CredentialsMode::kOmit);
   fetcher_->Start(loader_factory);
 }
 
@@ -235,16 +257,17 @@ void ContextualSearchSceneLayer::SetContentTree(
     const JavaParamRef<jobject>& jobj,
     const JavaParamRef<jobject>& jcontent_tree) {
   SceneLayer* content_tree = FromJavaObject(env, jcontent_tree);
-  if (!content_tree || !content_tree->layer()) return;
+  if (!content_tree || !content_tree->layer())
+    return;
 
-  if (!content_tree->layer()->parent()
-      || (content_tree->layer()->parent()->id() != content_container_->id())) {
+  if (!content_tree->layer()->parent() ||
+      (content_tree->layer()->parent()->id() != content_container_->id())) {
     content_container_->AddChild(content_tree->layer());
   }
 }
 
 void ContextualSearchSceneLayer::HideTree(JNIEnv* env,
-    const JavaParamRef<jobject>& jobj) {
+                                          const JavaParamRef<jobject>& jobj) {
   // TODO(mdjones): Create super class for this logic.
   if (contextual_search_layer_) {
     contextual_search_layer_->layer()->SetHideLayerAndSubtree(true);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,15 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
-#include "chrome/browser/extensions/chrome_extension_function.h"
+#include "base/memory/raw_ptr.h"
+#include "base/values.h"
 #include "chrome/browser/font_pref_change_notifier.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_event_histogram_value.h"
+#include "extensions/browser/extension_function.h"
 
 class Profile;
 
@@ -36,6 +37,10 @@ class FontSettingsEventRouter {
   // pointer to |profile| but does not take ownership. |profile| must be
   // non-NULL and remain alive for the lifetime of the instance.
   explicit FontSettingsEventRouter(Profile* profile);
+
+  FontSettingsEventRouter(const FontSettingsEventRouter&) = delete;
+  FontSettingsEventRouter& operator=(const FontSettingsEventRouter&) = delete;
+
   virtual ~FontSettingsEventRouter();
 
  private:
@@ -72,9 +77,7 @@ class FontSettingsEventRouter {
   FontPrefChangeNotifier::Registrar font_change_registrar_;
 
   // Weak, owns us (transitively via ExtensionService).
-  Profile* profile_;
-
-  DISALLOW_COPY_AND_ASSIGN(FontSettingsEventRouter);
+  raw_ptr<Profile> profile_;
 };
 
 // The profile-keyed service that manages the font_settings extension API.
@@ -101,7 +104,7 @@ class FontSettingsAPI : public BrowserContextKeyedAPI {
 };
 
 // fontSettings.clearFont API function.
-class FontSettingsClearFontFunction : public UIThreadExtensionFunction {
+class FontSettingsClearFontFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fontSettings.clearFont", FONTSETTINGS_CLEARFONT)
 
@@ -115,7 +118,7 @@ class FontSettingsClearFontFunction : public UIThreadExtensionFunction {
 };
 
 // fontSettings.getFont API function.
-class FontSettingsGetFontFunction : public UIThreadExtensionFunction {
+class FontSettingsGetFontFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fontSettings.getFont", FONTSETTINGS_GETFONT)
 
@@ -127,7 +130,7 @@ class FontSettingsGetFontFunction : public UIThreadExtensionFunction {
 };
 
 // fontSettings.setFont API function.
-class FontSettingsSetFontFunction : public UIThreadExtensionFunction {
+class FontSettingsSetFontFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fontSettings.setFont", FONTSETTINGS_SETFONT)
 
@@ -139,7 +142,7 @@ class FontSettingsSetFontFunction : public UIThreadExtensionFunction {
 };
 
 // fontSettings.getFontList API function.
-class FontSettingsGetFontListFunction : public ChromeAsyncExtensionFunction {
+class FontSettingsGetFontListFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fontSettings.getFontList",
                              FONTSETTINGS_GETFONTLIST)
@@ -148,15 +151,15 @@ class FontSettingsGetFontListFunction : public ChromeAsyncExtensionFunction {
   ~FontSettingsGetFontListFunction() override {}
 
   // ExtensionFunction:
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
  private:
-  void FontListHasLoaded(std::unique_ptr<base::ListValue> list);
-  bool CopyFontsToResult(base::ListValue* fonts);
+  void FontListHasLoaded(base::Value::List list);
+  ResponseValue CopyFontsToResult(const base::Value::List& fonts);
 };
 
 // Base class for extension API functions that clear a browser font pref.
-class ClearFontPrefExtensionFunction : public UIThreadExtensionFunction {
+class ClearFontPrefExtensionFunction : public ExtensionFunction {
  protected:
   ~ClearFontPrefExtensionFunction() override {}
 
@@ -169,7 +172,7 @@ class ClearFontPrefExtensionFunction : public UIThreadExtensionFunction {
 };
 
 // Base class for extension API functions that get a browser font pref.
-class GetFontPrefExtensionFunction : public UIThreadExtensionFunction {
+class GetFontPrefExtensionFunction : public ExtensionFunction {
  protected:
   ~GetFontPrefExtensionFunction() override {}
 
@@ -186,7 +189,7 @@ class GetFontPrefExtensionFunction : public UIThreadExtensionFunction {
 };
 
 // Base class for extension API functions that set a browser font pref.
-class SetFontPrefExtensionFunction : public UIThreadExtensionFunction {
+class SetFontPrefExtensionFunction : public ExtensionFunction {
  protected:
   ~SetFontPrefExtensionFunction() override {}
 

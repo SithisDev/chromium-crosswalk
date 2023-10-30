@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,8 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/media_galleries/gallery_watch_manager_observer.h"
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
 #include "chrome/common/apps/platform_apps/api/media_galleries.h"
@@ -27,6 +26,7 @@
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_event_histogram_value.h"
+#include "extensions/browser/extension_function.h"
 
 namespace content {
 class BlobHandle;
@@ -43,6 +43,9 @@ class MediaGalleriesEventRouter : public extensions::BrowserContextKeyedAPI,
                                   public GalleryWatchManagerObserver,
                                   public extensions::EventRouter::Observer {
  public:
+  MediaGalleriesEventRouter(const MediaGalleriesEventRouter&) = delete;
+  MediaGalleriesEventRouter& operator=(const MediaGalleriesEventRouter&) =
+      delete;
   // KeyedService implementation.
   void Shutdown() override;
 
@@ -63,7 +66,7 @@ class MediaGalleriesEventRouter : public extensions::BrowserContextKeyedAPI,
       const std::string& extension_id,
       extensions::events::HistogramValue histogram_value,
       const std::string& event_name,
-      std::unique_ptr<base::ListValue> event_args);
+      base::Value::List event_args);
 
   explicit MediaGalleriesEventRouter(content::BrowserContext* context);
   ~MediaGalleriesEventRouter() override;
@@ -82,22 +85,19 @@ class MediaGalleriesEventRouter : public extensions::BrowserContextKeyedAPI,
   void OnListenerRemoved(const extensions::EventListenerInfo& details) override;
 
   // Current profile.
-  Profile* profile_;
+  raw_ptr<Profile> profile_;
 
   base::WeakPtrFactory<MediaGalleriesEventRouter> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MediaGalleriesEventRouter);
 };
 
-class MediaGalleriesGetMediaFileSystemsFunction
-    : public ChromeAsyncExtensionFunction {
+class MediaGalleriesGetMediaFileSystemsFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("mediaGalleries.getMediaFileSystems",
                              MEDIAGALLERIES_GETMEDIAFILESYSTEMS)
 
  protected:
   ~MediaGalleriesGetMediaFileSystemsFunction() override;
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
  private:
   // Bottom half for RunAsync, invoked after the preferences is initialized.
@@ -123,18 +123,17 @@ class MediaGalleriesGetMediaFileSystemsFunction
 
   // A helper method that calls
   // MediaFileSystemRegistry::GetMediaFileSystemsForExtension().
-  void GetMediaFileSystemsForExtension(const MediaFileSystemsCallback& cb);
+  void GetMediaFileSystemsForExtension(MediaFileSystemsCallback cb);
 };
 
-class MediaGalleriesAddUserSelectedFolderFunction
-    : public ChromeAsyncExtensionFunction {
+class MediaGalleriesAddUserSelectedFolderFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("mediaGalleries.addUserSelectedFolder",
                              MEDIAGALLERIES_ADDUSERSELECTEDFOLDER)
 
  protected:
   ~MediaGalleriesAddUserSelectedFolderFunction() override;
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
  private:
   // Bottom half for RunAsync, invoked after the preferences is initialized.
@@ -156,17 +155,17 @@ class MediaGalleriesAddUserSelectedFolderFunction
 
   // A helper method that calls
   // MediaFileSystemRegistry::GetMediaFileSystemsForExtension().
-  void GetMediaFileSystemsForExtension(const MediaFileSystemsCallback& cb);
+  void GetMediaFileSystemsForExtension(MediaFileSystemsCallback cb);
 };
 
-class MediaGalleriesGetMetadataFunction : public ChromeAsyncExtensionFunction {
+class MediaGalleriesGetMetadataFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("mediaGalleries.getMetadata",
                              MEDIAGALLERIES_GETMETADATA)
 
  protected:
   ~MediaGalleriesGetMetadataFunction() override;
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
  private:
   // Bottom half for RunAsync, invoked after the preferences is initialized.
@@ -185,21 +184,20 @@ class MediaGalleriesGetMetadataFunction : public ChromeAsyncExtensionFunction {
       std::unique_ptr<std::vector<metadata::AttachedImage>> attached_images);
 
   void ConstructNextBlob(
-      std::unique_ptr<base::DictionaryValue> result_dictionary,
+      base::Value::Dict result_dictionary,
       std::unique_ptr<std::vector<metadata::AttachedImage>> attached_images,
       std::unique_ptr<std::vector<std::string>> blob_uuids,
       std::unique_ptr<content::BlobHandle> current_blob);
 };
 
-class MediaGalleriesAddGalleryWatchFunction
-    : public ChromeAsyncExtensionFunction {
+class MediaGalleriesAddGalleryWatchFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("mediaGalleries.addGalleryWatch",
                              MEDIAGALLERIES_ADDGALLERYWATCH)
 
  protected:
   ~MediaGalleriesAddGalleryWatchFunction() override;
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
  private:
   void OnPreferencesInit(const std::string& pref_id);
@@ -208,15 +206,14 @@ class MediaGalleriesAddGalleryWatchFunction
   void HandleResponse(MediaGalleryPrefId gallery_id, const std::string& error);
 };
 
-class MediaGalleriesRemoveGalleryWatchFunction
-    : public ChromeAsyncExtensionFunction {
+class MediaGalleriesRemoveGalleryWatchFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("mediaGalleries.removeGalleryWatch",
                              MEDIAGALLERIES_REMOVEGALLERYWATCH)
 
  protected:
   ~MediaGalleriesRemoveGalleryWatchFunction() override;
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
  private:
   void OnPreferencesInit(const std::string& pref_id);

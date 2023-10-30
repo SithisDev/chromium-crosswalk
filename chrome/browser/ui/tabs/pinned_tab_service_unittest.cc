@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
@@ -35,7 +35,9 @@ PinnedTabService* BuildForProfile(Profile* profile) {
 
 class PinnedTabServiceTest : public BrowserWithTestWindowTest {
  public:
-  PinnedTabServiceTest() : pinned_tab_service_(NULL) {}
+  PinnedTabServiceTest() : pinned_tab_service_(nullptr) {}
+  PinnedTabServiceTest(const PinnedTabServiceTest&) = delete;
+  PinnedTabServiceTest& operator=(const PinnedTabServiceTest&) = delete;
 
  protected:
   TestingProfile* CreateProfile() override {
@@ -45,9 +47,7 @@ class PinnedTabServiceTest : public BrowserWithTestWindowTest {
   }
 
  private:
-  PinnedTabService* pinned_tab_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(PinnedTabServiceTest);
+  raw_ptr<PinnedTabService> pinned_tab_service_;
 };
 
 // Makes sure closing a popup triggers writing pinned tabs.
@@ -58,7 +58,7 @@ TEST_F(PinnedTabServiceTest, Popup) {
 
   // Create a popup.
   Browser::CreateParams params(Browser::TYPE_POPUP, profile(), true);
-  std::unique_ptr<Browser> popup(CreateBrowserWithTestWindowForParams(&params));
+  std::unique_ptr<Browser> popup(CreateBrowserWithTestWindowForParams(params));
 
   // Close the browser. This should trigger saving the tabs. No need to destroy
   // the browser (this happens automatically in the test destructor).
@@ -70,7 +70,7 @@ TEST_F(PinnedTabServiceTest, Popup) {
 
   // Close the popup. This shouldn't reset the saved state.
   popup->tab_strip_model()->CloseAllTabs();
-  popup.reset(NULL);
+  popup.reset();
 
   // Check the state to make sure it hasn't changed.
   result = PinnedTabTestUtils::TabsToString(

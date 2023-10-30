@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,6 +62,7 @@ TabFeatures GetFullTabFeaturesForTesting() {
   tab.window_type = 4;
 
   tab.host = "www.google.com";
+  tab.frecency_score = 0.1234f;
   return tab;
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,7 @@
 
 #include <stdint.h>
 
-#include "base/macros.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
+#include "components/page_load_metrics/browser/page_load_metrics_observer.h"
 #include "content/public/browser/web_contents_observer.h"
 
 // Observer responsible for recording metrics on pages that play at least one
@@ -17,15 +16,25 @@ class MediaPageLoadMetricsObserver
     : public page_load_metrics::PageLoadMetricsObserver {
  public:
   MediaPageLoadMetricsObserver();
+
+  MediaPageLoadMetricsObserver(const MediaPageLoadMetricsObserver&) = delete;
+  MediaPageLoadMetricsObserver& operator=(const MediaPageLoadMetricsObserver&) =
+      delete;
+
   ~MediaPageLoadMetricsObserver() override;
 
   // page_load_metrics::PageLoadMetricsObserver:
-  void OnComplete(const page_load_metrics::mojom::PageLoadTiming& timing,
-                  const page_load_metrics::PageLoadExtraInfo& info) override;
+  const char* GetObserverName() const override;
+  ObservePolicy OnFencedFramesStart(
+      content::NavigationHandle* navigation_handle,
+      const GURL& currently_committed_url) override;
+  ObservePolicy OnPrerenderStart(content::NavigationHandle* navigation_handle,
+                                 const GURL& currently_committed_url) override;
+  void OnComplete(
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
   page_load_metrics::PageLoadMetricsObserver::ObservePolicy
   FlushMetricsOnAppEnterBackground(
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info) override;
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
   void OnResourceDataUseObserved(
       content::RenderFrameHost* rfh,
       const std::vector<page_load_metrics::mojom::ResourceDataUpdatePtr>&
@@ -45,8 +54,6 @@ class MediaPageLoadMetricsObserver
 
   // Whether the page load played a media element.
   bool played_media_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaPageLoadMetricsObserver);
 };
 
 #endif  // CHROME_BROWSER_PAGE_LOAD_METRICS_OBSERVERS_MEDIA_PAGE_LOAD_METRICS_OBSERVER_H_

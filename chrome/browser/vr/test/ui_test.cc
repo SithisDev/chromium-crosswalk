@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -103,6 +103,7 @@ void UiTest::CreateScene(const UiInitialState& state) {
 void UiTest::CreateScene(InWebVr in_web_vr) {
   UiInitialState state;
   state.in_web_vr = in_web_vr;
+  state.gvr_input_support = true;
   CreateScene(state);
 }
 
@@ -189,44 +190,16 @@ bool UiTest::VerifyRequiresLayout(const std::set<UiElementName>& names,
   return true;
 }
 
-bool UiTest::RunFor(base::TimeDelta delta) {
-  base::TimeTicks target_time = current_time_ + delta;
-  base::TimeDelta frame_time = base::TimeDelta::FromSecondsD(1.0 / 60.0);
-  bool changed = false;
-
-  // Run a frame in the near future to trigger new state changes.
-  current_time_ += frame_time;
-  changed |= OnBeginFrame();
-
-  // If needed, skip ahead and run another frame at the target time.
-  if (current_time_ < target_time) {
-    current_time_ = target_time;
-    changed |= OnBeginFrame();
-  }
-
-  return changed;
-}
-
 bool UiTest::RunForMs(float milliseconds) {
-  return RunFor(base::TimeDelta::FromMilliseconds(milliseconds));
+  return RunFor(base::Milliseconds(milliseconds));
 }
 
 bool UiTest::RunForSeconds(float seconds) {
-  return RunFor(base::TimeDelta::FromSecondsD(seconds));
+  return RunFor(base::Seconds(seconds));
 }
 
-bool UiTest::OnBeginFrame() const {
-  bool changed = false;
-  changed |= scene_->OnBeginFrame(current_time_, kStartHeadPose);
-  if (scene_->HasDirtyTextures()) {
-    scene_->UpdateTextures();
-    changed = true;
-  }
-  return changed;
-}
-
-bool UiTest::OnDelayedFrame(base::TimeDelta delta) {
-  current_time_ += delta;
+bool UiTest::AdvanceFrame() {
+  current_time_ += base::Milliseconds(16);
   return OnBeginFrame();
 }
 
@@ -265,6 +238,35 @@ void UiTest::ClickElement(UiElement* element) {
                                              controller_model, &reticle_model,
                                              &input_event_list);
   OnBeginFrame();
+}
+
+bool UiTest::RunFor(base::TimeDelta delta) {
+  base::TimeTicks target_time = current_time_ + delta;
+  base::TimeDelta frame_time = base::Milliseconds(16);
+  bool changed = false;
+
+  // Run a frame in the near future to trigger new state changes.
+  current_time_ += frame_time;
+  changed |= OnBeginFrame();
+
+  // If needed, skip ahead and run another frame at the target time.
+  if (current_time_ < target_time) {
+    current_time_ = target_time;
+    changed |= OnBeginFrame();
+  }
+
+  return changed;
+}
+
+bool UiTest::OnBeginFrame() const {
+  bool changed = false;
+  model_->current_time = current_time_;
+  changed |= scene_->OnBeginFrame(current_time_, kStartHeadPose);
+  if (scene_->HasDirtyTextures()) {
+    scene_->UpdateTextures();
+    changed = true;
+  }
+  return changed;
 }
 
 }  // namespace vr

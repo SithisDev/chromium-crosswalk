@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,36 +10,31 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.provider.Browser;
-import android.support.customtabs.CustomTabsIntent;
+
+import androidx.browser.customtabs.CustomTabsIntent;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.IntentUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.chrome.R;
-import org.chromium.chrome.browser.AppHooks;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
+import org.chromium.chrome.browser.app.download.home.DownloadActivity;
+import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider.CustomTabsUiType;
 import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
-import org.chromium.chrome.browser.download.DownloadActivity;
-import org.chromium.chrome.browser.download.DownloadInfo;
 import org.chromium.chrome.browser.download.DownloadManagerService;
-import org.chromium.chrome.browser.download.DownloadNotifier;
-import org.chromium.chrome.browser.download.DownloadSharedPreferenceEntry;
-import org.chromium.chrome.browser.download.DownloadSharedPreferenceHelper;
 import org.chromium.chrome.browser.offlinepages.OfflinePageOrigin;
 import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.TabLaunchType;
-import org.chromium.chrome.browser.tabmodel.document.AsyncTabCreationParams;
+import org.chromium.chrome.browser.tab.TabLaunchType;
+import org.chromium.chrome.browser.tabmodel.AsyncTabCreationParams;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.components.offline_items_collection.ContentId;
 import org.chromium.components.offline_items_collection.LaunchLocation;
-import org.chromium.components.offline_items_collection.LegacyHelpers;
 import org.chromium.content_public.browser.LoadUrlParams;
-import org.chromium.ui.widget.Toast;
 
 /**
  * Serves as an interface between Download Home UI and offline page related items that are to be
@@ -63,13 +58,16 @@ public class OfflinePageDownloadBridge {
     }
 
     private OfflinePageDownloadBridge() {
-        mNativeOfflinePageDownloadBridge = sIsTesting ? 0L : nativeInit();
+        mNativeOfflinePageDownloadBridge = sIsTesting
+                ? 0L
+                : OfflinePageDownloadBridgeJni.get().init(OfflinePageDownloadBridge.this);
     }
 
     /** Destroys the native portion of the bridge. */
     public void destroy() {
         if (mNativeOfflinePageDownloadBridge != 0) {
-            nativeDestroy(mNativeOfflinePageDownloadBridge);
+            OfflinePageDownloadBridgeJni.get().destroy(
+                    mNativeOfflinePageDownloadBridge, OfflinePageDownloadBridge.this);
             mNativeOfflinePageDownloadBridge = 0;
         }
     }
@@ -80,8 +78,8 @@ public class OfflinePageDownloadBridge {
      * item with specified GUID is not found or can't be opened, nothing happens.
      */
     @CalledByNative
-    private static void openItem(
-            final String url, final long offlineId, final int location, final boolean openInCct) {
+    private static void openItem(final String url, final long offlineId, final int location,
+            final boolean isIncognito, final boolean openInCct) {
         OfflinePageUtils.getLoadUrlParamsForOpeningOfflineVersion(
                 url, offlineId, location, (params) -> {
                     if (params == null) return;
@@ -91,11 +89,11 @@ public class OfflinePageDownloadBridge {
                     if (location == LaunchLocation.NET_ERROR_SUGGESTION) {
                         openItemInCurrentTab(offlineId, params);
                     } else if (openInCct && openingFromDownloadsHome) {
-                        openItemInCct(offlineId, params);
+                        openItemInCct(offlineId, params, isIncognito);
                     } else {
-                        openItemInNewTab(offlineId, params);
+                        openItemInNewTab(offlineId, params, isIncognito);
                     }
-                });
+                }, Profile.getLastUsedRegularProfile());
     }
 
     /**
@@ -118,19 +116,20 @@ public class OfflinePageDownloadBridge {
     /**
      * Opens the offline page identified by the given offlineId and the LoadUrlParams in a new tab.
      */
-    private static void openItemInNewTab(long offlineId, LoadUrlParams params) {
+    private static void openItemInNewTab(
+            long offlineId, LoadUrlParams params, boolean isIncognito) {
         ComponentName componentName = getComponentName();
         AsyncTabCreationParams asyncParams = componentName == null
                 ? new AsyncTabCreationParams(params)
                 : new AsyncTabCreationParams(params, componentName);
-        final TabDelegate tabDelegate = new TabDelegate(false);
+        final TabDelegate tabDelegate = new TabDelegate(isIncognito);
         tabDelegate.createNewTab(asyncParams, TabLaunchType.FROM_CHROME_UI, Tab.INVALID_TAB_ID);
     }
 
     /**
      * Opens the offline page identified by the given offlineId and the LoadUrlParams in a CCT.
      */
-    private static void openItemInCct(long offlineId, LoadUrlParams params) {
+    private static void openItemInCct(long offlineId, LoadUrlParams params, boolean isIncognito) {
         final Context context;
         if (ApplicationStatus.hasVisibleActivities()) {
             context = ApplicationStatus.getLastTrackedFocusedActivity();
@@ -149,10 +148,12 @@ public class OfflinePageDownloadBridge {
                 context, customTabIntent.intent);
         intent.setPackage(context.getPackageName());
         intent.putExtra(Browser.EXTRA_APPLICATION_ID, context.getPackageName());
-        intent.putExtra(CustomTabIntentDataProvider.EXTRA_UI_TYPE,
-                CustomTabIntentDataProvider.CustomTabsUiType.OFFLINE_PAGE);
+        intent.putExtra(CustomTabIntentDataProvider.EXTRA_UI_TYPE, CustomTabsUiType.OFFLINE_PAGE);
+        // TODO(crbug.com/1148275): Pass isIncognito boolean here after finding a way not to
+        // reload the downloaded page for Incognito CCT.
+        intent.putExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB, false);
 
-        IntentHandler.addTrustedIntentExtras(intent);
+        IntentUtils.addTrustedIntentExtras(intent);
         if (!(context instanceof Activity)) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         IntentHandler.setIntentExtraHeaders(params.getExtraHeaders(), intent);
 
@@ -171,56 +172,7 @@ public class OfflinePageDownloadBridge {
      * @param origin the object encapsulating application origin of the request.
      */
     public static void startDownload(Tab tab, OfflinePageOrigin origin) {
-        nativeStartDownload(tab, origin.encodeAsJsonString());
-    }
-
-    /**
-     * Aborts the notification.
-     *
-     * @param guid GUID of a request to download a page related to the notification.
-     */
-    private static void suppressNotification(String guid) {
-        DownloadNotifier notifier =
-                DownloadManagerService.getDownloadManagerService().getDownloadNotifier();
-        if (notifier == null) return;
-
-        ContentId id = LegacyHelpers.buildLegacyContentId(true, guid);
-
-        DownloadSharedPreferenceEntry entry =
-                DownloadSharedPreferenceHelper.getInstance().getDownloadSharedPreferenceEntry(id);
-
-        if (entry == null) return;
-
-        DownloadInfo downloadInfo = new DownloadInfo.Builder().setContentId(id).build();
-
-        notifier.removeDownloadNotification(entry.notificationId, downloadInfo);
-    }
-
-    /**
-     * Returns whether we should suppress download complete notification based
-     * on the origin app of the download.
-     * @param originString the qualified string form of an OfflinePageOrigin
-     */
-    private static boolean shouldSuppressCompletedNotification(String originString) {
-        OfflinePageOrigin origin = new OfflinePageOrigin(originString);
-        return AppHooks.get().getOfflinePagesSuppressNotificationPackages().contains(
-                origin.getAppName());
-    }
-
-    /**
-     * Returns whether the notification is suppressed. Suppression is determined
-     * based on the origin app of the download.
-     *
-     * @param originString the qualified string form of an OfflinePageOrigin
-     * @param guid GUID of a request to download a page related to the notification.
-     */
-    @CalledByNative
-    private static boolean maybeSuppressNotification(String originString, String guid) {
-        if (shouldSuppressCompletedNotification(originString)) {
-            suppressNotification(guid);
-            return true;
-        }
-        return false;
+        OfflinePageDownloadBridgeJni.get().startDownload(tab, origin.encodeAsJsonString());
     }
 
     /**
@@ -228,15 +180,9 @@ public class OfflinePageDownloadBridge {
      */
     @CalledByNative
     public static void showDownloadingToast() {
-        if (FeatureUtilities.isDownloadProgressInfoBarEnabled()) {
-            DownloadManagerService.getDownloadManagerService()
-                    .getInfoBarController(false)
-                    .onDownloadStarted();
-        } else {
-            Toast.makeText(ContextUtils.getApplicationContext(), R.string.download_started,
-                         Toast.LENGTH_SHORT)
-                    .show();
-        }
+        DownloadManagerService.getDownloadManagerService()
+                .getMessageUiController(/*otrProfileID=*/null)
+                .onDownloadStarted();
     }
 
     /**
@@ -259,7 +205,10 @@ public class OfflinePageDownloadBridge {
         return null;
     }
 
-    private native long nativeInit();
-    private native void nativeDestroy(long nativeOfflinePageDownloadBridge);
-    private static native void nativeStartDownload(Tab tab, String origin);
+    @NativeMethods
+    interface Natives {
+        long init(OfflinePageDownloadBridge caller);
+        void destroy(long nativeOfflinePageDownloadBridge, OfflinePageDownloadBridge caller);
+        void startDownload(Tab tab, String origin);
+    }
 }

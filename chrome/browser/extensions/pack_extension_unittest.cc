@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "chrome/browser/extensions/startup_helper.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -32,10 +32,13 @@ class PackExtensionTest : public testing::Test {
     base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
     command_line.AppendSwitchPath(switches::kPackExtension,
                                   temp_dir.GetPath().Append(path.BaseName()));
-    return startup_helper_.PackExtension(command_line);
+    std::string error_message;
+    bool result = startup_helper_.PackExtension(command_line, &error_message);
+    EXPECT_EQ(result, error_message.empty()) << error_message;
+    return result;
   }
 
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   base::FilePath test_data_dir_;
   StartupHelper startup_helper_;
@@ -45,6 +48,12 @@ TEST_F(PackExtensionTest, Extension) {
   ASSERT_TRUE(TestPackExtension(test_data_dir_.AppendASCII("api_test")
                                               .AppendASCII("tabs")
                                               .AppendASCII("basics")));
+}
+
+TEST_F(PackExtensionTest, ExtensionWithManagedStorage) {
+  ASSERT_TRUE(TestPackExtension(test_data_dir_.AppendASCII("api_test")
+                                    .AppendASCII("settings")
+                                    .AppendASCII("managed_storage")));
 }
 
 TEST_F(PackExtensionTest, PackagedApp) {

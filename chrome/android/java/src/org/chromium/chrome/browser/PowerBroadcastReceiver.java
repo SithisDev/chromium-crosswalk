@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,14 +10,14 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.Handler;
 import android.os.Looper;
-import android.support.annotation.IntDef;
+import android.os.PowerManager;
 
-import org.chromium.base.ApiCompatibilityUtils;
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.invalidation.DelayedInvalidationsController;
 import org.chromium.chrome.browser.omaha.OmahaBase;
 
 import java.lang.annotation.Retention;
@@ -34,19 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class PowerBroadcastReceiver extends BroadcastReceiver {
     private final AtomicBoolean mIsRegistered = new AtomicBoolean(false);
 
-    private PowerManagerHelper mPowerManagerHelper;
-    private ServiceRunnable mServiceRunnable;
-
-    /**
-     * Stubs out interaction with the PowerManager.
-     */
-    @VisibleForTesting
-    static class PowerManagerHelper {
-        /** @return whether the screen is on or not. */
-        public boolean isScreenOn(Context context) {
-            return ApiCompatibilityUtils.isInteractive(context);
-        }
-    }
+    private ServiceRunnable mServiceRunnable = new ServiceRunnable();
 
     /**
      * Defines a set of actions to perform when the conditions are met.
@@ -79,7 +67,7 @@ public class PowerBroadcastReceiver extends BroadcastReceiver {
         public void post() {
             if (mState == State.POSTED) return;
             setState(State.POSTED);
-            mHandler.postDelayed(this, getDelayToRun());
+            mHandler.postDelayed(this, MS_DELAY_TO_RUN);
         }
 
         public void cancel() {
@@ -106,17 +94,8 @@ public class PowerBroadcastReceiver extends BroadcastReceiver {
         public void runActions() {
             Context context = ContextUtils.getApplicationContext();
             OmahaBase.onForegroundSessionStart(context);
-            DelayedInvalidationsController.getInstance().notifyPendingInvalidations();
         }
 
-        public long getDelayToRun() {
-            return MS_DELAY_TO_RUN;
-        }
-    }
-
-    public PowerBroadcastReceiver() {
-        mServiceRunnable = new ServiceRunnable();
-        mPowerManagerHelper = new PowerManagerHelper();
     }
 
     /** See {@link ChromeApplication#onForegroundSessionStart()}. */
@@ -124,7 +103,10 @@ public class PowerBroadcastReceiver extends BroadcastReceiver {
         ThreadUtils.assertOnUiThread();
         assert Looper.getMainLooper() == Looper.myLooper();
 
-        if (mPowerManagerHelper.isScreenOn(ContextUtils.getApplicationContext())) {
+        PowerManager powerManager =
+                (PowerManager) ContextUtils.getApplicationContext().getSystemService(
+                        Context.POWER_SERVICE);
+        if (powerManager.isInteractive()) {
             mServiceRunnable.post();
         } else {
             registerReceiver();
@@ -184,13 +166,5 @@ public class PowerBroadcastReceiver extends BroadcastReceiver {
         assert mServiceRunnable != null;
         mServiceRunnable.cancel();
         mServiceRunnable = runnable;
-    }
-
-    /**
-     * Sets the PowerManagerHelper that will be used to check if the screen is on.
-     */
-    @VisibleForTesting
-    void setPowerManagerHelperForTests(PowerManagerHelper helper) {
-        mPowerManagerHelper = helper;
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,10 @@
 #include "base/command_line.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/render_messages.h"
-#include "chrome/renderer/searchbox/search_bouncer.h"
 #include "chrome/renderer/searchbox/searchbox.h"
 #include "chrome/test/base/chrome_render_view_test.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -26,7 +23,7 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/renderer/render_frame.h"
-#include "content/public/renderer/render_view.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/mock_render_thread.h"
 #include "content/public/test/test_utils.h"
@@ -41,42 +38,9 @@
 #include "third_party/blink/public/web/web_plugin_params.h"
 #include "url/gurl.h"
 
-using InstantProcessNavigationTest = ChromeRenderViewTest;
 using ChromeContentRendererClientSearchBoxTest = ChromeRenderViewTest;
 
 const char kHtmlWithIframe[] ="<iframe srcdoc=\"Nothing here\"></iframe>";
-
-// Tests that renderer-initiated navigations from an Instant render process get
-// bounced back to the browser to be rebucketed into a non-Instant renderer if
-// necessary.
-TEST_F(InstantProcessNavigationTest, ForkForNavigationsFromInstantProcess) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kInstantProcess);
-  ChromeContentRendererClient* client =
-      static_cast<ChromeContentRendererClient*>(content_renderer_client_.get());
-  EXPECT_TRUE(client->ShouldFork(GetMainFrame(), GURL("http://foo"), "GET",
-                                 false, false));
-}
-
-// Tests that renderer-initiated navigations from a non-Instant render process
-// to potentially Instant URLs get bounced back to the browser to be rebucketed
-// into an Instant renderer if necessary.
-TEST_F(InstantProcessNavigationTest, ForkForNavigationsToNewTabURLs) {
-  ChromeContentRendererClient* client =
-      static_cast<ChromeContentRendererClient*>(content_renderer_client_.get());
-  chrome_render_thread_->set_io_task_runner(
-      base::ThreadTaskRunnerHandle::Get());
-  client->RenderThreadStarted();
-  SearchBouncer::GetInstance()->SetNewTabPageURL(
-      GURL("http://example.com/newtab"));
-  EXPECT_TRUE(client->ShouldFork(
-      GetMainFrame(), GURL("http://example.com/newtab"), "GET", false, false));
-  EXPECT_FALSE(client->ShouldFork(GetMainFrame(),
-                                  GURL("http://example.com/search?q=foo"),
-                                  "GET", false, false));
-  EXPECT_FALSE(client->ShouldFork(GetMainFrame(), GURL("http://example.com/"),
-                                  "GET", false, false));
-}
 
 TEST_F(ChromeContentRendererClientSearchBoxTest, RewriteThumbnailURL) {
   // Instantiate a SearchBox for the main render frame.
@@ -90,18 +54,16 @@ TEST_F(ChromeContentRendererClientSearchBoxTest, RewriteThumbnailURL) {
   ChromeContentRendererClient* client =
       static_cast<ChromeContentRendererClient*>(content_renderer_client_.get());
 
-  // Create a thumbnail URL containing the correct render view ID and an
+  // Create a thumbnail URL containing the correct render frame ID and an
   // arbitrary instant restricted ID.
-  GURL thumbnail_url(base::StringPrintf(
-      "chrome-search:/thumb/%i/1",
-      render_frame->GetRenderView()->GetRoutingID()));
+  GURL thumbnail_url(base::StringPrintf("chrome-search:/thumb/%i/1",
+                                        render_frame->GetRoutingID()));
 
   GURL result;
-  bool attach_same_site_cookies;
   // Make sure the SearchBox rewrites a thumbnail request from the main frame.
   client->WillSendRequest(GetMainFrame(), ui::PAGE_TRANSITION_LINK,
-                          blink::WebURL(thumbnail_url), nullptr, &result,
-                          &attach_same_site_cookies);
+                          blink::WebURL(thumbnail_url), net::SiteForCookies(),
+                          nullptr, &result);
   EXPECT_NE(result, thumbnail_url);
 
   // Make sure the SearchBox rewrites a thumbnail request from the iframe.
@@ -111,8 +73,8 @@ TEST_F(ChromeContentRendererClientSearchBoxTest, RewriteThumbnailURL) {
   blink::WebLocalFrame* local_child =
       static_cast<blink::WebLocalFrame*>(child_frame);
   client->WillSendRequest(local_child, ui::PAGE_TRANSITION_LINK,
-                          blink::WebURL(thumbnail_url), nullptr, &result,
-                          &attach_same_site_cookies);
+                          blink::WebURL(thumbnail_url), net::SiteForCookies(),
+                          nullptr, &result);
   EXPECT_NE(result, thumbnail_url);
 }
 
@@ -168,8 +130,8 @@ class ChromeContentRendererClientBrowserTest :
 
     EXPECT_EQ(request.relative_url, GetParam().expected_url)
         << "URL is wrong for test " << GetParam().name;
-    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                             message_runner_->QuitClosure());
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, message_runner_->QuitClosure());
   }
 
   void WaitForYouTubeRequest() {
@@ -180,7 +142,7 @@ class ChromeContentRendererClientBrowserTest :
     host_resolver()->AddRule("*", "127.0.0.1");
 
     https_server_->ServeFilesFromSourceDirectory(GetChromeTestDataDir());
-    https_server_->RegisterRequestMonitor(base::Bind(
+    https_server_->RegisterRequestMonitor(base::BindRepeating(
         &ChromeContentRendererClientBrowserTest::MonitorRequestHandler,
         base::Unretained(this)));
     ASSERT_TRUE(https_server_->Start());
@@ -204,7 +166,7 @@ class ChromeContentRendererClientBrowserTest :
 IN_PROC_BROWSER_TEST_P(ChromeContentRendererClientBrowserTest,
                        RewriteYouTubeFlashEmbed) {
   GURL url(https_server()->GetURL("/flash_embeds.html"));
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
@@ -218,7 +180,7 @@ IN_PROC_BROWSER_TEST_P(ChromeContentRendererClientBrowserTest,
 IN_PROC_BROWSER_TEST_P(ChromeContentRendererClientBrowserTest,
                        RewriteYouTubeFlashEmbedObject) {
   GURL url(https_server()->GetURL("/flash_embeds.html"));
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   content::WebContents* web_contents =
      browser()->tab_strip_model()->GetActiveWebContents();
 

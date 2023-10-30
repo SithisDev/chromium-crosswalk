@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -100,7 +100,7 @@ chrome.test.runTests([
   },
 
   function connectToRemovedTab() {
-    // Expect a disconnect event when you connect to a non-existant tab, and
+    // Expect a disconnect event when you connect to a non-existent tab, and
     // once disconnected, expect an error while trying to post messages.
     chrome.tabs.create({}, pass(function(tab) {
       chrome.tabs.remove(tab.id, pass(function() {

@@ -1,10 +1,8 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser;
-
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import android.os.Environment;
 import android.support.test.InstrumentationRegistry;
@@ -21,12 +19,14 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Manual;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.base.PageTransition;
+import org.chromium.url.GURL;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -56,8 +56,7 @@ import java.util.concurrent.TimeoutException;
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PopularUrlsTest {
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
+    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
     private static final String TAG = "PopularUrlsTest";
     private static final String NEW_LINE = System.getProperty("line.separator");
@@ -88,7 +87,7 @@ public class PopularUrlsTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (mStatus != null) {
             mStatus.cleanUp();
         }
@@ -229,10 +228,8 @@ public class PopularUrlsTest {
      * @param url the page URL
      * @param failureWriter the writer where failures/crashes/timeouts are logged.
      * @throws IOException unable to read from input or write to writer.
-     * @throws InterruptedException the thread was interrupted waiting for the page to load.
      */
-    public void loadUrl(final String url, OutputStreamWriter failureWriter)
-            throws InterruptedException, IOException {
+    public void loadUrl(final String url, OutputStreamWriter failureWriter) throws IOException {
         Tab tab = mActivityTestRule.getActivity().getActivityTab();
         final CallbackHelper loadedCallback = new CallbackHelper();
         final CallbackHelper failedCallback = new CallbackHelper();
@@ -240,7 +237,7 @@ public class PopularUrlsTest {
 
         tab.addObserver(new EmptyTabObserver() {
             @Override
-            public void onPageLoadFinished(Tab tab, String url) {
+            public void onPageLoadFinished(Tab tab, GURL url) {
                 loadedCallback.notifyCalled();
             }
 
@@ -285,14 +282,12 @@ public class PopularUrlsTest {
             }
         } else {
             try {
-                failedCallback.waitForCallback(
-                        0, 1, scaleTimeout(100 * 1000), TimeUnit.MILLISECONDS);
+                failedCallback.waitForCallback(0, 1, (long) (100 * 1000), TimeUnit.MILLISECONDS);
             } catch (TimeoutException ex) {
                 failed = false;
             }
             try {
-                crashedCallback.waitForCallback(
-                        0, 1, scaleTimeout(100 * 1000), TimeUnit.MILLISECONDS);
+                crashedCallback.waitForCallback(0, 1, (long) (100 * 1000), TimeUnit.MILLISECONDS);
             } catch (TimeoutException ex) {
                 crashed = false;
             }
@@ -324,11 +319,10 @@ public class PopularUrlsTest {
      * @param clearCache determines whether the cache is cleared before loading each page.
      * @param loopCount the number of times to loop through the list of pages.
      * @throws IOException unable to read from input or write to writer.
-     * @throws InterruptedException the thread was interrupted waiting for the page to load.
      */
     private void loopUrls(BufferedReader input, OutputStreamWriter outputWriter,
             OutputStreamWriter failureWriter, boolean clearCache, int loopCount)
-            throws IOException, InterruptedException {
+            throws IOException {
         List<String> pages = new ArrayList<>();
 
         String page;
@@ -362,7 +356,8 @@ public class PopularUrlsTest {
                 loadUrl(page, failureWriter);
                 long stopTime = System.currentTimeMillis();
 
-                String currentUrl = mActivityTestRule.getActivity().getActivityTab().getUrl();
+                String currentUrl =
+                        mActivityTestRule.getActivity().getActivityTab().getUrl().getSpec();
                 Log.i(TAG, "Finish: " + currentUrl);
                 logToStream(page + "|" + (stopTime - startTime) + NEW_LINE, outputWriter);
                 mStatus.incrementPage();
@@ -377,9 +372,8 @@ public class PopularUrlsTest {
      * Navigate to all the pages listed in the input.
      * @param perf Whether this is a performance test or stability test.
      * @throws IOException
-     * @throws InterruptedException
      */
-    public void loadPages(boolean perf) throws IOException, InterruptedException {
+    public void loadPages(boolean perf) throws IOException {
         OutputStreamWriter outputWriter = null;
         if (perf) {
             outputWriter = getOutputStream(OUTPUT_FILE);
@@ -416,7 +410,7 @@ public class PopularUrlsTest {
      */
     @Test
     @Manual
-    public void testLoadPerformance() throws IOException, InterruptedException {
+    public void testLoadPerformance() throws IOException {
         loadPages(true);
     }
 
@@ -425,7 +419,7 @@ public class PopularUrlsTest {
      */
     @Test
     @Manual
-    public void testStability() throws IOException, InterruptedException {
+    public void testStability() throws IOException {
         loadPages(false);
     }
 }

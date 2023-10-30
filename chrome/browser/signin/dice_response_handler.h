@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,10 @@
 
 #include "base/cancelable_callback.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/timer/timer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/account_reconcilor.h"
 #include "components/signin/core/browser/signin_header_helper.h"
@@ -30,16 +33,26 @@ class IdentityManager;
 
 // Exposed for testing.
 extern const int kDiceTokenFetchTimeoutSeconds;
+// Exposed for testing.
+extern const int kLockAccountReconcilorTimeoutHours;
 
 // Delegate interface for processing a dice request.
 class ProcessDiceHeaderDelegate {
  public:
   virtual ~ProcessDiceHeaderDelegate() = default;
 
+  // Called when a token was successfully exchanged.
+  // Called after the account was seeded in the account tracker service and
+  // after the refresh token was fetched and updated in the token service.
+  // |is_new_account| is true if the account was added to Chrome (it is not a
+  // re-auth).
+  virtual void HandleTokenExchangeSuccess(CoreAccountId account_id,
+                                          bool is_new_account) = 0;
+
   // Asks the delegate to enable sync for the |account_id|.
   // Called after the account was seeded in the account tracker service and
   // after the refresh token was fetched and updated in the token service.
-  virtual void EnableSync(const std::string& account_id) = 0;
+  virtual void EnableSync(const CoreAccountId& account_id) = 0;
 
   // Handles a failure in the token exchange (i.e. shows the error to the user).
   virtual void HandleTokenExchangeFailure(
@@ -58,8 +71,11 @@ class DiceResponseHandler : public KeyedService {
                       signin::IdentityManager* identity_manager,
                       AccountReconcilor* account_reconcilor,
                       AboutSigninInternals* about_signin_internals,
-                      signin::AccountConsistencyMethod account_consistency,
                       const base::FilePath& profile_path_);
+
+  DiceResponseHandler(const DiceResponseHandler&) = delete;
+  DiceResponseHandler& operator=(const DiceResponseHandler&) = delete;
+
   ~DiceResponseHandler() override;
 
   // Must be called when receiving a Dice response header.
@@ -68,6 +84,9 @@ class DiceResponseHandler : public KeyedService {
 
   // Returns the number of pending DiceTokenFetchers. Exposed for testing.
   size_t GetPendingDiceTokenFetchersCountForTesting() const;
+
+  // Sets |task_runner_| for testing.
+  void SetTaskRunner(scoped_refptr<base::SequencedTaskRunner> task_runner);
 
  private:
   // Helper class to fetch a refresh token from an authorization code.
@@ -80,6 +99,10 @@ class DiceResponseHandler : public KeyedService {
                      AccountReconcilor* account_reconcilor,
                      std::unique_ptr<ProcessDiceHeaderDelegate> delegate,
                      DiceResponseHandler* dice_response_handler);
+
+    DiceTokenFetcher(const DiceTokenFetcher&) = delete;
+    DiceTokenFetcher& operator=(const DiceTokenFetcher&) = delete;
+
     ~DiceTokenFetcher() override;
 
     const std::string& gaia_id() const { return gaia_id_; }
@@ -109,27 +132,21 @@ class DiceResponseHandler : public KeyedService {
     std::string email_;
     std::string authorization_code_;
     std::unique_ptr<ProcessDiceHeaderDelegate> delegate_;
-    DiceResponseHandler* dice_response_handler_;
-    base::CancelableClosure timeout_closure_;
+    raw_ptr<DiceResponseHandler> dice_response_handler_;
+    base::CancelableOnceClosure timeout_closure_;
     bool should_enable_sync_;
     std::unique_ptr<GaiaAuthFetcher> gaia_auth_fetcher_;
-
-    DISALLOW_COPY_AND_ASSIGN(DiceTokenFetcher);
   };
 
   // Deletes the token fetcher.
   void DeleteTokenFetcher(DiceTokenFetcher* token_fetcher);
-
-  // Returns true if it is acceptable to get a new token for the account.
-  // Always returns true when using kDice.
-  bool CanGetTokenForAccount(const std::string& gaia_id,
-                             const std::string& email);
 
   // Process the Dice signin action.
   void ProcessDiceSigninHeader(
       const std::string& gaia_id,
       const std::string& email,
       const std::string& authorization_code,
+      bool no_authorization_code,
       std::unique_ptr<ProcessDiceHeaderDelegate> delegate);
 
   // Process the Dice enable sync action.
@@ -150,16 +167,20 @@ class DiceResponseHandler : public KeyedService {
                               bool is_under_advanced_protection);
   void OnTokenExchangeFailure(DiceTokenFetcher* token_fetcher,
                               const GoogleServiceAuthError& error);
+  // Called to unlock the reconcilor after a SLO outage.
+  void OnTimeoutUnlockReconcilor();
 
-  SigninClient* signin_client_;
-  signin::IdentityManager* identity_manager_;
-  AccountReconcilor* account_reconcilor_;
-  AboutSigninInternals* about_signin_internals_;
-  signin::AccountConsistencyMethod account_consistency_;
+  raw_ptr<SigninClient> signin_client_;
+  raw_ptr<signin::IdentityManager> identity_manager_;
+  raw_ptr<AccountReconcilor> account_reconcilor_;
+  raw_ptr<AboutSigninInternals> about_signin_internals_;
   base::FilePath profile_path_;
   std::vector<std::unique_ptr<DiceTokenFetcher>> token_fetchers_;
-
-  DISALLOW_COPY_AND_ASSIGN(DiceResponseHandler);
+  // Lock the account reconcilor for kLockAccountReconcilorTimeoutHours
+  // when there was OAuth outage in Dice.
+  std::unique_ptr<AccountReconcilor::Lock> lock_;
+  std::unique_ptr<base::OneShotTimer> timer_;
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
 };
 
 #endif  // CHROME_BROWSER_SIGNIN_DICE_RESPONSE_HANDLER_H_

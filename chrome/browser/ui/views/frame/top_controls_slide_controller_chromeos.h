@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,17 @@
 #include <memory>
 
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
-#include "base/optional.h"
-#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
-#include "chrome/browser/ui/ash/tablet_mode_client_observer.h"
+#include "base/memory/raw_ptr.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/views/frame/top_controls_slide_controller.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/display/display_observer.h"
+#include "ui/views/view_observer.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/accessibility/accessibility_manager.h"
+#endif
 
 class BrowserView;
 class TopControlsSlideTabObserver;
@@ -36,13 +39,18 @@ class TopControlsSlideTabObserver;
 // - Exiting tablet mode.
 // - Entering immersive fullscreen mode.
 // - Page security level changes.
-class TopControlsSlideControllerChromeOS
-    : public TopControlsSlideController,
-      public TabletModeClientObserver,
-      public TabStripModelObserver,
-      public content::NotificationObserver {
+class TopControlsSlideControllerChromeOS : public TopControlsSlideController,
+                                           public TabStripModelObserver,
+                                           public display::DisplayObserver,
+                                           public views::ViewObserver {
  public:
   explicit TopControlsSlideControllerChromeOS(BrowserView* browser_view);
+
+  TopControlsSlideControllerChromeOS(
+      const TopControlsSlideControllerChromeOS&) = delete;
+  TopControlsSlideControllerChromeOS& operator=(
+      const TopControlsSlideControllerChromeOS&) = delete;
+
   ~TopControlsSlideControllerChromeOS() override;
 
   // TopControlsSlideController:
@@ -54,9 +62,7 @@ class TopControlsSlideControllerChromeOS
       const content::WebContents* contents) const override;
   void SetTopControlsGestureScrollInProgress(bool in_progress) override;
   bool IsTopControlsGestureScrollInProgress() const override;
-
-  // TabletModeClientObserver:
-  void OnTabletModeToggled(bool tablet_mode_enabled) override;
+  bool IsTopControlsSlidingInProgress() const override;
 
   // TabStripModelObserver:
   void OnTabStripModelChanged(
@@ -65,10 +71,26 @@ class TopControlsSlideControllerChromeOS
       const TabStripSelectionChange& selection) override;
   void SetTabNeedsAttentionAt(int index, bool attention) override;
 
-  // content::NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // display::DisplayObserver:
+  void OnDisplayMetricsChanged(const display::Display& display,
+                               uint32_t changed_metrics) override;
+  void OnDisplayTabletStateChanged(display::TabletState state) override;
+
+  // views::ViewObserver:
+  void OnViewIsDeleting(views::View* observed_view) override;
+  void OnViewFocused(views::View* observed_view) override;
+  void OnViewBlurred(views::View* observed_view) override;
+
+  // Instructs the renderer of |web_contents| to show the top controls, and also
+  // updates its shown state constraints based on the current status of
+  // |web_contents| (see GetBrowserControlsStateConstraints()), and the focused
+  // state of the omnibox.
+  // If |web_contents| is nullptr, then browser's active WebContents will be
+  // updated.
+  // If |animate| is true and the top controls are hidden, they will animate to
+  // be fully shown.
+  void UpdateBrowserControlsStateShown(content::WebContents* web_contents,
+                                       bool animate);
 
  private:
   // Returns true if this feature can be turned on. If |fullscreen_state| is
@@ -77,14 +99,16 @@ class TopControlsSlideControllerChromeOS
   // BrowserView informs us with fullscreen state changes before they happen
   // (See OnBrowserFullscreenStateWillChange()) so that we can disable the
   // sliding behavior *before* immersive mode is entered.
-  bool CanEnable(base::Optional<bool> fullscreen_state) const;
+  bool CanEnable(absl::optional<bool> fullscreen_state) const;
 
-  // Called back from the AccessibilityManager so that we're updated by the
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Called back from the ash::AccessibilityManager so that we're updated by the
   // status of Chromevox, which when enabled, sliding the top-controls should
   // be disabled. This is important for users who want to touch explore and need
   // this to be consistent.
   void OnAccessibilityStatusChanged(
-      const chromeos::AccessibilityStatusEventDetails& event_details);
+      const ash::AccessibilityStatusEventDetails& event_details);
+#endif
 
   void OnEnabledStateChanged(bool new_state);
 
@@ -107,7 +131,16 @@ class TopControlsSlideControllerChromeOS
   // size.
   void UpdateDoBrowserControlsShrinkRendererSize();
 
-  BrowserView* browser_view_;
+  // Returns the tab observer associated with the given |contents|, or nullptr
+  // if |contents| is not observed yet.
+  TopControlsSlideTabObserver* GetTabSlideObserverForWebContents(
+      const content::WebContents* contents) const;
+
+  raw_ptr<BrowserView> browser_view_;
+
+  // The omnibox can be focused via a keyboard shortcut, in which case, we have
+  // to show the top controls, and keep them shown until it's blurred.
+  raw_ptr<views::View> observed_omni_box_ = nullptr;
 
   // Represents the per-browser (as opposed to per-tab) shown ratio of the top
   // controls that is currently applied.
@@ -144,18 +177,29 @@ class TopControlsSlideControllerChromeOS
   // re-laid out.
   bool is_sliding_in_progress_ = false;
 
+  // Set to true when the state of this feature is temporarily disabled when
+  // some display metrics change while sliding and scrolling are both in
+  // progress, so that once the user lifts their finger to end the gesture
+  // scrolling, the enabled state is updated to the correct value.
+  bool update_state_after_gesture_scrolling_ends_ = false;
+
+  // True when it's desired to ignore shown ratios sent by the renderer for this
+  // tab. This happens when a display property changes while sliding and gesture
+  // scrolling are in progress, in which case we force-set the top controls to
+  // fully shown, and ignore any renderer-sent values.
+  bool pause_updates_ = false;
+
   // We need to observe the tab's web contents to listen to events that affect
   // the browser top controls shown state for each tab.
   base::flat_map<content::WebContents*,
                  std::unique_ptr<TopControlsSlideTabObserver>>
       observed_tabs_;
 
-  content::NotificationRegistrar registrar_;
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  base::CallbackListSubscription accessibility_status_subscription_;
+#endif
 
-  std::unique_ptr<chromeos::AccessibilityStatusSubscription>
-      accessibility_status_subscription_;
-
-  DISALLOW_COPY_AND_ASSIGN(TopControlsSlideControllerChromeOS);
+  display::ScopedDisplayObserver display_observer_{this};
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_TOP_CONTROLS_SLIDE_CONTROLLER_CHROMEOS_H_

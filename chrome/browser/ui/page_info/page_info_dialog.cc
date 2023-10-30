@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,18 +23,17 @@ bool ShowPageInfoDialog(content::WebContents* web_contents,
 
   content::NavigationEntry* entry =
       web_contents->GetController().GetVisibleEntry();
-  if (!entry)
+  if (!entry || entry->IsInitialEntry())
     return false;
 
-  SecurityStateTabHelper* helper =
-      SecurityStateTabHelper::FromWebContents(web_contents);
-  ShowPageInfoDialogImpl(
-      browser, web_contents, entry->GetVirtualURL(), helper->GetSecurityLevel(),
-      *helper->GetVisibleSecurityState(), anchor, std::move(closing_callback));
+  auto initialized_callback =
+      GetPageInfoDialogCreatedCallbackForTesting()
+          ? std::move(GetPageInfoDialogCreatedCallbackForTesting())
+          : base::DoNothing();
 
-  if (GetPageInfoDialogCreatedCallbackForTesting())
-    std::move(GetPageInfoDialogCreatedCallbackForTesting()).Run();
-
+  ShowPageInfoDialogImpl(browser, web_contents, entry->GetVirtualURL(), anchor,
+                         std::move(initialized_callback),
+                         std::move(closing_callback));
   return true;
 }
 

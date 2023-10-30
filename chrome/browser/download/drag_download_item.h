@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@ class Image;
 // DownloadItem. If |icon| is NULL, no image will be accompany the drag. |view|
 // is only required for Mac OS X, elsewhere it can be NULL.
 void DragDownloadItem(const download::DownloadItem* download,
-                      gfx::Image* icon,
+                      const gfx::Image* icon,
                       gfx::NativeView view);
 
 #endif  // CHROME_BROWSER_DOWNLOAD_DRAG_DOWNLOAD_ITEM_H_

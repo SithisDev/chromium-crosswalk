@@ -1,25 +1,35 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_APP_LIST_ARC_ARC_PACKAGE_SYNC_MODEL_TYPE_CONTROLLER_H_
 #define CHROME_BROWSER_UI_APP_LIST_ARC_ARC_PACKAGE_SYNC_MODEL_TYPE_CONTROLLER_H_
 
-#include "base/macros.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
-#include "components/sync/driver/syncable_service_based_model_type_controller.h"
+#include <memory>
+
+#include "base/callback_forward.h"
+#include "base/memory/weak_ptr.h"
+#include "chrome/browser/ash/arc/session/arc_session_manager_observer.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
+#include "components/prefs/pref_change_registrar.h"
+#include "components/sync/driver/model_type_controller.h"
+#include "components/sync/model/model_type_store.h"
 
 class Profile;
 
 namespace syncer {
+class ModelTypeSyncBridge;
+class SyncableService;
 class SyncService;
 }  // namespace syncer
 
 // A DataTypeController for arc package sync datatypes, which enables or
-// disables these types based on whether ArcAppInstance is ready.
+// disables these types based on whether ArcAppInstance is ready and whether
+// the OS sync feature is enabled.
 class ArcPackageSyncModelTypeController
-    : public syncer::SyncableServiceBasedModelTypeController,
-      public arc::ArcSessionManager::Observer {
+    : public syncer::ModelTypeController,
+      public ArcAppListPrefs::Observer,
+      public arc::ArcSessionManagerObserver {
  public:
   // |dump_stack| is called when an unrecoverable error occurs.
   ArcPackageSyncModelTypeController(
@@ -28,19 +38,31 @@ class ArcPackageSyncModelTypeController
       const base::RepeatingClosure& dump_stack,
       syncer::SyncService* sync_service,
       Profile* profile);
+
+  ArcPackageSyncModelTypeController(const ArcPackageSyncModelTypeController&) =
+      delete;
+  ArcPackageSyncModelTypeController& operator=(
+      const ArcPackageSyncModelTypeController&) = delete;
+
   ~ArcPackageSyncModelTypeController() override;
 
   // DataTypeController overrides.
-  bool ReadyForStart() const override;
+  PreconditionState GetPreconditionState() const override;
 
-  // ArcSessionManager::Observer:
+  // ArcAppListPrefs::Observer overrides.
+  void OnPackageListInitialRefreshed() override;
+
+  // ArcSessionManagerObserver:
   void OnArcPlayStoreEnabledChanged(bool enabled) override;
   void OnArcInitialStart() override;
 
  private:
+  void OnOsSyncFeaturePrefChanged();
+
+  std::unique_ptr<syncer::ModelTypeSyncBridge> bridge_;
   syncer::SyncService* const sync_service_;
   Profile* const profile_;
-
-  DISALLOW_COPY_AND_ASSIGN(ArcPackageSyncModelTypeController);
+  ArcAppListPrefs* const arc_prefs_;
 };
+
 #endif  // CHROME_BROWSER_UI_APP_LIST_ARC_ARC_PACKAGE_SYNC_MODEL_TYPE_CONTROLLER_H_

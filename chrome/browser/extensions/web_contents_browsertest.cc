@@ -1,28 +1,31 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <map>
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
-#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/sessions/content/session_tab_helper.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "extensions/browser/extension_api_frame_id_map.h"
+#include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_navigation_ui_data.h"
+#include "extensions/browser/process_manager.h"
+#include "extensions/common/manifest_handlers/background_info.h"
 
 namespace extensions {
 namespace {
@@ -37,6 +40,11 @@ class ExtensionNavigationUIDataObserver : public content::WebContentsObserver {
  public:
   explicit ExtensionNavigationUIDataObserver(content::WebContents* web_contents)
       : WebContentsObserver(web_contents) {}
+
+  ExtensionNavigationUIDataObserver(const ExtensionNavigationUIDataObserver&) =
+      delete;
+  ExtensionNavigationUIDataObserver& operator=(
+      const ExtensionNavigationUIDataObserver&) = delete;
 
   const ExtensionNavigationUIData* GetExtensionNavigationUIData(
       content::RenderFrameHost* rfh) const {
@@ -62,8 +70,6 @@ class ExtensionNavigationUIDataObserver : public content::WebContentsObserver {
   std::map<content::RenderFrameHost*,
            std::unique_ptr<ExtensionNavigationUIData>>
       navigation_ui_data_map_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionNavigationUIDataObserver);
 };
 
 }  // namespace
@@ -76,9 +82,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WebContents) {
                     .AppendASCII("behllobkkfkfnphdnhnkndlbkcpglgmj")
                     .AppendASCII("1.0.0.0")));
 
-  ui_test_utils::NavigateToURL(
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(),
-      GURL("chrome-extension://behllobkkfkfnphdnhnkndlbkcpglgmj/page.html"));
+      GURL("chrome-extension://behllobkkfkfnphdnhnkndlbkcpglgmj/page.html")));
 
   bool result = false;
   ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
@@ -88,168 +94,97 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WebContents) {
   // There was a bug where we would crash if we navigated to a page in the same
   // extension because no new render view was getting created, so we would not
   // do some setup.
-  ui_test_utils::NavigateToURL(
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(),
-      GURL("chrome-extension://behllobkkfkfnphdnhnkndlbkcpglgmj/page.html"));
+      GURL("chrome-extension://behllobkkfkfnphdnhnkndlbkcpglgmj/page.html")));
   result = false;
   ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
       GetActiveWebContents(browser()), "testTabsAPI()", &result));
   EXPECT_TRUE(result);
 }
 
-// Test that the frame data for the Devtools main frame is cached. Regression
-// test for crbug.com/817075.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, DevToolsMainFrameIsCached) {
-  auto test_devtools_main_frame_cached = [](Browser* browser, bool is_docked) {
-    SCOPED_TRACE(base::StringPrintf("Testing a %s devtools window",
-                                    is_docked ? "docked" : "undocked"));
-    const auto* api_frame_id_map = ExtensionApiFrameIdMap::Get();
-    size_t prior_count = api_frame_id_map->GetFrameDataCountForTesting();
-
-    // Open a devtools window.
-    DevToolsWindow* devtools_window =
-        DevToolsWindowTesting::OpenDevToolsWindowSync(browser, is_docked);
-
-    // Ensure that frame data for its main frame is cached.
-    content::WebContents* devtools_web_contents =
-        DevToolsWindow::GetInTabWebContents(
-            devtools_window->GetInspectedWebContents(), nullptr);
-    ASSERT_TRUE(devtools_web_contents);
-    EXPECT_TRUE(api_frame_id_map->HasCachedFrameDataForTesting(
-        devtools_web_contents->GetMainFrame()));
-    EXPECT_GT(api_frame_id_map->GetFrameDataCountForTesting(), prior_count);
-
-    DevToolsWindowTesting::CloseDevToolsWindowSync(devtools_window);
-
-    // Ensure that the frame data for the devtools main frame, which might have
-    // been destroyed by now, is deleted.
-    EXPECT_EQ(prior_count, api_frame_id_map->GetFrameDataCountForTesting());
-  };
-
-  test_devtools_main_frame_cached(browser(), true /*is_docked*/);
-  test_devtools_main_frame_cached(browser(), false /*is_docked*/);
-}
-
-// Test that we correctly cache frame data for all frames on creation.
-// Regression test for crbug.com/810614.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, FrameDataCached) {
-  // Load an extension with a web accessible resource.
-  const Extension* extension =
-      LoadExtension(test_data_dir_.AppendASCII("web_accessible_resources"));
-  ASSERT_TRUE(extension);
-
+// Ensure that platform app frames can't be loaded in a tab even on a redirect.
+// Regression test for crbug.com/1110551.
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, TabNavigationToPlatformApp) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
-  // Some utility functions for the test.
+  const Extension* extension = LoadExtension(
+      test_data_dir_.AppendASCII("platform_apps").AppendASCII("minimal"));
+  ASSERT_TRUE(extension);
 
-  // Returns whether the frame data for |rfh| is cached.
-  auto has_cached_frame_data = [](content::RenderFrameHost* rfh) {
-    return ExtensionApiFrameIdMap::Get()->HasCachedFrameDataForTesting(rfh);
-  };
-
-  // Returns the cached frame data for |rfh|.
-  auto get_frame_data = [](content::RenderFrameHost* rfh) {
-    return ExtensionApiFrameIdMap::Get()->GetFrameData(
-        rfh->GetProcess()->GetID(), rfh->GetRoutingID());
-  };
-
-  // Adds an iframe with the given |name| and |src| to the given |web_contents|
-  // and waits till it loads. Returns true if successful.
-  auto add_iframe = [](content::WebContents* web_contents,
-                       const std::string& name, const GURL& src) {
-    content::TestNavigationObserver observer(web_contents,
-                                             1 /*number_of_navigations*/);
-    const char* code = R"(
-      var iframe = document.createElement('iframe');
-      iframe.name = '%s';
-      iframe.src = '%s';
-      document.body.appendChild(iframe);
-    )";
-    content::ExecuteScriptAsync(
-        web_contents,
-        base::StringPrintf(code, name.c_str(), src.spec().c_str()));
-
-    observer.WaitForNavigationFinished();
-    return observer.last_navigation_succeeded() &&
-           observer.last_navigation_url() == src;
-  };
-
-  // Returns the frame with the given |name| in |web_contents|.
-  auto get_frame_by_name = [](content::WebContents* web_contents,
-                              const std::string& name) {
-    return content::FrameMatchingPredicate(
-        web_contents, base::Bind(&content::FrameMatchesName, name));
-  };
-
-  // Navigates the browser to |url|. Injects a web-frame and an extension frame
-  // into the page and ensures that extension frame data is correctly cached for
-  // each created frame.
-  auto load_page_and_test = [&](const GURL& url) {
-    using FrameData = ExtensionApiFrameIdMap::FrameData;
-
-    SCOPED_TRACE(base::StringPrintf("Testing %s", url.spec().c_str()));
-
-    ui_test_utils::NavigateToURL(browser(), url);
+  const GURL test_cases[] = {extension->GetResourceURL("main.html"),
+                             BackgroundInfo::GetBackgroundURL(extension)};
+  for (const GURL& app_url : test_cases) {
+    GURL redirect_to_platform_app =
+        embedded_test_server()->GetURL("/server-redirect?" + app_url.spec());
     content::WebContents* web_contents = GetActiveWebContents(browser());
-    SessionTabHelper* session_tab_helper =
-        SessionTabHelper::FromWebContents(web_contents);
-    ASSERT_TRUE(session_tab_helper);
-    int expected_tab_id = session_tab_helper->session_id().id();
-    int expected_window_id = session_tab_helper->window_id().id();
-
-    // Ensure that the frame data for the main frame is cached.
-    content::RenderFrameHost* rfh = web_contents->GetMainFrame();
-    EXPECT_TRUE(has_cached_frame_data(rfh));
-    FrameData main_frame_data = get_frame_data(rfh);
-    EXPECT_EQ(ExtensionApiFrameIdMap::kTopFrameId, main_frame_data.frame_id);
-    EXPECT_EQ(ExtensionApiFrameIdMap::kInvalidFrameId,
-              main_frame_data.parent_frame_id);
-    EXPECT_EQ(expected_tab_id, main_frame_data.tab_id);
-    EXPECT_EQ(expected_window_id, main_frame_data.window_id);
-    EXPECT_EQ(url, main_frame_data.last_committed_main_frame_url);
-    EXPECT_FALSE(main_frame_data.pending_main_frame_url);
-
-    // Add an extension iframe to the page and ensure its frame data is cached.
+    content::TestNavigationObserver observer(web_contents,
+                                             net::ERR_BLOCKED_BY_CLIENT);
     ASSERT_TRUE(
-        add_iframe(web_contents, "extension_frame",
-                   extension->GetResourceURL("web_accessible_page.html")));
-    rfh = get_frame_by_name(web_contents, "extension_frame");
-    EXPECT_TRUE(has_cached_frame_data(rfh));
-    FrameData extension_frame_data = get_frame_data(rfh);
-    EXPECT_NE(ExtensionApiFrameIdMap::kInvalidFrameId,
-              extension_frame_data.frame_id);
-    EXPECT_NE(ExtensionApiFrameIdMap::kTopFrameId,
-              extension_frame_data.frame_id);
-    EXPECT_EQ(ExtensionApiFrameIdMap::kTopFrameId,
-              extension_frame_data.parent_frame_id);
-    EXPECT_EQ(expected_tab_id, extension_frame_data.tab_id);
-    EXPECT_EQ(expected_window_id, extension_frame_data.window_id);
-    EXPECT_EQ(url, extension_frame_data.last_committed_main_frame_url);
-    EXPECT_FALSE(extension_frame_data.pending_main_frame_url);
+        ui_test_utils::NavigateToURL(browser(), redirect_to_platform_app));
+    observer.Wait();
+    EXPECT_FALSE(observer.last_navigation_succeeded());
+  }
+}
 
-    // Add a web frame to the page and ensure its frame data is cached.
-    ASSERT_TRUE(add_iframe(web_contents, "web_frame",
-                           embedded_test_server()->GetURL("/empty.html")));
-    rfh = get_frame_by_name(web_contents, "web_frame");
-    EXPECT_TRUE(has_cached_frame_data(rfh));
-    FrameData web_frame_data = get_frame_data(rfh);
-    EXPECT_NE(ExtensionApiFrameIdMap::kInvalidFrameId, web_frame_data.frame_id);
-    EXPECT_NE(ExtensionApiFrameIdMap::kTopFrameId, web_frame_data.frame_id);
-    EXPECT_NE(extension_frame_data.frame_id, web_frame_data.frame_id);
-    EXPECT_EQ(ExtensionApiFrameIdMap::kTopFrameId,
-              web_frame_data.parent_frame_id);
-    EXPECT_EQ(expected_tab_id, web_frame_data.tab_id);
-    EXPECT_EQ(expected_window_id, web_frame_data.window_id);
-    EXPECT_EQ(url, web_frame_data.last_committed_main_frame_url);
-    EXPECT_FALSE(web_frame_data.pending_main_frame_url);
-  };
-  // End utility functions.
+// Ensure that the extension's background page can't be navigated away.
+// Regression test for crbug.com/1130083.
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, BackgroundPageNavigation) {
+  ASSERT_TRUE(embedded_test_server()->Start());
 
-  // Test an extension page.
-  load_page_and_test(extension->GetResourceURL("extension_page.html"));
+  const Extension* extension = LoadExtension(
+      test_data_dir_.AppendASCII("common").AppendASCII("background_page"));
+  ASSERT_TRUE(extension);
 
-  // Test a non-extension page.
-  load_page_and_test(embedded_test_server()->GetURL("/empty.html"));
+  ExtensionHost* host =
+      ProcessManager::Get(profile())->GetBackgroundHostForExtension(
+          extension->id());
+  ASSERT_TRUE(host);
+
+  content::WebContents* background_contents = host->web_contents();
+
+  // Navigation to a different url should be disallowed.
+  {
+    GURL target_url = embedded_test_server()->GetURL("/body1.html");
+    content::TestNavigationManager navigation_observer(background_contents,
+                                                       target_url);
+    constexpr char kScript[] = "window.location.href = '%s'";
+    ASSERT_TRUE(ExecuteScriptInBackgroundPageNoWait(
+        extension->id(),
+        base::StringPrintf(kScript, target_url.spec().c_str())));
+    navigation_observer.WaitForNavigationFinished();
+    EXPECT_FALSE(navigation_observer.was_committed());
+    EXPECT_EQ(extension->GetResourceURL("background.html"),
+              background_contents->GetLastCommittedURL());
+  }
+
+  // A same-document navigation is still permitted.
+  {
+    GURL target_url = extension->GetResourceURL("background.html#fragment");
+    content::TestNavigationManager navigation_observer(background_contents,
+                                                       target_url);
+    constexpr char kScript[] = "window.location.href = '%s'";
+    ASSERT_TRUE(ExecuteScriptInBackgroundPageNoWait(
+        extension->id(),
+        base::StringPrintf(kScript, target_url.spec().c_str())));
+    navigation_observer.WaitForNavigationFinished();
+    EXPECT_TRUE(navigation_observer.was_committed());
+    EXPECT_EQ(target_url, background_contents->GetLastCommittedURL());
+  }
+
+  // Another same-document navigation case.
+  {
+    GURL target_url = extension->GetResourceURL("bar.html");
+    content::TestNavigationManager navigation_observer(background_contents,
+                                                       target_url);
+    constexpr char kScript[] = "history.pushState({}, '', '%s')";
+    ASSERT_TRUE(ExecuteScriptInBackgroundPageNoWait(
+        extension->id(),
+        base::StringPrintf(kScript, target_url.spec().c_str())));
+    navigation_observer.WaitForNavigationFinished();
+    EXPECT_TRUE(navigation_observer.was_committed());
+    EXPECT_EQ(target_url, background_contents->GetLastCommittedURL());
+  }
 }
 
 // Test that we correctly set up the ExtensionNavigationUIData for each
@@ -257,15 +192,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, FrameDataCached) {
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ExtensionNavigationUIData) {
   ASSERT_TRUE(embedded_test_server()->Start());
   content::WebContents* web_contents = GetActiveWebContents(browser());
-  GURL last_committed_main_frame_url = web_contents->GetLastCommittedURL();
   ExtensionNavigationUIDataObserver observer(web_contents);
 
   // Load a page with an iframe.
   const GURL url = embedded_test_server()->GetURL("/iframe.html");
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
 
-  SessionTabHelper* session_tab_helper =
-      SessionTabHelper::FromWebContents(web_contents);
+  sessions::SessionTabHelper* session_tab_helper =
+      sessions::SessionTabHelper::FromWebContents(web_contents);
   ASSERT_TRUE(session_tab_helper);
   int expected_tab_id = session_tab_helper->session_id().id();
   int expected_window_id = session_tab_helper->window_id().id();
@@ -273,7 +207,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ExtensionNavigationUIData) {
   // Test ExtensionNavigationUIData for the main frame.
   {
     const auto* extension_navigation_ui_data =
-        observer.GetExtensionNavigationUIData(web_contents->GetMainFrame());
+        observer.GetExtensionNavigationUIData(
+            web_contents->GetPrimaryMainFrame());
     ASSERT_TRUE(extension_navigation_ui_data);
     EXPECT_FALSE(extension_navigation_ui_data->is_web_view());
 
@@ -284,16 +219,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ExtensionNavigationUIData) {
               frame_data.parent_frame_id);
     EXPECT_EQ(expected_tab_id, frame_data.tab_id);
     EXPECT_EQ(expected_window_id, frame_data.window_id);
-    EXPECT_EQ(last_committed_main_frame_url,
-              frame_data.last_committed_main_frame_url);
-    EXPECT_FALSE(frame_data.pending_main_frame_url);
   }
 
   // Test ExtensionNavigationUIData for the sub-frame.
   {
     const auto* extension_navigation_ui_data =
         observer.GetExtensionNavigationUIData(
-            content::ChildFrameAt(web_contents->GetMainFrame(), 0));
+            content::ChildFrameAt(web_contents->GetPrimaryMainFrame(), 0));
     ASSERT_TRUE(extension_navigation_ui_data);
     EXPECT_FALSE(extension_navigation_ui_data->is_web_view());
 
@@ -304,8 +236,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ExtensionNavigationUIData) {
     EXPECT_EQ(ExtensionApiFrameIdMap::kTopFrameId, frame_data.parent_frame_id);
     EXPECT_EQ(expected_tab_id, frame_data.tab_id);
     EXPECT_EQ(expected_window_id, frame_data.window_id);
-    EXPECT_EQ(url, frame_data.last_committed_main_frame_url);
-    EXPECT_FALSE(frame_data.pending_main_frame_url);
   }
 }
 

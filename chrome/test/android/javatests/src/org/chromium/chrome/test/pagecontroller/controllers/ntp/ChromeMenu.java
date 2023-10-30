@@ -1,10 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.test.pagecontroller.controllers.ntp;
 
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ui.appmenu.AppMenuTestSupport;
 import org.chromium.chrome.test.pagecontroller.controllers.PageController;
 import org.chromium.chrome.test.pagecontroller.utils.IUi2Locator;
 import org.chromium.chrome.test.pagecontroller.utils.Ui2Locators;
@@ -14,44 +15,39 @@ import org.chromium.chrome.test.pagecontroller.utils.Ui2Locators;
  */
 public class ChromeMenu extends PageController {
     private static final IUi2Locator LOCATOR_CHROME_MENU_BOX =
-            Ui2Locators.withResEntries(R.id.app_menu_list);
-    private static final IUi2Locator LOCATOR_CHROME_MENU = Ui2Locators.withPath(
-            LOCATOR_CHROME_MENU_BOX, Ui2Locators.withResEntries(R.id.button_five));
+            Ui2Locators.withAnyResEntry(AppMenuTestSupport.getAppMenuLayoutListViewId());
 
-    private static final IUi2Locator LOCATOR_NEW_TAB =
-            Ui2Locators.withResEntriesByIndex(0, R.id.menu_item_text);
-    private static final IUi2Locator LOCATOR_NEW_INCOGNITO_TAB =
-            Ui2Locators.withResEntriesByIndex(1, R.id.menu_item_text);
+    private static final IUi2Locator LOCATOR_NEW_TAB = Ui2Locators.withPath(
+            Ui2Locators.withAnyResEntry(AppMenuTestSupport.getStandardMenuItemTextViewId()),
+            Ui2Locators.withTextString(R.string.menu_new_tab));
+    private static final IUi2Locator LOCATOR_NEW_INCOGNITO_TAB = Ui2Locators.withPath(
+            Ui2Locators.withAnyResEntry(AppMenuTestSupport.getStandardMenuItemTextViewId()),
+            Ui2Locators.withTextString(R.string.menu_new_incognito_tab));
 
     private static final ChromeMenu sInstance = new ChromeMenu();
     private ChromeMenu() {}
-    static public ChromeMenu getInstance() {
+    public static ChromeMenu getInstance() {
         return sInstance;
     }
 
     @Override
-    public boolean isCurrentPageThis() {
-        return mLocatorHelper.isOnScreen(LOCATOR_CHROME_MENU);
+    public ChromeMenu verifyActive() {
+        mLocatorHelper.verifyOnScreen(LOCATOR_CHROME_MENU_BOX);
+        return this;
     }
 
     public NewTabPageController openNewTab() {
         mUtils.click(LOCATOR_NEW_TAB);
-        NewTabPageController inst = NewTabPageController.getInstance();
-        inst.verify();
-        return inst;
+        return NewTabPageController.getInstance().verifyActive();
     }
 
     public IncognitoNewTabPageController openNewIncognitoTab() {
         mUtils.click(LOCATOR_NEW_INCOGNITO_TAB);
-        IncognitoNewTabPageController inst = IncognitoNewTabPageController.getInstance();
-        inst.verify();
-        return inst;
+        return IncognitoNewTabPageController.getInstance().verifyActive();
     }
 
     public NewTabPageController dismiss() {
         mUtils.clickOutsideOf(LOCATOR_CHROME_MENU_BOX);
-        NewTabPageController inst = NewTabPageController.getInstance();
-        inst.verify();
-        return inst;
+        return NewTabPageController.getInstance().verifyActive();
     }
 }

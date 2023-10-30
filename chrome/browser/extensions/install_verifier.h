@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,24 +11,25 @@
 
 #include "base/callback.h"
 #include "base/containers/queue.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "extensions/browser/management_policy.h"
-#include "extensions/common/extension.h"
+#include "extensions/common/extension_id.h"
 
 namespace content {
 class BrowserContext;
 }
 
 namespace extensions {
-
+class Extension;
 class ExtensionPrefs;
 class InstallSigner;
 struct InstallSignature;
 
 // This class implements verification that a set of extensions are either from
-// the webstore or are whitelisted by enterprise policy.  The webstore
+// the webstore or are allowlisted by enterprise policy.  The webstore
 // verification process works by sending a request to a backend server to get a
 // signature proving that a set of extensions are verified. This signature is
 // written into the extension preferences and is checked for validity when
@@ -40,6 +41,10 @@ class InstallVerifier : public KeyedService,
                         public ManagementPolicy::Provider {
  public:
   InstallVerifier(ExtensionPrefs* prefs, content::BrowserContext* context);
+
+  InstallVerifier(const InstallVerifier&) = delete;
+  InstallVerifier& operator=(const InstallVerifier&) = delete;
+
   ~InstallVerifier() override;
 
   // Convenience method to return the InstallVerifier for a given |context|.
@@ -49,10 +54,12 @@ class InstallVerifier : public KeyedService,
   static bool ShouldEnforce();
 
   // Returns whether |extension| is of a type that needs verification.
-  static bool NeedsVerification(const Extension& extension);
+  static bool NeedsVerification(const Extension& extension,
+                                content::BrowserContext* context);
 
   // Determines if an extension claims to be from the webstore.
-  static bool IsFromStore(const Extension& extension);
+  static bool IsFromStore(const Extension& extension,
+                          content::BrowserContext* context);
 
   // Initializes this object for use, including reading preferences and
   // validating the stored signature.
@@ -90,7 +97,7 @@ class InstallVerifier : public KeyedService,
   std::string GetDebugPolicyProviderName() const override;
   bool MustRemainDisabled(const Extension* extension,
                           disable_reason::DisableReason* reason,
-                          base::string16* error) const override;
+                          std::u16string* error) const override;
 
  private:
   // We keep a list of operations to the current set of extensions.
@@ -149,10 +156,10 @@ class InstallVerifier : public KeyedService,
   // Called with the result of a signature request, or NULL on failure.
   void SignatureCallback(std::unique_ptr<InstallSignature> signature);
 
-  ExtensionPrefs* prefs_;
+  raw_ptr<ExtensionPrefs> prefs_;
 
   // The context with which the InstallVerifier is associated.
-  content::BrowserContext* context_;
+  raw_ptr<content::BrowserContext> context_;
 
   // Have we finished our bootstrap check yet?
   bool bootstrap_check_complete_;
@@ -172,8 +179,6 @@ class InstallVerifier : public KeyedService,
   ExtensionIdSet provisional_;
 
   base::WeakPtrFactory<InstallVerifier> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(InstallVerifier);
 };
 
 // Instances of this class can be constructed to disable install verification
@@ -186,13 +191,17 @@ class ScopedInstallVerifierBypassForTest {
   };
 
   explicit ScopedInstallVerifierBypassForTest(ForceType force_type = kForceOff);
+
+  ScopedInstallVerifierBypassForTest(
+      const ScopedInstallVerifierBypassForTest&) = delete;
+  ScopedInstallVerifierBypassForTest& operator=(
+      const ScopedInstallVerifierBypassForTest&) = delete;
+
   ~ScopedInstallVerifierBypassForTest();
 
  private:
   ForceType value_;
-  ForceType* old_value_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedInstallVerifierBypassForTest);
+  raw_ptr<ForceType> old_value_;
 };
 
 }  // namespace extensions

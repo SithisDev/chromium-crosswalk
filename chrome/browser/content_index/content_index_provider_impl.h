@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,18 +7,26 @@
 
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/observer_list.h"
-#include "base/optional.h"
+#include "chrome/browser/content_index/content_index_metrics.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/offline_items_collection/core/offline_content_provider.h"
 #include "components/offline_items_collection/core/offline_item.h"
 #include "content/public/browser/content_index_provider.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+
+namespace content {
+class WebContents;
+}  // namespace content
 
 namespace offline_items_collection {
 class OfflineContentAggregator;
 }  // namespace offline_items_collection
+
+namespace site_engagement {
+class SiteEngagementService;
+}
 
 class Profile;
 
@@ -27,20 +35,28 @@ class ContentIndexProviderImpl
       public offline_items_collection::OfflineContentProvider,
       public content::ContentIndexProvider {
  public:
+  static const char kProviderNamespace[];
+
   explicit ContentIndexProviderImpl(Profile* profile);
+
+  ContentIndexProviderImpl(const ContentIndexProviderImpl&) = delete;
+  ContentIndexProviderImpl& operator=(const ContentIndexProviderImpl&) = delete;
+
   ~ContentIndexProviderImpl() override;
 
   // KeyedService implementation.
   void Shutdown() override;
 
   // ContentIndexProvider implementation.
+  std::vector<gfx::Size> GetIconSizes(
+      blink::mojom::ContentCategory category) override;
   void OnContentAdded(content::ContentIndexEntry entry) override;
   void OnContentDeleted(int64_t service_worker_registration_id,
                         const url::Origin& origin,
                         const std::string& description_id) override;
 
   // OfflineContentProvider implementation.
-  void OpenItem(offline_items_collection::LaunchLocation location,
+  void OpenItem(const offline_items_collection::OpenParams& open_params,
                 const offline_items_collection::ContentId& id) override;
   void RemoveItem(const offline_items_collection::ContentId& id) override;
   void CancelDownload(const offline_items_collection::ContentId& id) override;
@@ -58,23 +74,36 @@ class ContentIndexProviderImpl
   void RenameItem(const offline_items_collection::ContentId& id,
                   const std::string& name,
                   RenameCallback callback) override;
-  void AddObserver(Observer* observer) override;
-  void RemoveObserver(Observer* observer) override;
+
+  void SetIconSizesForTesting(std::vector<gfx::Size> icon_sizes) {
+    icon_sizes_for_testing_ = std::move(icon_sizes);
+  }
 
  private:
-  friend class ContentIndexProviderImplTest;
+  void DidGetItem(SingleItemCallback callback,
+                  absl::optional<content::ContentIndexEntry> entry);
+  void DidGetAllEntriesAcrossStorageParitions(
+      std::unique_ptr<OfflineItemList> item_list,
+      MultipleItemCallback callback);
+  void DidGetAllEntries(base::OnceClosure done_closure,
+                        OfflineItemList* item_list,
+                        blink::mojom::ContentIndexError error,
+                        std::vector<content::ContentIndexEntry> entries);
+  void DidGetIcons(const offline_items_collection::ContentId& id,
+                   VisualsCallback callback,
+                   std::vector<SkBitmap> icons);
+  void DidGetEntryToOpen(absl::optional<content::ContentIndexEntry> entry);
+  void DidOpenTab(content::ContentIndexEntry entry,
+                  content::WebContents* web_contents);
+  offline_items_collection::OfflineItem EntryToOfflineItem(
+      const content::ContentIndexEntry& entry);
 
-  void DidGetIcon(const offline_items_collection::ContentId& id,
-                  VisualsCallback callback,
-                  SkBitmap icon);
-  void DidGetEntryToOpen(base::Optional<content::ContentIndexEntry> entry);
-
-  Profile* profile_;
-  offline_items_collection::OfflineContentAggregator* aggregator_;
-  base::ObserverList<Observer>::Unchecked observers_;
-  base::WeakPtrFactory<ContentIndexProviderImpl> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ContentIndexProviderImpl);
+  raw_ptr<Profile> profile_;
+  ContentIndexMetrics metrics_;
+  raw_ptr<offline_items_collection::OfflineContentAggregator> aggregator_;
+  raw_ptr<site_engagement::SiteEngagementService> site_engagement_service_;
+  absl::optional<std::vector<gfx::Size>> icon_sizes_for_testing_;
+  base::WeakPtrFactory<ContentIndexProviderImpl> weak_ptr_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_CONTENT_INDEX_CONTENT_INDEX_PROVIDER_IMPL_H_

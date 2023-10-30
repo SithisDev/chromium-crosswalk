@@ -1,8 +1,12 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Presubmit script for Chromium browser code."""
+
+USE_PYTHON3 = True
+
+import re
 
 def _RunHistogramChecks(input_api, output_api, histogram_name):
   try:
@@ -25,10 +29,32 @@ def _RunHistogramChecks(input_api, output_api, histogram_name):
   finally:
     sys.path = original_sys_path
 
+def _CheckUnwantedDependencies(input_api, output_api):
+  problems = []
+  for f in input_api.AffectedFiles():
+    if not f.LocalPath().endswith('DEPS'):
+      continue
+
+    for line_num, line in f.ChangedContents():
+      if not line.strip().startswith('#'):
+        m = re.search(r".*\/blink\/public\/web.*", line)
+        if m:
+          problems.append(m.group(0))
+
+  if not problems:
+    return []
+  return [output_api.PresubmitPromptWarning(
+      'chrome/browser cannot depend on blink/public/web interfaces. ' +
+      'Use blink/public/common instead.',
+      items=problems)]
 
 def _CommonChecks(input_api, output_api):
   """Checks common to both upload and commit."""
-  return _RunHistogramChecks(input_api, output_api, "BadMessageReasonChrome")
+  results = []
+  results.extend(_CheckUnwantedDependencies(input_api, output_api))
+  results.extend(_RunHistogramChecks(input_api, output_api,
+                 "BadMessageReasonChrome"))
+  return results
 
 
 def CheckChangeOnUpload(input_api, output_api):

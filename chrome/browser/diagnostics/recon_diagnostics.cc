@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,13 @@
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_string_value_serializer.h"
-#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/diagnostics/diagnostics_test.h"
 #include "chrome/common/channel_info.h"
@@ -28,7 +28,7 @@
 #include "components/bookmarks/common/bookmark_constants.h"
 #include "components/version_info/version_info.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "chrome/installer/util/install_util.h"
 #endif
 
@@ -48,13 +48,16 @@ const int64_t kOneKilobyte = 1024;
 const int64_t kOneMegabyte = 1024 * kOneKilobyte;
 
 class InstallTypeTest;
-InstallTypeTest* g_install_type = 0;
+InstallTypeTest* g_install_type = nullptr;
 
 // Check that the disk space in the volume where the user data directory
 // normally lives is not dangerously low.
 class DiskSpaceTest : public DiagnosticsTest {
  public:
   DiskSpaceTest() : DiagnosticsTest(DIAGNOSTICS_DISK_SPACE_TEST) {}
+
+  DiskSpaceTest(const DiskSpaceTest&) = delete;
+  DiskSpaceTest& operator=(const DiskSpaceTest&) = delete;
 
   bool ExecuteImpl(DiagnosticsModel::Observer* observer) override {
     base::FilePath data_dir;
@@ -74,9 +77,6 @@ class DiskSpaceTest : public DiagnosticsTest {
     RecordSuccess("Free space: " + printable_size);
     return true;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DiskSpaceTest);
 };
 
 // Check if it is system install or per-user install.
@@ -85,14 +85,17 @@ class InstallTypeTest : public DiagnosticsTest {
   InstallTypeTest()
       : DiagnosticsTest(DIAGNOSTICS_INSTALL_TYPE_TEST), user_level_(false) {}
 
+  InstallTypeTest(const InstallTypeTest&) = delete;
+  InstallTypeTest& operator=(const InstallTypeTest&) = delete;
+
   bool ExecuteImpl(DiagnosticsModel::Observer* observer) override {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     user_level_ = InstallUtil::IsPerUserInstall();
     const char* type = user_level_ ? "User Level" : "System Level";
     std::string install_type(type);
 #else
     std::string install_type("System Level");
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
     RecordSuccess(install_type);
     g_install_type = this;
     return true;
@@ -102,7 +105,6 @@ class InstallTypeTest : public DiagnosticsTest {
 
  private:
   bool user_level_;
-  DISALLOW_COPY_AND_ASSIGN(InstallTypeTest);
 };
 
 // Checks that a given JSON file can be correctly parsed.
@@ -121,6 +123,9 @@ class JSONTest : public DiagnosticsTest {
         path_(path),
         max_file_size_(max_file_size),
         importance_(importance) {}
+
+  JSONTest(const JSONTest&) = delete;
+  JSONTest& operator=(const JSONTest&) = delete;
 
   bool ExecuteImpl(DiagnosticsModel::Observer* observer) override {
     if (!base::PathExists(path_)) {
@@ -155,11 +160,11 @@ class JSONTest : public DiagnosticsTest {
     }
 
     JSONStringValueDeserializer json(json_data);
-    int error_code = base::JSONReader::JSON_NO_ERROR;
+    int error_code = base::ValueDeserializer::kErrorCodeNoError;
     std::string error_message;
     std::unique_ptr<base::Value> json_root(
         json.Deserialize(&error_code, &error_message));
-    if (base::JSONReader::JSON_NO_ERROR != error_code) {
+    if (base::ValueDeserializer::kErrorCodeNoError != error_code) {
       if (error_message.empty()) {
         error_message = "Parse error " + base::NumberToString(error_code);
       }
@@ -175,7 +180,6 @@ class JSONTest : public DiagnosticsTest {
   base::FilePath path_;
   int64_t max_file_size_;
   FileImportance importance_;
-  DISALLOW_COPY_AND_ASSIGN(JSONTest);
 };
 
 // Check that the flavor of the operating system is supported.
@@ -184,6 +188,9 @@ class OperatingSystemTest : public DiagnosticsTest {
   OperatingSystemTest()
       : DiagnosticsTest(DIAGNOSTICS_OPERATING_SYSTEM_TEST) {}
 
+  OperatingSystemTest(const OperatingSystemTest&) = delete;
+  OperatingSystemTest& operator=(const OperatingSystemTest&) = delete;
+
   bool ExecuteImpl(DiagnosticsModel::Observer* observer) override {
     // TODO(port): define the OS criteria for Linux and Mac.
     RecordSuccess(base::StringPrintf(
@@ -191,9 +198,6 @@ class OperatingSystemTest : public DiagnosticsTest {
         base::SysInfo::OperatingSystemVersion().c_str()));
     return true;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(OperatingSystemTest);
 };
 
 struct TestPathInfo {
@@ -222,6 +226,9 @@ class PathTest : public DiagnosticsTest {
   explicit PathTest(const TestPathInfo& path_info)
       : DiagnosticsTest(path_info.test_id),
         path_info_(path_info) {}
+
+  PathTest(const PathTest&) = delete;
+  PathTest& operator=(const PathTest&) = delete;
 
   bool ExecuteImpl(DiagnosticsModel::Observer* observer) override {
     if (!g_install_type) {
@@ -279,7 +286,6 @@ class PathTest : public DiagnosticsTest {
 
  private:
   TestPathInfo path_info_;
-  DISALLOW_COPY_AND_ASSIGN(PathTest);
 };
 
 // Check the version of Chrome.
@@ -287,24 +293,25 @@ class VersionTest : public DiagnosticsTest {
  public:
   VersionTest() : DiagnosticsTest(DIAGNOSTICS_VERSION_TEST) {}
 
+  VersionTest(const VersionTest&) = delete;
+  VersionTest& operator=(const VersionTest&) = delete;
+
   bool ExecuteImpl(DiagnosticsModel::Observer* observer) override {
     std::string current_version = version_info::GetVersionNumber();
     if (current_version.empty()) {
       RecordFailure(DIAG_RECON_EMPTY_VERSION, "Empty Version");
       return true;
     }
-    std::string version_modifier = chrome::GetChannelName();
+    std::string version_modifier =
+        chrome::GetChannelName(chrome::WithExtendedStable(true));
     if (!version_modifier.empty())
       current_version += " " + version_modifier;
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
     current_version += " GCB";
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
     RecordSuccess(current_version);
     return true;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(VersionTest);
 };
 
 }  // namespace

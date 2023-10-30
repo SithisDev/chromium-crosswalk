@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@ extern const char kWebstoreRequestError[];
 extern const char kInvalidWebstoreResponseError[];
 extern const char kInvalidManifestError[];
 extern const char kUserCancelledError[];
-extern const char kExtensionIsBlacklisted[];
+extern const char kExtensionIsBlocklisted[];
 extern const char kInstallInProgressError[];
 
 // Result codes returned by WebstoreStandaloneInstaller and its subclasses.
@@ -54,8 +54,8 @@ enum Result {
   // The user cancelled the operation.
   USER_CANCELLED,
 
-  // The extension is blacklisted.
-  BLACKLISTED,
+  // The extension is blocklisted.
+  BLOCKLISTED,
 
   // Unsatisfied dependencies, such as shared modules.
   MISSING_DEPENDENCIES,

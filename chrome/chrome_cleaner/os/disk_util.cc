@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,12 @@
 
 #include <algorithm>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/file_version_info.h"
 #include "base/files/file.h"
 #include "base/files/file_enumerator.h"
@@ -19,13 +21,12 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/stl_util.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "base/win/current_module.h"
 #include "base/win/registry.h"
 #include "base/win/shortcut.h"
@@ -63,12 +64,12 @@ const wchar_t kWindowsCurrentVersionRegKeyName[] =
 // "C:\Program Files\Common Files\".
 const wchar_t kCommonProgramW6432[] = L"%CommonProgramW6432%";
 
-constexpr const base::char16* kCompanyIgnoredReportingList[] = {
-    STRING16_LITERAL("Google LLC"),
-    STRING16_LITERAL("Google Inc"),
-    STRING16_LITERAL("Google Inc."),
-    STRING16_LITERAL("Intel Corporation"),
-    STRING16_LITERAL("Microsoft Corporation"),
+constexpr const wchar_t* kCompanyIgnoredReportingList[] = {
+    L"Google LLC",
+    L"Google Inc",
+    L"Google Inc.",
+    L"Intel Corporation",
+    L"Microsoft Corporation",
 };
 
 // Built from various sources to try and include all the extensions that are
@@ -138,8 +139,8 @@ void CollectMatchingPathsRecursive(
 }
 
 void AppendFileInformationField(const wchar_t* field_name,
-                                const base::string16& field,
-                                base::string16* information) {
+                                const std::wstring& field,
+                                std::wstring* information) {
   DCHECK(field_name);
   DCHECK(information);
   if (!field.empty()) {
@@ -185,7 +186,7 @@ bool ExtractExecutablePathWithoutArgument(const base::FilePath& program_path,
     return true;
   }
   size_t program_path_length = program_path.value().find(L" ");
-  while (program_path_length != base::string16::npos) {
+  while (program_path_length != std::wstring::npos) {
     base::FilePath truncated_path(
         program_path.value().substr(0, program_path_length));
     if (ExpandEnvPathandWow64PathIfFileExists(truncated_path,
@@ -199,17 +200,17 @@ bool ExtractExecutablePathWithoutArgument(const base::FilePath& program_path,
 }
 
 bool IsActionRunDll32(const base::FilePath& exec_path) {
-  return String16EqualsCaseInsensitive(
+  return WStringEqualsCaseInsensitive(
       exec_path.BaseName().RemoveExtension().value(), L"rundll32");
 }
 
-base::FilePath ExtractRunDllTargetPath(const base::string16& arguments) {
+base::FilePath ExtractRunDllTargetPath(const std::wstring& arguments) {
   // Some programs use rundll instead of an executable, and so their disk
   // footprint will be the first of a set of comma separated list of
   // arguments passed to rundll32.exe, which may also be "quoted", and may
   // also have command line arguments. We can't use CommandLine::GetArgs nor
   // CommandLine::GetArgumentsString() since they split/quote by spaces.
-  std::vector<base::string16> rundll_args = base::SplitString(
+  std::vector<std::wstring> rundll_args = base::SplitString(
       arguments, L",\"", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   if (rundll_args.empty()) {
     LOG(WARNING) << "Rundll without any arguments? '" << arguments << "'";
@@ -232,8 +233,9 @@ base::FilePath AppendProductPath(const base::FilePath& base_path) {
       FileVersionInfo::CreateFileVersionInfoForModule(CURRENT_MODULE()));
 
   if (file_version_info.get()) {
-    return base_path.Append(file_version_info->company_short_name())
-        .Append(file_version_info->product_short_name());
+    return base_path
+        .Append(base::AsWStringPiece(file_version_info->company_short_name()))
+        .Append(base::AsWStringPiece(file_version_info->product_short_name()));
   } else {
     return base_path.Append(COMPANY_SHORTNAME_STRING)
         .Append(L"Chrome Cleanup Tool Test");
@@ -252,7 +254,7 @@ base::FilePath GetX64ProgramFilesPath(const base::FilePath& input_path) {
                                 kWindowsCurrentVersionRegKeyName,
                                 KEY_READ | KEY_WOW64_64KEY);
   DCHECK(version_key.Valid());
-  base::string16 program_files_path;
+  std::wstring program_files_path;
   LONG error =
       version_key.ReadValue(kProgramFilesDirValueName, &program_files_path);
   if (error != ERROR_SUCCESS) {
@@ -268,7 +270,7 @@ base::FilePath GetX86ProgramFilesPath(const base::FilePath& input_path) {
                                 kWindowsCurrentVersionRegKeyName,
                                 KEY_READ | KEY_WOW64_32KEY);
   DCHECK(version_key.Valid());
-  base::string16 program_files_path;
+  std::wstring program_files_path;
   LONG error =
       version_key.ReadValue(kProgramFilesDirValueName, &program_files_path);
   if (error != ERROR_SUCCESS) {
@@ -279,15 +281,15 @@ base::FilePath GetX86ProgramFilesPath(const base::FilePath& input_path) {
   return base::FilePath(program_files_path).Append(input_path);
 }
 
-bool NameContainsWildcards(const base::string16& name) {
+bool NameContainsWildcards(const std::wstring& name) {
   return (name.find(L"*") != base::FilePath::StringType::npos ||
           name.find(L"?") != base::FilePath::StringType::npos);
 }
 
-bool NameMatchesPattern(const base::string16& name,
-                        const base::string16& pattern,
+bool NameMatchesPattern(const std::wstring& name,
+                        const std::wstring& pattern,
                         const wchar_t escape_char) {
-  return String16WildcardMatchInsensitive(name, pattern, escape_char);
+  return WStringWildcardMatchInsensitive(name, pattern, escape_char);
 }
 
 void CollectMatchingPaths(const base::FilePath& root_path,
@@ -295,49 +297,11 @@ void CollectMatchingPaths(const base::FilePath& root_path,
   DCHECK(matches);
 
   if (PathContainsWildcards(root_path)) {
-    std::vector<base::FilePath::StringType> components;
-    root_path.GetComponents(&components);
-    base::FilePath empty_path;
-    CollectMatchingPathsRecursive(empty_path, components, 0, matches);
+    CollectMatchingPathsRecursive(base::FilePath(), root_path.GetComponents(),
+                                  0, matches);
   } else if (base::PathExists(root_path)) {
     matches->push_back(root_path);
   }
-}
-
-bool CollectPathsRecursivelyWithLimits(const base::FilePath& file_path,
-                                       size_t max_files,
-                                       size_t max_filesize,
-                                       bool allow_folders,
-                                       FilePathSet* paths) {
-  DCHECK(paths);
-
-  FilePathSet collected_paths;
-  collected_paths.Insert(file_path);
-
-  size_t count_files = 0;
-  base::FileEnumerator file_enum(
-      file_path, true,
-      base::FileEnumerator::FILES | base::FileEnumerator::DIRECTORIES);
-  for (base::FilePath file = file_enum.Next(); !file.empty();
-       file = file_enum.Next()) {
-    if (count_files >= max_files)
-      return false;
-    ++count_files;
-
-    base::FileEnumerator::FileInfo file_info = file_enum.GetInfo();
-    if (file_info.IsDirectory()) {
-      if (!allow_folders)
-        return false;
-    } else {
-      if (static_cast<size_t>(file_info.GetSize()) >= max_filesize)
-        return false;
-    }
-
-    collected_paths.Insert(file);
-  }
-
-  paths->CopyFrom(collected_paths);
-  return true;
 }
 
 bool PathContainsWildcards(const base::FilePath& file_path) {
@@ -346,7 +310,7 @@ bool PathContainsWildcards(const base::FilePath& file_path) {
 }
 
 bool PathHasActiveExtension(const base::FilePath& file_path) {
-  base::string16 extension;
+  std::wstring extension;
   if (base::EndsWith(file_path.value(), kDefaultDataStream,
                      base::CompareCase::INSENSITIVE_ASCII)) {
     // Default stream with an explicit stream type specified.
@@ -355,7 +319,7 @@ bool PathHasActiveExtension(const base::FilePath& file_path) {
     // check.
     size_t true_path_len =
         file_path.value().size() - wcslen(kDefaultDataStream);
-    base::string16 true_path = file_path.value().substr(0, true_path_len);
+    std::wstring true_path = file_path.value().substr(0, true_path_len);
     extension = base::FilePath(true_path).Extension();
   } else {
     CHECK_EQ(base::FilePath::StringType::npos,
@@ -371,7 +335,7 @@ bool PathHasActiveExtension(const base::FilePath& file_path) {
 
 void InitializeDiskUtil() {
   // Only do this once.
-  static bool init_once = []() -> bool {
+  [[maybe_unused]] static bool init_once = []() -> bool {
     // Initialize the binary extension, so it can be used from different threads
     // without the initial creation race.
     DCHECK(g_active_extensions.empty());
@@ -381,7 +345,6 @@ void InitializeDiskUtil() {
     DCHECK(!g_active_extensions.empty());
     return true;
   }();
-  ANALYZER_ALLOW_UNUSED(init_once);
 }
 
 bool ExpandEnvPath(const base::FilePath& path, base::FilePath* expanded_path) {
@@ -433,25 +396,25 @@ void ExpandWow64Path(const base::FilePath& path,
   }
 }
 
-base::string16 FileInformationToString(
+std::wstring FileInformationToString(
     const internal::FileInformation& file_information) {
   if (file_information.path.empty())
     return L"";
 
   // We add the first field directly without using any AppendFileInformation*()
   // function since the first field should not be prepended with a separator.
-  base::string16 content = L"path = '" + file_information.path + L"'";
+  std::wstring content = L"path = '" + file_information.path + L"'";
 
   AppendFileInformationField(L"file_creation_date",
-                             base::UTF8ToUTF16(file_information.creation_date),
+                             base::UTF8ToWide(file_information.creation_date),
                              &content);
   AppendFileInformationField(
       L"file_last_modified_date",
-      base::UTF8ToUTF16(file_information.last_modified_date), &content);
+      base::UTF8ToWide(file_information.last_modified_date), &content);
   AppendFileInformationField(
-      L"digest", base::UTF8ToUTF16(file_information.sha256), &content);
+      L"digest", base::UTF8ToWide(file_information.sha256), &content);
   AppendFileInformationField(
-      L"size", base::NumberToString16(file_information.size), &content);
+      L"size", base::NumberToWString(file_information.size), &content);
   AppendFileInformationField(L"company_name", file_information.company_name,
                              &content);
   AppendFileInformationField(L"company_short_name",
@@ -469,13 +432,13 @@ base::string16 FileInformationToString(
   AppendFileInformationField(L"file_version", file_information.file_version,
                              &content);
   AppendFileInformationField(
-      L"active_file", base::NumberToString16(file_information.active_file),
+      L"active_file", base::NumberToWString(file_information.active_file),
       &content);
 
   return content;
 }
 
-bool IsCompanyOnIgnoredReportingList(const base::string16& company_name) {
+bool IsCompanyOnIgnoredReportingList(base::WStringPiece company_name) {
   return base::Contains(kCompanyIgnoredReportingList, company_name);
 }
 
@@ -483,7 +446,8 @@ bool IsExecutableOnIgnoredReportingList(const base::FilePath& file_path) {
   std::unique_ptr<FileVersionInfo> file_information(
       FileVersionInfo::CreateFileVersionInfo(file_path));
   return file_information &&
-         IsCompanyOnIgnoredReportingList(file_information->company_name());
+         IsCompanyOnIgnoredReportingList(
+             base::AsWStringPiece(file_information->company_name()));
 }
 
 bool RetrieveDetailedFileInformation(
@@ -518,14 +482,18 @@ bool RetrieveDetailedFileInformation(
   std::unique_ptr<FileVersionInfo> version(
       FileVersionInfo::CreateFileVersionInfo(expanded_path));
   if (version) {
-    file_information->company_name = version->company_name();
-    file_information->company_short_name = version->company_short_name();
-    file_information->product_name = version->product_name();
-    file_information->product_short_name = version->product_short_name();
-    file_information->internal_name = version->internal_name();
-    file_information->original_filename = version->original_filename();
-    file_information->file_description = version->file_description();
-    file_information->file_version = version->file_version();
+    file_information->company_name = base::AsWString(version->company_name());
+    file_information->company_short_name =
+        base::AsWString(version->company_short_name());
+    file_information->product_name = base::AsWString(version->product_name());
+    file_information->product_short_name =
+        base::AsWString(version->product_short_name());
+    file_information->internal_name = base::AsWString(version->internal_name());
+    file_information->original_filename =
+        base::AsWString(version->original_filename());
+    file_information->file_description =
+        base::AsWString(version->file_description());
+    file_information->file_version = base::AsWString(version->file_version());
   }
 
   return true;
@@ -559,7 +527,7 @@ bool ComputeSHA256DigestOfPath(const base::FilePath& path,
   DCHECK(digest);
 
   base::File file(path, base::File::FLAG_OPEN | base::File::FLAG_READ |
-                            base::File::FLAG_SHARE_DELETE);
+                            base::File::FLAG_WIN_SHARE_DELETE);
   if (!file.IsValid())
     return false;
 
@@ -652,7 +620,7 @@ void GetLayeredServiceProviders(const LayeredServiceProviderAPI& lsp_api,
 
   for (int i = 0; i < num_service_providers; ++i) {
     wchar_t path[MAX_PATH];
-    int path_length = base::size(path);
+    int path_length = std::size(path);
     if (0 == lsp_api.GetProviderPath(&service_providers[i].ProviderId, path,
                                      &path_length, &error)) {
       std::pair<LSPPathToGUIDs::iterator, bool> inserted =
@@ -660,8 +628,7 @@ void GetLayeredServiceProviders(const LayeredServiceProviderAPI& lsp_api,
       inserted.first->second.insert(service_providers[i].ProviderId);
     } else {
       LOG(ERROR) << "Couldn't get path for provider: "
-                 << base::win::String16FromGUID(
-                        service_providers[i].ProviderId);
+                 << base::win::WStringFromGUID(service_providers[i].ProviderId);
     }
   }
 }
@@ -679,7 +646,7 @@ bool DeleteFileFromTempProcess(const base::FilePath& path,
       L"%SystemRoot%\\System32\\rundll32.exe";
   wchar_t rundll32[MAX_PATH] = {};
   DWORD size =
-      ExpandEnvironmentStrings(kRunDll32Path, rundll32, base::size(rundll32));
+      ExpandEnvironmentStrings(kRunDll32Path, rundll32, std::size(rundll32));
   if (!size || size >= MAX_PATH)
     return false;
 
@@ -737,8 +704,8 @@ bool DeleteFileFromTempProcess(const base::FilePath& path,
 }
 
 bool PathEqual(const base::FilePath& path1, const base::FilePath& path2) {
-  base::string16 long_path1;
-  base::string16 long_path2;
+  std::wstring long_path1;
+  std::wstring long_path2;
   ConvertToLongPath(path1.value(), &long_path1);
   ConvertToLongPath(path2.value(), &long_path2);
   return base::FilePath::CompareEqualIgnoreCase(long_path1, long_path2);
@@ -746,8 +713,8 @@ bool PathEqual(const base::FilePath& path1, const base::FilePath& path2) {
 
 bool FilePathLess::operator()(const base::FilePath& smaller,
                               const base::FilePath& larger) const {
-  base::string16 long_smaller;
-  base::string16 long_larger;
+  std::wstring long_smaller;
+  std::wstring long_larger;
   ConvertToLongPath(smaller.value(), &long_smaller);
   ConvertToLongPath(larger.value(), &long_larger);
   return base::FilePath::CompareLessIgnoreCase(long_smaller, long_larger);
@@ -776,7 +743,7 @@ bool GetAppDataProductDirectory(base::FilePath* path) {
 }
 
 void GetProgramFilesFolders(std::set<base::FilePath>* folders) {
-  static const unsigned int kProgramFilesFolders[] = {
+  static const int kProgramFilesFolders[] = {
       // See the CSIDL_PROGRAM_FILES comment for rewrite_rules[].
       CsidlToPathServiceKey(CSIDL_PROGRAM_FILES),
       CsidlToPathServiceKey(CSIDL_PROGRAM_FILESX86),
@@ -784,7 +751,7 @@ void GetProgramFilesFolders(std::set<base::FilePath>* folders) {
   };
 
   DCHECK(folders);
-  for (unsigned int program_path : kProgramFilesFolders) {
+  for (int program_path : kProgramFilesFolders) {
     base::FilePath programfiles_folder;
     if (!base::PathService::Get(program_path, &programfiles_folder)) {
       LOG(ERROR) << "Can't get path from PathService.";
@@ -795,13 +762,14 @@ void GetProgramFilesFolders(std::set<base::FilePath>* folders) {
 }
 
 void GetProgramFilesCommonFolders(std::set<base::FilePath>* folders) {
-  static const unsigned int kCsidlProgramFileFolders[] = {
-      CSIDL_PROGRAM_FILES_COMMONX86, CSIDL_PROGRAM_FILES_COMMON,
+  static const int kCsidlProgramFileFolders[] = {
+      CSIDL_PROGRAM_FILES_COMMONX86,
+      CSIDL_PROGRAM_FILES_COMMON,
   };
   DCHECK(folders);
   // The CSIDL_PROGRAM_FILES_COMMON has no equivalent in the PathService. The
   // standard windows API is used to expand these paths.
-  for (unsigned int program_path : kCsidlProgramFileFolders) {
+  for (int program_path : kCsidlProgramFileFolders) {
     base::FilePath programfiles_folder =
         ExpandSpecialFolderPath(program_path, base::FilePath());
     if (programfiles_folder.empty()) {
@@ -817,21 +785,20 @@ void GetProgramFilesCommonFolders(std::set<base::FilePath>* folders) {
   base::FilePath common_files_x6432_folder;
   if (ExpandEnvPath(common_program_env, &common_files_x6432_folder)) {
     folders->insert(common_files_x6432_folder);
-  } else if (base::win::OSInfo::GetInstance()->wow64_status() ==
-             base::win::OSInfo::WOW64_ENABLED) {
+  } else if (base::win::OSInfo::GetInstance()->IsWowX86OnAMD64()) {
     LOG(ERROR) << "Can't get path for %CommonProgramW6432%";
   }
 }
 
 void GetAllProgramFolders(std::set<base::FilePath>* folders) {
-  static const unsigned int kProgramFilesFolders[] = {
+  static const int kProgramFilesFolders[] = {
       CsidlToPathServiceKey(CSIDL_APPDATA),
       CsidlToPathServiceKey(CSIDL_LOCAL_APPDATA),
       CsidlToPathServiceKey(CSIDL_COMMON_APPDATA),
   };
 
   DCHECK(folders);
-  for (unsigned int program_path : kProgramFilesFolders) {
+  for (int program_path : kProgramFilesFolders) {
     base::FilePath programfiles_folder;
     if (!base::PathService::Get(program_path, &programfiles_folder)) {
       LOG(ERROR) << "Can't get path from PathService.";
@@ -850,7 +817,7 @@ bool HasZoneIdentifier(const base::FilePath& path) {
 
 bool OverwriteZoneIdentifier(const base::FilePath& path) {
   const DWORD kShare = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
-  base::string16 stream_path = path.value() + L":Zone.Identifier";
+  std::wstring stream_path = path.value() + L":Zone.Identifier";
   HANDLE file = CreateFile(stream_path.c_str(), GENERIC_WRITE, kShare, nullptr,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (INVALID_HANDLE_VALUE == file)
@@ -858,7 +825,7 @@ bool OverwriteZoneIdentifier(const base::FilePath& path) {
 
   static const char kIdentifier[] = "[ZoneTransfer]\r\nZoneId=0\r\n";
   // Don't include trailing null in data written.
-  static const DWORD kIdentifierSize = base::size(kIdentifier) - 1;
+  static const DWORD kIdentifierSize = std::size(kIdentifier) - 1;
   DWORD written = 0;
   BOOL result =
       WriteFile(file, kIdentifier, kIdentifierSize, &written, nullptr);
@@ -874,7 +841,7 @@ bool OverwriteZoneIdentifier(const base::FilePath& path) {
 }
 
 base::FilePath ExtractExecutablePathFromRegistryContent(
-    const base::string16& content) {
+    const std::wstring& content) {
   // The content of the registry key can be a fullpath to an executable as is.
   base::FilePath program_path(content);
   base::FilePath return_program_path;
@@ -973,7 +940,7 @@ void TruncateLogFileToTail(const base::FilePath& path,
 
   if (bytes_read != tail_size_bytes) {
     // Something went wrong, clean the file.
-    base::DeleteFile(path, /*recursive=*/false);
+    base::DeleteFile(path);
     return;
   }
 

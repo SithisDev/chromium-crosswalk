@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,14 @@
 
 #include "base/files/file_util.h"
 #include "base/path_service.h"
-#include "base/sequenced_task_runner.h"
+#include "base/strings/stringprintf.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/scoped_blocking_call.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/chrome_browser_policy_connector.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
-#include "chrome/browser/prefs/in_process_service_factory_factory.h"
 #include "chrome/browser/prefs/profile_pref_store_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/buildflags.h"
@@ -31,8 +32,6 @@
 #include "components/prefs/pref_value_store.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "content/public/browser/network_service_instance.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/preferences/public/cpp/in_process_service_factory.h"
 #include "services/preferences/public/mojom/tracked_preference_validation_delegate.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -71,7 +70,7 @@ void CreateProfileReadme(const base::FilePath& profile_path) {
 void RegisterProfilePrefs(bool is_signin_profile,
                           const std::string& locale,
                           user_prefs::PrefRegistrySyncable* pref_registry) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (is_signin_profile)
     RegisterSigninProfilePrefs(pref_registry);
   else
@@ -89,7 +88,7 @@ std::unique_ptr<sync_preferences::PrefServiceSyncable> CreatePrefService(
     PrefStore* extension_pref_store,
     policy::PolicyService* policy_service,
     policy::ChromeBrowserPolicyConnector* browser_policy_connector,
-    prefs::mojom::TrackedPreferenceValidationDelegatePtr
+    mojo::PendingRemote<prefs::mojom::TrackedPreferenceValidationDelegate>
         pref_validation_delegate,
     scoped_refptr<base::SequencedTaskRunner> io_task_runner,
     SimpleFactoryKey* key,
@@ -102,14 +101,9 @@ std::unique_ptr<sync_preferences::PrefServiceSyncable> CreatePrefService(
   supervised_user_settings->Init(path, io_task_runner.get(), !async_prefs);
 #endif
   {
-    std::unique_ptr<PrefValueStore::Delegate> delegate =
-        InProcessPrefServiceFactoryFactory::GetInstanceForKey(key)
-            ->CreateDelegate();
-    delegate->InitPrefRegistry(pref_registry.get());
     return chrome_prefs::CreateProfilePrefs(
         path, std::move(pref_validation_delegate), policy_service,
         supervised_user_settings, extension_pref_store, pref_registry,
-        browser_policy_connector, async_prefs, io_task_runner,
-        std::move(delegate));
+        browser_policy_connector, async_prefs, io_task_runner);
   }
 }

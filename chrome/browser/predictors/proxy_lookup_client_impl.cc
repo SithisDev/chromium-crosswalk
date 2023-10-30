@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/task/post_task.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/task/common/task_annotator.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
 #include "net/proxy_resolution/proxy_info.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "url/gurl.h"
@@ -19,26 +19,40 @@ namespace predictors {
 
 ProxyLookupClientImpl::ProxyLookupClientImpl(
     const GURL& url,
+    const net::NetworkAnonymizationKey& network_isolation_key,
     ProxyLookupCallback callback,
     network::mojom::NetworkContext* network_context)
-    : binding_(this), callback_(std::move(callback)) {
+    : callback_(std::move(callback)) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  network::mojom::ProxyLookupClientPtr proxy_lookup_client_ptr;
-  binding_.Bind(
-      mojo::MakeRequest(&proxy_lookup_client_ptr),
-      base::CreateSingleThreadTaskRunnerWithTraits(
-          {content::BrowserThread::UI, content::BrowserTaskType::kPreconnect}));
-  network_context->LookUpProxyForURL(url, std::move(proxy_lookup_client_ptr));
-  binding_.set_connection_error_handler(
+  proxy_lookup_start_time_ = base::TimeTicks::Now();
+  network_context->LookUpProxyForURL(url, network_isolation_key,
+                                     receiver_.BindNewPipeAndPassRemote());
+  receiver_.set_disconnect_handler(
       base::BindOnce(&ProxyLookupClientImpl::OnProxyLookupComplete,
-                     base::Unretained(this), net::ERR_ABORTED, base::nullopt));
+                     base::Unretained(this), net::ERR_ABORTED, absl::nullopt));
 }
 
 ProxyLookupClientImpl::~ProxyLookupClientImpl() = default;
 
 void ProxyLookupClientImpl::OnProxyLookupComplete(
     int32_t net_error,
-    const base::Optional<net::ProxyInfo>& proxy_info) {
+    const absl::optional<net::ProxyInfo>& proxy_info) {
+  UMA_HISTOGRAM_TIMES("Navigation.Preconnect.ProxyLookupLatency",
+                      base::TimeTicks::Now() - proxy_lookup_start_time_);
+
+  // As this method is executed as a callback from a Mojo call, it should be
+  // executed via RunTask() and thus have a non-delayed PendingTask associated
+  // with it.
+  auto* task = base::TaskAnnotator::CurrentTaskForThread();
+  DCHECK(task);
+  DCHECK(task->delayed_run_time.is_null());
+  // The task will have a null |queue_time| if run synchronously (this happens
+  // in unit tests, for example).
+  base::TimeTicks queue_time =
+      !task->queue_time.is_null() ? task->queue_time : base::TimeTicks::Now();
+  UMA_HISTOGRAM_TIMES("Navigation.Preconnect.ProxyLookupCallbackQueueingTime",
+                      base::TimeTicks::Now() - queue_time);
+
   bool success = proxy_info.has_value() && !proxy_info->is_direct();
   std::move(callback_).Run(success);
 }

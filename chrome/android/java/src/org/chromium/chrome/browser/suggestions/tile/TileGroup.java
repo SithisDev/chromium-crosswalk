@@ -1,12 +1,9 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.suggestions.tile;
 
-import android.graphics.Bitmap;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
 import android.util.SparseArray;
 import android.view.ContextMenu;
 import android.view.ContextMenu.ContextMenuInfo;
@@ -14,24 +11,25 @@ import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.View.OnCreateContextMenuListener;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.Callback;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.explore_sites.ExploreSitesBridge;
 import org.chromium.chrome.browser.explore_sites.ExploreSitesCatalogUpdateRequestSource;
-import org.chromium.chrome.browser.favicon.IconType;
-import org.chromium.chrome.browser.favicon.LargeIconBridge;
 import org.chromium.chrome.browser.native_page.ContextMenuManager;
 import org.chromium.chrome.browser.native_page.ContextMenuManager.ContextMenuItemId;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.offlinepages.OfflinePageItem;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.suggestions.SiteSuggestion;
-import org.chromium.chrome.browser.suggestions.SuggestionsConfig;
 import org.chromium.chrome.browser.suggestions.SuggestionsMetrics;
 import org.chromium.chrome.browser.suggestions.SuggestionsOfflineModelObserver;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
 import org.chromium.chrome.browser.suggestions.mostvisited.MostVisitedSites;
 import org.chromium.ui.mojom.WindowOpenDisposition;
+import org.chromium.url.GURL;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -52,9 +50,11 @@ public class TileGroup implements MostVisitedSites.Observer {
          * @param removalUndoneCallback The callback to invoke if the removal is reverted. The
          *                              callback's argument is the URL being restored.
          */
-        void removeMostVisitedItem(Tile tile, Callback<String> removalUndoneCallback);
+        void removeMostVisitedItem(Tile tile, Callback<GURL> removalUndoneCallback);
 
         void openMostVisitedItem(int windowDisposition, Tile tile);
+
+        void openMostVisitedItemInGroup(int windowDisposition, Tile tile);
 
         /**
          * Gets the list of most visited sites.
@@ -117,9 +117,28 @@ public class TileGroup implements MostVisitedSites.Observer {
 
         /**
          * Returns a callback to be invoked when the icon for the provided tile is loaded. It will
-         * be responsible for updating the tile data and triggering the visual refresh.
+         * be responsible for triggering the visual refresh.
          */
-        LargeIconBridge.LargeIconCallback createIconLoadCallback(Tile tile);
+        Runnable createIconLoadCallback(Tile tile);
+    }
+
+    /**
+     * Delegate for handling interactions with tiles.
+     */
+    public interface TileInteractionDelegate extends OnClickListener, OnCreateContextMenuListener {
+        /**
+         * Set a runnable for click events on the tile. This is primarily used to track interaction
+         * with the tile used by feature engagement purposes.
+         * @param clickRunnable The {@link Runnable} to be executed when tile is clicked.
+         */
+        void setOnClickRunnable(Runnable clickRunnable);
+
+        /**
+         * Set a runnable for remove events on the tile. Similarly to setOnClickRunnable, this is
+         * primarily used to track interaction with the tile used by feature engagement purposes.
+         * @param removeRunnable The {@link Runnable} to be executed when tile is removed.
+         */
+        void setOnRemoveRunnable(Runnable removeRunnable);
     }
 
     /**
@@ -186,7 +205,7 @@ public class TileGroup implements MostVisitedSites.Observer {
      * the tile backend.
      */
     @Nullable
-    private String mPendingRemovalUrl;
+    private GURL mPendingRemovalUrl;
 
     /**
      * URL of the most recently added tile. Used to identify when a given tile's insertion is
@@ -194,7 +213,7 @@ public class TileGroup implements MostVisitedSites.Observer {
      * then the user undoes the action and wants that tile back.
      */
     @Nullable
-    private String mPendingInsertionUrl;
+    private GURL mPendingInsertionUrl;
 
     private boolean mHasReceivedData;
     private boolean mExploreSitesLoaded;
@@ -203,17 +222,20 @@ public class TileGroup implements MostVisitedSites.Observer {
     private final TileSetupDelegate mTileSetupDelegate = new TileSetupDelegate() {
         @Override
         public TileInteractionDelegate createInteractionDelegate(Tile tile) {
-            return new TileInteractionDelegate(tile.getData());
+            return new TileInteractionDelegateImpl(tile.getData());
         }
 
         @Override
-        public LargeIconBridge.LargeIconCallback createIconLoadCallback(Tile tile) {
+        public Runnable createIconLoadCallback(Tile tile) {
             // TODO(dgn): We could save on fetches by avoiding a new one when there is one pending
             // for the same URL, and applying the result to all matched URLs.
             boolean trackLoad =
                     isLoadTracked() && tile.getSectionType() == TileSectionType.PERSONALIZED;
             if (trackLoad) addTask(TileTask.FETCH_ICON);
-            return new LargeIconCallbackImpl(tile.getData(), trackLoad);
+            return () -> {
+                mObserver.onTileIconChanged(tile);
+                if (trackLoad) removeTask(TileTask.FETCH_ICON);
+            };
         }
     };
 
@@ -255,7 +277,7 @@ public class TileGroup implements MostVisitedSites.Observer {
             if (suggestion.url.equals(mPendingInsertionUrl)) insertionCompleted = true;
             if (suggestion.source == TileSource.EXPLORE && !mExploreSitesLoaded) {
                 mExploreSitesLoaded = true;
-                ExploreSitesBridge.initializeCatalog(Profile.getLastUsedProfile(),
+                ExploreSitesBridge.initializeCatalog(Profile.getLastUsedRegularProfile(),
                         ExploreSitesCatalogUpdateRequestSource.NEW_TAB_PAGE);
             }
         }
@@ -274,10 +296,9 @@ public class TileGroup implements MostVisitedSites.Observer {
     }
 
     @Override
-    public void onIconMadeAvailable(String siteUrl) {
+    public void onIconMadeAvailable(GURL siteUrl) {
         for (Tile tile : findTilesForUrl(siteUrl)) {
-            mTileRenderer.updateIcon(tile.getData(),
-                    new LargeIconCallbackImpl(tile.getData(), /* trackLoadTask = */ false));
+            mTileRenderer.updateIcon(tile, mTileSetupDelegate);
         }
     }
 
@@ -327,6 +348,10 @@ public class TileGroup implements MostVisitedSites.Observer {
         if (trackLoadTask) addTask(TileTask.FETCH_DATA);
         if (mPendingTiles != null) loadTiles();
         if (trackLoadTask) removeTask(TileTask.FETCH_DATA);
+    }
+
+    public TileSetupDelegate getTileSetupDelegate() {
+        return mTileSetupDelegate;
     }
 
     /** Loads tile data from {@link #mPendingTiles} and clears it afterwards. */
@@ -399,7 +424,7 @@ public class TileGroup implements MostVisitedSites.Observer {
      * @param tiles The section to search in, represented by the contained list of tiles.
      * @return A tile matching the provided URL and section, or {@code null} if none is found.
      */
-    private Tile findTile(String url, @Nullable List<Tile> tiles) {
+    private Tile findTile(GURL url, @Nullable List<Tile> tiles) {
         if (tiles == null) return null;
         for (Tile tile : tiles) {
             if (tile.getUrl().equals(url)) return tile;
@@ -408,7 +433,7 @@ public class TileGroup implements MostVisitedSites.Observer {
     }
 
     /** @return All tiles matching the provided URL, or an empty list if none is found. */
-    private List<Tile> findTilesForUrl(String url) {
+    private List<Tile> findTilesForUrl(GURL url) {
         List<Tile> tiles = new ArrayList<>();
         for (int i = 0; i < mTileSections.size(); ++i) {
             for (Tile tile : mTileSections.valueAt(i)) {
@@ -452,11 +477,6 @@ public class TileGroup implements MostVisitedSites.Observer {
         return mPendingTasks.contains(task);
     }
 
-    @VisibleForTesting
-    TileSetupDelegate getTileSetupDelegate() {
-        return mTileSetupDelegate;
-    }
-
     @Nullable
     public SiteSuggestion getHomepageTileData() {
         for (Tile tile : mTileSections.get(TileSectionType.PERSONALIZED)) {
@@ -479,46 +499,22 @@ public class TileGroup implements MostVisitedSites.Observer {
         return newTileData;
     }
 
-    // TODO(dgn): I would like to move that to TileRenderer, but setting the data on the tile,
-    // notifying the observer and updating the tasks make it awkward.
-    private class LargeIconCallbackImpl implements LargeIconBridge.LargeIconCallback {
-        private final SiteSuggestion mSiteData;
-        private final boolean mTrackLoadTask;
-
-        private LargeIconCallbackImpl(SiteSuggestion suggestion, boolean trackLoadTask) {
-            mSiteData = suggestion;
-            mTrackLoadTask = trackLoadTask;
-        }
-
-        @Override
-        public void onLargeIconAvailable(@Nullable Bitmap icon, int fallbackColor,
-                boolean isFallbackColorDefault, @IconType int iconType) {
-            Tile tile = findTile(mSiteData);
-            if (tile != null) { // Do nothing if the tile was removed.
-                tile.setIconType(iconType);
-                if (icon == null) {
-                    mTileRenderer.setTileIconFromColor(tile, fallbackColor, isFallbackColorDefault);
-                } else {
-                    mTileRenderer.setTileIconFromBitmap(tile, icon);
-                }
-
-                mObserver.onTileIconChanged(tile);
-            }
-
-            // This call needs to be made after the tiles are completely initialised, for UMA.
-            if (mTrackLoadTask) removeTask(TileTask.FETCH_ICON);
-        }
+    /**
+     * Called before this instance is abandoned to the garbage collector.
+     */
+    public void destroy() {
+        // The mOfflineModelObserver which implements SuggestionsOfflineModelObserver adds itself
+        // as the offlinePageBridge's observer. Calling onDestroy() removes itself from subscribers.
+        mOfflineModelObserver.onDestroy();
     }
 
-    /**
-     * Implements various listener and delegate interfaces to handle user interactions with tiles.
-     */
-    public class TileInteractionDelegate
-            implements ContextMenuManager.Delegate, OnClickListener, OnCreateContextMenuListener {
+    private class TileInteractionDelegateImpl
+            implements TileInteractionDelegate, ContextMenuManager.Delegate {
         private final SiteSuggestion mSuggestion;
         private Runnable mOnClickRunnable;
+        private Runnable mOnRemoveRunnable;
 
-        public TileInteractionDelegate(SiteSuggestion suggestion) {
+        public TileInteractionDelegateImpl(SiteSuggestion suggestion) {
             mSuggestion = suggestion;
         }
 
@@ -541,9 +537,19 @@ public class TileGroup implements MostVisitedSites.Observer {
         }
 
         @Override
+        public void openItemInGroup(int windowDisposition) {
+            Tile tile = findTile(mSuggestion);
+            if (tile == null) return;
+
+            mTileGroupDelegate.openMostVisitedItemInGroup(windowDisposition, tile);
+        }
+
+        @Override
         public void removeItem() {
             Tile tile = findTile(mSuggestion);
             if (tile == null) return;
+
+            if (mOnRemoveRunnable != null) mOnRemoveRunnable.run();
 
             // Note: This does not track all the removals, but will track the most recent one. If
             // that removal is committed, it's good enough for change detection.
@@ -552,7 +558,7 @@ public class TileGroup implements MostVisitedSites.Observer {
         }
 
         @Override
-        public String getUrl() {
+        public GURL getUrl() {
             return mSuggestion.url;
         }
 
@@ -569,8 +575,6 @@ public class TileGroup implements MostVisitedSites.Observer {
                 case ContextMenuItemId.REMOVE:
                     return mSuggestion.sectionType == TileSectionType.PERSONALIZED
                             && mSuggestion.source != TileSource.EXPLORE;
-                case ContextMenuItemId.LEARN_MORE:
-                    return SuggestionsConfig.scrollToLoad();
                 case ContextMenuItemId.OPEN_IN_INCOGNITO_TAB:
                     return mSuggestion.source != TileSource.EXPLORE;
                 default:
@@ -587,13 +591,14 @@ public class TileGroup implements MostVisitedSites.Observer {
             mContextMenuManager.createContextMenu(contextMenu, view, this);
         }
 
-        /**
-         * Set a runnable for click events on the tile. This is primarily used to track interaction
-         * with the tile used by feature engagement purposes.
-         * @param clickRunnable The {@link Runnable} to be executed when tile is clicked.
-         */
+        @Override
         public void setOnClickRunnable(Runnable clickRunnable) {
             mOnClickRunnable = clickRunnable;
+        }
+
+        @Override
+        public void setOnRemoveRunnable(Runnable removeRunnable) {
+            mOnRemoveRunnable = removeRunnable;
         }
     }
 

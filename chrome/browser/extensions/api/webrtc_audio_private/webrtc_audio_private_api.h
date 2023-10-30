@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,14 @@
 
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/system/system_monitor.h"
-#include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/common/extensions/api/webrtc_audio_private.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_context.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
+#include "extensions/browser/extension_function.h"
 #include "media/audio/audio_device_description.h"
 
 namespace media {
@@ -47,14 +47,19 @@ class WebrtcAudioPrivateEventService
 
   void SignalEvent();
 
-  content::BrowserContext* browser_context_;
+  raw_ptr<content::BrowserContext> browser_context_;
 };
 
 // Common base for WebrtcAudioPrivate functions, that provides a
 // couple of optionally-used common implementations.
-class WebrtcAudioPrivateFunction : public ChromeAsyncExtensionFunction {
+class WebrtcAudioPrivateFunction : public ExtensionFunction {
  protected:
   WebrtcAudioPrivateFunction();
+
+  WebrtcAudioPrivateFunction(const WebrtcAudioPrivateFunction&) = delete;
+  WebrtcAudioPrivateFunction& operator=(const WebrtcAudioPrivateFunction&) =
+      delete;
+
   ~WebrtcAudioPrivateFunction() override;
 
  protected:
@@ -74,8 +79,6 @@ class WebrtcAudioPrivateFunction : public ChromeAsyncExtensionFunction {
  private:
   std::string device_id_salt_;
   std::unique_ptr<media::AudioSystem> audio_system_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebrtcAudioPrivateFunction);
 };
 
 class WebrtcAudioPrivateGetSinksFunction : public WebrtcAudioPrivateFunction {
@@ -88,7 +91,7 @@ class WebrtcAudioPrivateGetSinksFunction : public WebrtcAudioPrivateFunction {
   DECLARE_EXTENSION_FUNCTION("webrtcAudioPrivate.getSinks",
                              WEBRTC_AUDIO_PRIVATE_GET_SINKS)
 
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
   // Receives output device descriptions, calculates HMACs for them and sends
   // the response.
@@ -109,7 +112,7 @@ class WebrtcAudioPrivateGetAssociatedSinkFunction
                              WEBRTC_AUDIO_PRIVATE_GET_ASSOCIATED_SINK)
 
   // UI thread: Entry point, posts GetInputDeviceDescriptions() to IO thread.
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
   // Receives the input device descriptions, looks up the raw source device ID
   // basing on |params|, and requests the associated raw sink ID for it.
@@ -117,7 +120,7 @@ class WebrtcAudioPrivateGetAssociatedSinkFunction
       media::AudioDeviceDescriptions source_devices);
 
   // Receives the raw sink ID, calculates HMAC and calls Reply().
-  void CalculateHMACAndReply(const base::Optional<std::string>& raw_sink_id);
+  void CalculateHMACAndReply(const absl::optional<std::string>& raw_sink_id);
 
   // Receives the associated sink ID as HMAC and sends the response.
   void Reply(const std::string& hmac);

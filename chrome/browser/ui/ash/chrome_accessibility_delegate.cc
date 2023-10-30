@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,11 @@
 
 #include <limits>
 
-#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
-#include "chrome/browser/chromeos/accessibility/magnification_manager.h"
+#include "chrome/browser/ash/accessibility/accessibility_manager.h"
+#include "chrome/browser/ash/accessibility/magnification_manager.h"
 
-using chromeos::AccessibilityManager;
-using chromeos::MagnificationManager;
+using ash::AccessibilityManager;
+using ash::MagnificationManager;
 
 ChromeAccessibilityDelegate::ChromeAccessibilityDelegate() = default;
 

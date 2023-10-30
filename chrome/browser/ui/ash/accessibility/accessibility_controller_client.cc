@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,19 @@
 
 #include "ash/public/cpp/accessibility_controller.h"
 #include "ash/public/cpp/accessibility_controller_enums.h"
-#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
+#include "ash/wm/desks/templates/saved_desk_util.h"
+#include "chrome/browser/ash/accessibility/accessibility_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #include "chrome/grit/generated_resources.h"
+#include "chromeos/ash/components/audio/sounds.h"
 #include "content/public/browser/tts_controller.h"
+#include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
+
+using ::ash::AccessibilityManager;
 
 void SetAutomationManagerEnabled(content::BrowserContext* context,
                                  bool enabled) {
@@ -73,6 +78,11 @@ void AccessibilityControllerClient::TriggerAccessibilityAlert(
     case ash::AccessibilityAlert::WORKSPACE_FULLSCREEN_STATE_EXITED:
       msg = IDS_A11Y_ALERT_WORKSPACE_FULLSCREEN_STATE_EXITED;
       break;
+    case ash::AccessibilityAlert::SAVED_DESKS_MODE_ENTERED:
+      msg = ash::saved_desk_util::AreDesksTemplatesEnabled()
+                ? IDS_A11Y_ALERT_SAVED_DESKS_LIBRARY_MODE_ENTERED
+                : IDS_A11Y_ALERT_SAVED_DESKS_SAVED_FOR_LATER_MODE_ENTERED;
+      break;
     case ash::AccessibilityAlert::NONE:
       msg = 0;
       break;
@@ -97,22 +107,23 @@ void AccessibilityControllerClient::TriggerAccessibilityAlertWithMessage(
   AutomationManagerAura::GetInstance()->HandleAlert(message);
 }
 
-void AccessibilityControllerClient::PlayEarcon(int32_t sound_key) {
-  chromeos::AccessibilityManager::Get()->PlayEarcon(
-      sound_key, chromeos::PlaySoundOption::ONLY_IF_SPOKEN_FEEDBACK_ENABLED);
+void AccessibilityControllerClient::PlayEarcon(ash::Sound sound_key) {
+  AccessibilityManager::Get()->PlayEarcon(
+      sound_key, ash::PlaySoundOption::kOnlyIfSpokenFeedbackEnabled);
 }
 
 base::TimeDelta AccessibilityControllerClient::PlayShutdownSound() {
-  return chromeos::AccessibilityManager::Get()->PlayShutdownSound();
+  return AccessibilityManager::Get()->PlayShutdownSound();
 }
 
 void AccessibilityControllerClient::HandleAccessibilityGesture(
-    ax::mojom::Gesture gesture) {
-  chromeos::AccessibilityManager::Get()->HandleAccessibilityGesture(gesture);
+    ax::mojom::Gesture gesture,
+    gfx::PointF location) {
+  AccessibilityManager::Get()->HandleAccessibilityGesture(gesture, location);
 }
 
 bool AccessibilityControllerClient::ToggleDictation() {
-  return chromeos::AccessibilityManager::Get()->ToggleDictation();
+  return AccessibilityManager::Get()->ToggleDictation();
 }
 
 void AccessibilityControllerClient::SilenceSpokenFeedback() {
@@ -120,30 +131,49 @@ void AccessibilityControllerClient::SilenceSpokenFeedback() {
 }
 
 void AccessibilityControllerClient::OnTwoFingerTouchStart() {
-  chromeos::AccessibilityManager::Get()->OnTwoFingerTouchStart();
+  AccessibilityManager::Get()->OnTwoFingerTouchStart();
 }
 
 void AccessibilityControllerClient::OnTwoFingerTouchStop() {
-  chromeos::AccessibilityManager::Get()->OnTwoFingerTouchStop();
+  AccessibilityManager::Get()->OnTwoFingerTouchStop();
 }
 
 bool AccessibilityControllerClient::ShouldToggleSpokenFeedbackViaTouch() const {
-  return chromeos::AccessibilityManager::Get()
-      ->ShouldToggleSpokenFeedbackViaTouch();
+  return AccessibilityManager::Get()->ShouldToggleSpokenFeedbackViaTouch();
 }
 
 void AccessibilityControllerClient::PlaySpokenFeedbackToggleCountdown(
     int tick_count) {
-  chromeos::AccessibilityManager::Get()->PlaySpokenFeedbackToggleCountdown(
-      tick_count);
+  AccessibilityManager::Get()->PlaySpokenFeedbackToggleCountdown(tick_count);
 }
 
 void AccessibilityControllerClient::RequestSelectToSpeakStateChange() {
-  chromeos::AccessibilityManager::Get()->RequestSelectToSpeakStateChange();
+  AccessibilityManager::Get()->RequestSelectToSpeakStateChange();
 }
 
 void AccessibilityControllerClient::RequestAutoclickScrollableBoundsForPoint(
     gfx::Point& point_in_screen) {
-  chromeos::AccessibilityManager::Get()
-      ->RequestAutoclickScrollableBoundsForPoint(point_in_screen);
+  AccessibilityManager::Get()->RequestAutoclickScrollableBoundsForPoint(
+      point_in_screen);
+}
+
+void AccessibilityControllerClient::MagnifierBoundsChanged(
+    const gfx::Rect& bounds_in_screen) {
+  AccessibilityManager::Get()->MagnifierBoundsChanged(bounds_in_screen);
+}
+
+void AccessibilityControllerClient::OnSwitchAccessDisabled() {
+  AccessibilityManager::Get()->OnSwitchAccessDisabled();
+}
+
+void AccessibilityControllerClient::OnSelectToSpeakPanelAction(
+    ash::SelectToSpeakPanelAction action,
+    double value) {
+  AccessibilityManager::Get()->OnSelectToSpeakPanelAction(action, value);
+}
+
+void AccessibilityControllerClient::SetA11yOverrideWindow(
+    aura::Window* a11y_override_window) {
+  AutomationManagerAura::GetInstance()->SetA11yOverrideWindow(
+      a11y_override_window);
 }

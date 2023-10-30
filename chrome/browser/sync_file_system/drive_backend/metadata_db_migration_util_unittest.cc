@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,8 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_constants.h"
 #include "chrome/browser/sync_file_system/syncable_file_system_util.h"
-#include "storage/browser/fileapi/external_mount_points.h"
-#include "storage/common/fileapi/file_system_util.h"
+#include "storage/browser/file_system/external_mount_points.h"
+#include "storage/common/file_system/file_system_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/env_chromium.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
@@ -55,25 +55,9 @@ TEST(DriveMetadataDBMigrationUtilTest, RollbackFromV4ToV3) {
   // Please see metadata_database_index.cc for version 3 format, and
   // metadata_database_index_on_disk.cc for version 4 format.
 
-  const char kDatabaseVersionKey[] = "VERSION";
-  const char kServiceMetadataKey[] = "SERVICE";
-  const char kFileMetadataKeyPrefix[] = "FILE: ";
-  const char kFileTrackerKeyPrefix[] = "TRACKER: ";
-
-  // Key prefixes used in version 4.
-  const char kAppRootIDByAppIDKeyPrefix[] = "APP_ROOT: ";
-  const char kActiveTrackerIDByFileIDKeyPrefix[] = "ACTIVE_FILE: ";
-  const char kTrackerIDByFileIDKeyPrefix[] = "TRACKER_FILE: ";
-  const char kMultiTrackerByFileIDKeyPrefix[] = "MULTI_FILE: ";
-  const char kActiveTrackerIDByParentAndTitleKeyPrefix[] = "ACTIVE_PATH: ";
-  const char kTrackerIDByParentAndTitleKeyPrefix[] = "TRACKER_PATH: ";
-  const char kMultiBackingParentAndTitleKeyPrefix[] = "MULTI_PATH: ";
-  const char kDirtyIDKeyPrefix[] = "DIRTY: ";
-  const char kDemotedDirtyIDKeyPrefix[] = "DEMOTED_DIRTY: ";
-
   // Set up environment.
-  std::unique_ptr<leveldb::DB> db;
   base::ScopedTempDir base_dir;
+  std::unique_ptr<leveldb::DB> db;
   ASSERT_TRUE(base_dir.CreateUniqueTempDir());
   {
     leveldb_env::Options options;

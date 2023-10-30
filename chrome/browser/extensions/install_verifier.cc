@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,13 @@
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/one_shot_event.h"
 #include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -31,6 +33,8 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/pref_names.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/extension_id.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_url_handlers.h"
@@ -56,37 +60,13 @@ enum class VerifyStatus {
   VERIFY_STATUS_MAX
 };
 
-const char kExperimentName[] = "ExtensionInstallVerification";
-
 VerifyStatus GetExperimentStatus() {
-  const std::string group = base::FieldTrialList::FindFullName(
-      kExperimentName);
-
-  std::string forced_trials =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          ::switches::kForceFieldTrials);
-  if (forced_trials.find(kExperimentName) != std::string::npos) {
-    // We don't want to allow turning off enforcement by forcing the field
-    // trial group to something other than enforcement.
-    return VerifyStatus::ENFORCE_STRICT;
-  }
-
-#if defined(GOOGLE_CHROME_BUILD) && (defined(OS_WIN) || defined(OS_MACOSX))
-  VerifyStatus default_status = VerifyStatus::ENFORCE;
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING) && \
+    (BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC))
+  return VerifyStatus::ENFORCE;
 #else
-  VerifyStatus default_status = VerifyStatus::NONE;
-#endif  // defined(GOOGLE_CHROME_BUILD)
-
-  if (group == "EnforceStrict")
-    return VerifyStatus::ENFORCE_STRICT;
-  else if (group == "Enforce")
-    return VerifyStatus::ENFORCE;
-  else if (group == "Bootstrap")
-    return VerifyStatus::BOOTSTRAP;
-  else if (group == "None" || group == "Control")
-    return VerifyStatus::NONE;
-
-  return default_status;
+  return VerifyStatus::NONE;
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 }
 
 VerifyStatus GetCommandLineStatus() {
@@ -125,62 +105,8 @@ bool ShouldFetchSignature() {
   return GetStatus() >= VerifyStatus::BOOTSTRAP;
 }
 
-enum InitResult {
-  INIT_NO_PREF = 0,
-  INIT_UNPARSEABLE_PREF,
-  INIT_INVALID_SIGNATURE,
-  INIT_VALID_SIGNATURE,
-
-  // This is used in histograms - do not remove or reorder entries above! Also
-  // the "MAX" item below should always be the last element.
-
-  INIT_RESULT_MAX
-};
-
-void LogInitResultHistogram(InitResult result) {
-  UMA_HISTOGRAM_ENUMERATION("ExtensionInstallVerifier.InitResult",
-                            result, INIT_RESULT_MAX);
-}
-
 bool CanUseExtensionApis(const Extension& extension) {
   return extension.is_extension() || extension.is_legacy_packaged_app();
-}
-
-enum VerifyAllSuccess {
-  VERIFY_ALL_BOOTSTRAP_SUCCESS = 0,
-  VERIFY_ALL_BOOTSTRAP_FAILURE,
-  VERIFY_ALL_NON_BOOTSTRAP_SUCCESS,
-  VERIFY_ALL_NON_BOOTSTRAP_FAILURE,
-
-  // Used in histograms. Do not remove/reorder any entries above, and the below
-  // MAX entry should always come last.
-  VERIFY_ALL_SUCCESS_MAX
-};
-
-// Record the success or failure of verifying all extensions, and whether or
-// not it was a bootstrapping.
-void LogVerifyAllSuccessHistogram(bool bootstrap, bool success) {
-  VerifyAllSuccess result;
-  if (bootstrap && success)
-    result = VERIFY_ALL_BOOTSTRAP_SUCCESS;
-  else if (bootstrap && !success)
-    result = VERIFY_ALL_BOOTSTRAP_FAILURE;
-  else if (!bootstrap && success)
-    result = VERIFY_ALL_NON_BOOTSTRAP_SUCCESS;
-  else
-    result = VERIFY_ALL_NON_BOOTSTRAP_FAILURE;
-
-  // This used to be part of ExtensionService, but moved here. In order to keep
-  // our histograms accurate, the name is unchanged.
-  UMA_HISTOGRAM_ENUMERATION(
-      "ExtensionService.VerifyAllSuccess", result, VERIFY_ALL_SUCCESS_MAX);
-}
-
-// Record the success or failure of a single verification.
-void LogAddVerifiedSuccess(bool success) {
-  // This used to be part of ExtensionService, but moved here. In order to keep
-  // our histograms accurate, the name is unchanged.
-  UMA_HISTOGRAM_BOOLEAN("ExtensionService.AddVerified", success);
 }
 
 }  // namespace
@@ -203,42 +129,34 @@ bool InstallVerifier::ShouldEnforce() {
 }
 
 // static
-bool InstallVerifier::NeedsVerification(const Extension& extension) {
-  return IsFromStore(extension) && CanUseExtensionApis(extension);
+bool InstallVerifier::NeedsVerification(const Extension& extension,
+                                        content::BrowserContext* context) {
+  return IsFromStore(extension, context) && CanUseExtensionApis(extension);
 }
 
 // static
-bool InstallVerifier::IsFromStore(const Extension& extension) {
+bool InstallVerifier::IsFromStore(const Extension& extension,
+                                  content::BrowserContext* context) {
   return extension.from_webstore() ||
-         ManifestURL::UpdatesFromGallery(&extension);
+         ExtensionManagementFactory::GetForBrowserContext(context)
+             ->UpdatesFromWebstore(extension);
 }
 
 void InstallVerifier::Init() {
   TRACE_EVENT0("browser,startup", "extensions::InstallVerifier::Init");
-  UMA_HISTOGRAM_ENUMERATION("ExtensionInstallVerifier.ExperimentStatus",
-                            GetExperimentStatus(),
-                            VerifyStatus::VERIFY_STATUS_MAX);
-  UMA_HISTOGRAM_ENUMERATION("ExtensionInstallVerifier.ActualStatus",
-                            GetStatus(), VerifyStatus::VERIFY_STATUS_MAX);
 
   const base::DictionaryValue* pref = prefs_->GetInstallSignature();
   if (pref) {
     std::unique_ptr<InstallSignature> signature_from_prefs =
         InstallSignature::FromValue(*pref);
-    if (!signature_from_prefs.get()) {
-      LogInitResultHistogram(INIT_UNPARSEABLE_PREF);
-    } else if (!InstallSigner::VerifySignature(*signature_from_prefs)) {
-      LogInitResultHistogram(INIT_INVALID_SIGNATURE);
-      DVLOG(1) << "Init - ignoring invalid signature";
-    } else {
-      signature_ = std::move(signature_from_prefs);
-      LogInitResultHistogram(INIT_VALID_SIGNATURE);
-      UMA_HISTOGRAM_COUNTS_100("ExtensionInstallVerifier.InitSignatureCount",
-                               signature_->ids.size());
-      GarbageCollect();
+    if (signature_from_prefs.get()) {
+      if (!InstallSigner::VerifySignature(*signature_from_prefs)) {
+        DVLOG(1) << "Init - ignoring invalid signature";
+      } else {
+        signature_ = std::move(signature_from_prefs);
+        GarbageCollect();
+      }
     }
-  } else {
-    LogInitResultHistogram(INIT_NO_PREF);
   }
 
   ExtensionSystem::Get(context_)->ready().Post(
@@ -342,92 +260,46 @@ std::string InstallVerifier::GetDebugPolicyProviderName() const {
   return std::string("InstallVerifier");
 }
 
-namespace {
-
-enum MustRemainDisabledOutcome {
-  VERIFIED = 0,
-  NOT_EXTENSION,
-  UNPACKED,
-  ENTERPRISE_POLICY_ALLOWED,
-  FORCED_NOT_VERIFIED,
-  NOT_FROM_STORE,
-  NO_SIGNATURE,
-  NOT_VERIFIED_BUT_NOT_ENFORCING,
-  NOT_VERIFIED,
-  NOT_VERIFIED_BUT_INSTALL_TIME_NEWER_THAN_SIGNATURE,
-  NOT_VERIFIED_BUT_UNKNOWN_ID,
-  COMPONENT,
-
-  // This is used in histograms - do not remove or reorder entries above! Also
-  // the "MAX" item below should always be the last element.
-  MUST_REMAIN_DISABLED_OUTCOME_MAX
-};
-
-void MustRemainDisabledHistogram(MustRemainDisabledOutcome outcome) {
-  UMA_HISTOGRAM_ENUMERATION("ExtensionInstallVerifier.MustRemainDisabled",
-                            outcome, MUST_REMAIN_DISABLED_OUTCOME_MAX);
-}
-
-}  // namespace
-
 bool InstallVerifier::MustRemainDisabled(const Extension* extension,
                                          disable_reason::DisableReason* reason,
-                                         base::string16* error) const {
+                                         std::u16string* error) const {
   CHECK(extension);
-  if (!CanUseExtensionApis(*extension)) {
-    MustRemainDisabledHistogram(NOT_EXTENSION);
+  if (!CanUseExtensionApis(*extension))
     return false;
-  }
-  if (Manifest::IsUnpackedLocation(extension->location())) {
-    MustRemainDisabledHistogram(UNPACKED);
+  if (Manifest::IsUnpackedLocation(extension->location()))
     return false;
-  }
-  if (extension->location() == Manifest::COMPONENT) {
-    MustRemainDisabledHistogram(COMPONENT);
+  if (extension->location() == mojom::ManifestLocation::kComponent)
     return false;
-  }
-  if (AllowedByEnterprisePolicy(extension->id())) {
-    MustRemainDisabledHistogram(ENTERPRISE_POLICY_ALLOWED);
+  if (AllowedByEnterprisePolicy(extension->id()))
     return false;
-  }
 
   bool verified = true;
-  MustRemainDisabledOutcome outcome = VERIFIED;
   if (base::Contains(InstallSigner::GetForcedNotFromWebstore(),
                      extension->id())) {
     verified = false;
-    outcome = FORCED_NOT_VERIFIED;
-  } else if (!IsFromStore(*extension)) {
+  } else if (!IsFromStore(*extension, context_)) {
     verified = false;
-    outcome = NOT_FROM_STORE;
-  } else if (signature_.get() == NULL &&
-             (!bootstrap_check_complete_ ||
-              GetStatus() < VerifyStatus::ENFORCE_STRICT)) {
+  } else if (!signature_ && (!bootstrap_check_complete_ ||
+                             GetStatus() < VerifyStatus::ENFORCE_STRICT)) {
     // If we don't have a signature yet, we'll temporarily consider every
     // extension from the webstore verified to avoid false positives on existing
     // profiles hitting this code for the first time. The InstallVerifier
     // will bootstrap itself once the ExtensionsSystem is ready.
-    outcome = NO_SIGNATURE;
+    // |verified| is already set to true.
   } else if (!IsVerified(extension->id())) {
     // Transient network failures can create a stale signature missing recently
     // added extension ids. To avoid false positives, consider all extensions to
     // be from the webstore unless the signature explicitly lists the extension
     // as invalid.
-    if (signature_.get() &&
-        !base::Contains(signature_->invalid_ids, extension->id()) &&
-        GetStatus() < VerifyStatus::ENFORCE_STRICT) {
-      outcome = NOT_VERIFIED_BUT_UNKNOWN_ID;
-    } else {
+    if (!signature_ ||
+        base::Contains(signature_->invalid_ids, extension->id()) ||
+        GetStatus() >= VerifyStatus::ENFORCE_STRICT) {
       verified = false;
-      outcome = NOT_VERIFIED;
     }
   }
 
-  if (!verified && !ShouldEnforce()) {
+  if (!verified && !ShouldEnforce())
     verified = true;
-    outcome = NOT_VERIFIED_BUT_NOT_ENFORCING;
-  }
-  MustRemainDisabledHistogram(outcome);
 
   if (!verified) {
     DLOG(WARNING) << "Disabling extension " << extension->id() << " ('"
@@ -459,7 +331,7 @@ ExtensionIdSet InstallVerifier::GetExtensionsToVerify() const {
   for (ExtensionSet::const_iterator iter = extensions->begin();
        iter != extensions->end();
        ++iter) {
-    if (NeedsVerification(**iter))
+    if (NeedsVerification(**iter, context_))
       result.insert((*iter)->id());
   }
   return result;
@@ -469,7 +341,7 @@ void InstallVerifier::MaybeBootstrapSelf() {
   bool needs_bootstrap = false;
 
   ExtensionIdSet extension_ids = GetExtensionsToVerify();
-  if (signature_.get() == NULL && ShouldFetchSignature()) {
+  if (signature_.get() == nullptr && ShouldFetchSignature()) {
     needs_bootstrap = true;
   } else {
     for (auto iter = extension_ids.begin(); iter != extension_ids.end();
@@ -489,12 +361,8 @@ void InstallVerifier::MaybeBootstrapSelf() {
 
 void InstallVerifier::OnVerificationComplete(bool success, OperationType type) {
   switch (type) {
-    case ADD_SINGLE:
-      LogAddVerifiedSuccess(success);
-      break;
     case ADD_ALL:
     case ADD_ALL_BOOTSTRAP:
-      LogVerifyAllSuccessHistogram(type == ADD_ALL_BOOTSTRAP, success);
       bootstrap_check_complete_ = true;
       if (success) {
         // Iterate through the extensions and, if any are newly-verified and
@@ -506,7 +374,7 @@ void InstallVerifier::OnVerificationComplete(bool success, OperationType type) {
              ++iter) {
           int disable_reasons = prefs_->GetDisableReasons((*iter)->id());
           if (disable_reasons & disable_reason::DISABLE_NOT_VERIFIED &&
-              !MustRemainDisabled(iter->get(), NULL, NULL)) {
+              !MustRemainDisabled(iter->get(), nullptr, nullptr)) {
             prefs_->RemoveDisableReason((*iter)->id(),
                                         disable_reason::DISABLE_NOT_VERIFIED);
           }
@@ -518,9 +386,9 @@ void InstallVerifier::OnVerificationComplete(bool success, OperationType type) {
             ->CheckManagementPolicy();
       }
       break;
-    // We don't need to check disable reasons or report UMA stats for
-    // provisional adds or removals.
+    // We don't need to check disable reasons for provisional adds or removals.
     case ADD_PROVISIONAL:
+    case ADD_SINGLE:
     case REMOVE:
       break;
   }
@@ -574,9 +442,8 @@ void InstallVerifier::BeginFetch() {
     ids_to_sign.insert(operation.ids.begin(), operation.ids.end());
   }
 
-  auto url_loader_factory =
-      content::BrowserContext::GetDefaultStoragePartition(context_)
-          ->GetURLLoaderFactoryForBrowserProcess();
+  auto url_loader_factory = context_->GetDefaultStoragePartition()
+                                ->GetURLLoaderFactoryForBrowserProcess();
   signer_ = std::make_unique<InstallSigner>(url_loader_factory, ids_to_sign);
   signer_->GetSignature(base::BindOnce(&InstallVerifier::SignatureCallback,
                                        weak_factory_.GetWeakPtr()));
@@ -588,7 +455,7 @@ void InstallVerifier::SaveToPrefs() {
 
   if (!signature_.get() || signature_->ids.empty()) {
     DVLOG(1) << "SaveToPrefs - saving NULL";
-    prefs_->SetInstallSignature(NULL);
+    prefs_->SetInstallSignature(nullptr);
   } else {
     base::DictionaryValue pref;
     signature_->ToValue(&pref);
@@ -604,48 +471,14 @@ void InstallVerifier::SaveToPrefs() {
   }
 }
 
-namespace {
-
-enum CallbackResult {
-  CALLBACK_NO_SIGNATURE = 0,
-  CALLBACK_INVALID_SIGNATURE,
-  CALLBACK_VALID_SIGNATURE,
-
-  // This is used in histograms - do not remove or reorder entries above! Also
-  // the "MAX" item below should always be the last element.
-
-  CALLBACK_RESULT_MAX
-};
-
-void GetSignatureResultHistogram(CallbackResult result) {
-  UMA_HISTOGRAM_ENUMERATION("ExtensionInstallVerifier.GetSignatureResult",
-                            result, CALLBACK_RESULT_MAX);
-}
-
-}  // namespace
-
 void InstallVerifier::SignatureCallback(
     std::unique_ptr<InstallSignature> signature) {
   std::unique_ptr<PendingOperation> operation =
       std::move(operation_queue_.front());
   operation_queue_.pop();
 
-  bool success = false;
-  if (!signature.get()) {
-    GetSignatureResultHistogram(CALLBACK_NO_SIGNATURE);
-  } else if (!InstallSigner::VerifySignature(*signature)) {
-    GetSignatureResultHistogram(CALLBACK_INVALID_SIGNATURE);
-  } else {
-    GetSignatureResultHistogram(CALLBACK_VALID_SIGNATURE);
-    success = true;
-  }
-
-  if (!success) {
-    OnVerificationComplete(false, operation->type);
-
-    // TODO(asargent) - if this was something like a network error, we need to
-    // do retries with exponential back off.
-  } else {
+  bool success = signature.get() && InstallSigner::VerifySignature(*signature);
+  if (success) {
     signature_ = std::move(signature);
     SaveToPrefs();
 
@@ -654,10 +487,11 @@ void InstallVerifier::SignatureCallback(
       provisional_ = base::STLSetDifference<ExtensionIdSet>(
           provisional_, signature_->ids);
     }
-
-    OnVerificationComplete(success, operation->type);
   }
 
+  // TODO(asargent) - if this was something like a network error, we need to
+  // do retries with exponential back off.
+  OnVerificationComplete(success, operation->type);
   if (!operation_queue_.empty())
     BeginFetch();
 }

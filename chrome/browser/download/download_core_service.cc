@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,10 +22,11 @@ int DownloadCoreService::NonMaliciousDownloadCountAllProfiles() {
   for (auto it = profiles.begin(); it < profiles.end(); ++it) {
     count += DownloadCoreServiceFactory::GetForBrowserContext(*it)
                  ->NonMaliciousDownloadCount();
-    if ((*it)->HasOffTheRecordProfile())
-      count += DownloadCoreServiceFactory::GetForBrowserContext(
-                   (*it)->GetOffTheRecordProfile())
+    std::vector<Profile*> otr_profiles = (*it)->GetAllOffTheRecordProfiles();
+    for (Profile* otr : otr_profiles) {
+      count += DownloadCoreServiceFactory::GetForBrowserContext(otr)
                    ->NonMaliciousDownloadCount();
+    }
   }
 
   return count;

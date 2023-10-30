@@ -1,10 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.dom_distiller;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.ObserverList;
 import org.chromium.base.UserData;
@@ -13,6 +13,7 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.dom_distiller.content.DistillablePageUtils;
 import org.chromium.components.dom_distiller.content.DistillablePageUtils.PageDistillableDelegate;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.ui.base.WindowAndroid;
 
 /**
  * A mechanism for clients interested in the distillability of a page to receive updates.
@@ -145,8 +146,8 @@ public class TabDistillabilityProvider
     }
 
     @Override
-    public void onActivityAttachmentChanged(Tab tab, boolean isAttached) {
-        if (isAttached) return;
+    public void onActivityAttachmentChanged(Tab tab, @Nullable WindowAndroid window) {
+        if (window != null) return;
         resetState();
     }
 

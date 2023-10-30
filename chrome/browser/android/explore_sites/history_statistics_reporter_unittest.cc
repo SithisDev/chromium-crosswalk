@@ -1,14 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/android/explore_sites/history_statistics_reporter.h"
 
-#include "base/feature_list.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/test_mock_time_task_runner.h"
+#include "base/test/task_environment.h"
+#include "base/time/clock.h"
+#include "base/time/time.h"
 #include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/test/history_service_test_util.h"
@@ -30,8 +31,13 @@ namespace explore_sites {
 class HistoryStatisticsReporterTest : public testing::Test {
  public:
   HistoryStatisticsReporterTest()
-      : task_runner_(new base::TestMockTimeTaskRunner(
-            base::TestMockTimeTaskRunner::Type::kBoundToThread)) {}
+      : task_environment_(
+            base::test::SingleThreadTaskEnvironment::TimeSource::MOCK_TIME) {}
+
+  HistoryStatisticsReporterTest(const HistoryStatisticsReporterTest&) = delete;
+  HistoryStatisticsReporterTest& operator=(
+      const HistoryStatisticsReporterTest&) = delete;
+
   ~HistoryStatisticsReporterTest() override {}
 
   void SetUp() override {
@@ -40,20 +46,21 @@ class HistoryStatisticsReporterTest : public testing::Test {
     // Creates HistoryService, but does not load it yet. Use LoadHistory() from
     // tests to control loading of HistoryService.
     history_service_ = std::make_unique<history::HistoryService>();
-    reporter_ = std::make_unique<HistoryStatisticsReporter>(
-        history_service(), &pref_service_, task_runner_->GetMockClock());
+    reporter_ = std::make_unique<HistoryStatisticsReporter>(history_service(),
+                                                            &pref_service_);
   }
 
   // Wait for separate background task runner in HistoryService to complete
   // all tasks and then all the tasks on the current one to complete as well.
   void RunUntilIdle() {
     history::BlockUntilHistoryProcessesPendingRequests(history_service());
-    task_runner_->RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   void ScheduleReportAndRunUntilIdle() {
     reporter()->ScheduleReportStatistics();
-    task_runner()->FastForwardUntilNoTasksRemain();
+    task_environment_.FastForwardBy(
+        HistoryStatisticsReporter::kComputeStatisticsDelay);
     RunUntilIdle();
   }
 
@@ -68,18 +75,17 @@ class HistoryStatisticsReporterTest : public testing::Test {
   HistoryStatisticsReporter* reporter() const { return reporter_.get(); }
   const base::HistogramTester& histograms() const { return histogram_tester_; }
   history::HistoryService* history_service() { return history_service_.get(); }
-  base::TestMockTimeTaskRunner* task_runner() { return task_runner_.get(); }
   TestingPrefServiceSimple* prefs() { return &pref_service_; }
 
+ protected:
+  base::test::TaskEnvironment task_environment_;
+
  private:
-  scoped_refptr<base::TestMockTimeTaskRunner> task_runner_;
   base::ScopedTempDir history_dir_;
   TestingPrefServiceSimple pref_service_;
   base::HistogramTester histogram_tester_;
   std::unique_ptr<history::HistoryService> history_service_;
   std::unique_ptr<HistoryStatisticsReporter> reporter_;
-
-  DISALLOW_COPY_AND_ASSIGN(HistoryStatisticsReporterTest);
 };
 
 TEST_F(HistoryStatisticsReporterTest, HistoryNotLoaded) {
@@ -87,7 +93,8 @@ TEST_F(HistoryStatisticsReporterTest, HistoryNotLoaded) {
   reporter()->ScheduleReportStatistics();
 
   // Move past initial delay of reporter.
-  task_runner()->FastForwardUntilNoTasksRemain();
+  task_environment_.FastForwardBy(
+      HistoryStatisticsReporter::kComputeStatisticsDelay);
 
   // Since History is not yet loaded, there should be no histograms.
   histograms().ExpectTotalCount("History.DatabaseMonthlyHostCountTime", 0);
@@ -108,7 +115,8 @@ TEST_F(HistoryStatisticsReporterTest, HistoryLoaded) {
 
   reporter()->ScheduleReportStatistics();
   // Move past initial delay of reporter.
-  task_runner()->FastForwardUntilNoTasksRemain();
+  task_environment_.FastForwardBy(
+      HistoryStatisticsReporter::kComputeStatisticsDelay);
 
   RunUntilIdle();
   // Since History is already loaded, there should be a sample reported.
@@ -126,7 +134,8 @@ TEST_F(HistoryStatisticsReporterTest, HistoryLoadedTimeDelay) {
   histograms().ExpectTotalCount("History.DatabaseMonthlyHostCountTime", 0);
 
   // Move past initial delay of reporter.
-  task_runner()->FastForwardUntilNoTasksRemain();
+  task_environment_.FastForwardBy(
+      HistoryStatisticsReporter::kComputeStatisticsDelay);
 
   RunUntilIdle();
   // Since History is already loaded, there should be a sample reported.
@@ -151,8 +160,8 @@ TEST_F(HistoryStatisticsReporterTest, HostAddedLongAgo) {
   ASSERT_TRUE(LoadHistory());
 
   base::Time time_now = offline_pages::OfflineTimeNow();
-  base::Time time_29_days_ago = time_now - base::TimeDelta::FromDays(29);
-  base::Time time_31_days_ago = time_now - base::TimeDelta::FromDays(31);
+  base::Time time_29_days_ago = time_now - base::Days(29);
+  base::Time time_31_days_ago = time_now - base::Days(31);
 
   history_service()->AddPage(GURL("http://www.google.com"), time_now,
                              history::VisitSource::SOURCE_BROWSED);
@@ -200,15 +209,14 @@ TEST_F(HistoryStatisticsReporterTest, OneRunPerWeekSaveTimestamp) {
   histograms().ExpectTotalCount("History.DatabaseMonthlyHostCountTime", 1);
 
   // Reporter should have left the time of request in Prefs.
-  base::Time time_now = task_runner()->GetMockClock()->Now();
-  EXPECT_EQ(time_now, prefs()->GetTime(kWeeklyStatsReportingTimestamp));
+  EXPECT_EQ(base::Time::Now(),
+            prefs()->GetTime(kWeeklyStatsReportingTimestamp));
 }
 
 TEST_F(HistoryStatisticsReporterTest, OneRunPerWeekReadTimestamp) {
   ASSERT_TRUE(LoadHistory());
 
-  prefs()->SetTime(kWeeklyStatsReportingTimestamp,
-                   task_runner()->GetMockClock()->Now());
+  prefs()->SetTime(kWeeklyStatsReportingTimestamp, base::Time::Now());
   ScheduleReportAndRunUntilIdle();
 
   // No queries, a week did not pass yet.
@@ -218,16 +226,15 @@ TEST_F(HistoryStatisticsReporterTest, OneRunPerWeekReadTimestamp) {
 TEST_F(HistoryStatisticsReporterTest, OneRunPerWeekReadTimestampAfterWeek) {
   ASSERT_TRUE(LoadHistory());
 
-  prefs()->SetTime(
-      kWeeklyStatsReportingTimestamp,
-      task_runner()->GetMockClock()->Now() - base::TimeDelta::FromDays(8));
+  prefs()->SetTime(kWeeklyStatsReportingTimestamp,
+                   base::Time::Now() - base::Days(8));
   ScheduleReportAndRunUntilIdle();
 
   // More than a week since last query, should have gone through.
   histograms().ExpectTotalCount("History.DatabaseMonthlyHostCountTime", 1);
   // Reporter should have left the time of request in Prefs.
-  base::Time time_now = task_runner()->GetMockClock()->Now();
-  EXPECT_EQ(time_now, prefs()->GetTime(kWeeklyStatsReportingTimestamp));
+  EXPECT_EQ(base::Time::Now(),
+            prefs()->GetTime(kWeeklyStatsReportingTimestamp));
 }
 
 }  // namespace explore_sites

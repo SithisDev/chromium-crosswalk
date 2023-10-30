@@ -1,22 +1,25 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/test/test_storage_partition.h"
 #include "extensions/browser/api/socket/tls_socket.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/socket/socket_test_util.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_test_util.h"
 #include "services/network/network_context.h"
 #include "services/network/public/mojom/network_context.mojom.h"
@@ -32,8 +35,10 @@ const char FAKE_ID[] = "abcdefghijklmnopqrst";
 
 class TLSSocketTestBase : public extensions::ExtensionServiceTestBase {
  public:
-  TLSSocketTestBase() : url_request_context_(true) {}
-  ~TLSSocketTestBase() override {}
+  TLSSocketTestBase()
+      : url_request_context_builder_(
+            net::CreateTestURLRequestContextBuilder()) {}
+  ~TLSSocketTestBase() override = default;
 
   // Creates a TCP socket.
   std::unique_ptr<TCPSocket> CreateTCPSocket() {
@@ -66,14 +71,16 @@ class TLSSocketTestBase : public extensions::ExtensionServiceTestBase {
     socket->UpgradeToTLS(
         nullptr /* options */,
         base::BindLambdaForTesting(
-            [&](int result, network::mojom::TLSClientSocketPtr tls_socket_ptr,
+            [&](int result,
+                mojo::PendingRemote<network::mojom::TLSClientSocket>
+                    pending_tls_socket,
                 const net::IPEndPoint& local_addr,
                 const net::IPEndPoint& peer_addr,
                 mojo::ScopedDataPipeConsumerHandle receive_handle,
                 mojo::ScopedDataPipeProducerHandle send_handle) {
               if (net::OK == result) {
                 tls_socket = std::make_unique<TLSSocket>(
-                    std::move(tls_socket_ptr), local_addr, peer_addr,
+                    std::move(pending_tls_socket), local_addr, peer_addr,
                     std::move(receive_handle), std::move(send_handle), FAKE_ID);
               }
               run_loop.Quit();
@@ -87,22 +94,23 @@ class TLSSocketTestBase : public extensions::ExtensionServiceTestBase {
   void SetUp() override { InitializeEmptyExtensionService(); }
 
   void Initialize() {
-    url_request_context_.Init();
+    url_request_context_ = url_request_context_builder_->Build();
     network_context_ = std::make_unique<network::NetworkContext>(
-        nullptr, mojo::MakeRequest(&network_context_ptr_),
-        &url_request_context_,
+        nullptr, network_context_remote_.BindNewPipeAndPassReceiver(),
+        url_request_context_.get(),
         /*cors_exempt_header_list=*/std::vector<std::string>());
-    partition_.set_network_context(network_context_ptr_.get());
+    partition_.set_network_context(network_context_remote_.get());
   }
 
-  net::TestURLRequestContext url_request_context_;
+  std::unique_ptr<net::URLRequestContextBuilder> url_request_context_builder_;
 
  private:
   static const int kPort = 1234;
   TestingProfile profile_;
+  std::unique_ptr<net::URLRequestContext> url_request_context_;
   content::TestStoragePartition partition_;
   std::unique_ptr<network::NetworkContext> network_context_;
-  network::mojom::NetworkContextPtr network_context_ptr_;
+  mojo::Remote<network::mojom::NetworkContext> network_context_remote_;
 };
 
 }  // namespace
@@ -112,7 +120,7 @@ class TLSSocketTest : public TLSSocketTestBase,
  public:
   TLSSocketTest() : TLSSocketTestBase() {
     mock_client_socket_factory_.set_enable_read_if_ready(true);
-    url_request_context_.set_client_socket_factory(
+    url_request_context_builder_->set_client_socket_factory_for_testing(
         &mock_client_socket_factory_);
     Initialize();
   }
@@ -170,12 +178,12 @@ TEST_F(TLSSocketTest, UpgradeToTLSWhilePendingRead) {
   auto socket = CreateTCPSocket();
   // This read will be pending when UpgradeToTLS() is called.
   socket->Read(1 /* count */, base::DoNothing());
-  network::mojom::TLSClientSocketPtr tls_socket_ptr;
   base::RunLoop run_loop;
   socket->UpgradeToTLS(
       nullptr /* options */,
       base::BindLambdaForTesting(
-          [&](int result, network::mojom::TLSClientSocketPtr tls_socket_ptr,
+          [&](int result,
+              mojo::PendingRemote<network::mojom::TLSClientSocket> tls_socket,
               const net::IPEndPoint& local_addr,
               const net::IPEndPoint& peer_addr,
               mojo::ScopedDataPipeConsumerHandle receive_handle,
@@ -203,17 +211,17 @@ TEST_F(TLSSocketTest, UpgradeToTLSWithCustomOptions) {
   mock_client_socket_factory()->AddSSLSocketDataProvider(&ssl_socket);
 
   auto socket = CreateTCPSocket();
-  network::mojom::TLSClientSocketPtr tls_socket_ptr;
   api::socket::SecureOptions options;
-  options.tls_version = std::make_unique<api::socket::TLSVersionConstraints>();
-  options.tls_version->min = std::make_unique<std::string>("tls1.1");
-  options.tls_version->max = std::make_unique<std::string>("tls1.2");
+  options.tls_version.emplace();
+  options.tls_version->min = "tls1.1";
+  options.tls_version->max = "tls1.2";
   int net_error = net::ERR_FAILED;
   base::RunLoop run_loop;
   socket->UpgradeToTLS(
       &options,
       base::BindLambdaForTesting(
-          [&](int result, network::mojom::TLSClientSocketPtr tls_socket_ptr,
+          [&](int result,
+              mojo::PendingRemote<network::mojom::TLSClientSocket> tls_socket,
               const net::IPEndPoint& local_addr,
               const net::IPEndPoint& peer_addr,
               mojo::ScopedDataPipeConsumerHandle receive_handle,
@@ -244,17 +252,17 @@ TEST_F(TLSSocketTest, UpgradeToTLSWithCustomOptionsTLS13) {
   mock_client_socket_factory()->AddSSLSocketDataProvider(&ssl_socket);
 
   auto socket = CreateTCPSocket();
-  network::mojom::TLSClientSocketPtr tls_socket_ptr;
   api::socket::SecureOptions options;
-  options.tls_version = std::make_unique<api::socket::TLSVersionConstraints>();
-  options.tls_version->min = std::make_unique<std::string>("tls1.3");
-  options.tls_version->max = std::make_unique<std::string>("tls1.3");
+  options.tls_version.emplace();
+  options.tls_version->min = "tls1.3";
+  options.tls_version->max = "tls1.3";
   int net_error = net::ERR_FAILED;
   base::RunLoop run_loop;
   socket->UpgradeToTLS(
       &options,
       base::BindLambdaForTesting(
-          [&](int result, network::mojom::TLSClientSocketPtr tls_socket_ptr,
+          [&](int result,
+              mojo::PendingRemote<network::mojom::TLSClientSocket> tls_socket,
               const net::IPEndPoint& local_addr,
               const net::IPEndPoint& peer_addr,
               mojo::ScopedDataPipeConsumerHandle receive_handle,
@@ -267,7 +275,7 @@ TEST_F(TLSSocketTest, UpgradeToTLSWithCustomOptionsTLS13) {
   EXPECT_TRUE(ssl_socket.ConnectDataConsumed());
 }
 
-INSTANTIATE_TEST_SUITE_P(/* no prefix */,
+INSTANTIATE_TEST_SUITE_P(All,
                          TLSSocketTest,
                          testing::Values(net::SYNCHRONOUS, net::ASYNC));
 

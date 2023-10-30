@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-     Copyright 2019 The Chromium Authors. All rights reserved.
-
+     Copyright 2019 The Chromium Authors
      Use of this source code is governed by a BSD-style license that can be
      found in the LICENSE file.
 -->
@@ -11,7 +10,7 @@
         android:layout_height="match_parent"
         android:fillViewport="true">
     <LinearLayout
-        android:background="@color/modern_primary_color"
+        android:background="@macro/default_bg_color"
         android:fillViewport="true"
         android:layout_height="wrap_content"
         android:layout_width="match_parent"
@@ -39,7 +38,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:paddingBottom="16dp"
-            android:textAppearance="@style/TextAppearance.BlackHeadline"
+            android:textAppearance="@style/TextAppearance.Headline.Primary"
             android:layout_gravity="start"
             android:text="@string/usage_stats_site_paused" />
 
@@ -49,7 +48,7 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:paddingBottom="16dp"
-            android:textAppearance="@style/TextAppearance.BlackBody"
+            android:textAppearance="@style/TextAppearance.TextMedium.Secondary"
             android:layout_gravity="start"
             app:leading="@dimen/text_size_large_leading" />
 
@@ -59,7 +58,7 @@
             android:layout_height="wrap_content"
             android:layout_gravity="end"
             android:gravity="center"
-            android:text="@string/preferences"
+            android:text="@string/settings"
             app:verticalInset="0dp"
             style="@style/TextButton" />
     </LinearLayout>

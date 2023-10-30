@@ -1,14 +1,15 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/desktop_capture/desktop_media_list_view.h"
 
-#include <algorithm>
 #include <string>
 #include <utility>
 
-#include "base/numerics/ranges.h"
+#include "base/cxx17_backports.h"
+#include "base/ranges/algorithm.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/media/webrtc/desktop_media_list.h"
 #include "chrome/browser/media/webrtc/window_icon_util.h"
 #include "chrome/browser/ui/views/desktop_capture/desktop_media_picker_views.h"
@@ -17,10 +18,12 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/theme_resources.h"
 #include "extensions/grit/extensions_browser_resources.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/views/view_utils.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ui/aura/window.h"
 #endif
 
@@ -30,7 +33,7 @@ namespace {
 
 const int kDesktopMediaSourceViewGroupId = 1;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // Here we are going to display default app icon for app windows without an
 // icon, and display product logo for chrome browser windows.
 gfx::ImageSkia LoadDefaultIcon(aura::Window* window) {
@@ -42,7 +45,8 @@ gfx::ImageSkia LoadDefaultIcon(aura::Window* window) {
   // windows without Browser association as apps.
   // Technically dev tool is actually a special app, but we would like to
   // display product logo for it, because intuitively it is internal to browser.
-  bool is_app = !browser || (browser->is_app() && !browser->is_devtools());
+  bool is_app =
+      !browser || browser->is_type_app() || browser->is_type_app_popup();
   int idr = is_app ? IDR_APP_DEFAULT_ICON : IDR_PRODUCT_LOGO_32;
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
@@ -51,8 +55,7 @@ gfx::ImageSkia LoadDefaultIcon(aura::Window* window) {
 #endif
 
 DesktopMediaSourceView* AsDesktopMediaSourceView(views::View* view) {
-  DCHECK_EQ(DesktopMediaSourceView::kDesktopMediaSourceViewClassName,
-            view->GetClassName());
+  DCHECK(views::IsViewClass<DesktopMediaSourceView>(view));
   return static_cast<DesktopMediaSourceView*>(view);
 }
 
@@ -62,15 +65,13 @@ DesktopMediaListView::DesktopMediaListView(
     DesktopMediaListController* controller,
     DesktopMediaSourceViewStyle generic_style,
     DesktopMediaSourceViewStyle single_style,
-    const base::string16& accessible_name)
+    const std::u16string& accessible_name)
     : controller_(controller),
       single_style_(single_style),
       generic_style_(generic_style),
       active_style_(&single_style_),
       accessible_name_(accessible_name) {
   SetStyle(&single_style_);
-
-  SetFocusBehavior(FocusBehavior::ALWAYS);
 }
 
 DesktopMediaListView::~DesktopMediaListView() {}
@@ -79,13 +80,10 @@ void DesktopMediaListView::OnSelectionChanged() {
   controller_->OnSourceSelectionChanged();
 }
 
-void DesktopMediaListView::OnDoubleClick() {
-  controller_->AcceptSource();
-}
-
 gfx::Size DesktopMediaListView::CalculatePreferredSize() const {
-  int total_rows = (int{children().size()} + active_style_->columns - 1) /
-                   active_style_->columns;
+  int total_rows =
+      (static_cast<int>(children().size()) + active_style_->columns - 1) /
+      active_style_->columns;
   return gfx::Size(active_style_->columns * active_style_->item_size.width(),
                    total_rows * active_style_->item_size.height());
 }
@@ -133,11 +131,17 @@ bool DesktopMediaListView::OnKeyPressed(const ui::KeyEvent& event) {
   views::View* new_selected = nullptr;
 
   if (selected) {
-    int index = GetIndexOf(selected);
-    int new_index = base::ClampToRange(index + position_increment, 0,
-                                       int{children().size()} - 1);
+    size_t index = GetIndexOf(selected).value();
+    size_t new_index = index + static_cast<size_t>(position_increment);
+    if (position_increment < 0 &&
+        index < static_cast<size_t>(-position_increment)) {
+      new_index = 0;
+    } else if (position_increment > 0 &&
+               (index + position_increment) > (children().size() - 1)) {
+      new_index = children().size() - 1;
+    }
     if (index != new_index)
-      new_selected = children()[size_t{new_index}];
+      new_selected = children()[new_index];
   } else if (!children().empty()) {
     new_selected = children().front();
   }
@@ -147,15 +151,22 @@ bool DesktopMediaListView::OnKeyPressed(const ui::KeyEvent& event) {
   return true;
 }
 
-base::Optional<content::DesktopMediaID> DesktopMediaListView::GetSelection() {
+absl::optional<content::DesktopMediaID> DesktopMediaListView::GetSelection() {
   DesktopMediaSourceView* view = GetSelectedView();
-  return view ? base::Optional<content::DesktopMediaID>(view->source_id())
-              : base::nullopt;
+  return view ? absl::optional<content::DesktopMediaID>(view->source_id())
+              : absl::nullopt;
 }
 
 DesktopMediaListController::SourceListListener*
 DesktopMediaListView::GetSourceListListener() {
   return this;
+}
+
+void DesktopMediaListView::ClearSelection() {
+  DesktopMediaSourceView* view = GetSelectedView();
+  if (view) {
+    view->ClearSelection();
+  }
 }
 
 void DesktopMediaListView::OnSourceAdded(size_t index) {
@@ -172,7 +183,7 @@ void DesktopMediaListView::OnSourceAdded(size_t index) {
   source_view->SetGroup(kDesktopMediaSourceViewGroupId);
   if (source.id.type == DesktopMediaID::TYPE_WINDOW) {
     gfx::ImageSkia icon_image = GetWindowIcon(source.id);
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     // Empty icons are used to represent default icon for aura windows. By
     // detecting this, we load the default icon from resource.
     if (icon_image.isNull()) {
@@ -195,7 +206,7 @@ void DesktopMediaListView::OnSourceRemoved(size_t index) {
   DesktopMediaSourceView* view = AsDesktopMediaSourceView(children()[index]);
   DCHECK(view);
 
-  bool was_selected = view->is_selected();
+  bool was_selected = view->GetSelected();
   RemoveChildView(view);
   delete view;
 
@@ -231,20 +242,28 @@ void DesktopMediaListView::OnSourceThumbnailChanged(size_t index) {
   source_view->SetThumbnail(source.thumbnail);
 }
 
+void DesktopMediaListView::OnSourcePreviewChanged(size_t index) {}
+
+void DesktopMediaListView::OnDelegatedSourceListSelection() {
+  // If the SourceList is delegated, we will only have one (or zero), sources.
+  // As long as we have one source, select it once we get notified that the user
+  // made a selection in the delegated source list.
+  if (!children().empty())
+    children().front()->RequestFocus();
+}
+
 void DesktopMediaListView::SetStyle(DesktopMediaSourceViewStyle* style) {
   active_style_ = style;
-  controller_->SetThumbnailSize(gfx::Size(
-      style->image_rect.width() - 2 * style->selection_border_thickness,
-      style->image_rect.height() - 2 * style->selection_border_thickness));
+  controller_->SetThumbnailSize(style->image_rect.size());
 
   for (auto* child : children())
     AsDesktopMediaSourceView(child)->SetStyle(*active_style_);
 }
 
 DesktopMediaSourceView* DesktopMediaListView::GetSelectedView() {
-  const auto i = std::find_if(
-      children().cbegin(), children().cend(),
-      [](View* v) { return AsDesktopMediaSourceView(v)->is_selected(); });
+  const auto i =
+      base::ranges::find_if(children(), &DesktopMediaSourceView::GetSelected,
+                            &AsDesktopMediaSourceView);
   return (i == children().cend()) ? nullptr : AsDesktopMediaSourceView(*i);
 }
 

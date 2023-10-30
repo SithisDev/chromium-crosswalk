@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/time/time.h"
 #include "chrome/browser/predictors/loading_predictor.h"
 #include "chrome/common/chrome_switches.h"
@@ -18,7 +17,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 
 using content::BrowserThread;
@@ -51,11 +50,12 @@ NetBenchmarking::~NetBenchmarking() {
 void NetBenchmarking::Create(
     base::WeakPtr<predictors::LoadingPredictor> loading_predictor,
     int render_process_id,
-    chrome::mojom::NetBenchmarkingRequest request) {
+    mojo::PendingReceiver<chrome::mojom::NetBenchmarking> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  mojo::MakeStrongBinding(std::make_unique<NetBenchmarking>(
-                              std::move(loading_predictor), render_process_id),
-                          std::move(request));
+  mojo::MakeSelfOwnedReceiver(
+      std::make_unique<NetBenchmarking>(std::move(loading_predictor),
+                                        render_process_id),
+      std::move(receiver));
 }
 
 // static

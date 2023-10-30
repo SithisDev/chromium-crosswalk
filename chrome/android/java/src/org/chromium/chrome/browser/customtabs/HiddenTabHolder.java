@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,21 +8,23 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Rect;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
-import android.support.customtabs.CustomTabsSessionToken;
 import android.text.TextUtils;
 
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+import androidx.browser.customtabs.CustomTabsSessionToken;
+
+import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.TraceEvent;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.IntentHandler;
-import org.chromium.chrome.browser.prerender.ExternalPrerenderHandler;
+import org.chromium.chrome.browser.app.tab_activity_glue.ReparentingTask;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabBuilder;
-import org.chromium.chrome.browser.tab.TabObserver;
-import org.chromium.chrome.browser.tabmodel.TabLaunchType;
-import org.chromium.chrome.browser.util.UrlUtilities;
+import org.chromium.chrome.browser.tab.TabLaunchType;
+import org.chromium.chrome.browser.tab.TabUtils;
+import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.common.Referrer;
 import org.chromium.network.mojom.ReferrerPolicy;
@@ -42,23 +44,45 @@ public class HiddenTabHolder {
         public final CustomTabsSessionToken session;
         public final String url;
         public final Tab tab;
-        public final TabObserver observer;
         public final String referrer;
 
-        private SpeculationParams(CustomTabsSessionToken session, String url, Tab tab,
-                TabObserver observer, String referrer) {
+        private SpeculationParams(
+                CustomTabsSessionToken session, String url, Tab tab, String referrer) {
             this.session = session;
             this.url = url;
             this.tab = tab;
-            this.observer = observer;
             this.referrer = referrer;
         }
     }
 
     private class HiddenTabObserver extends EmptyTabObserver {
+        // This WindowAndroid is "owned" by the Tab and should be destroyed when it is no longer
+        // needed by the Tab or when the Tab is destroyed.
+        private WindowAndroid mOwnedWindowAndroid;
+        public HiddenTabObserver(WindowAndroid ownedWindowAndroid) {
+            mOwnedWindowAndroid = ownedWindowAndroid;
+        }
+
         @Override
         public void onCrash(Tab tab) {
             destroyHiddenTab(null);
+        }
+
+        @Override
+        public void onDestroyed(Tab tab) {
+            destroyOwnedWindow(tab);
+        }
+
+        @Override
+        public void onActivityAttachmentChanged(Tab tab, WindowAndroid window) {
+            destroyOwnedWindow(tab);
+        }
+
+        private void destroyOwnedWindow(Tab tab) {
+            assert mOwnedWindowAndroid != null;
+            mOwnedWindowAndroid.destroy();
+            mOwnedWindowAndroid = null;
+            tab.removeObserver(this);
         }
     }
 
@@ -67,14 +91,16 @@ public class HiddenTabHolder {
     /**
      * Creates a hidden tab and initiates a navigation.
      *
+     * @param tabCreatedCallback Callback run with the tab that is created. This is run before the
+     *        url is loaded.
      * @param session The {@link CustomTabsSessionToken} for the Tab to be associated with.
      * @param clientManager The {@link ClientManager} to get referrer information and link
      *                      PostMessage.
      * @param url The URL to load into the Tab.
      * @param extras Extras to be passed that may contain referrer information.
      */
-    void launchUrlInHiddenTab(CustomTabsSessionToken session, ClientManager clientManager,
-            String url, @Nullable Bundle extras) {
+    void launchUrlInHiddenTab(Callback<Tab> tabCreatedCallback, CustomTabsSessionToken session,
+            ClientManager clientManager, String url, @Nullable Bundle extras) {
         Intent extrasIntent = new Intent();
         if (extras != null) extrasIntent.putExtras(extras);
 
@@ -82,8 +108,9 @@ public class HiddenTabHolder {
         if (IntentHandler.getExtraHeadersFromIntent(extrasIntent) != null) return;
 
         Tab tab = buildDetachedTab();
+        tabCreatedCallback.onResult(tab);
 
-        HiddenTabObserver observer = new HiddenTabObserver();
+        HiddenTabObserver observer = new HiddenTabObserver(tab.getWindowAndroid());
         tab.addObserver(observer);
 
         // Updating post message as soon as we have a valid WebContents.
@@ -91,15 +118,15 @@ public class HiddenTabHolder {
 
         LoadUrlParams loadParams = new LoadUrlParams(url);
         String referrer = IntentHandler.getReferrerUrlIncludingExtraHeaders(extrasIntent);
-        if (referrer == null && clientManager.getReferrerForSession(session) != null) {
-            referrer = clientManager.getReferrerForSession(session).getUrl();
+        if (referrer == null && clientManager.getDefaultReferrerForSession(session) != null) {
+            referrer = clientManager.getDefaultReferrerForSession(session).getUrl();
         }
         if (referrer == null) referrer = "";
         if (!referrer.isEmpty()) {
             loadParams.setReferrer(new Referrer(referrer, ReferrerPolicy.DEFAULT));
         }
 
-        mSpeculation = new SpeculationParams(session, url, tab, observer, referrer);
+        mSpeculation = new SpeculationParams(session, url, tab, referrer);
         mSpeculation.tab.loadUrl(loadParams);
     }
 
@@ -113,18 +140,21 @@ public class HiddenTabHolder {
      */
     private static Tab buildDetachedTab() {
         Context context = ContextUtils.getApplicationContext();
+        // TODO(crbug.com/1190971): Set isIncognito flag here if hidden tabs are allowed for
+        // incognito mode.
         Tab tab = new TabBuilder()
                           .setWindow(new WindowAndroid(context))
                           .setLaunchType(TabLaunchType.FROM_SPECULATIVE_BACKGROUND_CREATION)
+                          .setDelegateFactory(CustomTabDelegateFactory.createDummy())
+                          .setInitiallyHidden(true)
                           .build();
-        tab.initialize(null, CustomTabDelegateFactory.createDummy(), true, null, false);
 
         // Resize the webContent to avoid expensive post load resize when attaching the tab.
-        Rect bounds = ExternalPrerenderHandler.estimateContentSize(context, false);
+        Rect bounds = TabUtils.estimateContentSize(context);
         int width = bounds.right - bounds.left;
         int height = bounds.bottom - bounds.top;
         tab.getWebContents().setSize(width, height);
-        tab.detach();
+        ReparentingTask.from(tab).detach();
         return tab;
     }
 
@@ -148,7 +178,6 @@ public class HiddenTabHolder {
             String speculatedUrl = mSpeculation.url;
             String speculationReferrer = mSpeculation.referrer;
 
-            tab.removeObserver(mSpeculation.observer);
             mSpeculation = null;
 
             boolean urlsMatch = ignoreFragments
@@ -166,6 +195,11 @@ public class HiddenTabHolder {
                 return null;
             }
         }
+    }
+
+    @VisibleForTesting
+    public Tab getHiddenTab() {
+        return mSpeculation != null ? mSpeculation.tab : null;
     }
 
     /** Cancels the speculation for a given session, or any session if null. */

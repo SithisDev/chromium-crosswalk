@@ -1,13 +1,22 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+import {HIDE_FOCUS_RING_ATTRIBUTE, LOCAL_STORAGE_FOLDER_STATE_KEY, LOCAL_STORAGE_TREE_WIDTH_KEY} from 'chrome://bookmarks/bookmarks.js';
+import {isMac} from 'chrome://resources/js/cr.m.js';
+import {getDeepActiveElement} from 'chrome://resources/js/util.m.js';
+import {down, keyDownOn, pressAndReleaseKeyOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
+import {flushTasks} from 'chrome://webui-test/test_util.js';
+
+import {TestStore} from './test_store.js';
+import {createFolder, normalizeIterable, replaceBody} from './test_util.js';
 
 suite('<bookmarks-app>', function() {
   let app;
   let store;
 
   function resetStore() {
-    store = new bookmarks.TestStore({});
+    store = new TestStore({});
     store.acceptInitOnce();
     store.replaceSingleton();
 
@@ -59,7 +68,7 @@ suite('<bookmarks-app>', function() {
 
     const sidebarWidth = '500px';
     app.$.sidebar.style.width = sidebarWidth;
-    cr.dispatchSimpleEvent(app.$.splitter, 'resize');
+    app.$.splitter.dispatchEvent(new CustomEvent('resize'));
     assertEquals(
         sidebarWidth, window.localStorage[LOCAL_STORAGE_TREE_WIDTH_KEY]);
 
@@ -70,32 +79,30 @@ suite('<bookmarks-app>', function() {
   });
 
   test('focus ring hides and restores', async function() {
-    await PolymerTest.flushTasks();
-    const list = app.$$('bookmarks-list');
+    await flushTasks();
+    const list = app.shadowRoot.querySelector('bookmarks-list');
     const item = list.root.querySelectorAll('bookmarks-item')[0];
-    const getFocusAttribute = () =>
-        app.getAttribute(bookmarks.HIDE_FOCUS_RING_ATTRIBUTE);
+    const getFocusAttribute = () => app.getAttribute(HIDE_FOCUS_RING_ATTRIBUTE);
 
     assertEquals(null, getFocusAttribute());
 
-    MockInteractions.tap(item);
+    down(item);
     assertEquals('', getFocusAttribute());
 
-    MockInteractions.keyDownOn(item, 16, [], 'Shift');
+    keyDownOn(item, 16, [], 'Shift');
     assertEquals('', getFocusAttribute());
 
     // This event is also captured by the bookmarks-list and propagation is
     // stopped. Regardless, it should clear the focus first.
-    MockInteractions.keyDownOn(item, 40, [], 'ArrowDown');
+    keyDownOn(item, 40, [], 'ArrowDown');
     assertEquals(null, getFocusAttribute());
   });
 
   test('when find shortcut is invoked, focus on search input', () => {
-    const searchInput =
-        app.$$('bookmarks-toolbar').searchField.getSearchInput();
+    const searchInput = app.shadowRoot.querySelector('bookmarks-toolbar')
+                            .searchField.getSearchInput();
     assertNotEquals(searchInput, getDeepActiveElement());
-    MockInteractions.pressAndReleaseKeyOn(
-        document.body, '', cr.isMac ? 'meta' : 'ctrl', 'f');
+    pressAndReleaseKeyOn(document.body, '', isMac ? 'meta' : 'ctrl', 'f');
     assertEquals(searchInput, getDeepActiveElement());
   });
 });

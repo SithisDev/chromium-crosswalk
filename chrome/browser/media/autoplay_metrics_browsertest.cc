@@ -1,12 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/task/post_task.h"
+#include "build/build_config.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_frame_navigation_observer.h"
 #include "net/dns/mock_host_resolver.h"
@@ -31,8 +32,6 @@ class AutoplayMetricsBrowserTest : public InProcessBrowserTest {
   void TryAutoplay(ukm::TestUkmRecorder& ukm_recorder,
                    const content::ToRenderFrameHost& adapter) {
     base::RunLoop run_loop;
-    base::PostDelayedTask(FROM_HERE, run_loop.QuitClosure(),
-                          base::TimeDelta::FromSeconds(10));
     ukm_recorder.SetOnAddEntryCallback(Entry::kEntryName,
                                        run_loop.QuitClosure());
     EXPECT_TRUE(ExecuteScriptWithoutUserGesture(adapter.render_frame_host(),
@@ -56,15 +55,22 @@ class AutoplayMetricsBrowserTest : public InProcessBrowserTest {
   }
 
   content::RenderFrameHost* first_child() const {
-    return web_contents()->GetAllFrames()[1];
+    return ChildFrameAt(web_contents(), 0);
   }
 
   content::RenderFrameHost* second_child() const {
-    return web_contents()->GetAllFrames()[2];
+    return ChildFrameAt(first_child(), 0);
   }
 };
 
-IN_PROC_BROWSER_TEST_F(AutoplayMetricsBrowserTest, RecordAutoplayAttemptUkm) {
+// Flaky on various platforms. https://crbug.com/1101841
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#define MAYBE_RecordAutoplayAttemptUkm DISABLED_RecordAutoplayAttemptUkm
+#else
+#define MAYBE_RecordAutoplayAttemptUkm RecordAutoplayAttemptUkm
+#endif
+IN_PROC_BROWSER_TEST_F(AutoplayMetricsBrowserTest,
+                       MAYBE_RecordAutoplayAttemptUkm) {
   ukm::TestAutoSetUkmRecorder test_ukm_recorder;
   GURL main_url(embedded_test_server()->GetURL("example.com",
                                                "/media/autoplay_iframe.html"));
@@ -74,7 +80,7 @@ IN_PROC_BROWSER_TEST_F(AutoplayMetricsBrowserTest, RecordAutoplayAttemptUkm) {
       embedded_test_server()->GetURL("bar.com", "/media/autoplay_iframe.html"));
 
   // Navigate main frame, try play.
-  NavigateFrameAndWait(web_contents()->GetMainFrame(), main_url);
+  NavigateFrameAndWait(web_contents()->GetPrimaryMainFrame(), main_url);
   TryAutoplay(test_ukm_recorder, web_contents());
 
   // Check that we recorded a UKM event using the main frame URL.
@@ -144,7 +150,7 @@ IN_PROC_BROWSER_TEST_F(AutoplayMetricsBrowserTest, RecordAutoplayAttemptUkm) {
   }
 
   // Navigate top frame, try play.
-  NavigateFrameAndWait(web_contents()->GetMainFrame(), foo_url);
+  NavigateFrameAndWait(web_contents()->GetPrimaryMainFrame(), foo_url);
   TryAutoplay(test_ukm_recorder, web_contents());
 
   // Check that we recorded a UKM event using the main frame URL.

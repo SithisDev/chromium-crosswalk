@@ -1,34 +1,43 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.compositor.bottombar;
 
+import android.app.Activity;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.View.MeasureSpec;
 import android.view.ViewGroup;
 import android.view.ViewGroup.MarginLayoutParams;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.NonNull;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeVersionInfo;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.browser.content.ContentUtils;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManager;
-import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler;
+import org.chromium.chrome.browser.externalnav.ExternalNavigationDelegateImpl;
+import org.chromium.chrome.browser.incognito.IncognitoUtils;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.embedder_support.delegate.WebContentsDelegateAndroid;
 import org.chromium.components.embedder_support.view.ContentView;
+import org.chromium.components.external_intents.ExternalNavigationHandler;
 import org.chromium.components.navigation_interception.InterceptNavigationDelegate;
-import org.chromium.components.navigation_interception.NavigationParams;
+import org.chromium.components.version_info.VersionInfo;
+import org.chromium.content_public.browser.LoadCommittedDetails;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.RenderCoordinates;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.ui.base.ViewAndroidDelegate;
+import org.chromium.ui.base.WindowAndroid;
+import org.chromium.url.GURL;
 
 /**
  * Content container for an OverlayPanel. This class is responsible for the management of the
@@ -36,6 +45,17 @@ import org.chromium.ui.base.ViewAndroidDelegate;
  * panel has.
  */
 public class OverlayPanelContent {
+    /** The {@link CompositorViewHolder} for the current activity, used to add/remove views. */
+    private final ViewGroup mCompositorViewHolder;
+
+    /** The {@link WindowAndroid} for the current activity. */
+    private final WindowAndroid mWindowAndroid;
+
+    /** Supplies the current activity {@link Tab}. */
+    private final Supplier<Tab> mCurrentTabSupplier;
+
+    /** Used for progress bar events. */
+    private final WebContentsDelegateAndroid mWebContentsDelegate;
 
     /** The WebContents that this panel will display. */
     private WebContents mWebContents;
@@ -46,11 +66,8 @@ public class OverlayPanelContent {
     /** The pointer to the native version of this class. */
     private long mNativeOverlayPanelContentPtr;
 
-    /** Used for progress bar events. */
-    private final WebContentsDelegateAndroid mWebContentsDelegate;
-
     /** The activity that this content is contained in. */
-    private ChromeActivity mActivity;
+    private Activity mActivity;
 
     /** Observer used for tracking loading and navigation. */
     private WebContentsObserver mWebContentsObserver;
@@ -133,25 +150,25 @@ public class OverlayPanelContent {
     // Used to intercept intent navigations.
     // TODO(jeremycho): Consider creating a Tab with the Panel's WebContents.
     // which would also handle functionality like long-press-to-paste.
-    private class InterceptNavigationDelegateImpl implements InterceptNavigationDelegate {
+    private class InterceptNavigationDelegateImpl extends InterceptNavigationDelegate {
         final ExternalNavigationHandler mExternalNavHandler;
 
         public InterceptNavigationDelegateImpl() {
-            Tab tab = mActivity.getActivityTab();
+            Tab tab = mCurrentTabSupplier.get();
             mExternalNavHandler = (tab != null && tab.getWebContents() != null)
-                    ? new ExternalNavigationHandler(tab)
+                    ? new ExternalNavigationHandler(new ExternalNavigationDelegateImpl(tab))
                     : null;
         }
 
         @Override
-        public boolean shouldIgnoreNavigation(NavigationParams navigationParams) {
+        public boolean shouldIgnoreNavigation(NavigationHandle navigationHandle, GURL escapedUrl) {
             // If either of the required params for the delegate are null, do not call the
             // delegate and ignore the navigation.
-            if (mExternalNavHandler == null || navigationParams == null) return true;
+            if (mExternalNavHandler == null || navigationHandle == null) return true;
             // TODO(mdjones): Rather than passing the two navigation params, instead consider
             // passing a boolean to make this API simpler.
-            return !mContentDelegate.shouldInterceptNavigation(mExternalNavHandler,
-                    navigationParams);
+            return !mContentDelegate.shouldInterceptNavigation(
+                    mExternalNavHandler, navigationHandle, escapedUrl);
         }
     }
 
@@ -163,25 +180,32 @@ public class OverlayPanelContent {
      * @param contentDelegate An observer for events that occur on this content. If null is passed
      *                        for this parameter, the default one will be used.
      * @param progressObserver An observer for progress related events.
-     * @param activity The ChromeActivity that contains this object.
+     * @param activity The {@link Activity} that contains this object.
      * @param isIncognito {@True} if opened for an incognito tab
      * @param barHeight The height of the bar at the top of the OverlayPanel in dp.
+     * @param compositorViewHolder The {@link CompositorViewHolder} for the current activity.
+     * @param windowAndroid The {@link WindowAndroid} for the current activity.
+     * @param currentTabSupplier Supplies the current activity {@link Tab}.
      */
-    public OverlayPanelContent(OverlayContentDelegate contentDelegate,
-            OverlayContentProgressObserver progressObserver, ChromeActivity activity,
-            boolean isIncognito, float barHeight) {
-        mNativeOverlayPanelContentPtr = nativeInit();
+    public OverlayPanelContent(@NonNull OverlayContentDelegate contentDelegate,
+            @NonNull OverlayContentProgressObserver progressObserver, @NonNull Activity activity,
+            boolean isIncognito, float barHeight, @NonNull ViewGroup compositorViewHolder,
+            @NonNull WindowAndroid windowAndroid, @NonNull Supplier<Tab> currentTabSupplier) {
+        mNativeOverlayPanelContentPtr = OverlayPanelContentJni.get().init(OverlayPanelContent.this);
         mContentDelegate = contentDelegate;
         mProgressObserver = progressObserver;
         mActivity = activity;
         mIsIncognito = isIncognito;
         mBarHeightPx = (int) (barHeight * mActivity.getResources().getDisplayMetrics().density);
+        mCompositorViewHolder = compositorViewHolder;
+        mWindowAndroid = windowAndroid;
+        mCurrentTabSupplier = currentTabSupplier;
 
         mWebContentsDelegate = new WebContentsDelegateAndroid() {
             private boolean mIsFullscreen;
 
             @Override
-            public void loadingStateChanged(boolean toDifferentDocument) {
+            public void loadingStateChanged(boolean shouldShowLoadingUI) {
                 boolean isLoading = mWebContents != null && mWebContents.isLoading();
                 if (isLoading) {
                     mProgressObserver.onProgressBarStarted();
@@ -191,12 +215,13 @@ public class OverlayPanelContent {
             }
 
             @Override
-            public void onLoadProgressChanged(int progress) {
-                mProgressObserver.onProgressBarUpdated(progress);
+            public void visibleSSLStateChanged() {
+                mContentDelegate.onSSLStateUpdated();
             }
 
             @Override
-            public void enterFullscreenModeForTab(boolean prefersNavigationBar) {
+            public void enterFullscreenModeForTab(
+                    boolean prefersNavigationBar, boolean prefersStatusBar) {
                 mIsFullscreen = true;
             }
 
@@ -211,19 +236,18 @@ public class OverlayPanelContent {
             }
 
             @Override
+            public boolean shouldCreateWebContents(GURL targetUrl) {
+                return false;
+            }
+
+            @Override
             public int getTopControlsHeight() {
-                return (int) (mBarHeightPx
-                        / mActivity.getWindowAndroid().getDisplay().getDipScale());
+                return (int) (mBarHeightPx / mWindowAndroid.getDisplay().getDipScale());
             }
 
             @Override
             public int getBottomControlsHeight() {
                 return 0;
-            }
-
-            @Override
-            public boolean controlsResizeView() {
-                return false;
             }
         };
     }
@@ -254,11 +278,19 @@ public class OverlayPanelContent {
     }
 
     /**
+     * Whether we should reuse any existing WebContents instead of deleting and recreating.
+     * @param reuse {@code true} if we want to reuse the WebContents.
+     */
+    public void setReuseWebContents(boolean reuse) {
+        mShouldReuseWebContents = reuse;
+    }
+
+    /**
      * Call this when a loadUrl request has failed to notify the panel that the WebContents can
      * be reused.  See crbug.com/682953 for details.
      */
     void onLoadUrlFailed() {
-        mShouldReuseWebContents = true;
+        setReuseWebContents(true);
     }
 
     /**
@@ -301,10 +333,12 @@ public class OverlayPanelContent {
             destroyWebContents();
         }
 
+        Profile profile = IncognitoUtils.getProfileFromWindowAndroid(mWindowAndroid, mIsIncognito);
         // Creates an initially hidden WebContents which gets shown when the panel is opened.
-        mWebContents = WebContentsFactory.createWebContents(mIsIncognito, true);
+        mWebContents = WebContentsFactory.createWebContents(profile, true);
 
-        ContentView cv = ContentView.createContentView(mActivity, mWebContents);
+        ContentView cv = ContentView.createContentView(
+                mActivity, null /* eventOffsetHandler */, mWebContents);
         if (mContentViewWidth != 0 || mContentViewHeight != 0) {
             int width = mContentViewWidth == 0 ? ContentView.DEFAULT_MEASURE_SPEC
                     : MeasureSpec.makeMeasureSpec(mContentViewWidth, MeasureSpec.EXACTLY);
@@ -314,53 +348,80 @@ public class OverlayPanelContent {
         }
 
         OverlayViewDelegate delegate = new OverlayViewDelegate(cv);
-        mWebContents.initialize(ChromeVersionInfo.getProductVersion(), delegate, cv,
-                mActivity.getWindowAndroid(), WebContents.createDefaultInternalsHolder());
-        ContentUtils.setUserAgentOverride(mWebContents);
+        mWebContents.initialize(VersionInfo.getProductVersion(), delegate, cv, mWindowAndroid,
+                WebContents.createDefaultInternalsHolder());
+        ContentUtils.setUserAgentOverride(mWebContents, /* overrideInNewTabs= */ false);
 
         // Transfers the ownership of the WebContents to the native OverlayPanelContent.
-        nativeSetWebContents(mNativeOverlayPanelContentPtr, mWebContents, mWebContentsDelegate);
+        OverlayPanelContentJni.get().setWebContents(mNativeOverlayPanelContentPtr,
+                OverlayPanelContent.this, mWebContents, mWebContentsDelegate);
 
         mWebContentsObserver =
                 new WebContentsObserver(mWebContents) {
                     @Override
-                    public void didStartLoading(String url) {
-                        mContentDelegate.onContentLoadStarted(url);
+                    public void didStartLoading(GURL url) {
+                        mContentDelegate.onContentLoadStarted();
                     }
 
                     @Override
-                    public void navigationEntryCommitted() {
+                    public void loadProgressChanged(float progress) {
+                        mProgressObserver.onProgressBarUpdated(progress);
+                    }
+
+                    @Override
+                    public void navigationEntryCommitted(LoadCommittedDetails details) {
                         mContentDelegate.onNavigationEntryCommitted();
                     }
 
                     @Override
-                    public void didStartNavigation(NavigationHandle navigation) {
-                        if (navigation.isInMainFrame() && !navigation.isSameDocument()) {
-                            String url = navigation.getUrl();
+                    public void didStartNavigationInPrimaryMainFrame(NavigationHandle navigation) {
+                        if (!navigation.isSameDocument()) {
+                            String url = navigation.getUrl().getSpec();
                             mContentDelegate.onMainFrameLoadStarted(
                                     url, !TextUtils.equals(url, mLoadedUrl));
                         }
                     }
 
                     @Override
-                    public void didFinishNavigation(NavigationHandle navigation) {
-                        if (navigation.hasCommitted() && navigation.isInMainFrame()) {
+                    public void didStartNavigationNoop(NavigationHandle navigation) {
+                        if (!navigation.isInPrimaryMainFrame()) return;
+                    }
+
+                    @Override
+                    public void titleWasSet(String title) {
+                        mContentDelegate.onTitleUpdated(title);
+                    }
+
+                    @Override
+                    public void didFinishNavigationInPrimaryMainFrame(NavigationHandle navigation) {
+                        if (navigation.hasCommitted()) {
                             mIsProcessingPendingNavigation = false;
-                            mContentDelegate.onMainFrameNavigation(navigation.getUrl(),
-                                    !TextUtils.equals(navigation.getUrl(), mLoadedUrl),
-                                    isHttpFailureCode(navigation.httpStatusCode()));
+                            mContentDelegate.onMainFrameNavigation(navigation.getUrl().getSpec(),
+                                    !TextUtils.equals(navigation.getUrl().getSpec(), mLoadedUrl),
+                                    isHttpFailureCode(navigation.httpStatusCode()),
+                                    navigation.isErrorPage());
                         }
+                    }
+
+                    @Override
+                    public void didFinishNavigationNoop(NavigationHandle navigation) {
+                        if (!navigation.isInPrimaryMainFrame()) return;
+                    }
+
+                    @Override
+                    public void didFirstVisuallyNonEmptyPaint() {
+                        mContentDelegate.onFirstNonEmptyPaint();
                     }
                 };
 
         mContainerView = cv;
         mInterceptNavigationDelegate = new InterceptNavigationDelegateImpl();
-        nativeSetInterceptNavigationDelegate(
-                mNativeOverlayPanelContentPtr, mInterceptNavigationDelegate, mWebContents);
+        OverlayPanelContentJni.get().setInterceptNavigationDelegate(mNativeOverlayPanelContentPtr,
+                OverlayPanelContent.this, mInterceptNavigationDelegate, mWebContents);
 
         mContentDelegate.onContentViewCreated();
         resizePanelContentView();
-        mActivity.getCompositorViewHolder().addView(mContainerView, 1);
+        mCompositorViewHolder.addView(mContainerView, 1);
     }
 
     /**
@@ -368,8 +429,11 @@ public class OverlayPanelContent {
      */
     private void destroyWebContents() {
         if (mWebContents != null) {
+            mCompositorViewHolder.removeView(mContainerView);
+
             // Native destroy will call up to destroy the Java WebContents.
-            nativeDestroyWebContents(mNativeOverlayPanelContentPtr);
+            OverlayPanelContentJni.get().destroyWebContents(
+                    mNativeOverlayPanelContentPtr, OverlayPanelContent.this);
             mWebContents = null;
             if (mWebContentsObserver != null) {
                 mWebContentsObserver.destroy();
@@ -379,11 +443,6 @@ public class OverlayPanelContent {
             mDidStartLoadingUrl = false;
             mIsProcessingPendingNavigation = false;
             mShouldReuseWebContents = false;
-
-            setVisibility(false);
-
-            // After everything has been disposed, notify the observer.
-            mContentDelegate.onContentViewDestroyed();
         }
     }
 
@@ -398,7 +457,8 @@ public class OverlayPanelContent {
      *                          Otherwise the web contents never accounts for them.
      */
     public void updateBrowserControlsState(boolean areControlsHidden) {
-        nativeUpdateBrowserControlsState(mNativeOverlayPanelContentPtr, areControlsHidden);
+        OverlayPanelContentJni.get().updateBrowserControlsState(
+                mNativeOverlayPanelContentPtr, OverlayPanelContent.this, areControlsHidden);
     }
 
     /**
@@ -484,11 +544,17 @@ public class OverlayPanelContent {
         mNativeOverlayPanelContentPtr = 0;
     }
 
-    protected WebContents getWebContents() {
+    /**
+     * @return The associated {@link WebContents}.
+     */
+    public WebContents getWebContents() {
         return mWebContents;
     }
 
-    ViewGroup getContainerView() {
+    /**
+     * @return The associated {@link ContentView}.
+     */
+    public ViewGroup getContainerView() {
         return mContainerView;
     }
 
@@ -496,8 +562,8 @@ public class OverlayPanelContent {
         WebContents webContents = getWebContents();
         if (webContents == null) return;
         int viewHeight = mContentViewHeight - (mSubtractBarHeight ? mBarHeightPx : 0);
-        nativeOnPhysicalBackingSizeChanged(
-                mNativeOverlayPanelContentPtr, webContents, mContentViewWidth, viewHeight);
+        OverlayPanelContentJni.get().onPhysicalBackingSizeChanged(mNativeOverlayPanelContentPtr,
+                OverlayPanelContent.this, webContents, mContentViewWidth, viewHeight);
         mWebContents.setSize(mContentViewWidth, viewHeight);
     }
 
@@ -507,7 +573,8 @@ public class OverlayPanelContent {
      * @param urlTimeMs The time the URL was navigated to.
      */
     public void removeLastHistoryEntry(String historyUrl, long urlTimeMs) {
-        nativeRemoveLastHistoryEntry(mNativeOverlayPanelContentPtr, historyUrl, urlTimeMs);
+        OverlayPanelContentJni.get().removeLastHistoryEntry(
+                mNativeOverlayPanelContentPtr, OverlayPanelContent.this, historyUrl, urlTimeMs);
     }
 
     /**
@@ -518,24 +585,30 @@ public class OverlayPanelContent {
         if (mWebContents != null) destroyWebContents();
 
         // Tests will not create the native pointer, so we need to check if it's not zero
-        // otherwise calling nativeDestroy with zero will make Chrome crash.
+        // otherwise calling OverlayPanelContentJni.get().destroy with zero will make Chrome crash.
         if (mNativeOverlayPanelContentPtr != 0L) {
-            nativeDestroy(mNativeOverlayPanelContentPtr);
+            OverlayPanelContentJni.get().destroy(
+                    mNativeOverlayPanelContentPtr, OverlayPanelContent.this);
         }
     }
 
-    // Native calls.
-    private native long nativeInit();
-    private native void nativeDestroy(long nativeOverlayPanelContent);
-    private native void nativeRemoveLastHistoryEntry(
-            long nativeOverlayPanelContent, String historyUrl, long urlTimeMs);
-    private native void nativeOnPhysicalBackingSizeChanged(
-            long nativeOverlayPanelContent, WebContents webContents, int width, int height);
-    private native void nativeSetWebContents(long nativeOverlayPanelContent,
-            WebContents webContents, WebContentsDelegateAndroid delegate);
-    private native void nativeDestroyWebContents(long nativeOverlayPanelContent);
-    private native void nativeSetInterceptNavigationDelegate(long nativeOverlayPanelContent,
-            InterceptNavigationDelegate delegate, WebContents webContents);
-    private native void nativeUpdateBrowserControlsState(
-            long nativeOverlayPanelContent, boolean areControlsHidden);
+    @NativeMethods
+    interface Natives {
+        // Native calls.
+        long init(OverlayPanelContent caller);
+
+        void destroy(long nativeOverlayPanelContent, OverlayPanelContent caller);
+        void removeLastHistoryEntry(long nativeOverlayPanelContent, OverlayPanelContent caller,
+                String historyUrl, long urlTimeMs);
+        void onPhysicalBackingSizeChanged(long nativeOverlayPanelContent,
+                OverlayPanelContent caller, WebContents webContents, int width, int height);
+        void setWebContents(long nativeOverlayPanelContent, OverlayPanelContent caller,
+                WebContents webContents, WebContentsDelegateAndroid delegate);
+        void destroyWebContents(long nativeOverlayPanelContent, OverlayPanelContent caller);
+        void setInterceptNavigationDelegate(long nativeOverlayPanelContent,
+                OverlayPanelContent caller, InterceptNavigationDelegate delegate,
+                WebContents webContents);
+        void updateBrowserControlsState(long nativeOverlayPanelContent, OverlayPanelContent caller,
+                boolean areControlsHidden);
+    }
 }

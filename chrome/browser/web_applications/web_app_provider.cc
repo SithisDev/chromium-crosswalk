@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,64 +7,91 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/check_is_test.h"
 #include "base/feature_list.h"
-#include "base/one_shot_event.h"
-#include "base/threading/thread_task_runner_handle.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "base/location.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/run_loop.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/web_applications/bookmark_apps/bookmark_app_install_manager.h"
-#include "chrome/browser/web_applications/components/externally_installed_web_app_prefs.h"
-#include "chrome/browser/web_applications/components/install_bounce_metric.h"
-#include "chrome/browser/web_applications/components/policy/web_app_policy_manager.h"
-#include "chrome/browser/web_applications/components/web_app_audio_focus_id_map.h"
-#include "chrome/browser/web_applications/components/web_app_constants.h"
-#include "chrome/browser/web_applications/components/web_app_helpers.h"
-#include "chrome/browser/web_applications/components/web_app_install_utils.h"
-#include "chrome/browser/web_applications/components/web_app_ui_manager.h"
-#include "chrome/browser/web_applications/components/web_app_utils.h"
-#include "chrome/browser/web_applications/extensions/bookmark_app_install_finalizer.h"
-#include "chrome/browser/web_applications/extensions/bookmark_app_registrar.h"
-#include "chrome/browser/web_applications/extensions/bookmark_app_tab_helper.h"
-#include "chrome/browser/web_applications/extensions/pending_bookmark_app_manager.h"
-#include "chrome/browser/web_applications/external_web_apps.h"
+#include "chrome/browser/web_applications/externally_managed_app_manager_impl.h"
 #include "chrome/browser/web_applications/file_utils_wrapper.h"
-#include "chrome/browser/web_applications/system_web_app_manager.h"
-#include "chrome/browser/web_applications/web_app_database.h"
+#include "chrome/browser/web_applications/manifest_update_manager.h"
+#include "chrome/browser/web_applications/os_integration/os_integration_manager.h"
+#include "chrome/browser/web_applications/os_integration/url_handler_manager.h"
+#include "chrome/browser/web_applications/os_integration/url_handler_manager_impl.h"
+#include "chrome/browser/web_applications/os_integration/web_app_file_handler_manager.h"
+#include "chrome/browser/web_applications/os_integration/web_app_protocol_handler_manager.h"
+#include "chrome/browser/web_applications/os_integration/web_app_shortcut_manager.h"
+#include "chrome/browser/web_applications/policy/web_app_policy_manager.h"
+#include "chrome/browser/web_applications/preinstalled_web_app_manager.h"
+#include "chrome/browser/web_applications/web_app_audio_focus_id_map.h"
+#include "chrome/browser/web_applications/web_app_command_manager.h"
 #include "chrome/browser/web_applications/web_app_database_factory.h"
 #include "chrome/browser/web_applications/web_app_icon_manager.h"
 #include "chrome/browser/web_applications/web_app_install_finalizer.h"
 #include "chrome/browser/web_applications/web_app_install_manager.h"
+#include "chrome/browser/web_applications/web_app_prefs_utils.h"
 #include "chrome/browser/web_applications/web_app_provider_factory.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
-#include "chrome/browser/web_applications/web_app_sync_manager.h"
-#include "chrome/browser/web_applications/web_app_tab_helper.h"
+#include "chrome/browser/web_applications/web_app_registry_update.h"
+#include "chrome/browser/web_applications/web_app_sync_bridge.h"
+#include "chrome/browser/web_applications/web_app_translation_manager.h"
+#include "chrome/browser/web_applications/web_app_ui_manager.h"
+#include "chrome/browser/web_applications/web_app_utils.h"
 #include "chrome/common/chrome_features.h"
-#include "components/pref_registry/pref_registry_syncable.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
-#include "extensions/browser/extension_system.h"
 
 namespace web_app {
 
 namespace {
 
-#define DCHECK_IS_CONNECTED()                                          \
-  DCHECK(connected_) << "Attempted to access Web App subsystem while " \
-                        "WebAppProvider is not connected."
-
-void OnExternalWebAppsSynchronized(
-    std::map<GURL, InstallResultCode> install_results,
-    std::map<GURL, bool> uninstall_results) {
-  RecordExternalAppInstallResultCode("Webapp.InstallResult.Default",
-                                     install_results);
-}
+WebAppProvider::OsIntegrationManagerFactory
+    g_os_integration_manager_factory_for_testing = nullptr;
 
 }  // namespace
 
 // static
-WebAppProvider* WebAppProvider::Get(Profile* profile) {
+WebAppProvider* WebAppProvider::GetDeprecated(Profile* profile) {
   return WebAppProviderFactory::GetForProfile(profile);
+}
+
+// static
+WebAppProvider* WebAppProvider::GetForWebApps(Profile* profile) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // If features::kWebAppsCrosapi is enabled, Ash browser only manages system
+  // web apps (return nullptr here). Otherwise, Ash browser manages all web apps
+  // (return WebAppProvider).
+  return IsWebAppsCrosapiEnabled()
+             ? nullptr
+             : WebAppProviderFactory::GetForProfile(profile);
+#else
+  return WebAppProviderFactory::GetForProfile(profile);
+#endif
+}
+
+// static
+WebAppProvider* WebAppProvider::GetForLocalAppsUnchecked(Profile* profile) {
+  return WebAppProviderFactory::GetForProfile(profile);
+}
+
+// static
+WebAppProvider* WebAppProvider::GetForTest(Profile* profile) {
+  // Running a nested base::RunLoop outside of tests causes a deadlock. Crash
+  // immediately instead of deadlocking for easier debugging (especially for
+  // TAST tests which use prod binaries).
+  CHECK_IS_TEST();
+
+  WebAppProvider* provider = GetForLocalAppsUnchecked(profile);
+
+  if (provider->on_registry_ready().is_signaled())
+    return provider;
+
+  base::RunLoop run_loop;
+  provider->on_registry_ready().Post(FROM_HERE, run_loop.QuitClosure());
+  run_loop.Run();
+  return provider;
 }
 
 // static
@@ -73,26 +100,28 @@ WebAppProvider* WebAppProvider::GetForWebContents(
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   DCHECK(profile);
-  return WebAppProvider::Get(profile);
+  return WebAppProvider::GetForLocalAppsUnchecked(profile);
+}
+
+// static
+void WebAppProvider::SetOsIntegrationManagerFactoryForTesting(
+    OsIntegrationManagerFactory factory) {
+  g_os_integration_manager_factory_for_testing = factory;
 }
 
 WebAppProvider::WebAppProvider(Profile* profile) : profile_(profile) {
   DCHECK(AreWebAppsEnabled(profile_));
+
   // WebApp System must have only one instance in original profile.
   // Exclude secondary off-the-record profiles.
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  if (!profile_->IsGuestSession())
+    DCHECK(!profile_->IsOffTheRecord());
+#else
   DCHECK(!profile_->IsOffTheRecord());
+#endif
 
-  audio_focus_id_map_ = std::make_unique<WebAppAudioFocusIdMap>();
-
-  if (base::FeatureList::IsEnabled(features::kDesktopPWAsWithoutExtensions))
-    CreateWebAppsSubsystems(profile_);
-  else
-    CreateBookmarkAppsSubsystems(profile_);
-
-  ui_manager_ = WebAppUiManager::Create(profile);
-
-  notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                              content::Source<Profile>(profile_));
+  CreateSubsystems(profile_);
 }
 
 WebAppProvider::~WebAppProvider() = default;
@@ -106,194 +135,240 @@ void WebAppProvider::Start() {
   StartImpl();
 }
 
-AppRegistrar& WebAppProvider::registrar() {
-  DCHECK_IS_CONNECTED();
+WebAppRegistrar& WebAppProvider::registrar() {
+  CheckIsConnected();
   return *registrar_;
 }
 
-InstallManager& WebAppProvider::install_manager() {
-  DCHECK_IS_CONNECTED();
+const WebAppRegistrar& WebAppProvider::registrar() const {
+  CheckIsConnected();
+  return *registrar_;
+}
+
+WebAppSyncBridge& WebAppProvider::sync_bridge() {
+  CheckIsConnected();
+  return *sync_bridge_;
+}
+
+WebAppInstallManager& WebAppProvider::install_manager() {
+  CheckIsConnected();
   return *install_manager_;
 }
 
-PendingAppManager& WebAppProvider::pending_app_manager() {
-  DCHECK_IS_CONNECTED();
-  return *pending_app_manager_;
+WebAppInstallFinalizer& WebAppProvider::install_finalizer() {
+  CheckIsConnected();
+  return *install_finalizer_;
 }
 
-WebAppPolicyManager* WebAppProvider::policy_manager() {
-  DCHECK_IS_CONNECTED();
-  return web_app_policy_manager_.get();
+ManifestUpdateManager& WebAppProvider::manifest_update_manager() {
+  CheckIsConnected();
+  return *manifest_update_manager_;
+}
+
+ExternallyManagedAppManager& WebAppProvider::externally_managed_app_manager() {
+  CheckIsConnected();
+  return *externally_managed_app_manager_;
+}
+
+WebAppPolicyManager& WebAppProvider::policy_manager() {
+  CheckIsConnected();
+  return *web_app_policy_manager_;
 }
 
 WebAppUiManager& WebAppProvider::ui_manager() {
-  DCHECK(ui_manager_);
+  CheckIsConnected();
   return *ui_manager_;
 }
 
-SystemWebAppManager& WebAppProvider::system_web_app_manager() {
-  DCHECK_IS_CONNECTED();
-  return *system_web_app_manager_;
+WebAppAudioFocusIdMap& WebAppProvider::audio_focus_id_map() {
+  CheckIsConnected();
+  return *audio_focus_id_map_;
+}
+
+WebAppIconManager& WebAppProvider::icon_manager() {
+  CheckIsConnected();
+  return *icon_manager_;
+}
+
+WebAppTranslationManager& WebAppProvider::translation_manager() {
+  CheckIsConnected();
+  return *translation_manager_;
+}
+
+OsIntegrationManager& WebAppProvider::os_integration_manager() {
+  CheckIsConnected();
+  return *os_integration_manager_;
+}
+
+const OsIntegrationManager& WebAppProvider::os_integration_manager() const {
+  CheckIsConnected();
+  return *os_integration_manager_;
+}
+
+WebAppCommandManager& WebAppProvider::command_manager() {
+  CheckIsConnected();
+  return *command_manager_;
 }
 
 void WebAppProvider::Shutdown() {
-  // Destroy subsystems.
-  // The order of destruction is the reverse order of creation:
-  // TODO(calamity): Make subsystem destruction happen in destructor.
-  ui_manager_.reset();
-  web_app_policy_manager_.reset();
-  system_web_app_manager_.reset();
-  pending_app_manager_.reset();
-
-  install_manager_.reset();
-  install_finalizer_.reset();
-  icon_manager_.reset();
-  registrar_.reset();
-  database_.reset();
-  database_factory_.reset();
-  audio_focus_id_map_.reset();
+  command_manager_->Shutdown();
+  ui_manager_->Shutdown();
+  externally_managed_app_manager_->Shutdown();
+  manifest_update_manager_->Shutdown();
+  install_manager_->Shutdown();
+  icon_manager_->Shutdown();
+  install_finalizer_->Shutdown();
+  registrar_->Shutdown();
+  is_registry_ready_ = false;
 }
 
 void WebAppProvider::StartImpl() {
-  StartRegistry();
+  StartSyncBridge();
 }
 
-void WebAppProvider::CreateWebAppsSubsystems(Profile* profile) {
-  database_factory_ = std::make_unique<WebAppDatabaseFactory>(profile);
-  database_ = std::make_unique<WebAppDatabase>(database_factory_.get());
-  auto web_app_registrar =
-      std::make_unique<WebAppRegistrar>(profile, database_.get());
-  icon_manager_ = std::make_unique<WebAppIconManager>(
-      profile, std::make_unique<FileUtilsWrapper>());
-
-  // TODO(crbug.com/973324): Once the WebAppInstallFinalizer can take an
-  // AppRegistrar instead of needing a WebAppRegistrar, move this wiring into
-  // ConnectSubsystems().
-  install_finalizer_ = std::make_unique<WebAppInstallFinalizer>(
-      web_app_registrar.get(), icon_manager_.get());
+void WebAppProvider::CreateSubsystems(Profile* profile) {
+  audio_focus_id_map_ = std::make_unique<WebAppAudioFocusIdMap>();
+  ui_manager_ = WebAppUiManager::Create(profile);
   install_manager_ = std::make_unique<WebAppInstallManager>(profile);
-
-  sync_manager_ = std::make_unique<WebAppSyncManager>();
-
-  registrar_ = std::move(web_app_registrar);
-}
-
-void WebAppProvider::CreateBookmarkAppsSubsystems(Profile* profile) {
-  install_finalizer_ =
-      std::make_unique<extensions::BookmarkAppInstallFinalizer>(profile);
-
-  if (base::FeatureList::IsEnabled(features::kDesktopPWAsUnifiedInstall)) {
-    install_manager_ = std::make_unique<WebAppInstallManager>(profile);
-  } else {
-    install_manager_ =
-        std::make_unique<extensions::BookmarkAppInstallManager>(profile);
-  }
-
-  pending_app_manager_ =
-      std::make_unique<extensions::PendingBookmarkAppManager>(profile);
-
+  manifest_update_manager_ = std::make_unique<ManifestUpdateManager>();
+  externally_managed_app_manager_ =
+      std::make_unique<ExternallyManagedAppManagerImpl>(profile);
+  preinstalled_web_app_manager_ =
+      std::make_unique<PreinstalledWebAppManager>(profile);
   web_app_policy_manager_ = std::make_unique<WebAppPolicyManager>(profile);
 
-  system_web_app_manager_ = std::make_unique<SystemWebAppManager>(profile);
+  database_factory_ = std::make_unique<WebAppDatabaseFactory>(profile);
 
-  registrar_ = std::make_unique<extensions::BookmarkAppRegistrar>(profile);
+  std::unique_ptr<WebAppRegistrar> registrar;
+  std::unique_ptr<WebAppSyncBridge> sync_bridge;
+
+  // Only WebAppSyncBridge must have an access to mutable WebAppRegistrar.
+  {
+    auto mutable_registrar = std::make_unique<WebAppRegistrarMutable>(profile);
+
+    sync_bridge = std::make_unique<WebAppSyncBridge>(mutable_registrar.get());
+
+    // Upcast to read-only WebAppRegistrar.
+    registrar = std::move(mutable_registrar);
+  }
+
+  icon_manager_ = std::make_unique<WebAppIconManager>(
+      profile, base::MakeRefCounted<FileUtilsWrapper>());
+  translation_manager_ = std::make_unique<WebAppTranslationManager>(
+      profile, base::MakeRefCounted<FileUtilsWrapper>());
+  install_finalizer_ = std::make_unique<WebAppInstallFinalizer>(profile);
+
+  if (g_os_integration_manager_factory_for_testing) {
+    os_integration_manager_ =
+        g_os_integration_manager_factory_for_testing(profile);
+  } else {
+    auto file_handler_manager =
+        std::make_unique<WebAppFileHandlerManager>(profile);
+    auto protocol_handler_manager =
+        std::make_unique<WebAppProtocolHandlerManager>(profile);
+    auto shortcut_manager = std::make_unique<WebAppShortcutManager>(
+        profile, icon_manager_.get(), file_handler_manager.get(),
+        protocol_handler_manager.get());
+
+    std::unique_ptr<UrlHandlerManager> url_handler_manager;
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || \
+    (BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS_LACROS))
+    url_handler_manager = std::make_unique<UrlHandlerManagerImpl>(profile);
+#endif
+
+    os_integration_manager_ = std::make_unique<OsIntegrationManager>(
+        profile, std::move(shortcut_manager), std::move(file_handler_manager),
+        std::move(protocol_handler_manager), std::move(url_handler_manager));
+  }
+
+  command_manager_ = std::make_unique<WebAppCommandManager>(profile);
+
+  registrar_ = std::move(registrar);
+  sync_bridge_ = std::move(sync_bridge);
 }
 
 void WebAppProvider::ConnectSubsystems() {
   DCHECK(!started_);
 
-  install_manager_->SetSubsystems(registrar_.get(), install_finalizer_.get());
-  // TODO(crbug.com/877898): Port all other managers to support BMO.
-  if (!base::FeatureList::IsEnabled(features::kDesktopPWAsWithoutExtensions)) {
-    pending_app_manager_->SetSubsystems(registrar_.get(), ui_manager_.get(),
-                                        install_finalizer_.get());
-    web_app_policy_manager_->SetSubsystems(pending_app_manager_.get());
-    system_web_app_manager_->SetSubsystems(pending_app_manager_.get(),
-                                           registrar_.get(), ui_manager_.get());
-  }
+  sync_bridge_->SetSubsystems(database_factory_.get(), install_manager_.get(),
+                              command_manager_.get());
+  icon_manager_->SetSubsystems(registrar_.get(), install_manager_.get());
+  install_finalizer_->SetSubsystems(
+      install_manager_.get(), registrar_.get(), ui_manager_.get(),
+      sync_bridge_.get(), os_integration_manager_.get(), icon_manager_.get(),
+      web_app_policy_manager_.get(), translation_manager_.get(),
+      command_manager_.get());
+  install_manager_->SetSubsystems(
+      registrar_.get(), os_integration_manager_.get(), command_manager_.get(),
+      install_finalizer_.get(), icon_manager_.get(), sync_bridge_.get(),
+      translation_manager_.get());
+  manifest_update_manager_->SetSubsystems(
+      install_manager_.get(), registrar_.get(), icon_manager_.get(),
+      ui_manager_.get(), install_finalizer_.get(),
+      os_integration_manager_.get(), sync_bridge_.get());
+  externally_managed_app_manager_->SetSubsystems(
+      registrar_.get(), ui_manager_.get(), install_finalizer_.get(),
+      command_manager_.get(), sync_bridge_.get());
+  preinstalled_web_app_manager_->SetSubsystems(
+      registrar_.get(), ui_manager_.get(),
+      externally_managed_app_manager_.get());
+  web_app_policy_manager_->SetSubsystems(externally_managed_app_manager_.get(),
+                                         registrar_.get(), sync_bridge_.get(),
+                                         os_integration_manager_.get());
+  registrar_->SetSubsystems(web_app_policy_manager_.get(),
+                            translation_manager_.get());
+  ui_manager_->SetSubsystems(sync_bridge_.get(), os_integration_manager_.get());
+  os_integration_manager_->SetSubsystems(sync_bridge_.get(), registrar_.get(),
+                                         ui_manager_.get(),
+                                         icon_manager_.get());
 
+  command_manager_->SetSubsystems(install_manager_.get());
   connected_ = true;
 }
 
-void WebAppProvider::StartRegistry() {
-  registrar_->Init(base::BindOnce(&WebAppProvider::OnRegistryReady,
-                                  weak_ptr_factory_.GetWeakPtr()));
+void WebAppProvider::StartSyncBridge() {
+  sync_bridge_->Init(base::BindOnce(&WebAppProvider::OnSyncBridgeReady,
+                                    weak_ptr_factory_.GetWeakPtr()));
 }
 
-void WebAppProvider::OnRegistryReady() {
+void WebAppProvider::OnSyncBridgeReady() {
   DCHECK(!on_registry_ready_.is_signaled());
 
-  if (!base::FeatureList::IsEnabled(features::kDesktopPWAsWithoutExtensions)) {
-    web_app_policy_manager_->Start();
-    system_web_app_manager_->Start();
+  ExternallyInstalledWebAppPrefs::MigrateExternalPrefData(profile_->GetPrefs(),
+                                                          sync_bridge_.get());
+  DoMigrateProfilePrefs(profile_);
 
-    // Start ExternalWebApps subsystem:
-    ScanForExternalWebApps(
-        profile_, base::BindOnce(&WebAppProvider::OnScanForExternalWebApps,
-                                 weak_ptr_factory_.GetWeakPtr()));
-  }
+  registrar_->Start();
+  install_finalizer_->Start();
+  icon_manager_->Start();
+  translation_manager_->Start();
+  install_manager_->Start();
+  preinstalled_web_app_manager_->Start();
+  web_app_policy_manager_->Start();
+  manifest_update_manager_->Start();
+  os_integration_manager_->Start();
+  ui_manager_->Start();
 
   on_registry_ready_.Signal();
+  is_registry_ready_ = true;
 }
 
-// static
-void WebAppProvider::RegisterProfilePrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
-  ExternallyInstalledWebAppPrefs::RegisterProfilePrefs(registry);
-  WebAppPolicyManager::RegisterProfilePrefs(registry);
-  SystemWebAppManager::RegisterProfilePrefs(registry);
-  RegisterInstallBounceMetricProfilePrefs(registry);
+void WebAppProvider::CheckIsConnected() const {
+  DCHECK(connected_) << "Attempted to access Web App subsystem while "
+                        "WebAppProvider is not connected.";
 }
 
-// static
-WebAppTabHelperBase* WebAppProvider::CreateTabHelper(
-    content::WebContents* web_contents) {
-  WebAppProvider* provider = WebAppProvider::GetForWebContents(web_contents);
-  if (!provider)
-    return nullptr;
-
-  WebAppTabHelperBase* tab_helper =
-      WebAppTabHelperBase::FromWebContents(web_contents);
-  // Do nothing if already exists.
-  if (tab_helper)
-    return tab_helper;
-
-  if (base::FeatureList::IsEnabled(features::kDesktopPWAsWithoutExtensions)) {
-    tab_helper = WebAppTabHelper::CreateForWebContents(web_contents);
-  } else {
-    tab_helper =
-        extensions::BookmarkAppTabHelper::CreateForWebContents(web_contents);
+void WebAppProvider::DoMigrateProfilePrefs(Profile* profile) {
+  std::map<AppId, int> sources =
+      TakeAllWebAppInstallSources(profile->GetPrefs());
+  ScopedRegistryUpdate update(sync_bridge_.get());
+  for (const auto& iter : sources) {
+    WebApp* web_app = update->UpdateApp(iter.first);
+    if (web_app && !web_app->install_source_for_metrics()) {
+      web_app->SetInstallSourceForMetrics(
+          static_cast<webapps::WebappInstallSource>(iter.second));
+    }
   }
-
-  tab_helper->Init(provider->audio_focus_id_map_.get());
-  return tab_helper;
-}
-
-void WebAppProvider::Observe(int type,
-                             const content::NotificationSource& source,
-                             const content::NotificationDetails& detals) {
-  DCHECK_EQ(chrome::NOTIFICATION_PROFILE_DESTROYED, type);
-
-  ProfileDestroyed();
-}
-
-void WebAppProvider::ProfileDestroyed() {
-  // KeyedService::Shutdown() gets called when the profile is being destroyed,
-  // but after DCHECK'ing that no RenderProcessHosts are being leaked. The
-  // "chrome::NOTIFICATION_PROFILE_DESTROYED" notification gets sent before the
-  // DCHECK so we use that to clean up RenderProcessHosts instead.
-  if (pending_app_manager_)
-    pending_app_manager_->Shutdown();
-
-  install_manager_->Shutdown();
-}
-
-void WebAppProvider::OnScanForExternalWebApps(
-    std::vector<ExternalInstallOptions> desired_apps_install_options) {
-  pending_app_manager_->SynchronizeInstalledApps(
-      std::move(desired_apps_install_options),
-      ExternalInstallSource::kExternalDefault,
-      base::BindOnce(&OnExternalWebAppsSynchronized));
 }
 
 }  // namespace web_app

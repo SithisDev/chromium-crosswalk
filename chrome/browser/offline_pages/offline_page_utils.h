@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,7 @@ class OfflinePageUtils {
   static const base::FilePath::CharType kMHTMLExtension[];
 
   // Callback to inform the duplicate checking result.
-  using DuplicateCheckCallback = base::Callback<void(DuplicateCheckResult)>;
+  using DuplicateCheckCallback = base::OnceCallback<void(DuplicateCheckResult)>;
 
   // Returns via callback all offline pages related to |url|. The provided URL
   // is matched both against the original and the actual URL fields (they
@@ -117,7 +117,7 @@ class OfflinePageUtils {
   // for more details.
   static void CheckDuplicateDownloads(content::BrowserContext* browser_context,
                                       const GURL& url,
-                                      const DuplicateCheckCallback& callback);
+                                      DuplicateCheckCallback callback);
 
   // Shows appropriate UI to indicate to the user that the |url| is either
   // already downloaded or is already scheduled to be downloaded soon (as
@@ -125,7 +125,7 @@ class OfflinePageUtils {
   // continue with creating a duplicate - which is indicated by invoking the
   // |confirm_continuation|, or cancels the whole operation which does not
   // invoke continuation then.
-  static void ShowDuplicatePrompt(const base::Closure& confirm_continuation,
+  static void ShowDuplicatePrompt(base::OnceClosure confirm_continuation,
                                   const GURL& url,
                                   bool exists_duplicate_request,
                                   content::WebContents* web_contents);

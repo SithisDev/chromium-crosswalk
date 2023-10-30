@@ -1,31 +1,33 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_SERVICES_MEDIA_GALLERY_UTIL_PUBLIC_CPP_MEDIA_PARSER_PROVIDER_H_
 #define CHROME_SERVICES_MEDIA_GALLERY_UTIL_PUBLIC_CPP_MEDIA_PARSER_PROVIDER_H_
 
-#include "base/macros.h"
 #include "chrome/services/media_gallery_util/public/mojom/media_parser.mojom.h"
-
-namespace service_manager {
-class Connector;
-}
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 // Base class used by SafeMediaMetadataParser and SafeAudioVideoChecker to
-// retrieve a MediaParserPtr.
+// retrieve a mojo::Remote<MediaParser>.
 class MediaParserProvider {
  public:
   MediaParserProvider();
+
+  MediaParserProvider(const MediaParserProvider&) = delete;
+  MediaParserProvider& operator=(const MediaParserProvider&) = delete;
+
   virtual ~MediaParserProvider();
 
  protected:
-  // Retrieves the MediaParserPtr. OnMediaParserCreated() is called when the
-  // media parser is available.
-  void RetrieveMediaParser(service_manager::Connector* connector);
+  // Acquires the remote MediaParser interface asynchronously from a new
+  // service process. |OnMediaParserCreated()| is called if and when the media
+  // parser is available.
+  void RetrieveMediaParser();
 
   // Invoked when the media parser was successfully created. It can then be
-  // obtained by calling media_parser() and is guaranteed to be non null.
+  // obtained by calling media_parser() which is then guaranteed to be bound.
   virtual void OnMediaParserCreated() = 0;
 
   // Invoked when there was an error with the connection to the media gallerie
@@ -33,20 +35,19 @@ class MediaParserProvider {
   // expected from media_parser() will not happen.
   virtual void OnConnectionError() = 0;
 
-  chrome::mojom::MediaParser* media_parser() const {
-    return media_parser_ptr_.get();
+  const mojo::Remote<chrome::mojom::MediaParser>& media_parser() const {
+    return remote_media_parser_;
   }
 
-  // Clears all interface ptr to the media gallery service.
+  // Clears all remote handles to the media gallery service process.
   void ResetMediaParser();
 
  private:
-  void OnMediaParserCreatedImpl(chrome::mojom::MediaParserPtr media_parser_ptr);
+  void OnMediaParserCreatedImpl(
+      mojo::PendingRemote<chrome::mojom::MediaParser> remote_media_parser);
 
-  chrome::mojom::MediaParserFactoryPtr media_parser_factory_ptr_;
-  chrome::mojom::MediaParserPtr media_parser_ptr_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaParserProvider);
+  mojo::Remote<chrome::mojom::MediaParserFactory> remote_media_parser_factory_;
+  mojo::Remote<chrome::mojom::MediaParser> remote_media_parser_;
 };
 
 #endif  // CHROME_SERVICES_MEDIA_GALLERY_UTIL_PUBLIC_CPP_MEDIA_PARSER_PROVIDER_H_

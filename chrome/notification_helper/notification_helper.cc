@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,7 +58,7 @@ extern "C" int WINAPI wWinMain(HINSTANCE instance,
   }
 
   // The histogram storage folder should be under folder "User Data".
-  base::string16 user_data_dir;
+  std::wstring user_data_dir;
   install_static::GetUserDataDirectory(&user_data_dir, nullptr);
 
   persistent_histogram_storage.set_storage_base_dir(

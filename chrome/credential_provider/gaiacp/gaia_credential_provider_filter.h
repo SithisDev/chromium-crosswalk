@@ -1,13 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_CREDENTIAL_PROVIDER_GAIACP_GAIA_CREDENTIAL_PROVIDER_FILTER_H_
 #define CHROME_CREDENTIAL_PROVIDER_GAIACP_GAIA_CREDENTIAL_PROVIDER_FILTER_H_
 
-#include <atlbase.h>
-#include <atlcom.h>
 #include <credentialprovider.h>
+
+#include "base/win/atl.h"
 
 namespace credential_provider {
 
@@ -18,16 +18,13 @@ namespace credential_provider {
 // providers get their SetUserArray called. Otherwise there could be
 // inconsistency in the UI where some credential providers are not shown if they
 // are called before the user's rights have been revoked.
-class ATL_NO_VTABLE
-#if defined(GOOGLE_CHROME_BUILD)
-DECLSPEC_UUID("aec62ffe-6617-4685-a080-b11a848a0607")
-#else
-DECLSPEC_UUID("fd768777-340e-4426-9b07-8fdf489f1ff9")
-#endif
-    CGaiaCredentialProviderFilter
+
+extern const CLSID CLSID_CGaiaCredentialProviderFilter;
+
+class ATL_NO_VTABLE CGaiaCredentialProviderFilter
     : public CComObjectRootEx<CComMultiThreadModel>,
       public CComCoClass<CGaiaCredentialProviderFilter,
-                         &__uuidof(CGaiaCredentialProviderFilter)>,
+                         &CLSID_CGaiaCredentialProviderFilter>,
       public ICredentialProviderFilter {
  public:
   // This COM object is registered with the rgs file.  The rgs file is used by
@@ -66,7 +63,7 @@ DECLSPEC_UUID("fd768777-340e-4426-9b07-8fdf489f1ff9")
 #pragma clang diagnostic ignored "-Wextra-semi"
 #endif
 
-OBJECT_ENTRY_AUTO(__uuidof(CGaiaCredentialProviderFilter),
+OBJECT_ENTRY_AUTO(CLSID_CGaiaCredentialProviderFilter,
                   CGaiaCredentialProviderFilter)
 
 #if defined(__clang__)

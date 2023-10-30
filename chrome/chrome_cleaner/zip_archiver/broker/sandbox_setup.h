@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,22 +9,28 @@
 
 #include "base/command_line.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/sequenced_task_runner.h"
-#include "chrome/chrome_cleaner/mojom/zip_archiver.mojom.h"
+#include "base/task/sequenced_task_runner.h"
 #include "chrome/chrome_cleaner/ipc/mojo_sandbox_hooks.h"
 #include "chrome/chrome_cleaner/ipc/mojo_task_runner.h"
+#include "chrome/chrome_cleaner/mojom/zip_archiver.mojom.h"
 #include "components/chrome_cleaner/public/constants/result_codes.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "sandbox/win/src/sandbox_policy.h"
 
 namespace chrome_cleaner {
 
-using UniqueZipArchiverPtr =
-    std::unique_ptr<mojom::ZipArchiverPtr, base::OnTaskRunnerDeleter>;
+using RemoteZipArchiverPtr = std::unique_ptr<mojo::Remote<mojom::ZipArchiver>,
+                                             base::OnTaskRunnerDeleter>;
 
 class ZipArchiverSandboxSetupHooks : public MojoSandboxSetupHooks {
  public:
   ZipArchiverSandboxSetupHooks(scoped_refptr<MojoTaskRunner> mojo_task_runner,
                                base::OnceClosure connection_error_handler);
+
+  ZipArchiverSandboxSetupHooks(const ZipArchiverSandboxSetupHooks&) = delete;
+  ZipArchiverSandboxSetupHooks& operator=(const ZipArchiverSandboxSetupHooks&) =
+      delete;
+
   ~ZipArchiverSandboxSetupHooks() override;
 
   // SandboxSetupHooks
@@ -32,14 +38,12 @@ class ZipArchiverSandboxSetupHooks : public MojoSandboxSetupHooks {
   ResultCode UpdateSandboxPolicy(sandbox::TargetPolicy* policy,
                                  base::CommandLine* command_line) override;
 
-  UniqueZipArchiverPtr TakeZipArchiverPtr();
+  RemoteZipArchiverPtr TakeZipArchiverRemote();
 
  private:
   scoped_refptr<MojoTaskRunner> mojo_task_runner_;
   base::OnceClosure connection_error_handler_;
-  UniqueZipArchiverPtr zip_archiver_ptr_;
-
-  DISALLOW_COPY_AND_ASSIGN(ZipArchiverSandboxSetupHooks);
+  RemoteZipArchiverPtr zip_archiver_;
 };
 
 }  // namespace chrome_cleaner

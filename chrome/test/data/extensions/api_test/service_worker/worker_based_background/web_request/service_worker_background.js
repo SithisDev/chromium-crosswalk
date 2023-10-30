@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,20 +71,6 @@ chrome.test.runTests([
           chrome.test.assertEq(tabUrl, details.url);
           chrome.test.succeed();
         }, {urls: [tabUrl]});
-    chrome.tabs.create({url: tabUrl});
-  },
-  function testOnBeforeRequestBlocked() {
-    chrome.webRequest.onErrorOccurred.addListener(
-        function localListener(details) {
-          chrome.webRequest.onErrorOccurred.removeListener(localListener);
-          chrome.test.assertEq('net::ERR_BLOCKED_BY_CLIENT', details.error);
-          chrome.test.succeed();
-        }, {urls: [tabUrl]});
-    chrome.webRequest.onBeforeRequest.addListener(
-        function localListener(details) {
-          chrome.webRequest.onBeforeRequest.removeListener(localListener);
-          return {cancel: true};
-        }, {urls: [tabUrl]}, ['blocking']);
     chrome.tabs.create({url: tabUrl});
   },
 ]);

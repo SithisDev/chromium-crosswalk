@@ -1,23 +1,29 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.offlinepages.indicator;
 
 import android.app.Activity;
-import android.support.annotation.Nullable;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
 
+import androidx.annotation.Nullable;
+
+import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.snackbar.Snackbar;
-import org.chromium.chrome.browser.snackbar.SnackbarView;
+import org.chromium.chrome.browser.fullscreen.BrowserControlsManager;
+import org.chromium.chrome.browser.ui.messages.snackbar.Snackbar;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarView;
+import org.chromium.ui.base.WindowAndroid;
 
 /**
  * Visual representation of a snackbar positioned at the top.
  */
 public class TopSnackbarView extends SnackbarView {
+    private final Activity mActivity;
+    private final Supplier<BrowserControlsManager> mBrowserControlsManagerSupplier;
+
     /**
      * Creates an instance of the {@link SnackbarView}.
      * @param activity The activity that displays the snackbar.
@@ -28,8 +34,12 @@ public class TopSnackbarView extends SnackbarView {
      *                   will determine where to attach the snackbar.
      */
     public TopSnackbarView(Activity activity, OnClickListener listener, Snackbar snackbar,
-            @Nullable ViewGroup parentView) {
-        super(activity, listener, snackbar, parentView);
+            @Nullable WindowAndroid windowAndroid,
+            @Nullable Supplier<BrowserControlsManager> browserControlsManagerSupplier) {
+        super(activity, listener, snackbar, (ViewGroup) activity.findViewById(android.R.id.content),
+                windowAndroid);
+        mActivity = activity;
+        mBrowserControlsManagerSupplier = browserControlsManagerSupplier;
     }
 
     @Override
@@ -43,24 +53,18 @@ public class TopSnackbarView extends SnackbarView {
     }
 
     @Override
-    protected ViewGroup findParentView(Activity activity) {
-        // Override this in order not to associate top snackbar view with bottom container view.
-        return (ViewGroup) activity.findViewById(android.R.id.content);
-    }
-
-    @Override
     public void announceforAccessibility() {
         mMessageView.announceForAccessibility(mMessageView.getContentDescription() + " "
                 + mContainerView.getResources().getString(R.string.top_bar_screen_position));
     }
 
     private int getOffsetFromTop() {
-        if (!(mActivity instanceof ChromeActivity)) return 0;
+        if (mBrowserControlsManagerSupplier == null
+                || !mBrowserControlsManagerSupplier.hasValue()) {
+            return 0;
+        }
+        if (mBrowserControlsManagerSupplier.get().getContentOffset() == 0) return 0;
 
-        ChromeActivity chromeActivity = (ChromeActivity) mActivity;
-
-        if (chromeActivity.getFullscreenManager().getContentOffset() == 0) return 0;
-
-        return chromeActivity.getFullscreenManager().getTopControlsHeight();
+        return mBrowserControlsManagerSupplier.get().getTopControlsHeight();
     }
 }

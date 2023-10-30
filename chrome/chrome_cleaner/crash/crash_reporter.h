@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,6 @@
 #define CHROME_CHROME_CLEANER_CRASH_CRASH_REPORTER_H_
 
 #include <string>
-
-#include "base/strings/string16.h"
 
 // Starts a new instance of this executable running as the crash reporter
 // process.
@@ -20,10 +18,10 @@ int CrashReporterMain();
 // Returns the name of the IPC pipe that is used to communicate with the crash
 // reporter process, or an empty string if the current process is not connected
 // to a crash reporter process.
-base::string16 GetCrashReporterIPCPipeName();
+std::wstring GetCrashReporterIPCPipeName();
 
 // Uses the crash reporter with the specified |ipc_pipe_name|, instead of
 // starting a new crash reporter process.
-void UseCrashReporter(const base::string16& ipc_pipe_name);
+void UseCrashReporter(const std::wstring& ipc_pipe_name);
 
 #endif  // CHROME_CHROME_CLEANER_CRASH_CRASH_REPORTER_H_

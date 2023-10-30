@@ -1,10 +1,9 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser;
 
-import android.annotation.TargetApi;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Rect;
@@ -13,9 +12,10 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Message;
-import android.support.test.filters.MediumTest;
 import android.view.View;
 import android.view.ViewGroup;
+
+import androidx.test.filters.MediumTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -27,11 +27,13 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.Restriction;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.test.util.Coordinates;
 import org.chromium.content_public.browser.test.util.DOMUtils;
@@ -52,8 +54,7 @@ public class SmartClipProviderTest implements Handler.Callback {
     // interface.
 
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
+    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
     private static final String MOUNTAIN = "Mountain";
 
@@ -138,8 +139,7 @@ public class SmartClipProviderTest implements Handler.Callback {
     }
 
     @After
-    @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR2)
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
             mHandlerThread.quitSafely();
         } else {
@@ -193,8 +193,8 @@ public class SmartClipProviderTest implements Handler.Callback {
     @Test
     @MediumTest
     @Feature({"SmartClip"})
-    @RetryOnFailure
-    public void testSmartClipDataCallback() throws InterruptedException, TimeoutException {
+    @FlakyTest(message = "https://crbug.com/853816")
+    public void testSmartClipDataCallback() throws TimeoutException {
         final float dpi = Coordinates.createFor(mWebContents).getDeviceScaleFactor();
         final Rect bounds = DOMUtils.getNodeBounds(mWebContents, "simple_text");
         TestThreadUtils.runOnUiThreadBlocking(() -> {
@@ -225,8 +225,7 @@ public class SmartClipProviderTest implements Handler.Callback {
     @Test
     @MediumTest
     @Feature({"SmartClip"})
-    @RetryOnFailure
-    public void testSmartClipNoHandlerDoesntCrash() throws InterruptedException, TimeoutException {
+    public void testSmartClipNoHandlerDoesntCrash() throws TimeoutException {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             Object scp = findSmartClipProvider(
                     mActivityTestRule.getActivity().findViewById(android.R.id.content));

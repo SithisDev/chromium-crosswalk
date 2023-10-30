@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -262,6 +262,9 @@ function runTests() {
                 var text = fileReader.result;
                 chrome.test.assertEq(0, text.length);
               });
+              fileReader.onerror = function(error) {
+                chrome.test.fail(error.name);
+              };
               fileReader.readAsText(fileSlice);
             }),
             function(error) {

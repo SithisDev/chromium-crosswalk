@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,22 @@
 #include "base/bind.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/singleton.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/string_piece.h"
 #include "base/threading/thread.h"
 #include "base/values.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/enterprise/connectors/connectors_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/advanced_protection_status_manager.h"
+#include "chrome/browser/safe_browsing/advanced_protection_status_manager_factory.h"
+#include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/webui/downloads/downloads.mojom.h"
 #include "chrome/browser/ui/webui/downloads/downloads_dom_handler.h"
-#include "chrome/browser/ui/webui/localized_string.h"
 #include "chrome/browser/ui/webui/managed_ui_handler.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
+#include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -31,15 +36,19 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/prefs/pref_service.h"
+#include "components/profile_metrics/browser_profile_type.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/resources/grit/webui_resources.h"
+#include "ui/base/webui/web_ui_util.h"
 
 using content::BrowserContext;
 using content::DownloadManager;
@@ -50,19 +59,24 @@ namespace {
 content::WebUIDataSource* CreateDownloadsUIHTMLSource(Profile* profile) {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIDownloadsHost);
+  webui::SetupWebUIDataSource(
+      source, base::make_span(kDownloadsResources, kDownloadsResourcesSize),
+      IDR_DOWNLOADS_DOWNLOADS_HTML);
 
-  bool requests_ap_verdicts = safe_browsing::AdvancedProtectionStatusManager::
-      RequestsAdvancedProtectionVerdicts(profile);
+  bool requests_ap_verdicts =
+      safe_browsing::AdvancedProtectionStatusManagerFactory::GetForProfile(
+          profile)
+          ->IsUnderAdvancedProtection();
   source->AddBoolean("requestsApVerdicts", requests_ap_verdicts);
 
-  static constexpr LocalizedString kStrings[] = {
+  static constexpr webui::LocalizedString kStrings[] = {
       {"title", IDS_DOWNLOAD_TITLE},
       {"searchResultsPlural", IDS_SEARCH_RESULTS_PLURAL},
       {"searchResultsSingular", IDS_SEARCH_RESULTS_SINGULAR},
       {"downloads", IDS_DOWNLOAD_TITLE},
       {"actionMenuDescription", IDS_DOWNLOAD_ACTION_MENU_DESCRIPTION},
       {"clearAll", IDS_DOWNLOAD_LINK_CLEAR_ALL},
-      {"clearSearch", IDS_DOWNLOAD_CLEAR_SEARCH},
+      {"clearSearch", IDS_CLEAR_SEARCH},
       {"openDownloadsFolder", IDS_DOWNLOAD_LINK_OPEN_DOWNLOADS_FOLDER},
       {"moreActions", IDS_DOWNLOAD_MORE_ACTIONS},
       {"search", IDS_DOWNLOAD_SEARCH},
@@ -80,6 +94,19 @@ content::WebUIDataSource* CreateDownloadsUIHTMLSource(Profile* profile) {
       {"dangerSave", IDS_CONFIRM_DOWNLOAD},
       {"dangerRestore", IDS_CONFIRM_DOWNLOAD_RESTORE},
       {"dangerDiscard", IDS_DISCARD_DOWNLOAD},
+      {"dangerReview", IDS_REVIEW_DOWNLOAD},
+
+      // Deep scanning strings.
+      {"deepScannedSafeDesc", IDS_DEEP_SCANNED_SAFE_DESCRIPTION},
+      {"deepScannedOpenedDangerousDesc",
+       IDS_DEEP_SCANNED_OPENED_DANGEROUS_DESCRIPTION},
+      {"sensitiveContentWarningDesc",
+       IDS_BLOCK_REASON_SENSITIVE_CONTENT_WARNING},
+      {"sensitiveContentBlockedDesc",
+       IDS_SENSITIVE_CONTENT_BLOCKED_DESCRIPTION},
+      {"blockedTooLargeDesc", IDS_BLOCKED_TOO_LARGE_DESCRIPTION},
+      {"blockedPasswordProtectedDesc",
+       IDS_BLOCKED_PASSWORD_PROTECTED_DESCRIPTION},
 
       // Controls.
       {"controlPause", IDS_DOWNLOAD_LINK_PAUSE},
@@ -89,11 +116,12 @@ content::WebUIDataSource* CreateDownloadsUIHTMLSource(Profile* profile) {
       {"controlRemoveFromListAriaLabel", IDS_DOWNLOAD_LINK_REMOVE_ARIA_LABEL},
       {"controlRetry", IDS_DOWNLOAD_LINK_RETRY},
       {"controlledByUrl", IDS_DOWNLOAD_BY_EXTENSION_URL},
+      {"controlOpenNow", IDS_OPEN_DOWNLOAD_NOW},
       {"toastClearedAll", IDS_DOWNLOAD_TOAST_CLEARED_ALL},
       {"toastRemovedFromList", IDS_DOWNLOAD_TOAST_REMOVED_FROM_LIST},
       {"undo", IDS_DOWNLOAD_UNDO},
   };
-  AddLocalizedStringsBulk(source, kStrings, base::size(kStrings));
+  source->AddLocalizedStrings(kStrings);
 
   source->AddLocalizedString("dangerDownloadDesc",
                              IDS_BLOCK_REASON_DANGEROUS_DOWNLOAD);
@@ -104,49 +132,37 @@ content::WebUIDataSource* CreateDownloadsUIHTMLSource(Profile* profile) {
           : IDS_BLOCK_REASON_UNCOMMON_DOWNLOAD);
   source->AddLocalizedString("dangerSettingsDesc",
                              IDS_BLOCK_REASON_UNWANTED_DOWNLOAD);
-
-  if (browser_defaults::kDownloadPageHasShowInFolder)
-    source->AddLocalizedString("controlShowInFolder", IDS_DOWNLOAD_LINK_SHOW);
+  source->AddLocalizedString("mixedContentDownloadDesc",
+                             IDS_BLOCK_REASON_MIXED_CONTENT);
+  source->AddLocalizedString("asyncScanningDownloadDesc",
+                             IDS_BLOCK_REASON_DEEP_SCANNING);
+  source->AddLocalizedString("accountCompromiseDownloadDesc",
+                             IDS_BLOCK_REASON_ACCOUNT_COMPROMISE);
+  source->AddBoolean("hasShowInFolder",
+                     browser_defaults::kDownloadPageHasShowInFolder);
 
   // Build an Accelerator to describe undo shortcut
   // NOTE: the undo shortcut is also defined in downloads/downloads.html
   // TODO(crbug/893033): de-duplicate shortcut by moving all shortcut
   // definitions from JS to C++.
-  ui::Accelerator undoAccelerator(ui::VKEY_Z, ui::EF_PLATFORM_ACCELERATOR);
+  ui::Accelerator undo_accelerator(ui::VKEY_Z, ui::EF_PLATFORM_ACCELERATOR);
   source->AddString("undoDescription", l10n_util::GetStringFUTF16(
-                                           IDS_DOWNLOAD_UNDO_DESCRIPTION,
-                                           undoAccelerator.GetShortcutText()));
+                                           IDS_UNDO_DESCRIPTION,
+                                           undo_accelerator.GetShortcutText()));
 
   PrefService* prefs = profile->GetPrefs();
   source->AddBoolean("allowDeletingHistory",
                      prefs->GetBoolean(prefs::kAllowDeletingBrowserHistory) &&
-                         !profile->IsSupervised());
+                         !profile->IsChild());
 
   source->AddLocalizedString("inIncognito", IDS_DOWNLOAD_IN_INCOGNITO);
 
-  source->AddResourcePath("images/incognito_marker.svg",
-                          IDR_DOWNLOADS_IMAGES_INCOGNITO_MARKER_SVG);
-  source->AddResourcePath("images/no_downloads.svg",
-                          IDR_DOWNLOADS_IMAGES_NO_DOWNLOADS_SVG);
-  source->AddResourcePath("downloads.mojom-lite.js",
-                          IDR_DOWNLOADS_MOJO_LITE_JS);
-#if BUILDFLAG(OPTIMIZE_WEBUI)
-  source->AddResourcePath("downloads.mojom-lite.html",
-                          IDR_DOWNLOADS_MOJO_LITE_HTML);
-  source->AddResourcePath("crisper.js", IDR_DOWNLOADS_CRISPER_JS);
-  source->SetDefaultResource(IDR_DOWNLOADS_VULCANIZED_HTML);
-#else
-  for (size_t i = 0; i < kDownloadsResourcesSize; ++i) {
-    source->AddResourcePath(kDownloadsResources[i].name,
-                            kDownloadsResources[i].value);
-  }
-  // Add the subpage loader, to load subpages in non-optimized builds.
-  source->AddResourcePath("subpage_loader.html", IDR_WEBUI_HTML_SUBPAGE_LOADER);
-  source->AddResourcePath("subpage_loader.js", IDR_WEBUI_JS_SUBPAGE_LOADER);
-  source->SetDefaultResource(IDR_DOWNLOADS_DOWNLOADS_HTML);
-#endif
-
-  source->SetJsonPath("strings.js");
+  source->AddBoolean(
+      "allowOpenNow",
+      !enterprise_connectors::ConnectorsServiceFactory::GetForBrowserContext(
+           profile)
+           ->DelayUntilVerdict(
+               enterprise_connectors::AnalysisConnector::FILE_DOWNLOADED));
 
   return source;
 }
@@ -160,7 +176,7 @@ content::WebUIDataSource* CreateDownloadsUIHTMLSource(Profile* profile) {
 ///////////////////////////////////////////////////////////////////////////////
 
 DownloadsUI::DownloadsUI(content::WebUI* web_ui)
-    : ui::MojoWebUIController(web_ui, true), page_factory_binding_(this) {
+    : ui::MojoWebUIController(web_ui, true) {
   Profile* profile = Profile::FromWebUI(web_ui);
   web_ui->AddMessageHandler(std::make_unique<MetricsHandler>());
 
@@ -170,34 +186,36 @@ DownloadsUI::DownloadsUI(content::WebUI* web_ui)
   content::WebUIDataSource::Add(profile, source);
   content::URLDataSource::Add(profile, std::make_unique<ThemeSource>(profile));
 
-  AddHandlerToRegistry(base::BindRepeating(&DownloadsUI::BindPageHandlerFactory,
-                                           base::Unretained(this)));
+  base::UmaHistogramEnumeration(
+      "Download.OpenDownloads.PerProfileType",
+      profile_metrics::GetBrowserProfileType(profile));
 }
+
+WEB_UI_CONTROLLER_TYPE_IMPL(DownloadsUI)
 
 DownloadsUI::~DownloadsUI() = default;
 
 // static
 base::RefCountedMemory* DownloadsUI::GetFaviconResourceBytes(
-    ui::ScaleFactor scale_factor) {
+    ui::ResourceScaleFactor scale_factor) {
   return ui::ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
       IDR_DOWNLOADS_FAVICON, scale_factor);
 }
 
-void DownloadsUI::BindPageHandlerFactory(
-    downloads::mojom::PageHandlerFactoryRequest request) {
-  if (page_factory_binding_.is_bound())
-    page_factory_binding_.Unbind();
+void DownloadsUI::BindInterface(
+    mojo::PendingReceiver<downloads::mojom::PageHandlerFactory> receiver) {
+  page_factory_receiver_.reset();
 
-  page_factory_binding_.Bind(std::move(request));
+  page_factory_receiver_.Bind(std::move(receiver));
 }
 
 void DownloadsUI::CreatePageHandler(
-    downloads::mojom::PagePtr page,
-    downloads::mojom::PageHandlerRequest request) {
+    mojo::PendingRemote<downloads::mojom::Page> page,
+    mojo::PendingReceiver<downloads::mojom::PageHandler> receiver) {
   DCHECK(page);
   Profile* profile = Profile::FromWebUI(web_ui());
-  DownloadManager* dlm = BrowserContext::GetDownloadManager(profile);
+  DownloadManager* dlm = profile->GetDownloadManager();
 
-  page_handler_.reset(new DownloadsDOMHandler(std::move(request),
-                                              std::move(page), dlm, web_ui()));
+  page_handler_ = std::make_unique<DownloadsDOMHandler>(
+      std::move(receiver), std::move(page), dlm, web_ui());
 }

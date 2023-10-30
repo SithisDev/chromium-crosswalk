@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@ package org.chromium.chrome.browser.feature_engagement;
 
 import android.database.ContentObserver;
 import android.net.Uri;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -16,6 +17,7 @@ import org.junit.runner.RunWith;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.task.PostTask;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
@@ -28,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Tests ScreenshotMonitor.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
+@Batch(Batch.PER_CLASS)
 public class ScreenshotMonitorTest {
     private static final String FILENAME = "image.jpeg";
     private static final String TAG = "ScreenshotTest";
@@ -49,7 +52,7 @@ public class ScreenshotMonitorTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mTestScreenshotMonitorDelegate = new TestScreenshotMonitorDelegate();
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
@@ -66,7 +69,7 @@ public class ScreenshotMonitorTest {
     @Test
     @SmallTest
     @Feature({"FeatureEngagement", "Screenshot"})
-    public void testDelegateCalledOnEvent() throws Throwable {
+    public void testDelegateCalledOnEvent() {
         startMonitoringOnUiThreadBlocking();
         Assert.assertEquals(0, mTestScreenshotMonitorDelegate.screenshotShowUiCount.get());
 
@@ -82,7 +85,7 @@ public class ScreenshotMonitorTest {
     @Test
     @SmallTest
     @Feature({"FeatureEngagement", "Screenshot"})
-    public void testRestartShouldTriggerDelegate() throws Throwable {
+    public void testRestartShouldTriggerDelegate() {
         startMonitoringOnUiThreadBlocking();
         Assert.assertEquals(0, mTestScreenshotMonitorDelegate.screenshotShowUiCount.get());
 
@@ -105,7 +108,7 @@ public class ScreenshotMonitorTest {
     @Test
     @SmallTest
     @Feature({"FeatureEngagement", "Screenshot"})
-    public void testStopMonitoringShouldNotTriggerDelegate() throws Throwable {
+    public void testStopMonitoringShouldNotTriggerDelegate() {
         startMonitoringOnUiThreadBlocking();
         Assert.assertEquals(0, mTestScreenshotMonitorDelegate.screenshotShowUiCount.get());
 
@@ -121,7 +124,7 @@ public class ScreenshotMonitorTest {
     @Test
     @SmallTest
     @Feature({"FeatureEngagement", "Screenshot"})
-    public void testNoMonitoringShouldNotTriggerDelegate() throws Throwable {
+    public void testNoMonitoringShouldNotTriggerDelegate() {
         Assert.assertEquals(0, mTestScreenshotMonitorDelegate.screenshotShowUiCount.get());
 
         mContentObserver.onChange(true, TEST_URI);

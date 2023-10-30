@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,12 +84,6 @@ public class NativePageAssassin {
     }
 
     private void freeze(Tab tab) {
-        if (tab == null) return;
-        NativePage pageToFreeze = tab.getNativePage();
-        if (pageToFreeze == null || pageToFreeze instanceof FrozenNativePage
-                || pageToFreeze.getView().getParent() != null) {
-            return;
-        }
-        tab.freezeNativePage();
+        if (tab != null) tab.freezeNativePage();
     }
 }

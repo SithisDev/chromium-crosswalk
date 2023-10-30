@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,7 +59,7 @@ public class ConnectivityCheckerTestRule extends ChromeBrowserTestRule {
         return mGeneratedSlowUrl;
     }
 
-    private void setUp() throws Exception {
+    private void setUp() {
         mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         mGenerated200Url = mTestServer.getURL("/echo?status=200");
         mGenerated204Url = mTestServer.getURL("/echo?status=204");
@@ -68,7 +68,7 @@ public class ConnectivityCheckerTestRule extends ChromeBrowserTestRule {
         mGeneratedSlowUrl = mTestServer.getURL("/slow?5");
     }
 
-    private void tearDown() throws Exception {
+    private void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 }

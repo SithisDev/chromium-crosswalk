@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,10 @@
 
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/vr/elements/ui_element.h"
-#include "chrome/browser/vr/gl_bindings.h"
 #include "chrome/browser/vr/render_info.h"
 #include "chrome/browser/vr/ui_element_renderer.h"
 #include "chrome/browser/vr/ui_scene.h"
+#include "device/vr/gl_bindings.h"
 
 namespace vr {
 

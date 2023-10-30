@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,15 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_renderer_host.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/event_router_factory.h"
@@ -27,10 +29,8 @@
 #include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
 #include "components/user_manager/scoped_user_manager.h"
 #endif
 
@@ -104,9 +104,12 @@ ExtensionHost* CreateHost(Profile* profile, const Extension* app) {
 class UpdateInstallGateTest : public testing::Test {
  public:
   UpdateInstallGateTest() {
-    profile_manager_.reset(
-        new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
+    profile_manager_ = std::make_unique<TestingProfileManager>(
+        TestingBrowserProcess::GetGlobal());
   }
+
+  UpdateInstallGateTest(const UpdateInstallGateTest&) = delete;
+  UpdateInstallGateTest& operator=(const UpdateInstallGateTest&) = delete;
 
   // testing::Test
   void SetUp() override {
@@ -114,10 +117,10 @@ class UpdateInstallGateTest : public testing::Test {
     ASSERT_TRUE(profile_manager_->SetUp());
 
     const char kUserProfile[] = "profile1@example.com";
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     const AccountId account_id(AccountId::FromUserEmail(kUserProfile));
     // Needed to allow ChromeProcessManagerDelegate to allow background pages.
-    fake_user_manager_ = new chromeos::FakeChromeUserManager();
+    fake_user_manager_ = new ash::FakeChromeUserManager();
     // Takes ownership of fake_user_manager_.
     scoped_user_manager_enabler_ =
         std::make_unique<user_manager::ScopedUserManager>(
@@ -126,11 +129,10 @@ class UpdateInstallGateTest : public testing::Test {
     fake_user_manager_->LoginUser(account_id);
 #endif
     profile_ = profile_manager_->CreateTestingProfile(kUserProfile);
-    profile_manager_->SetLoggedIn(true);
+    base::RunLoop().RunUntilIdle();
 
-    TestExtensionSystem* test_extension_system =
-        static_cast<TestExtensionSystem*>(ExtensionSystem::Get(profile_));
-    service_ = test_extension_system->CreateExtensionService(
+    system_ = static_cast<TestExtensionSystem*>(ExtensionSystem::Get(profile_));
+    service_ = system_->CreateExtensionService(
         base::CommandLine::ForCurrentProcess(),
         base::FilePath() /* install_directory */,
         false /* autoupdate_enabled */);
@@ -140,7 +142,7 @@ class UpdateInstallGateTest : public testing::Test {
         EventRouterFactory::GetInstance()->SetTestingFactoryAndUse(
             profile_, base::BindRepeating(&BuildEventRouter)));
 
-    delayer_.reset(new UpdateInstallGate(service_));
+    delayer_ = std::make_unique<UpdateInstallGate>(profile_);
 
     new_app_ = CreateApp(kAppId, "2.0");
     new_persistent_ = CreateExtension(kPersistentExtensionId, "2.0", true);
@@ -166,14 +168,14 @@ class UpdateInstallGateTest : public testing::Test {
   void MakeExtensionInUse(const std::string& extension_id) {
     const Extension* const extension =
         registry_->GetInstalledExtension(extension_id);
-    ASSERT_TRUE(!!extension);
-    ASSERT_TRUE(!!CreateHost(profile_, extension));
+    ASSERT_TRUE(extension);
+    ASSERT_TRUE(CreateHost(profile_, extension));
   }
 
   void MakeExtensionListenForOnUpdateAvailable(
       const std::string& extension_id) {
     const char kOnUpdateAvailableEvent[] = "runtime.onUpdateAvailable";
-    event_router_->AddEventListener(kOnUpdateAvailableEvent, NULL,
+    event_router_->AddEventListener(kOnUpdateAvailableEvent, nullptr,
                                     extension_id);
   }
 
@@ -192,6 +194,7 @@ class UpdateInstallGateTest : public testing::Test {
   }
 
   UpdateInstallGate* delayer() { return delayer_.get(); }
+  ExtensionSystem* system() { return system_; }
   ExtensionService* service() { return service_; }
 
   const Extension* new_app() const { return new_app_.get(); }
@@ -202,22 +205,23 @@ class UpdateInstallGateTest : public testing::Test {
 
  private:
   // Needed by extension system.
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   // Needed to ensure we don't end up creating actual RenderViewHosts
   // and RenderProcessHosts.
   content::RenderViewHostTestEnabler render_view_host_test_enabler_;
 
-  TestingProfile* profile_ = nullptr;
+  raw_ptr<TestingProfile> profile_ = nullptr;
   std::unique_ptr<TestingProfileManager> profile_manager_;
 
-  ExtensionService* service_ = nullptr;
-  ExtensionRegistry* registry_ = nullptr;
-  EventRouter* event_router_ = nullptr;
+  raw_ptr<TestExtensionSystem> system_ = nullptr;
+  raw_ptr<ExtensionService> service_ = nullptr;
+  raw_ptr<ExtensionRegistry> registry_ = nullptr;
+  raw_ptr<EventRouter> event_router_ = nullptr;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Needed for creating ExtensionService.
-  chromeos::FakeChromeUserManager* fake_user_manager_ = nullptr;
+  ash::FakeChromeUserManager* fake_user_manager_ = nullptr;
   std::unique_ptr<user_manager::ScopedUserManager> scoped_user_manager_enabler_;
 #endif
 
@@ -226,12 +230,10 @@ class UpdateInstallGateTest : public testing::Test {
   scoped_refptr<const Extension> new_app_;
   scoped_refptr<const Extension> new_persistent_;
   scoped_refptr<const Extension> new_none_persistent_;
-
-  DISALLOW_COPY_AND_ASSIGN(UpdateInstallGateTest);
 };
 
 TEST_F(UpdateInstallGateTest, InstallOnServiceNotReady) {
-  ASSERT_FALSE(service()->is_ready());
+  ASSERT_FALSE(system()->is_ready());
   Check(new_app(), false, false, false, InstallGate::INSTALL);
   Check(new_persistent(), false, false, false, InstallGate::INSTALL);
   Check(new_none_persistent(), false, false, false, InstallGate::INSTALL);

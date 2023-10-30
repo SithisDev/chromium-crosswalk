@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,27 +7,29 @@
 
 #include <memory>
 
-#include "base/files/file_path.h"
-#include "base/macros.h"
-#include "base/time/time.h"
+#include "base/memory/raw_ptr.h"
 #include "base/timer/elapsed_timer.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/base/accelerators/accelerator.h"
+#include "ui/base/interaction/element_identifier.h"
 #include "ui/base/models/button_menu_item_model.h"
 #include "ui/base/models/simple_menu_model.h"
 
 class AppMenuIconController;
 class BookmarkSubMenuModel;
 class Browser;
-class RecentTabsSubMenuModel;
 
 namespace {
 class MockAppMenuModel;
 }  // namespace
 
-// Values should correspond to 'WrenchMenuAction' enum in histograms.xml.
+// Values should correspond to 'WrenchMenuAction' enum in enums.xml.
 enum AppMenuAction {
   MENU_ACTION_NEW_TAB = 0,
   MENU_ACTION_NEW_WINDOW = 1,
@@ -35,7 +37,7 @@ enum AppMenuAction {
   MENU_ACTION_SHOW_BOOKMARK_BAR = 3,
   MENU_ACTION_SHOW_BOOKMARK_MANAGER = 4,
   MENU_ACTION_IMPORT_SETTINGS = 5,
-  MENU_ACTION_BOOKMARK_PAGE = 6,
+  MENU_ACTION_BOOKMARK_THIS_TAB = 6,
   MENU_ACTION_BOOKMARK_ALL_TABS = 7,
   MENU_ACTION_PIN_TO_START_SCREEN = 8,
   MENU_ACTION_RESTORE_TAB = 9,
@@ -76,6 +78,11 @@ enum AppMenuAction {
   MENU_ACTION_OPEN_IN_CHROME = 48,
   MENU_ACTION_SITE_SETTINGS = 49,
   MENU_ACTION_APP_INFO = 50,
+  // Only used by WebAppMenuModel:
+  MENU_ACTION_UNINSTALL_APP = 51,
+  MENU_ACTION_CHROME_TIPS = 53,
+  MENU_ACTION_CHROME_WHATS_NEW = 54,
+  MENU_ACTION_LACROS_DATA_MIGRATION = 55,
   LIMIT_MENU_ACTION
 };
 
@@ -86,23 +93,29 @@ void LogWrenchMenuAction(AppMenuAction action_id);
 class ZoomMenuModel : public ui::SimpleMenuModel {
  public:
   explicit ZoomMenuModel(ui::SimpleMenuModel::Delegate* delegate);
+
+  ZoomMenuModel(const ZoomMenuModel&) = delete;
+  ZoomMenuModel& operator=(const ZoomMenuModel&) = delete;
+
   ~ZoomMenuModel() override;
 
  private:
   void Build();
-
-  DISALLOW_COPY_AND_ASSIGN(ZoomMenuModel);
 };
 
 class ToolsMenuModel : public ui::SimpleMenuModel {
  public:
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kPerformanceMenuItem);
+
   ToolsMenuModel(ui::SimpleMenuModel::Delegate* delegate, Browser* browser);
+
+  ToolsMenuModel(const ToolsMenuModel&) = delete;
+  ToolsMenuModel& operator=(const ToolsMenuModel&) = delete;
+
   ~ToolsMenuModel() override;
 
  private:
   void Build(Browser* browser);
-
-  DISALLOW_COPY_AND_ASSIGN(ToolsMenuModel);
 };
 
 // A menu model that builds the contents of the app menu.
@@ -112,9 +125,19 @@ class AppMenuModel : public ui::SimpleMenuModel,
                      public TabStripModelObserver,
                      public content::WebContentsObserver {
  public:
-  // Range of command IDs to use for the items in the recent tabs submenu.
-  static const int kMinRecentTabsCommandId = 1001;
-  static const int kMaxRecentTabsCommandId = 1200;
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kDownloadsMenuItem);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kHistoryMenuItem);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kMoreToolsMenuItem);
+
+  // First command ID to use for the recent tabs menu. This is one higher than
+  // the first command id used for the bookmarks menus, as the command ids for
+  // these menus should be offset to avoid conflicts.
+  static const int kMinRecentTabsCommandId = IDC_FIRST_UNBOUNDED_MENU + 1;
+  // Number of menus within the app menu with an arbitrarily high (variable)
+  // number of menu items. For example, the number of bookmarks menu items
+  // varies depending upon the underlying model. Currently, this accounts for
+  // the bookmarks and recent tabs menus.
+  static const int kNumUnboundedMenuTypes = 2;
 
   // Creates an app menu model for the given browser. Init() must be called
   // before passing this to an AppMenu. |app_menu_icon_controller|, if provided,
@@ -123,6 +146,10 @@ class AppMenuModel : public ui::SimpleMenuModel,
   AppMenuModel(ui::AcceleratorProvider* provider,
                Browser* browser,
                AppMenuIconController* app_menu_icon_controller = nullptr);
+
+  AppMenuModel(const AppMenuModel&) = delete;
+  AppMenuModel& operator=(const AppMenuModel&) = delete;
+
   ~AppMenuModel() override;
 
   // Runs Build() and registers observers.
@@ -133,8 +160,8 @@ class AppMenuModel : public ui::SimpleMenuModel,
 
   // Overridden for both ButtonMenuItemModel::Delegate and SimpleMenuModel:
   bool IsItemForCommandIdDynamic(int command_id) const override;
-  base::string16 GetLabelForCommandId(int command_id) const override;
-  bool GetIconForCommandId(int command_id, gfx::Image* icon) const override;
+  std::u16string GetLabelForCommandId(int command_id) const override;
+  ui::ImageModel GetIconForCommandId(int command_id) const override;
   void ExecuteCommand(int command_id, int event_flags) override;
   bool IsCommandIdChecked(int command_id) const override;
   bool IsCommandIdEnabled(int command_id) const override;
@@ -172,18 +199,11 @@ class AppMenuModel : public ui::SimpleMenuModel,
   // Appends a clipboard menu (without separators).
   void CreateCutCopyPasteMenu();
 
-  // Add a menu item for the browser action icons if there is overflow, returns
-  // whether the menu was added.
-  bool CreateActionToolbarOverflowMenu();
-
   // Appends a zoom menu (without separators).
   void CreateZoomMenu();
 
  private:
-  class HelpMenuModel;
   friend class ::MockAppMenuModel;
-
-  bool ShouldShowNewIncognitoWindowMenuItem();
 
   // Adds actionable global error menu items to the menu.
   // Examples: Extension permissions and sign in errors.
@@ -196,6 +216,12 @@ class AppMenuModel : public ui::SimpleMenuModel,
   // Logs UMA metrics about which command was chosen and how long the user
   // took to select the command.
   void LogMenuMetrics(int command_id);
+
+#if BUILDFLAG(IS_CHROMEOS)
+  // Disables/Enables the settings item based on kSystemFeaturesDisableList
+  // pref.
+  void UpdateSettingsItemState();
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   // Time menu has been open. Used by LogMenuMetrics() to record the time
   // to action when the user selects a menu item.
@@ -211,31 +237,22 @@ class AppMenuModel : public ui::SimpleMenuModel,
   std::unique_ptr<ui::ButtonMenuItemModel> zoom_menu_item_model_;
 
   // Label of the zoom label in the zoom menu item.
-  base::string16 zoom_label_;
-
-#if defined(GOOGLE_CHROME_BUILD)
-  // Help menu.
-  std::unique_ptr<HelpMenuModel> help_menu_model_;
-#endif
-
-  // Tools menu.
-  std::unique_ptr<ToolsMenuModel> tools_menu_model_;
+  std::u16string zoom_label_;
 
   // Bookmark submenu.
   std::unique_ptr<BookmarkSubMenuModel> bookmark_sub_menu_model_;
 
-  // Recent Tabs submenu.
-  std::unique_ptr<RecentTabsSubMenuModel> recent_tabs_sub_menu_model_;
+  // Other submenus.
+  std::vector<std::unique_ptr<ui::SimpleMenuModel>> sub_menus_;
 
-  ui::AcceleratorProvider* provider_;  // weak
+  raw_ptr<ui::AcceleratorProvider> provider_;  // weak
 
-  Browser* const browser_;  // weak
-  AppMenuIconController* const app_menu_icon_controller_;
+  const raw_ptr<Browser> browser_;  // weak
+  const raw_ptr<AppMenuIconController> app_menu_icon_controller_;
 
-  std::unique_ptr<content::HostZoomMap::Subscription>
-      browser_zoom_subscription_;
+  base::CallbackListSubscription browser_zoom_subscription_;
 
-  DISALLOW_COPY_AND_ASSIGN(AppMenuModel);
+  PrefChangeRegistrar local_state_pref_change_registrar_;
 };
 
 #endif  // CHROME_BROWSER_UI_TOOLBAR_APP_MENU_MODEL_H_

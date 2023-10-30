@@ -1,6 +1,8 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "base/memory/raw_ptr.h"
 
 #import "chrome/browser/ui/cocoa/touchbar/browser_window_default_touch_bar.h"
 
@@ -9,11 +11,11 @@
 #include "base/bind.h"
 #include "base/mac/mac_util.h"
 #import "base/mac/scoped_nsobject.h"
-#import "base/mac/sdk_forward_declarations.h"
+#include "base/no_destructor.h"
 #include "base/strings/sys_string_conversions.h"
+#include "build/branding_buildflags.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/vector_icons/vector_icons.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/command_observer.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/profiles/profile.h"
@@ -22,6 +24,8 @@
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper_observer.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_list_observer.h"
 #import "chrome/browser/ui/cocoa/touchbar/browser_window_touch_bar_controller.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
@@ -33,7 +37,6 @@
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_formatter.h"
 #include "components/vector_icons/vector_icons.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #import "skia/ext/skia_utils_mac.h"
@@ -88,20 +91,27 @@ NSImage* CreateNSImageFromIcon(const gfx::VectorIcon& icon,
       base::mac::GetSRGBColorSpace());
 }
 
-// Creates a NSButton for the touch bar.
-API_AVAILABLE(macos(10.12.2))
+// Creates an NSButton for the touch bar using an existing NSImage.
+NSButton* CreateTouchBarButtonWithImage(NSImage* image,
+                                        BrowserWindowDefaultTouchBar* owner,
+                                        int command,
+                                        int tooltip_id) {
+  NSButton* button = [NSButton buttonWithImage:image
+                                        target:owner
+                                        action:@selector(executeCommand:)];
+  button.tag = command;
+  button.accessibilityTitle = l10n_util::GetNSString(tooltip_id);
+  return button;
+}
+
+// Creates an NSButton for the touch bar using a vector icon.
 NSButton* CreateTouchBarButton(const gfx::VectorIcon& icon,
                                BrowserWindowDefaultTouchBar* owner,
                                int command,
                                int tooltip_id,
                                SkColor color = kTouchBarDefaultIconColor) {
-  NSButton* button =
-      [NSButton buttonWithImage:CreateNSImageFromIcon(icon, color)
-                         target:owner
-                         action:@selector(executeCommand:)];
-  button.tag = command;
-  button.accessibilityTitle = l10n_util::GetNSString(tooltip_id);
-  return button;
+  return CreateTouchBarButtonWithImage(CreateNSImageFromIcon(icon, color),
+                                       owner, command, tooltip_id);
 }
 
 ui::TouchBarAction TouchBarActionFromCommand(int command) {
@@ -118,7 +128,7 @@ ui::TouchBarAction TouchBarActionFromCommand(int command) {
       return ui::TouchBarAction::HOME;
     case IDC_FOCUS_LOCATION:
       return ui::TouchBarAction::SEARCH;
-    case IDC_BOOKMARK_PAGE:
+    case IDC_BOOKMARK_THIS_TAB:
       return ui::TouchBarAction::STAR;
     case IDC_NEW_TAB:
       return ui::TouchBarAction::NEW_TAB;
@@ -130,12 +140,11 @@ ui::TouchBarAction TouchBarActionFromCommand(int command) {
 
 // A class registered for C++ notifications. This is used to detect changes in
 // the profile preferences and the back/forward commands.
-class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
-    : public CommandObserver,
-      public BookmarkTabHelperObserver,
-      public TabStripModelObserver,
-      public content::NotificationObserver,
-      public content::WebContentsObserver {
+class TouchBarNotificationBridge : public CommandObserver,
+                                   public BrowserListObserver,
+                                   public BookmarkTabHelperObserver,
+                                   public TabStripModelObserver,
+                                   public content::WebContentsObserver {
  public:
   TouchBarNotificationBridge(BrowserWindowDefaultTouchBar* owner,
                              Browser* browser)
@@ -149,7 +158,7 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
     command_controller->AddCommandObserver(IDC_BACK, this);
     owner.canGoBack = command_controller->IsCommandEnabled(IDC_BACK);
     command_controller->AddCommandObserver(IDC_FORWARD, this);
-    owner.canGoBack = command_controller->IsCommandEnabled(IDC_FORWARD);
+    owner.canGoForward = command_controller->IsCommandEnabled(IDC_FORWARD);
 
     auto* profile = browser->profile();
     auto* prefs = profile->GetPrefs();
@@ -164,13 +173,17 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
         base::BindRepeating(&TouchBarNotificationBridge::UpdateTouchBar,
                             base::Unretained(this)));
 
-    notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                                content::Source<Profile>(profile));
+    BrowserList::AddObserver(this);
   }
 
   bool show_home_button() { return show_home_button_.GetValue(); }
 
+  TouchBarNotificationBridge(const TouchBarNotificationBridge&) = delete;
+  TouchBarNotificationBridge& operator=(const TouchBarNotificationBridge&) =
+      delete;
+
   ~TouchBarNotificationBridge() override {
+    BrowserList::RemoveObserver(this);
     browser_->tab_strip_model()->RemoveObserver(this);
     UpdateWebContents(nullptr);
   }
@@ -186,8 +199,8 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
     contents_ = new_contents;
 
     // Stop observing the old WebContents and start observing the new one (if
-    // nonnull). Qualified to disambiguate from NotificationObserver::Observe().
-    WebContentsObserver::Observe(contents_);
+    // nonnull).
+    Observe(contents_);
 
     BookmarkTabHelper* bookmark_helper =
         contents_ ? BookmarkTabHelper::FromWebContents(contents_) : nullptr;
@@ -224,11 +237,9 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
     UpdateWebContents(selection.new_contents);
   }
 
-  // NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    owner_.browser = nullptr;
+  void OnBrowserRemoved(Browser* browser) override {
+    if (browser == owner_.browser)
+      owner_.browser = nullptr;
   }
 
   // WebContentsObserver:
@@ -251,31 +262,40 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
 
  private:
   BrowserWindowDefaultTouchBar* owner_;  // Weak.
-  Browser* browser_;                     // Weak.
-  content::WebContents* contents_;       // Weak.
+  raw_ptr<Browser> browser_;             // Weak.
+  raw_ptr<content::WebContents> contents_;  // Weak.
 
   // Used to monitor the optional home button pref.
   BooleanPrefMember show_home_button_;
 
-  content::NotificationRegistrar notification_registrar_;
-
   PrefChangeRegistrar profile_pref_registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(TouchBarNotificationBridge);
 };
 
 }  // namespace
 
 @interface BrowserWindowDefaultTouchBar () {
   // Used to receive and handle notifications.
-  std::unique_ptr<TouchBarNotificationBridge> notificationBridge_;
+  std::unique_ptr<TouchBarNotificationBridge> _notificationBridge;
 
   // The stop/reload button in the touch bar.
-  base::scoped_nsobject<NSButton> reloadStopButton_;
+  base::scoped_nsobject<NSButton> _reloadStopButton;
 
   // The starred button in the touch bar.
-  base::scoped_nsobject<NSButton> starredButton_;
+  base::scoped_nsobject<NSButton> _starredButton;
+
+  // The search button in the touch bar.
+  base::scoped_nsobject<NSButton> _searchButton;
+
+  // The last created BrowserWindowDefaultTouchBar (cached until it needs a
+  // rebuild).
+  base::scoped_nsobject<NSTouchBar> _touchBar;
+
+  // The existence of the Home button in the Touch Bar.
+  bool _touchBarHasHomeButton;
 }
+
+// Creates and returns a touch bar for tab non-fullscreen mode.
+- (NSTouchBar*)createTabTouchBar;
 
 // Creates and returns a touch bar for tab fullscreen mode.
 - (NSTouchBar*)createTabFullscreenTouchBar;
@@ -283,62 +303,35 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
 // Updates the starred button in the touch bar.
 - (void)updateStarredButton;
 
-// Creates and returns the search button.
-- (NSView*)searchTouchBarView;
+// Updates the reload / stop button in the touch bar.
+- (void)updateReloadStopButton;
+
+// Updates the search button in the touch bar.
+- (void)updateSearchTouchBarButton;
 
 @end
 
 @implementation BrowserWindowDefaultTouchBar
 
-@synthesize isPageLoading = isPageLoading_;
-@synthesize isStarred = isStarred_;
-@synthesize canGoBack = canGoBack_;
-@synthesize canGoForward = canGoForward_;
-@synthesize controller = controller_;
-@synthesize browser = browser_;
+@synthesize isPageLoading = _isPageLoading;
+@synthesize isStarred = _isStarred;
+@synthesize canGoBack = _canGoBack;
+@synthesize canGoForward = _canGoForward;
+@synthesize controller = _controller;
+@synthesize browser = _browser;
 
 - (NSTouchBar*)makeTouchBar {
   // When in tab or extension fullscreen, we should show a touch bar containing
   // only items associated with that mode. Since the toolbar is hidden, only
   // the option to exit fullscreen should show up.
   FullscreenController* controller =
-      browser_->exclusive_access_manager()->fullscreen_controller();
+      _browser->exclusive_access_manager()->fullscreen_controller();
   if (controller->IsWindowFullscreenForTabOrPending() ||
       controller->IsExtensionFullscreenOrPending()) {
     return [self createTabFullscreenTouchBar];
   }
 
-  base::scoped_nsobject<NSTouchBar> touchBar([[ui::NSTouchBar() alloc] init]);
-  [touchBar
-      setCustomizationIdentifier:ui::GetTouchBarId(kBrowserWindowTouchBarId)];
-  [touchBar setDelegate:self];
-
-  NSMutableArray<NSString*>* customIdentifiers = [NSMutableArray array];
-  NSMutableArray<NSString*>* defaultIdentifiers = [NSMutableArray array];
-
-  NSArray<NSString*>* touchBarItems = @[
-    kBackTouchId, kForwardTouchId, kReloadOrStopTouchId, kHomeTouchId,
-    kSearchTouchId, kStarTouchId, kNewTabTouchId
-  ];
-
-  for (NSString* item in touchBarItems) {
-    NSString* itemIdentifier =
-        ui::GetTouchBarItemId(kBrowserWindowTouchBarId, item);
-    [customIdentifiers addObject:itemIdentifier];
-
-    // Don't add the home button if it's not shown in the toolbar.
-    if (item == kHomeTouchId && !notificationBridge_->show_home_button())
-      continue;
-
-    [defaultIdentifiers addObject:itemIdentifier];
-  }
-
-  [customIdentifiers addObject:NSTouchBarItemIdentifierFlexibleSpace];
-
-  [touchBar setDefaultItemIdentifiers:defaultIdentifiers];
-  [touchBar setCustomizationAllowedItemIdentifiers:customIdentifiers];
-
-  return touchBar.autorelease();
+  return [self createTabTouchBar];
 }
 
 - (NSTouchBarItem*)touchBar:(NSTouchBar*)touchBar
@@ -363,7 +356,7 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
   }
 
   base::scoped_nsobject<NSCustomTouchBarItem> touchBarItem(
-      [[ui::NSCustomTouchBarItem() alloc] initWithIdentifier:identifier]);
+      [[NSCustomTouchBarItem alloc] initWithIdentifier:identifier]);
   if ([identifier hasSuffix:kBackTouchId]) {
     auto* button = CreateTouchBarButton(vector_icons::kBackArrowIcon, self,
                                         IDC_BACK, IDS_ACCNAME_BACK);
@@ -383,7 +376,7 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
         setCustomizationLabel:l10n_util::GetNSString(IDS_ACCNAME_FORWARD)];
   } else if ([identifier hasSuffix:kReloadOrStopTouchId]) {
     [self updateReloadStopButton];
-    [touchBarItem setView:reloadStopButton_.get()];
+    [touchBarItem setView:_reloadStopButton.get()];
     [touchBarItem setCustomizationLabel:
                       l10n_util::GetNSString(
                           IDS_TOUCH_BAR_STOP_RELOAD_CUSTOMIZATION_LABEL)];
@@ -402,27 +395,28 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
                                   IDS_TOUCH_BAR_NEW_TAB_CUSTOMIZATION_LABEL)];
   } else if ([identifier hasSuffix:kStarTouchId]) {
     [self updateStarredButton];
-    [touchBarItem setView:starredButton_.get()];
+    [touchBarItem setView:_starredButton.get()];
     [touchBarItem
         setCustomizationLabel:l10n_util::GetNSString(
                                   IDS_TOUCH_BAR_BOOKMARK_CUSTOMIZATION_LABEL)];
   } else if ([identifier hasSuffix:kSearchTouchId]) {
-    [touchBarItem setView:[self searchTouchBarView]];
+    [self updateSearchTouchBarButton];
+    [touchBarItem setView:_searchButton.get()];
     [touchBarItem setCustomizationLabel:l10n_util::GetNSString(
                                             IDS_TOUCH_BAR_GOOGLE_SEARCH)];
   } else if ([identifier hasSuffix:kFullscreenOriginLabelTouchId]) {
     content::WebContents* contents =
-        browser_->tab_strip_model()->GetActiveWebContents();
+        _browser->tab_strip_model()->GetActiveWebContents();
 
     if (!contents)
       return nil;
 
     // Strip the trailing slash.
     url::Parsed parsed;
-    base::string16 displayText = url_formatter::FormatUrl(
+    std::u16string displayText = url_formatter::FormatUrl(
         contents->GetLastCommittedURL(),
         url_formatter::kFormatUrlOmitTrailingSlashOnBareHostname,
-        net::UnescapeRule::SPACES, &parsed, nullptr, nullptr);
+        base::UnescapeRule::SPACES, &parsed, nullptr, nullptr);
 
     base::scoped_nsobject<NSMutableAttributedString> attributedString(
         [[NSMutableAttributedString alloc]
@@ -439,6 +433,9 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
 
     [touchBarItem
         setView:[NSTextField labelWithAttributedString:attributedString.get()]];
+    [touchBarItem
+        setCustomizationLabel:l10n_util::GetNSString(
+                                  IDS_TOUCH_BAR_URL_CUSTOMIZATION_LABEL)];
   } else {
     return nil;
   }
@@ -446,95 +443,186 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
   return touchBarItem.autorelease();
 }
 
+- (NSTouchBar*)createTabTouchBar {
+  [self updateSearchTouchBarButton];
+  bool showHomeButton = _notificationBridge->show_home_button();
+
+  if (!_touchBar || _touchBarHasHomeButton != showHomeButton) {
+    _touchBar.reset([[NSTouchBar alloc] init]);
+    [_touchBar
+        setCustomizationIdentifier:ui::GetTouchBarId(kBrowserWindowTouchBarId)];
+    [_touchBar setDelegate:self];
+
+    NSMutableArray<NSString*>* customizationIdentifiers =
+        [NSMutableArray array];
+    NSMutableArray<NSString*>* defaultIdentifiers = [NSMutableArray array];
+
+    NSArray<NSString*>* touchBarItemIdentifiers = @[
+      kBackTouchId, kForwardTouchId, kReloadOrStopTouchId, kHomeTouchId,
+      kSearchTouchId, kStarTouchId, kNewTabTouchId
+    ];
+
+    for (NSString* itemIdentifier in touchBarItemIdentifiers) {
+      NSString* fullIdentifier =
+          ui::GetTouchBarItemId(kBrowserWindowTouchBarId, itemIdentifier);
+      [customizationIdentifiers addObject:fullIdentifier];
+
+      // Don't add the home button if it's not shown in the toolbar.
+      if (itemIdentifier == kHomeTouchId && !showHomeButton) {
+        continue;
+      }
+
+      [defaultIdentifiers addObject:fullIdentifier];
+    }
+
+    [customizationIdentifiers addObject:NSTouchBarItemIdentifierFlexibleSpace];
+
+    [_touchBar setDefaultItemIdentifiers:defaultIdentifiers];
+    [_touchBar setCustomizationAllowedItemIdentifiers:customizationIdentifiers];
+
+    _touchBarHasHomeButton = showHomeButton;
+  }
+
+  return _touchBar.get();
+}
+
 - (NSTouchBar*)createTabFullscreenTouchBar {
-  base::scoped_nsobject<NSTouchBar> touchBar([[ui::NSTouchBar() alloc] init]);
+  base::scoped_nsobject<NSTouchBar> touchBar([[NSTouchBar alloc] init]);
+  [touchBar
+      setCustomizationIdentifier:ui::GetTouchBarId(kTabFullscreenTouchBarId)];
   [touchBar setDelegate:self];
-  [touchBar setDefaultItemIdentifiers:@[ ui::GetTouchBarItemId(
-                                          kTabFullscreenTouchBarId,
-                                          kFullscreenOriginLabelTouchId) ]];
+
+  NSArray<NSString*>* touchBarItems = @[ ui::GetTouchBarItemId(
+      kTabFullscreenTouchBarId, kFullscreenOriginLabelTouchId) ];
+
+  [touchBar setDefaultItemIdentifiers:touchBarItems];
+  [touchBar setCustomizationAllowedItemIdentifiers:touchBarItems];
+
   return touchBar.autorelease();
 }
 
 - (void)setBrowser:(Browser*)browser {
-  if (browser_ == browser)
+  if (_browser == browser)
     return;
-  browser_ = browser;
-  notificationBridge_.reset(
-      browser_ ? new TouchBarNotificationBridge(self, browser_) : nullptr);
+  _browser = browser;
+  _notificationBridge.reset(
+      _browser ? new TouchBarNotificationBridge(self, _browser) : nullptr);
 }
 
 - (void)updateStarredButton {
-  const gfx::VectorIcon& icon =
-      isStarred_ ? omnibox::kStarActiveIcon : omnibox::kStarIcon;
-  SkColor iconColor =
-      isStarred_ ? kTouchBarStarActiveColor : kTouchBarDefaultIconColor;
-  int tooltipId = isStarred_ ? IDS_TOOLTIP_STARRED : IDS_TOOLTIP_STAR;
-  if (!starredButton_) {
-    starredButton_.reset([CreateTouchBarButton(icon, self, IDC_BOOKMARK_PAGE,
-                                               tooltipId, iconColor) retain]);
+  NSImage* image = _isStarred ? [BrowserWindowDefaultTouchBar starActiveIcon]
+                              : [BrowserWindowDefaultTouchBar starDefaultIcon];
+  int tooltipId = _isStarred ? IDS_TOOLTIP_STARRED : IDS_TOOLTIP_STAR;
+
+  if (!_starredButton) {
+    _starredButton.reset([CreateTouchBarButtonWithImage(
+        image, self, IDC_BOOKMARK_THIS_TAB, tooltipId) retain]);
     return;
   }
 
-  [starredButton_ setImage:CreateNSImageFromIcon(icon, iconColor)];
-  [starredButton_ setAccessibilityLabel:l10n_util::GetNSString(tooltipId)];
+  if ([_starredButton image] == image) {
+    return;
+  }
+
+  [_starredButton setImage:image];
+  [_starredButton setAccessibilityLabel:l10n_util::GetNSString(tooltipId)];
 }
 
-- (NSView*)searchTouchBarView {
+- (void)updateReloadStopButton {
+  NSImage* image = _isPageLoading
+                       ? [BrowserWindowDefaultTouchBar navigateStopIcon]
+                       : [BrowserWindowDefaultTouchBar reloadIcon];
+  int commandId = _isPageLoading ? IDC_STOP : IDC_RELOAD;
+  int tooltipId = _isPageLoading ? IDS_TOOLTIP_STOP : IDS_TOOLTIP_RELOAD;
+
+  if (!_reloadStopButton) {
+    _reloadStopButton.reset([CreateTouchBarButtonWithImage(
+        image, self, commandId, tooltipId) retain]);
+    return;
+  }
+
+  if ([_reloadStopButton tag] == commandId) {
+    return;
+  }
+
+  [_reloadStopButton setImage:image];
+  [_reloadStopButton setTag:commandId];
+  [_reloadStopButton setAccessibilityLabel:l10n_util::GetNSString(tooltipId)];
+}
+
+- (void)updateSearchTouchBarButton {
   TemplateURLService* templateUrlService =
-      TemplateURLServiceFactory::GetForProfile(browser_->profile());
+      TemplateURLServiceFactory::GetForProfile(_browser->profile());
   const TemplateURL* defaultProvider =
       templateUrlService->GetDefaultSearchProvider();
-  BOOL isGoogle =
-      defaultProvider->GetEngineType(templateUrlService->search_terms_data()) ==
-      SEARCH_ENGINE_GOOGLE;
+  BOOL isGoogle = NO;
+  std::u16string title;
+  if (defaultProvider) {
+    isGoogle =
+        defaultProvider->GetEngineType(
+            templateUrlService->search_terms_data()) == SEARCH_ENGINE_GOOGLE;
 
-  base::string16 title =
-      isGoogle ? l10n_util::GetStringUTF16(IDS_TOUCH_BAR_GOOGLE_SEARCH)
-               : l10n_util::GetStringFUTF16(IDS_TOUCH_BAR_SEARCH,
-                                            defaultProvider->short_name());
+    title = isGoogle ? l10n_util::GetStringUTF16(IDS_TOUCH_BAR_GOOGLE_SEARCH)
+                     : l10n_util::GetStringFUTF16(
+                           IDS_TOUCH_BAR_SEARCH, defaultProvider->short_name());
+  } else {
+    title = l10n_util::GetStringUTF16(IDS_TOUCH_BAR_NO_DEFAULT_SEARCH);
+  }
+
+  NSString* buttonTitle = base::SysUTF16ToNSString(title);
+
+  if ([buttonTitle isEqualToString:[_searchButton title]]) {
+    return;
+  }
 
   NSImage* image = nil;
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   if (isGoogle) {
     image = NSImageFromImageSkiaWithColorSpace(
-        gfx::CreateVectorIcon(kGoogleGLogoIcon, kTouchBarIconSize,
+        gfx::CreateVectorIcon(vector_icons::kGoogleGLogoIcon, kTouchBarIconSize,
                               gfx::kPlaceholderColor),
         base::mac::GetSRGBColorSpace());
+  } else {
     image = CreateNSImageFromIcon(vector_icons::kSearchIcon);
   }
 #endif
   if (!image)
     image = CreateNSImageFromIcon(vector_icons::kSearchIcon);
 
-  NSButton* searchButton =
-      [NSButton buttonWithTitle:base::SysUTF16ToNSString(title)
-                          image:image
-                         target:self
-                         action:@selector(executeCommand:)];
-  searchButton.imageHugsTitle = YES;
-  searchButton.tag = IDC_FOCUS_LOCATION;
-  [searchButton.widthAnchor
-      constraintGreaterThanOrEqualToConstant:kSearchBtnMinWidth]
-      .active = YES;
-  [searchButton
-      setContentHuggingPriority:1.0
-                 forOrientation:NSLayoutConstraintOrientationHorizontal];
-  return searchButton;
+  if (!_searchButton) {
+    NSButton* searchButton =
+        [NSButton buttonWithTitle:buttonTitle
+                            image:image
+                           target:self
+                           action:@selector(executeCommand:)];
+    searchButton.imageHugsTitle = YES;
+    searchButton.tag = IDC_FOCUS_LOCATION;
+    [searchButton.widthAnchor
+        constraintGreaterThanOrEqualToConstant:kSearchBtnMinWidth]
+        .active = YES;
+    [searchButton
+        setContentHuggingPriority:1.0
+                   forOrientation:NSLayoutConstraintOrientationHorizontal];
+    _searchButton.reset([searchButton retain]);
+  } else {
+    [_searchButton setTitle:buttonTitle];
+    [_searchButton setImage:image];
+  }
 }
 
 - (void)executeCommand:(id)sender {
   int command = [sender tag];
   ui::LogTouchBarUMA(TouchBarActionFromCommand(command));
-  browser_->command_controller()->ExecuteCommand(command);
+  _browser->command_controller()->ExecuteCommand(command);
 }
 
 - (void)setIsPageLoading:(BOOL)isPageLoading {
-  isPageLoading_ = isPageLoading;
+  _isPageLoading = isPageLoading;
   [self updateReloadStopButton];
 }
 
 - (void)setIsStarred:(BOOL)isStarred {
-  isStarred_ = isStarred;
+  _isStarred = isStarred;
   [self updateStarredButton];
 }
 
@@ -545,6 +633,10 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
 
 + (NSString*)reloadOrStopItemIdentifier {
   return ui::GetTouchBarItemId(kBrowserWindowTouchBarId, kReloadOrStopTouchId);
+}
+
++ (NSString*)bookmarkStarItemIdentifier {
+  return ui::GetTouchBarItemId(kBrowserWindowTouchBarId, kStarTouchId);
 }
 
 + (NSString*)backItemIdentifier {
@@ -560,33 +652,49 @@ class API_AVAILABLE(macos(10.12.2)) TouchBarNotificationBridge
                                kFullscreenOriginLabelTouchId);
 }
 
-- (void)updateReloadStopButton {
-  const gfx::VectorIcon& icon =
-      isPageLoading_ ? kNavigateStopIcon : vector_icons::kReloadIcon;
-  int commandId = isPageLoading_ ? IDC_STOP : IDC_RELOAD;
-  int tooltipId = isPageLoading_ ? IDS_TOOLTIP_STOP : IDS_TOOLTIP_RELOAD;
-
-  if (!reloadStopButton_) {
-    reloadStopButton_.reset(
-        [CreateTouchBarButton(icon, self, commandId, tooltipId) retain]);
-    return;
-  }
-
-  [reloadStopButton_
-      setImage:CreateNSImageFromIcon(icon, kTouchBarDefaultIconColor)];
-  [reloadStopButton_ setTag:commandId];
-  [reloadStopButton_ setAccessibilityLabel:l10n_util::GetNSString(tooltipId)];
++ (NSImage*)starDefaultIcon {
+  static const base::NoDestructor<base::scoped_nsobject<NSImage>>
+      _starDefaultIcon([]() {
+        return [CreateNSImageFromIcon(omnibox::kStarIcon,
+                                      kTouchBarDefaultIconColor) retain];
+      }());
+  return _starDefaultIcon->get();
 }
 
-- (NSButton*)reloadStopButton {
-  if (!reloadStopButton_)
-    [self updateReloadStopButton];
++ (NSString*)homeItemIdentifier {
+  return ui::GetTouchBarItemId(kBrowserWindowTouchBarId, kHomeTouchId);
+}
 
-  return reloadStopButton_.get();
++ (NSImage*)starActiveIcon {
+  static const base::NoDestructor<base::scoped_nsobject<NSImage>>
+      _starActiveIcon([]() {
+        return [CreateNSImageFromIcon(omnibox::kStarActiveIcon,
+                                      kTouchBarStarActiveColor) retain];
+      }());
+  return _starActiveIcon->get();
+}
+
++ (NSImage*)navigateStopIcon {
+  static const base::NoDestructor<base::scoped_nsobject<NSImage>>
+      _navigateStopIcon(
+          []() { return [CreateNSImageFromIcon(kNavigateStopIcon) retain]; }());
+  return _navigateStopIcon->get();
+}
+
++ (NSImage*)reloadIcon {
+  static const base::NoDestructor<base::scoped_nsobject<NSImage>> _reloadIcon(
+      []() {
+        return [CreateNSImageFromIcon(vector_icons::kReloadIcon) retain];
+      }());
+  return _reloadIcon->get();
+}
+
+- (NSButton*)searchButton {
+  return _searchButton.get();
 }
 
 - (BookmarkTabHelperObserver*)bookmarkTabObserver {
-  return notificationBridge_.get();
+  return _notificationBridge.get();
 }
 
 @end

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,8 +48,8 @@ void JNI_ScreenshotTask_GrabWindowSnapshotAsync(
   gfx::Rect window_bounds(window_width, window_height);
   ui::GrabWindowSnapshotAsyncPNG(
       window_android, window_bounds,
-      base::Bind(&JNI_ScreenshotTask_SnapshotCallback, env,
-                 ScopedJavaGlobalRef<jobject>(env, jcallback)));
+      base::BindOnce(&JNI_ScreenshotTask_SnapshotCallback, env,
+                     ScopedJavaGlobalRef<jobject>(env, jcallback)));
 }
 
 }  // namespace android

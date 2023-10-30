@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "components/zucchini/zucchini.h"
 #include "components/zucchini/zucchini_integration.h"
 #include "courgette/courgette.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/bspatch/mbspatch.h"
 
 namespace installer {
@@ -39,7 +40,7 @@ bool ArchivePatchHelper::UncompressAndPatch(
     UnPackConsumer consumer) {
   ArchivePatchHelper instance(working_directory, compressed_archive,
                               patch_source, target, consumer);
-  return (instance.Uncompress(NULL) && instance.ApplyPatch());
+  return (instance.Uncompress(nullptr) && instance.ApplyPatch());
 }
 
 bool ArchivePatchHelper::Uncompress(base::FilePath* last_uncompressed_file) {
@@ -48,12 +49,10 @@ bool ArchivePatchHelper::Uncompress(base::FilePath* last_uncompressed_file) {
 
   // UnPackArchive takes care of logging.
   base::FilePath output_file;
-  UnPackStatus unpack_status = UNPACK_NO_ERROR;
-  int32_t ntstatus = 0;
-  DWORD lzma_result = UnPackArchive(compressed_archive_, working_directory_,
-                                    &output_file, &unpack_status, &ntstatus);
-  RecordUnPackMetrics(unpack_status, ntstatus, lzma_result, consumer_);
-  if (lzma_result != ERROR_SUCCESS)
+  UnPackStatus unpack_status =
+      UnPackArchive(compressed_archive_, working_directory_, &output_file);
+  RecordUnPackMetrics(unpack_status, consumer_);
+  if (unpack_status != UNPACK_NO_ERROR)
     return false;
 
   last_uncompressed_file_ = output_file;
@@ -76,10 +75,9 @@ bool ArchivePatchHelper::CourgetteEnsemblePatch() {
     return false;
   }
 
-  courgette::Status result =
-      courgette::ApplyEnsemblePatch(patch_source_.value().c_str(),
-                                    last_uncompressed_file_.value().c_str(),
-                                    target_.value().c_str());
+  courgette::Status result = courgette::ApplyEnsemblePatch(
+      patch_source_.value().c_str(), last_uncompressed_file_.value().c_str(),
+      target_.value().c_str());
   if (result == courgette::C_OK)
     return true;
 
@@ -88,7 +86,7 @@ bool ArchivePatchHelper::CourgetteEnsemblePatch() {
              << target_.value() << " using Courgette. err=" << result;
 
   // Ensure a partial output is not left behind.
-  base::DeleteFile(target_, false);
+  base::DeleteFile(target_);
 
   return false;
 }
@@ -111,7 +109,7 @@ bool ArchivePatchHelper::ZucchiniEnsemblePatch() {
              << " using Zucchini. err=" << static_cast<uint32_t>(result);
 
   // Ensure a partial output is not left behind.
-  base::DeleteFile(target_, false);
+  base::DeleteFile(target_);
 
   return false;
 }
@@ -128,14 +126,12 @@ bool ArchivePatchHelper::BinaryPatch() {
   if (result == OK)
     return true;
 
-  LOG(ERROR)
-      << "Failed to apply patch " << last_uncompressed_file_.value()
-      << " to file " << patch_source_.value()
-      << " and generating file " << target_.value()
-      << " using bsdiff. err=" << result;
+  LOG(ERROR) << "Failed to apply patch " << last_uncompressed_file_.value()
+             << " to file " << patch_source_.value() << " and generating file "
+             << target_.value() << " using bsdiff. err=" << result;
 
   // Ensure a partial output is not left behind.
-  base::DeleteFile(target_, false);
+  base::DeleteFile(target_);
 
   return false;
 }

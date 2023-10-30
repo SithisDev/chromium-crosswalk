@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,19 +6,21 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_consistency_mode_manager.h"
+#include "chrome/browser/signin/account_consistency_mode_manager_factory.h"
+#include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/signin_error_controller_factory.h"
-#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/signin/core/browser/about_signin_internals.h"
 
 AboutSigninInternalsFactory::AboutSigninInternalsFactory()
-    : BrowserContextKeyedServiceFactory(
-        "AboutSigninInternals",
-        BrowserContextDependencyManager::GetInstance()) {
+    : ProfileKeyedServiceFactory("AboutSigninInternals") {
   DependsOn(ChromeSigninClientFactory::GetInstance());
   DependsOn(SigninErrorControllerFactory::GetInstance());
+  DependsOn(AccountReconcilorFactory::GetInstance());
+  DependsOn(IdentityManagerFactory::GetInstance());
+  DependsOn(AccountConsistencyModeManagerFactory::GetInstance());
 }
 
 AboutSigninInternalsFactory::~AboutSigninInternalsFactory() {}
@@ -46,7 +48,8 @@ KeyedService* AboutSigninInternalsFactory::BuildServiceInstanceFor(
   AboutSigninInternals* service = new AboutSigninInternals(
       IdentityManagerFactory::GetForProfile(profile),
       SigninErrorControllerFactory::GetForProfile(profile),
-      AccountConsistencyModeManager::GetMethodForProfile(profile));
-  service->Initialize(ChromeSigninClientFactory::GetForProfile(profile));
+      AccountConsistencyModeManager::GetMethodForProfile(profile),
+      ChromeSigninClientFactory::GetForProfile(profile),
+      AccountReconcilorFactory::GetForProfile(profile));
   return service;
 }

@@ -1,13 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/sync/test/integration/autofill_helper.h"
-#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "components/autofill/core/browser/webdata/autofill_entry.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -15,18 +14,19 @@ namespace {
 using autofill::AutofillKey;
 using autofill_helper::AddKeys;
 using autofill_helper::GetAllKeys;
-using autofill_helper::KeysMatch;
 using autofill_helper::RemoveKey;
 
 class TwoClientAutocompleteSyncTest : public SyncTest {
  public:
   TwoClientAutocompleteSyncTest() : SyncTest(TWO_CLIENT) {}
-  ~TwoClientAutocompleteSyncTest() override {}
+
+  TwoClientAutocompleteSyncTest(const TwoClientAutocompleteSyncTest&) = delete;
+  TwoClientAutocompleteSyncTest& operator=(
+      const TwoClientAutocompleteSyncTest&) = delete;
+
+  ~TwoClientAutocompleteSyncTest() override = default;
 
   bool TestUsesSelfNotifications() override { return false; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TwoClientAutocompleteSyncTest);
 };
 
 IN_PROC_BROWSER_TEST_F(TwoClientAutocompleteSyncTest, WebDataServiceSanity) {
@@ -63,8 +63,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientAutocompleteSyncTest, AddUnicodeProfile) {
   ASSERT_TRUE(SetupClients());
 
   std::set<AutofillKey> keys;
-  keys.insert(AutofillKey(base::WideToUTF16(L"Sigur R\u00F3s"),
-                          base::WideToUTF16(L"\u00C1g\u00E6tis byrjun")));
+  keys.insert(AutofillKey(u"Sigur R\u00F3s", u"\u00C1g\u00E6tis byrjun"));
   AddKeys(0, keys);
   ASSERT_TRUE(SetupSync());
   EXPECT_TRUE(AutofillKeysChecker(0, 1).Wait());

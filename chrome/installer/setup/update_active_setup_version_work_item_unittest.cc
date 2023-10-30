@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,7 @@
 
 #include <ostream>
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -19,7 +18,7 @@ using testing::ValuesIn;
 namespace {
 
 const HKEY kActiveSetupRoot = HKEY_LOCAL_MACHINE;
-const base::char16 kActiveSetupPath[] = L"Active Setup\\test";
+const wchar_t kActiveSetupPath[] = L"Active Setup\\test";
 
 struct UpdateActiveSetupVersionWorkItemTestCase {
   // The initial value to be set in the registry prior to executing the
@@ -67,9 +66,10 @@ struct UpdateActiveSetupVersionWorkItemTestCase {
 void PrintTo(const UpdateActiveSetupVersionWorkItemTestCase& test_case,
              ::std::ostream* os) {
   *os << "Initial value: "
-      << (test_case.initial_value ? test_case.initial_value : L"(empty)")
+      << (test_case.initial_value ? base::WideToUTF8(test_case.initial_value)
+                                  : "(empty)")
       << ", bump_selective_trigger: " << test_case.bump_selective_trigger
-      << ", expected result: " << test_case.expected_result;
+      << ", expected result: " << base::WideToUTF8(test_case.expected_result);
 }
 
 }  // namespace
@@ -79,6 +79,11 @@ class UpdateActiveSetupVersionWorkItemTest
  public:
   UpdateActiveSetupVersionWorkItemTest() {}
 
+  UpdateActiveSetupVersionWorkItemTest(
+      const UpdateActiveSetupVersionWorkItemTest&) = delete;
+  UpdateActiveSetupVersionWorkItemTest& operator=(
+      const UpdateActiveSetupVersionWorkItemTest&) = delete;
+
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(
         registry_override_manager_.OverrideRegistry(kActiveSetupRoot));
@@ -86,8 +91,6 @@ class UpdateActiveSetupVersionWorkItemTest
 
  private:
   registry_util::RegistryOverrideManager registry_override_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(UpdateActiveSetupVersionWorkItemTest);
 };
 
 TEST_P(UpdateActiveSetupVersionWorkItemTest, Execute) {
@@ -125,7 +128,7 @@ TEST_P(UpdateActiveSetupVersionWorkItemTest, Execute) {
   EXPECT_TRUE(active_setup_work_item.Do());
 
   {
-    base::string16 version_out;
+    std::wstring version_out;
     EXPECT_EQ(ERROR_SUCCESS, test_key.Open(kActiveSetupRoot, kActiveSetupPath,
                                            KEY_QUERY_VALUE));
     EXPECT_EQ(ERROR_SUCCESS, test_key.ReadValue(L"Version", &version_out));
@@ -138,7 +141,7 @@ TEST_P(UpdateActiveSetupVersionWorkItemTest, Execute) {
     EXPECT_EQ(ERROR_SUCCESS, test_key.Open(kActiveSetupRoot, kActiveSetupPath,
                                            KEY_QUERY_VALUE));
 
-    base::string16 version_out;
+    std::wstring version_out;
     LONG read_result = test_key.ReadValue(L"Version", &version_out);
     if (test_case.initial_value) {
       EXPECT_EQ(ERROR_SUCCESS, read_result);

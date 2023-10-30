@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/certificate_manager_localized_strings_provider.h"
+#include "chrome/browser/ui/webui/certificate_provisioning_ui_handler.h"
 #include "chrome/browser/ui/webui/certificates_handler.h"
-#include "chrome/browser/ui/webui/chromeos/bluetooth_dialog_localized_strings_provider.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
@@ -44,6 +44,9 @@ CertificateManagerDialogUI::CertificateManagerDialogUI(content::WebUI* web_ui)
     : WebDialogUI(web_ui) {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUICertificateManagerHost);
+  Profile* profile = Profile::FromWebUI(web_ui);
+
+  source->DisableTrustedTypesCSP();
 
   AddCertificateManagerStrings(source);
   source->AddBoolean(
@@ -51,18 +54,19 @@ CertificateManagerDialogUI::CertificateManagerDialogUI(content::WebUI* web_ui)
       user_manager::UserManager::Get()->IsLoggedInAsGuest() ||
           user_manager::UserManager::Get()->IsLoggedInAsPublicAccount());
   source->AddBoolean(
-      "isKiosk",
-      user_manager::UserManager::Get()->IsLoggedInAsKioskApp() ||
-          user_manager::UserManager::Get()->IsLoggedInAsArcKioskApp());
+      "isKiosk", user_manager::UserManager::Get()->IsLoggedInAsAnyKioskApp());
 
-  source->SetJsonPath("strings.js");
+  source->UseStringsJs();
   source->SetDefaultResource(IDR_CERT_MANAGER_DIALOG_HTML);
   source->DisableContentSecurityPolicy();
 
   web_ui->AddMessageHandler(
       std::make_unique<certificate_manager::CertificatesHandler>());
+  web_ui->AddMessageHandler(
+      chromeos::cert_provisioning::CertificateProvisioningUiHandler::
+          CreateForProfile(profile));
 
-  content::WebUIDataSource::Add(Profile::FromWebUI(web_ui), source);
+  content::WebUIDataSource::Add(profile, source);
 }
 
 CertificateManagerDialogUI::~CertificateManagerDialogUI() {}

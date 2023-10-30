@@ -1,15 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/supervised_user/supervised_user_navigation_throttle.h"
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/single_thread_task_runner.h"
+#include "base/notreached.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/supervised_user/supervised_user_interstitial.h"
@@ -29,12 +30,12 @@ namespace {
 enum {
   FILTERING_BEHAVIOR_ALLOW = 1,
   FILTERING_BEHAVIOR_ALLOW_UNCERTAIN,
-  FILTERING_BEHAVIOR_BLOCK_BLACKLIST,
+  FILTERING_BEHAVIOR_BLOCK_DENYLIST,
   FILTERING_BEHAVIOR_BLOCK_SAFESITES,
   FILTERING_BEHAVIOR_BLOCK_MANUAL,
   FILTERING_BEHAVIOR_BLOCK_DEFAULT,
-  FILTERING_BEHAVIOR_ALLOW_WHITELIST,
-  FILTERING_BEHAVIOR_MAX = FILTERING_BEHAVIOR_ALLOW_WHITELIST
+  FILTERING_BEHAVIOR_ALLOW_ALLOWLIST,
+  FILTERING_BEHAVIOR_MAX = FILTERING_BEHAVIOR_ALLOW_ALLOWLIST
 };
 const int kHistogramFilteringBehaviorSpacing = 100;
 const int kHistogramPageTransitionMaxKnownValue =
@@ -57,18 +58,17 @@ int GetHistogramValueForFilteringBehavior(
     bool uncertain) {
   switch (behavior) {
     case SupervisedUserURLFilter::ALLOW:
-    case SupervisedUserURLFilter::WARN:
-      if (reason == supervised_user_error_page::WHITELIST)
-        return FILTERING_BEHAVIOR_ALLOW_WHITELIST;
+      if (reason == supervised_user_error_page::ALLOWLIST)
+        return FILTERING_BEHAVIOR_ALLOW_ALLOWLIST;
       return uncertain ? FILTERING_BEHAVIOR_ALLOW_UNCERTAIN
                        : FILTERING_BEHAVIOR_ALLOW;
     case SupervisedUserURLFilter::BLOCK:
       switch (reason) {
-        case supervised_user_error_page::BLACKLIST:
-          return FILTERING_BEHAVIOR_BLOCK_BLACKLIST;
+        case supervised_user_error_page::DENYLIST:
+          return FILTERING_BEHAVIOR_BLOCK_DENYLIST;
         case supervised_user_error_page::ASYNC_CHECKER:
           return FILTERING_BEHAVIOR_BLOCK_SAFESITES;
-        case supervised_user_error_page::WHITELIST:
+        case supervised_user_error_page::ALLOWLIST:
           NOTREACHED();
           break;
         case supervised_user_error_page::MANUAL:
@@ -79,7 +79,7 @@ int GetHistogramValueForFilteringBehavior(
           // Should never happen, only used for requests from Webview
           NOTREACHED();
       }
-      FALLTHROUGH;
+      [[fallthrough]];
     case SupervisedUserURLFilter::INVALID:
       NOTREACHED();
   }
@@ -121,12 +121,12 @@ void RecordFilterResultEvent(
 std::unique_ptr<SupervisedUserNavigationThrottle>
 SupervisedUserNavigationThrottle::MaybeCreateThrottleFor(
     content::NavigationHandle* navigation_handle) {
-  if (!navigation_handle->IsInMainFrame())
-    return nullptr;
   Profile* profile = Profile::FromBrowserContext(
       navigation_handle->GetWebContents()->GetBrowserContext());
-  if (!profile->IsSupervised())
+
+  if (!profile->IsChild())
     return nullptr;
+
   // Can't use std::make_unique because the constructor is private.
   return base::WrapUnique(
       new SupervisedUserNavigationThrottle(navigation_handle));
@@ -149,10 +149,32 @@ content::NavigationThrottle::ThrottleCheckResult
 SupervisedUserNavigationThrottle::CheckURL() {
   deferred_ = false;
   DCHECK_EQ(SupervisedUserURLFilter::INVALID, behavior_);
+
+  // We do not yet support prerendering for supervised users.
+  if (navigation_handle()->IsInPrerenderedMainFrame()) {
+    return NavigationThrottle::CANCEL;
+  }
+
   GURL url = navigation_handle()->GetURL();
-  bool got_result = url_filter_->GetFilteringBehaviorForURLWithAsyncChecks(
-      url, base::Bind(&SupervisedUserNavigationThrottle::OnCheckDone,
-                      weak_ptr_factory_.GetWeakPtr(), url));
+
+  bool skip_manual_parent_filter =
+      url_filter_->ShouldSkipParentManualAllowlistFiltering(
+          navigation_handle()->GetWebContents()->GetOutermostWebContents());
+  bool got_result = false;
+
+  if (navigation_handle()->IsInPrimaryMainFrame()) {
+    got_result = url_filter_->GetFilteringBehaviorForURLWithAsyncChecks(
+        url,
+        base::BindOnce(&SupervisedUserNavigationThrottle::OnCheckDone,
+                       weak_ptr_factory_.GetWeakPtr(), url),
+        skip_manual_parent_filter);
+  } else {
+    got_result = url_filter_->GetFilteringBehaviorForSubFrameURLWithAsyncChecks(
+        url, navigation_handle()->GetWebContents()->GetVisibleURL(),
+        base::BindOnce(&SupervisedUserNavigationThrottle::OnCheckDone,
+                       weak_ptr_factory_.GetWeakPtr(), url));
+  }
+
   DCHECK_EQ(got_result, behavior_ != SupervisedUserURLFilter::INVALID);
   // If we got a "not blocked" result synchronously, don't defer.
   deferred_ = !got_result || (behavior_ == SupervisedUserURLFilter::BLOCK);
@@ -185,8 +207,10 @@ void SupervisedUserNavigationThrottle::ShowInterstitialAsync(
   SupervisedUserNavigationObserver::OnRequestBlocked(
       navigation_handle()->GetWebContents(), navigation_handle()->GetURL(),
       reason, navigation_handle()->GetNavigationId(),
-      base::Bind(&SupervisedUserNavigationThrottle::OnInterstitialResult,
-                 weak_ptr_factory_.GetWeakPtr()));
+      navigation_handle()->GetFrameTreeNodeId(),
+      base::BindRepeating(
+          &SupervisedUserNavigationThrottle::OnInterstitialResult,
+          weak_ptr_factory_.GetWeakPtr()));
 }
 
 content::NavigationThrottle::ThrottleCheckResult
@@ -209,6 +233,7 @@ void SupervisedUserNavigationThrottle::OnCheckDone(
     supervised_user_error_page::FilteringBehaviorReason reason,
     bool uncertain) {
   DCHECK_EQ(SupervisedUserURLFilter::INVALID, behavior_);
+
   // If we got a result synchronously, pass it back to ShowInterstitialIfNeeded.
   if (!deferred_)
     behavior_ = behavior;
@@ -219,12 +244,21 @@ void SupervisedUserNavigationThrottle::OnCheckDone(
 
   RecordFilterResultEvent(false, behavior, reason, uncertain, transition);
 
-  // If both the static blacklist and the async checker are enabled, also record
+  // If both the static denylist and the async checker are enabled, also record
   // SafeSites-only UMA events.
-  if (url_filter_->HasBlacklist() && url_filter_->HasAsyncURLChecker() &&
+  if (url_filter_->HasDenylist() && url_filter_->HasAsyncURLChecker() &&
       (reason == supervised_user_error_page::ASYNC_CHECKER ||
-       reason == supervised_user_error_page::BLACKLIST)) {
+       reason == supervised_user_error_page::DENYLIST)) {
     RecordFilterResultEvent(true, behavior, reason, uncertain, transition);
+  }
+
+  if (navigation_handle()->IsInPrimaryMainFrame()) {
+    // Update navigation observer about the navigation state of the main frame.
+    auto* navigation_observer =
+        SupervisedUserNavigationObserver::FromWebContents(
+            navigation_handle()->GetWebContents());
+    if (navigation_observer)
+      navigation_observer->UpdateMainFrameFilteringStatus(behavior, reason);
   }
 
   if (behavior == SupervisedUserURLFilter::BLOCK)
@@ -234,7 +268,9 @@ void SupervisedUserNavigationThrottle::OnCheckDone(
 }
 
 void SupervisedUserNavigationThrottle::OnInterstitialResult(
-    CallbackActions action) {
+    CallbackActions action,
+    bool already_sent_request,
+    bool is_main_frame) {
   switch (action) {
     case kCancelNavigation: {
       CancelDeferredNavigation(CANCEL);
@@ -245,7 +281,7 @@ void SupervisedUserNavigationThrottle::OnInterstitialResult(
           SupervisedUserInterstitial::GetHTMLContents(
               Profile::FromBrowserContext(
                   navigation_handle()->GetWebContents()->GetBrowserContext()),
-              reason_);
+              reason_, already_sent_request, is_main_frame);
       CancelDeferredNavigation(content::NavigationThrottle::ThrottleCheckResult(
           CANCEL, net::ERR_BLOCKED_BY_CLIENT, interstitial_html));
     }

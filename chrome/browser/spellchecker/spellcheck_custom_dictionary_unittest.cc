@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,15 @@
 
 #include <stddef.h>
 
+#include <list>
 #include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/files/file_util.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/strings/string_number_conversions.h"
@@ -24,13 +25,15 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/spellcheck/browser/spellcheck_host_metrics.h"
 #include "components/spellcheck/common/spellcheck_common.h"
+#include "components/sync/base/client_tag_hash.h"
 #include "components/sync/model/sync_change.h"
-#include "components/sync/model/sync_change_processor_wrapper_for_test.h"
 #include "components/sync/model/sync_data.h"
 #include "components/sync/model/sync_error_factory.h"
-#include "components/sync/model/sync_error_factory_mock.h"
-#include "components/sync/protocol/sync.pb.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "components/sync/protocol/dictionary_specifics.pb.h"
+#include "components/sync/protocol/entity_specifics.pb.h"
+#include "components/sync/test/sync_change_processor_wrapper_for_test.h"
+#include "components/sync/test/sync_error_factory_mock.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "net/test/embedded_test_server/default_handlers.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -68,13 +71,20 @@ static std::unique_ptr<KeyedService> BuildSpellcheckService(
 class SpellcheckCustomDictionaryTest : public testing::Test {
  public:
   SpellcheckCustomDictionaryTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {}
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP) {}
 
  protected:
   void SetUp() override {
     // Use SetTestingFactoryAndUse to force creation and initialization.
     SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
         &profile_, base::BindRepeating(&BuildSpellcheckService));
+  }
+
+  void TearDown() override {
+    // Allow tasks with pending I/O (e.g.,
+    // SpellcheckCustomDictionary::LoadDictionaryFile) to complete before
+    // destroying the testing profiles.
+    task_environment_.RunUntilIdle();
   }
 
   // A wrapper around SpellcheckCustomDictionary::LoadDictionaryFile private
@@ -115,9 +125,20 @@ class SpellcheckCustomDictionaryTest : public testing::Test {
     return dictionary.Apply(change);
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  // Returns the custom dictionary for an extra profile, created on demand.
+  SpellcheckCustomDictionary* MakeExtraProfileDictionary() {
+    extra_profiles_.emplace_back();
+    auto* const extra_profile = &extra_profiles_.back();
+    return static_cast<SpellcheckService*>(
+               SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+                   extra_profile, base::BindRepeating(&BuildSpellcheckService)))
+        ->GetCustomDictionary();
+  }
+
+  content::BrowserTaskEnvironment task_environment_;
 
   TestingProfile profile_;
+  std::list<TestingProfile> extra_profiles_;
 };
 
 // An implementation of SyncErrorFactory that does not upload the error message
@@ -127,6 +148,10 @@ class SyncErrorFactoryStub : public syncer::SyncErrorFactory {
  public:
   explicit SyncErrorFactoryStub(int* error_counter)
       : error_counter_(error_counter) {}
+
+  SyncErrorFactoryStub(const SyncErrorFactoryStub&) = delete;
+  SyncErrorFactoryStub& operator=(const SyncErrorFactoryStub&) = delete;
+
   ~SyncErrorFactoryStub() override {}
 
   // Overridden from syncer::SyncErrorFactory:
@@ -140,14 +165,18 @@ class SyncErrorFactoryStub : public syncer::SyncErrorFactory {
   }
 
  private:
-  int* error_counter_;
-  DISALLOW_COPY_AND_ASSIGN(SyncErrorFactoryStub);
+  raw_ptr<int> error_counter_;
 };
 
 // Counts the number of notifications for dictionary load and change.
 class DictionaryObserverCounter : public SpellcheckCustomDictionary::Observer {
  public:
   DictionaryObserverCounter() : loads_(0), changes_(0) {}
+
+  DictionaryObserverCounter(const DictionaryObserverCounter&) = delete;
+  DictionaryObserverCounter& operator=(const DictionaryObserverCounter&) =
+      delete;
+
   virtual ~DictionaryObserverCounter() {}
 
   int loads() const { return loads_; }
@@ -163,7 +192,6 @@ class DictionaryObserverCounter : public SpellcheckCustomDictionary::Observer {
  private:
   int loads_;
   int changes_;
-  DISALLOW_COPY_AND_ASSIGN(DictionaryObserverCounter);
 };
 
 TEST_F(SpellcheckCustomDictionaryTest, SaveAndLoad) {
@@ -199,12 +227,7 @@ TEST_F(SpellcheckCustomDictionaryTest, MultiProfile) {
       SpellcheckServiceFactory::GetForContext(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
-  TestingProfile profile2;
-  SpellcheckService* spellcheck_service2 = static_cast<SpellcheckService*>(
-      SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile2, base::BindRepeating(&BuildSpellcheckService)));
-  SpellcheckCustomDictionary* custom_dictionary2 =
-      spellcheck_service2->GetCustomDictionary();
+  SpellcheckCustomDictionary* custom_dictionary2 = MakeExtraProfileDictionary();
 
   std::set<std::string> expected1;
   std::set<std::string> expected2;
@@ -300,13 +323,14 @@ TEST_F(SpellcheckCustomDictionaryTest,
       SpellcheckServiceFactory::GetForContext(
           &profile_)->GetCustomDictionary();
 
-  syncer::SyncDataList data = dictionary->GetAllSyncData(syncer::DICTIONARY);
+  syncer::SyncDataList data =
+      dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY);
   EXPECT_TRUE(data.empty());
 
   EXPECT_TRUE(dictionary->AddWord("bar"));
   EXPECT_TRUE(dictionary->AddWord("foo"));
 
-  data = dictionary->GetAllSyncData(syncer::DICTIONARY);
+  data = dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY);
   EXPECT_EQ(2UL, data.size());
   std::vector<std::string> words;
   words.push_back("bar");
@@ -314,14 +338,15 @@ TEST_F(SpellcheckCustomDictionaryTest,
   for (size_t i = 0; i < data.size(); i++) {
     EXPECT_TRUE(data[i].GetSpecifics().has_dictionary());
     EXPECT_EQ(syncer::DICTIONARY, data[i].GetDataType());
-    EXPECT_EQ(words[i], syncer::SyncDataLocal(data[i]).GetTag());
+    EXPECT_EQ(syncer::ClientTagHash::FromUnhashed(syncer::DICTIONARY, words[i]),
+              data[i].GetClientTagHash());
     EXPECT_EQ(words[i], data[i].GetSpecifics().dictionary().word());
   }
 
   EXPECT_TRUE(dictionary->RemoveWord("bar"));
   EXPECT_TRUE(dictionary->RemoveWord("foo"));
 
-  data = dictionary->GetAllSyncData(syncer::DICTIONARY);
+  data = dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY);
   EXPECT_TRUE(data.empty());
 }
 
@@ -338,25 +363,25 @@ TEST_F(SpellcheckCustomDictionaryTest, GetAllSyncDataHasLimit) {
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords - 1,
             dictionary->GetWords().size());
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords - 1,
-            dictionary->GetAllSyncData(syncer::DICTIONARY).size());
+            dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
 
   dictionary->AddWord("baz");
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
             dictionary->GetWords().size());
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            dictionary->GetAllSyncData(syncer::DICTIONARY).size());
+            dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
 
   dictionary->AddWord("bar");
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords + 1,
             dictionary->GetWords().size());
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            dictionary->GetAllSyncData(syncer::DICTIONARY).size());
+            dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
 
   dictionary->AddWord("snafoo");
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords + 2,
             dictionary->GetWords().size());
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            dictionary->GetAllSyncData(syncer::DICTIONARY).size());
+            dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
 }
 
 TEST_F(SpellcheckCustomDictionaryTest, ProcessSyncChanges) {
@@ -421,7 +446,7 @@ TEST_F(SpellcheckCustomDictionaryTest, ProcessSyncChanges) {
         syncer::SyncData::CreateLocalData(word, word, specifics)));
   }
 
-  EXPECT_FALSE(dictionary->ProcessSyncChanges(FROM_HERE, changes).IsSet());
+  EXPECT_FALSE(dictionary->ProcessSyncChanges(FROM_HERE, changes).has_value());
 
   const std::set<std::string>& words = dictionary->GetWords();
   EXPECT_EQ(2UL, words.size());
@@ -435,12 +460,7 @@ TEST_F(SpellcheckCustomDictionaryTest, MergeDataAndStartSyncing) {
       SpellcheckServiceFactory::GetForContext(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
-  TestingProfile profile2;
-  SpellcheckService* spellcheck_service2 = static_cast<SpellcheckService*>(
-      SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile2, base::BindRepeating(&BuildSpellcheckService)));
-  SpellcheckCustomDictionary* custom_dictionary2 =
-      spellcheck_service2->GetCustomDictionary();
+  SpellcheckCustomDictionary* custom_dictionary2 = MakeExtraProfileDictionary();
 
   SpellcheckCustomDictionary::Change change;
   for (size_t i = 0; i < spellcheck::kMaxSyncableDictionaryWords / 2; ++i) {
@@ -455,17 +475,17 @@ TEST_F(SpellcheckCustomDictionaryTest, MergeDataAndStartSyncing) {
   Apply(*custom_dictionary2, change2);
 
   int error_counter = 0;
-  EXPECT_FALSE(custom_dictionary
-                   ->MergeDataAndStartSyncing(
-                       syncer::DICTIONARY,
-                       custom_dictionary2->GetAllSyncData(syncer::DICTIONARY),
-                       std::unique_ptr<syncer::SyncChangeProcessor>(
-                           new syncer::SyncChangeProcessorWrapperForTest(
-                               custom_dictionary2)),
-                       std::unique_ptr<syncer::SyncErrorFactory>(
-                           new SyncErrorFactoryStub(&error_counter)))
-                   .error()
-                   .IsSet());
+  EXPECT_FALSE(
+      custom_dictionary
+          ->MergeDataAndStartSyncing(
+              syncer::DICTIONARY,
+              custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY),
+              std::unique_ptr<syncer::SyncChangeProcessor>(
+                  new syncer::SyncChangeProcessorWrapperForTest(
+                      custom_dictionary2)),
+              std::unique_ptr<syncer::SyncErrorFactory>(
+                  new SyncErrorFactoryStub(&error_counter)))
+          .has_value());
   EXPECT_EQ(0, error_counter);
   EXPECT_TRUE(custom_dictionary->IsSyncing());
 
@@ -497,12 +517,7 @@ TEST_F(SpellcheckCustomDictionaryTest, SyncBeforeLoadDoesNotDuplicateWords) {
   SpellcheckCustomDictionary* custom_dictionary =
       SpellcheckServiceFactory::GetForContext(&profile_)->GetCustomDictionary();
 
-  TestingProfile profile2;
-  SpellcheckCustomDictionary* custom_dictionary2 =
-      static_cast<SpellcheckService*>(
-          SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-              &profile2, base::BindRepeating(&BuildSpellcheckService)))
-          ->GetCustomDictionary();
+  SpellcheckCustomDictionary* custom_dictionary2 = MakeExtraProfileDictionary();
 
   std::unique_ptr<SpellcheckCustomDictionary::Change> change(
       new SpellcheckCustomDictionary::Change);
@@ -515,17 +530,17 @@ TEST_F(SpellcheckCustomDictionaryTest, SyncBeforeLoadDoesNotDuplicateWords) {
   EXPECT_TRUE(custom_dictionary->GetWords().empty());
 
   int error_counter = 0;
-  EXPECT_FALSE(custom_dictionary
-                   ->MergeDataAndStartSyncing(
-                       syncer::DICTIONARY,
-                       custom_dictionary2->GetAllSyncData(syncer::DICTIONARY),
-                       std::unique_ptr<syncer::SyncChangeProcessor>(
-                           new syncer::SyncChangeProcessorWrapperForTest(
-                               custom_dictionary2)),
-                       std::unique_ptr<syncer::SyncErrorFactory>(
-                           new SyncErrorFactoryStub(&error_counter)))
-                   .error()
-                   .IsSet());
+  EXPECT_FALSE(
+      custom_dictionary
+          ->MergeDataAndStartSyncing(
+              syncer::DICTIONARY,
+              custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY),
+              std::unique_ptr<syncer::SyncChangeProcessor>(
+                  new syncer::SyncChangeProcessorWrapperForTest(
+                      custom_dictionary2)),
+              std::unique_ptr<syncer::SyncErrorFactory>(
+                  new SyncErrorFactoryStub(&error_counter)))
+          .has_value());
   EXPECT_EQ(0, error_counter);
   EXPECT_TRUE(custom_dictionary->IsSyncing());
 
@@ -549,12 +564,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigBeforeSyncing) {
       SpellcheckServiceFactory::GetForContext(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
-  TestingProfile profile2;
-  SpellcheckService* spellcheck_service2 = static_cast<SpellcheckService*>(
-      SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile2, base::BindRepeating(&BuildSpellcheckService)));
-  SpellcheckCustomDictionary* custom_dictionary2 =
-      spellcheck_service2->GetCustomDictionary();
+  SpellcheckCustomDictionary* custom_dictionary2 = MakeExtraProfileDictionary();
 
   SpellcheckCustomDictionary::Change change;
   for (size_t i = 0; i < spellcheck::kMaxSyncableDictionaryWords + 1; ++i) {
@@ -563,17 +573,17 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigBeforeSyncing) {
   Apply(*custom_dictionary, change);
 
   int error_counter = 0;
-  EXPECT_FALSE(custom_dictionary
-                   ->MergeDataAndStartSyncing(
-                       syncer::DICTIONARY,
-                       custom_dictionary2->GetAllSyncData(syncer::DICTIONARY),
-                       std::unique_ptr<syncer::SyncChangeProcessor>(
-                           new syncer::SyncChangeProcessorWrapperForTest(
-                               custom_dictionary2)),
-                       std::unique_ptr<syncer::SyncErrorFactory>(
-                           new SyncErrorFactoryStub(&error_counter)))
-                   .error()
-                   .IsSet());
+  EXPECT_FALSE(
+      custom_dictionary
+          ->MergeDataAndStartSyncing(
+              syncer::DICTIONARY,
+              custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY),
+              std::unique_ptr<syncer::SyncChangeProcessor>(
+                  new syncer::SyncChangeProcessorWrapperForTest(
+                      custom_dictionary2)),
+              std::unique_ptr<syncer::SyncErrorFactory>(
+                  new SyncErrorFactoryStub(&error_counter)))
+          .has_value());
   EXPECT_EQ(0, error_counter);
   EXPECT_FALSE(custom_dictionary->IsSyncing());
 
@@ -582,10 +592,12 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigBeforeSyncing) {
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
             custom_dictionary2->GetWords().size());
 
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            custom_dictionary->GetAllSyncData(syncer::DICTIONARY).size());
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            custom_dictionary2->GetAllSyncData(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords,
+      custom_dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords,
+      custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
 }
 
 TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigAndServerFull) {
@@ -593,12 +605,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigAndServerFull) {
       SpellcheckServiceFactory::GetForContext(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
-  TestingProfile profile2;
-  SpellcheckService* spellcheck_service2 = static_cast<SpellcheckService*>(
-      SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile2, base::BindRepeating(&BuildSpellcheckService)));
-  SpellcheckCustomDictionary* custom_dictionary2 =
-      spellcheck_service2->GetCustomDictionary();
+  SpellcheckCustomDictionary* custom_dictionary2 = MakeExtraProfileDictionary();
 
   SpellcheckCustomDictionary::Change change;
   SpellcheckCustomDictionary::Change change2;
@@ -616,17 +623,17 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigAndServerFull) {
             custom_dictionary2->GetWords().size());
 
   int error_counter = 0;
-  EXPECT_FALSE(custom_dictionary
-                   ->MergeDataAndStartSyncing(
-                       syncer::DICTIONARY,
-                       custom_dictionary2->GetAllSyncData(syncer::DICTIONARY),
-                       std::unique_ptr<syncer::SyncChangeProcessor>(
-                           new syncer::SyncChangeProcessorWrapperForTest(
-                               custom_dictionary2)),
-                       std::unique_ptr<syncer::SyncErrorFactory>(
-                           new SyncErrorFactoryStub(&error_counter)))
-                   .error()
-                   .IsSet());
+  EXPECT_FALSE(
+      custom_dictionary
+          ->MergeDataAndStartSyncing(
+              syncer::DICTIONARY,
+              custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY),
+              std::unique_ptr<syncer::SyncChangeProcessor>(
+                  new syncer::SyncChangeProcessorWrapperForTest(
+                      custom_dictionary2)),
+              std::unique_ptr<syncer::SyncErrorFactory>(
+                  new SyncErrorFactoryStub(&error_counter)))
+          .has_value());
   EXPECT_EQ(0, error_counter);
   EXPECT_FALSE(custom_dictionary->IsSyncing());
 
@@ -635,10 +642,12 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigAndServerFull) {
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
             custom_dictionary2->GetWords().size());
 
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            custom_dictionary->GetAllSyncData(syncer::DICTIONARY).size());
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            custom_dictionary2->GetAllSyncData(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords,
+      custom_dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords,
+      custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
 }
 
 TEST_F(SpellcheckCustomDictionaryTest, ServerTooBig) {
@@ -646,12 +655,7 @@ TEST_F(SpellcheckCustomDictionaryTest, ServerTooBig) {
       SpellcheckServiceFactory::GetForContext(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
-  TestingProfile profile2;
-  SpellcheckService* spellcheck_service2 = static_cast<SpellcheckService*>(
-      SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile2, base::BindRepeating(&BuildSpellcheckService)));
-  SpellcheckCustomDictionary* custom_dictionary2 =
-      spellcheck_service2->GetCustomDictionary();
+  SpellcheckCustomDictionary* custom_dictionary2 = MakeExtraProfileDictionary();
 
   SpellcheckCustomDictionary::Change change;
   SpellcheckCustomDictionary::Change change2;
@@ -677,8 +681,7 @@ TEST_F(SpellcheckCustomDictionaryTest, ServerTooBig) {
                                custom_dictionary2)),
                        std::unique_ptr<syncer::SyncErrorFactory>(
                            new SyncErrorFactoryStub(&error_counter)))
-                   .error()
-                   .IsSet());
+                   .has_value());
   EXPECT_EQ(0, error_counter);
   EXPECT_FALSE(custom_dictionary->IsSyncing());
 
@@ -687,10 +690,12 @@ TEST_F(SpellcheckCustomDictionaryTest, ServerTooBig) {
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords + 1,
             custom_dictionary2->GetWords().size());
 
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            custom_dictionary->GetAllSyncData(syncer::DICTIONARY).size());
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            custom_dictionary2->GetAllSyncData(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords,
+      custom_dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords,
+      custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
 }
 
 TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigToStartSyncing) {
@@ -698,12 +703,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigToStartSyncing) {
       SpellcheckServiceFactory::GetForContext(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
-  TestingProfile profile2;
-  SpellcheckService* spellcheck_service2 = static_cast<SpellcheckService*>(
-      SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile2, base::BindRepeating(&BuildSpellcheckService)));
-  SpellcheckCustomDictionary* custom_dictionary2 =
-      spellcheck_service2->GetCustomDictionary();
+  SpellcheckCustomDictionary* custom_dictionary2 = MakeExtraProfileDictionary();
 
   SpellcheckCustomDictionary::Change change;
   for (size_t i = 0; i < spellcheck::kMaxSyncableDictionaryWords - 1; ++i) {
@@ -715,17 +715,17 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigToStartSyncing) {
   custom_dictionary2->AddWord("baz");
 
   int error_counter = 0;
-  EXPECT_FALSE(custom_dictionary
-                   ->MergeDataAndStartSyncing(
-                       syncer::DICTIONARY,
-                       custom_dictionary2->GetAllSyncData(syncer::DICTIONARY),
-                       std::unique_ptr<syncer::SyncChangeProcessor>(
-                           new syncer::SyncChangeProcessorWrapperForTest(
-                               custom_dictionary2)),
-                       std::unique_ptr<syncer::SyncErrorFactory>(
-                           new SyncErrorFactoryStub(&error_counter)))
-                   .error()
-                   .IsSet());
+  EXPECT_FALSE(
+      custom_dictionary
+          ->MergeDataAndStartSyncing(
+              syncer::DICTIONARY,
+              custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY),
+              std::unique_ptr<syncer::SyncChangeProcessor>(
+                  new syncer::SyncChangeProcessorWrapperForTest(
+                      custom_dictionary2)),
+              std::unique_ptr<syncer::SyncErrorFactory>(
+                  new SyncErrorFactoryStub(&error_counter)))
+          .has_value());
   EXPECT_EQ(0, error_counter);
   EXPECT_FALSE(custom_dictionary->IsSyncing());
 
@@ -734,10 +734,12 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigToStartSyncing) {
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
             custom_dictionary2->GetWords().size());
 
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            custom_dictionary->GetAllSyncData(syncer::DICTIONARY).size());
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            custom_dictionary2->GetAllSyncData(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords,
+      custom_dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords,
+      custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
 }
 
 TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigToContiueSyncing) {
@@ -745,12 +747,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigToContiueSyncing) {
       SpellcheckServiceFactory::GetForContext(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
-  TestingProfile profile2;
-  SpellcheckService* spellcheck_service2 = static_cast<SpellcheckService*>(
-      SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile2, base::BindRepeating(&BuildSpellcheckService)));
-  SpellcheckCustomDictionary* custom_dictionary2 =
-      spellcheck_service2->GetCustomDictionary();
+  SpellcheckCustomDictionary* custom_dictionary2 = MakeExtraProfileDictionary();
 
   SpellcheckCustomDictionary::Change change;
   for (size_t i = 0; i < spellcheck::kMaxSyncableDictionaryWords - 1; ++i) {
@@ -759,17 +756,17 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigToContiueSyncing) {
   Apply(*custom_dictionary, change);
 
   int error_counter = 0;
-  EXPECT_FALSE(custom_dictionary
-                   ->MergeDataAndStartSyncing(
-                       syncer::DICTIONARY,
-                       custom_dictionary2->GetAllSyncData(syncer::DICTIONARY),
-                       std::unique_ptr<syncer::SyncChangeProcessor>(
-                           new syncer::SyncChangeProcessorWrapperForTest(
-                               custom_dictionary2)),
-                       std::unique_ptr<syncer::SyncErrorFactory>(
-                           new SyncErrorFactoryStub(&error_counter)))
-                   .error()
-                   .IsSet());
+  EXPECT_FALSE(
+      custom_dictionary
+          ->MergeDataAndStartSyncing(
+              syncer::DICTIONARY,
+              custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY),
+              std::unique_ptr<syncer::SyncChangeProcessor>(
+                  new syncer::SyncChangeProcessorWrapperForTest(
+                      custom_dictionary2)),
+              std::unique_ptr<syncer::SyncErrorFactory>(
+                  new SyncErrorFactoryStub(&error_counter)))
+          .has_value());
   EXPECT_EQ(0, error_counter);
   EXPECT_TRUE(custom_dictionary->IsSyncing());
 
@@ -786,10 +783,12 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigToContiueSyncing) {
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
             custom_dictionary2->GetWords().size());
 
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            custom_dictionary->GetAllSyncData(syncer::DICTIONARY).size());
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            custom_dictionary2->GetAllSyncData(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords,
+      custom_dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords,
+      custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
 }
 
 TEST_F(SpellcheckCustomDictionaryTest, LoadAfterSyncStart) {
@@ -797,27 +796,22 @@ TEST_F(SpellcheckCustomDictionaryTest, LoadAfterSyncStart) {
       SpellcheckServiceFactory::GetForContext(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
-  TestingProfile profile2;
-  SpellcheckService* spellcheck_service2 = static_cast<SpellcheckService*>(
-      SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile2, base::BindRepeating(&BuildSpellcheckService)));
-  SpellcheckCustomDictionary* custom_dictionary2 =
-      spellcheck_service2->GetCustomDictionary();
+  SpellcheckCustomDictionary* custom_dictionary2 = MakeExtraProfileDictionary();
 
   custom_dictionary->AddWord("foo");
 
   int error_counter = 0;
-  EXPECT_FALSE(custom_dictionary
-                   ->MergeDataAndStartSyncing(
-                       syncer::DICTIONARY,
-                       custom_dictionary2->GetAllSyncData(syncer::DICTIONARY),
-                       std::unique_ptr<syncer::SyncChangeProcessor>(
-                           new syncer::SyncChangeProcessorWrapperForTest(
-                               custom_dictionary2)),
-                       std::unique_ptr<syncer::SyncErrorFactory>(
-                           new SyncErrorFactoryStub(&error_counter)))
-                   .error()
-                   .IsSet());
+  EXPECT_FALSE(
+      custom_dictionary
+          ->MergeDataAndStartSyncing(
+              syncer::DICTIONARY,
+              custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY),
+              std::unique_ptr<syncer::SyncChangeProcessor>(
+                  new syncer::SyncChangeProcessorWrapperForTest(
+                      custom_dictionary2)),
+              std::unique_ptr<syncer::SyncErrorFactory>(
+                  new SyncErrorFactoryStub(&error_counter)))
+          .has_value());
   EXPECT_EQ(0, error_counter);
   EXPECT_TRUE(custom_dictionary->IsSyncing());
 
@@ -830,8 +824,12 @@ TEST_F(SpellcheckCustomDictionaryTest, LoadAfterSyncStart) {
   EXPECT_EQ(2UL, custom_dictionary->GetWords().size());
   EXPECT_EQ(2UL, custom_dictionary2->GetWords().size());
 
-  EXPECT_EQ(2UL, custom_dictionary->GetAllSyncData(syncer::DICTIONARY).size());
-  EXPECT_EQ(2UL, custom_dictionary2->GetAllSyncData(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      2UL,
+      custom_dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      2UL,
+      custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
 }
 
 TEST_F(SpellcheckCustomDictionaryTest, LoadAfterSyncStartTooBigToSync) {
@@ -839,27 +837,22 @@ TEST_F(SpellcheckCustomDictionaryTest, LoadAfterSyncStartTooBigToSync) {
       SpellcheckServiceFactory::GetForContext(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
-  TestingProfile profile2;
-  SpellcheckService* spellcheck_service2 = static_cast<SpellcheckService*>(
-      SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile2, base::BindRepeating(&BuildSpellcheckService)));
-  SpellcheckCustomDictionary* custom_dictionary2 =
-      spellcheck_service2->GetCustomDictionary();
+  SpellcheckCustomDictionary* custom_dictionary2 = MakeExtraProfileDictionary();
 
   custom_dictionary->AddWord("foo");
 
   int error_counter = 0;
-  EXPECT_FALSE(custom_dictionary
-                   ->MergeDataAndStartSyncing(
-                       syncer::DICTIONARY,
-                       custom_dictionary2->GetAllSyncData(syncer::DICTIONARY),
-                       std::unique_ptr<syncer::SyncChangeProcessor>(
-                           new syncer::SyncChangeProcessorWrapperForTest(
-                               custom_dictionary2)),
-                       std::unique_ptr<syncer::SyncErrorFactory>(
-                           new SyncErrorFactoryStub(&error_counter)))
-                   .error()
-                   .IsSet());
+  EXPECT_FALSE(
+      custom_dictionary
+          ->MergeDataAndStartSyncing(
+              syncer::DICTIONARY,
+              custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY),
+              std::unique_ptr<syncer::SyncChangeProcessor>(
+                  new syncer::SyncChangeProcessorWrapperForTest(
+                      custom_dictionary2)),
+              std::unique_ptr<syncer::SyncErrorFactory>(
+                  new SyncErrorFactoryStub(&error_counter)))
+          .has_value());
   EXPECT_EQ(0, error_counter);
   EXPECT_TRUE(custom_dictionary->IsSyncing());
 
@@ -877,10 +870,12 @@ TEST_F(SpellcheckCustomDictionaryTest, LoadAfterSyncStartTooBigToSync) {
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
             custom_dictionary2->GetWords().size());
 
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            custom_dictionary->GetAllSyncData(syncer::DICTIONARY).size());
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
-            custom_dictionary2->GetAllSyncData(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords,
+      custom_dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords,
+      custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
 }
 
 TEST_F(SpellcheckCustomDictionaryTest, LoadDuplicatesAfterSync) {
@@ -888,12 +883,7 @@ TEST_F(SpellcheckCustomDictionaryTest, LoadDuplicatesAfterSync) {
       SpellcheckServiceFactory::GetForContext(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
-  TestingProfile profile2;
-  SpellcheckService* spellcheck_service2 = static_cast<SpellcheckService*>(
-      SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile2, base::BindRepeating(&BuildSpellcheckService)));
-  SpellcheckCustomDictionary* custom_dictionary2 =
-      spellcheck_service2->GetCustomDictionary();
+  SpellcheckCustomDictionary* custom_dictionary2 = MakeExtraProfileDictionary();
 
   SpellcheckCustomDictionary::Change change;
   for (size_t i = 0; i < spellcheck::kMaxSyncableDictionaryWords / 2; ++i) {
@@ -902,17 +892,17 @@ TEST_F(SpellcheckCustomDictionaryTest, LoadDuplicatesAfterSync) {
   Apply(*custom_dictionary, change);
 
   int error_counter = 0;
-  EXPECT_FALSE(custom_dictionary
-                   ->MergeDataAndStartSyncing(
-                       syncer::DICTIONARY,
-                       custom_dictionary2->GetAllSyncData(syncer::DICTIONARY),
-                       std::unique_ptr<syncer::SyncChangeProcessor>(
-                           new syncer::SyncChangeProcessorWrapperForTest(
-                               custom_dictionary2)),
-                       std::unique_ptr<syncer::SyncErrorFactory>(
-                           new SyncErrorFactoryStub(&error_counter)))
-                   .error()
-                   .IsSet());
+  EXPECT_FALSE(
+      custom_dictionary
+          ->MergeDataAndStartSyncing(
+              syncer::DICTIONARY,
+              custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY),
+              std::unique_ptr<syncer::SyncChangeProcessor>(
+                  new syncer::SyncChangeProcessorWrapperForTest(
+                      custom_dictionary2)),
+              std::unique_ptr<syncer::SyncErrorFactory>(
+                  new SyncErrorFactoryStub(&error_counter)))
+          .has_value());
   EXPECT_EQ(0, error_counter);
   EXPECT_TRUE(custom_dictionary->IsSyncing());
 
@@ -926,10 +916,12 @@ TEST_F(SpellcheckCustomDictionaryTest, LoadDuplicatesAfterSync) {
   EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords / 2,
             custom_dictionary2->GetWords().size());
 
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords / 2,
-            custom_dictionary->GetAllSyncData(syncer::DICTIONARY).size());
-  EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords / 2,
-            custom_dictionary2->GetAllSyncData(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords / 2,
+      custom_dictionary->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
+  EXPECT_EQ(
+      spellcheck::kMaxSyncableDictionaryWords / 2,
+      custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY).size());
 }
 
 TEST_F(SpellcheckCustomDictionaryTest, DictionaryLoadNotification) {
@@ -1002,12 +994,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionarySyncNotification) {
       SpellcheckServiceFactory::GetForContext(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
-  TestingProfile profile2;
-  SpellcheckService* spellcheck_service2 = static_cast<SpellcheckService*>(
-      SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile2, base::BindRepeating(&BuildSpellcheckService)));
-  SpellcheckCustomDictionary* custom_dictionary2 =
-      spellcheck_service2->GetCustomDictionary();
+  SpellcheckCustomDictionary* custom_dictionary2 = MakeExtraProfileDictionary();
 
   OnLoaded(*custom_dictionary, base::WrapUnique(new std::set<std::string>));
   OnLoaded(*custom_dictionary2, base::WrapUnique(new std::set<std::string>));
@@ -1024,17 +1011,17 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionarySyncNotification) {
   custom_dictionary2->AddObserver(&observer2);
 
   int error_counter = 0;
-  EXPECT_FALSE(custom_dictionary
-                   ->MergeDataAndStartSyncing(
-                       syncer::DICTIONARY,
-                       custom_dictionary2->GetAllSyncData(syncer::DICTIONARY),
-                       std::unique_ptr<syncer::SyncChangeProcessor>(
-                           new syncer::SyncChangeProcessorWrapperForTest(
-                               custom_dictionary2)),
-                       std::unique_ptr<syncer::SyncErrorFactory>(
-                           new SyncErrorFactoryStub(&error_counter)))
-                   .error()
-                   .IsSet());
+  EXPECT_FALSE(
+      custom_dictionary
+          ->MergeDataAndStartSyncing(
+              syncer::DICTIONARY,
+              custom_dictionary2->GetAllSyncDataForTesting(syncer::DICTIONARY),
+              std::unique_ptr<syncer::SyncChangeProcessor>(
+                  new syncer::SyncChangeProcessorWrapperForTest(
+                      custom_dictionary2)),
+              std::unique_ptr<syncer::SyncErrorFactory>(
+                  new SyncErrorFactoryStub(&error_counter)))
+          .has_value());
   EXPECT_EQ(0, error_counter);
   EXPECT_TRUE(custom_dictionary->IsSyncing());
 
@@ -1050,15 +1037,9 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionarySyncNotification) {
 // sync server upon association. The client should accept words from the sync
 // server, however.
 TEST_F(SpellcheckCustomDictionaryTest, DictionarySyncLimit) {
-  TestingProfile server_profile;
-  SpellcheckService* server_spellcheck_service =
-      static_cast<SpellcheckService*>(
-          SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-              &server_profile, base::BindRepeating(&BuildSpellcheckService)));
-
   // Here, |server_custom_dictionary| plays the role of the sync server.
   SpellcheckCustomDictionary* server_custom_dictionary =
-      server_spellcheck_service->GetCustomDictionary();
+      MakeExtraProfileDictionary();
 
   // Upload the maximum number of words to the sync server.
   {
@@ -1074,18 +1055,17 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionarySyncLimit) {
     Apply(*custom_dictionary, change);
 
     int error_counter = 0;
-    EXPECT_FALSE(
-        custom_dictionary
-            ->MergeDataAndStartSyncing(
-                syncer::DICTIONARY,
-                server_custom_dictionary->GetAllSyncData(syncer::DICTIONARY),
-                std::unique_ptr<syncer::SyncChangeProcessor>(
-                    new syncer::SyncChangeProcessorWrapperForTest(
-                        server_custom_dictionary)),
-                std::unique_ptr<syncer::SyncErrorFactory>(
-                    new SyncErrorFactoryStub(&error_counter)))
-            .error()
-            .IsSet());
+    EXPECT_FALSE(custom_dictionary
+                     ->MergeDataAndStartSyncing(
+                         syncer::DICTIONARY,
+                         server_custom_dictionary->GetAllSyncDataForTesting(
+                             syncer::DICTIONARY),
+                         std::unique_ptr<syncer::SyncChangeProcessor>(
+                             new syncer::SyncChangeProcessorWrapperForTest(
+                                 server_custom_dictionary)),
+                         std::unique_ptr<syncer::SyncErrorFactory>(
+                             new SyncErrorFactoryStub(&error_counter)))
+                     .has_value());
     EXPECT_EQ(0, error_counter);
     EXPECT_TRUE(custom_dictionary->IsSyncing());
     EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords,
@@ -1100,15 +1080,9 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionarySyncLimit) {
   // words, but all of these words are different from the ones on the sync
   // server.
   {
-    TestingProfile client_profile;
-    SpellcheckService* client_spellcheck_service =
-        static_cast<SpellcheckService*>(
-            SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-                &client_profile, base::BindRepeating(&BuildSpellcheckService)));
-
     // Here, |client_custom_dictionary| plays the role of the client.
     SpellcheckCustomDictionary* client_custom_dictionary =
-        client_spellcheck_service->GetCustomDictionary();
+        MakeExtraProfileDictionary();
 
     // Add the maximum number of words to the client. These words are all
     // different from those on the server.
@@ -1120,18 +1094,17 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionarySyncLimit) {
 
     // Associate the server and the client.
     int error_counter = 0;
-    EXPECT_FALSE(
-        client_custom_dictionary
-            ->MergeDataAndStartSyncing(
-                syncer::DICTIONARY,
-                server_custom_dictionary->GetAllSyncData(syncer::DICTIONARY),
-                std::unique_ptr<syncer::SyncChangeProcessor>(
-                    new syncer::SyncChangeProcessorWrapperForTest(
-                        server_custom_dictionary)),
-                std::unique_ptr<syncer::SyncErrorFactory>(
-                    new SyncErrorFactoryStub(&error_counter)))
-            .error()
-            .IsSet());
+    EXPECT_FALSE(client_custom_dictionary
+                     ->MergeDataAndStartSyncing(
+                         syncer::DICTIONARY,
+                         server_custom_dictionary->GetAllSyncDataForTesting(
+                             syncer::DICTIONARY),
+                         std::unique_ptr<syncer::SyncChangeProcessor>(
+                             new syncer::SyncChangeProcessorWrapperForTest(
+                                 server_custom_dictionary)),
+                         std::unique_ptr<syncer::SyncErrorFactory>(
+                             new SyncErrorFactoryStub(&error_counter)))
+                     .has_value());
     EXPECT_EQ(0, error_counter);
     EXPECT_FALSE(client_custom_dictionary->IsSyncing());
     EXPECT_EQ(spellcheck::kMaxSyncableDictionaryWords * 2,
@@ -1144,7 +1117,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionarySyncLimit) {
             server_custom_dictionary->GetWords().size());
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // Failing consistently on Win7+. See crbug.com/230534.
 #define MAYBE_RecordSizeStatsCorrectly DISABLED_RecordSizeStatsCorrectly
 #else
@@ -1157,7 +1130,7 @@ TEST_F(SpellcheckCustomDictionaryTest, MAYBE_RecordSizeStatsCorrectly) {
 
   HistogramBase* histogram =
       StatisticsRecorder::FindHistogram("SpellCheck.CustomWords");
-  ASSERT_TRUE(histogram != NULL);
+  ASSERT_TRUE(histogram != nullptr);
   std::unique_ptr<HistogramSamples> baseline = histogram->SnapshotSamples();
 
   // Load the dictionary which should be empty.
@@ -1168,7 +1141,7 @@ TEST_F(SpellcheckCustomDictionaryTest, MAYBE_RecordSizeStatsCorrectly) {
   // We expect there to be an entry with 0.
   histogram =
       StatisticsRecorder::FindHistogram("SpellCheck.CustomWords");
-  ASSERT_TRUE(histogram != NULL);
+  ASSERT_TRUE(histogram != nullptr);
   std::unique_ptr<HistogramSamples> samples = histogram->SnapshotSamples();
 
   samples->Subtract(*baseline);
@@ -1185,7 +1158,7 @@ TEST_F(SpellcheckCustomDictionaryTest, MAYBE_RecordSizeStatsCorrectly) {
 
   histogram =
       StatisticsRecorder::FindHistogram("SpellCheck.CustomWords");
-  ASSERT_TRUE(histogram != NULL);
+  ASSERT_TRUE(histogram != nullptr);
   std::unique_ptr<HistogramSamples> samples2 = histogram->SnapshotSamples();
 
   samples2->Subtract(*baseline);

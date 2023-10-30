@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@ import android.content.Context;
 import android.graphics.RectF;
 import android.view.View;
 
-import org.chromium.chrome.browser.compositor.TitleCache;
-import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
+import org.chromium.chrome.browser.fullscreen.BrowserControlsManager;
+import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 
 /**
  * This is the minimal interface of the host view from the layout side.
@@ -26,6 +26,15 @@ public interface LayoutManagerHost {
      * Requests a refresh of the visuals.
      */
     void requestRender();
+
+    /**
+     * Requests a refresh of the visuals.
+     * @param onUpdateEffective Callback that will be called when there is a buffer swap for the
+     *                          requested update. The rendered frame for this request won't be
+     *                          visible until a buffer swap occurs. Note that there is no guarantee
+     *                          the updated buffer is the one currently being displayed for pre-Q.
+     */
+    default void requestRender(Runnable onUpdateEffective) {}
 
     /**
      * @return The Android context of the host view.
@@ -91,14 +100,14 @@ public interface LayoutManagerHost {
     void setContentOverlayVisibility(boolean show, boolean canBeFocusable);
 
     /**
-     * @return The {@link TitleCache} to use to store title bitmaps.
+     * @return The manager providing browser control state.
      */
-    TitleCache getTitleCache();
+    BrowserControlsManager getBrowserControlsManager();
 
     /**
      * @return The manager in charge of handling fullscreen changes.
      */
-    ChromeFullscreenManager getFullscreenManager();
+    FullscreenManager getFullscreenManager();
 
     /**
      * Called when the currently visible content has been changed.

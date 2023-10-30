@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,17 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/extensions/extension_prefs_unittest.h"
 #include "components/crx_file/id_util.h"
 #include "components/sync/model/string_ordinal.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/extension_id.h"
 #include "extensions/common/manifest_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using extensions::mojom::ManifestLocation;
 
 namespace extensions {
 
@@ -578,23 +583,22 @@ class ChromeAppSortingPreinstalledAppsBase : public PrefsPrepopulatedTestBase {
  public:
   ChromeAppSortingPreinstalledAppsBase() {
     base::DictionaryValue simple_dict;
-    simple_dict.SetString(keys::kVersion, "1.0.0.0");
-    simple_dict.SetString(keys::kName, "unused");
-    simple_dict.SetString(keys::kApp, "true");
-    simple_dict.SetString(keys::kLaunchLocalPath, "fake.html");
+    simple_dict.SetStringPath(keys::kVersion, "1.0.0.0");
+    simple_dict.SetStringPath(keys::kName, "unused");
+    simple_dict.SetStringPath(keys::kLaunchLocalPath, "fake.html");
 
     std::string error;
-    app1_scoped_ = Extension::Create(
-        prefs_.temp_dir().AppendASCII("app1_"), Manifest::EXTERNAL_PREF,
-        simple_dict, Extension::NO_FLAGS, &error);
+    app1_scoped_ = Extension::Create(prefs_.temp_dir().AppendASCII("app1_"),
+                                     ManifestLocation::kExternalPref,
+                                     simple_dict, Extension::NO_FLAGS, &error);
     prefs()->OnExtensionInstalled(app1_scoped_.get(),
                                   Extension::ENABLED,
                                   syncer::StringOrdinal(),
                                   std::string());
 
-    app2_scoped_ = Extension::Create(
-        prefs_.temp_dir().AppendASCII("app2_"), Manifest::EXTERNAL_PREF,
-        simple_dict, Extension::NO_FLAGS, &error);
+    app2_scoped_ = Extension::Create(prefs_.temp_dir().AppendASCII("app2_"),
+                                     ManifestLocation::kExternalPref,
+                                     simple_dict, Extension::NO_FLAGS, &error);
     prefs()->OnExtensionInstalled(app2_scoped_.get(),
                                   Extension::ENABLED,
                                   syncer::StringOrdinal(),
@@ -607,8 +611,8 @@ class ChromeAppSortingPreinstalledAppsBase : public PrefsPrepopulatedTestBase {
 
  protected:
   // Weak references, for convenience.
-  Extension* app1_;
-  Extension* app2_;
+  raw_ptr<Extension> app1_;
+  raw_ptr<Extension> app2_;
 
  private:
   scoped_refptr<Extension> app1_scoped_;
@@ -747,14 +751,13 @@ class ChromeAppSortingDefaultOrdinalsBase : public ExtensionPrefsTest {
  protected:
   scoped_refptr<Extension> CreateApp(const std::string& name) {
     base::DictionaryValue simple_dict;
-    simple_dict.SetString(keys::kVersion, "1.0.0.0");
-    simple_dict.SetString(keys::kName, name);
-    simple_dict.SetString(keys::kApp, "true");
-    simple_dict.SetString(keys::kLaunchLocalPath, "fake.html");
+    simple_dict.SetStringPath(keys::kVersion, "1.0.0.0");
+    simple_dict.SetStringPath(keys::kName, name);
+    simple_dict.SetStringPath(keys::kLaunchLocalPath, "fake.html");
 
     std::string errors;
     scoped_refptr<Extension> app = Extension::Create(
-        prefs_.temp_dir().AppendASCII(name), Manifest::EXTERNAL_PREF,
+        prefs_.temp_dir().AppendASCII(name), ManifestLocation::kExternalPref,
         simple_dict, Extension::NO_FLAGS, &errors);
     EXPECT_TRUE(app.get()) << errors;
     EXPECT_TRUE(crx_file::id_util::IdIsValid(app->id()));

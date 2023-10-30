@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,10 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/android/explore_sites/catalog.h"
-
-namespace base {
-class DictionaryValue;
-class Value;
-}  // namespace base
+#include "services/data_decoder/public/cpp/data_decoder.h"
 
 namespace content {
 class BrowserContext;
@@ -37,6 +33,10 @@ class NTPJsonFetcher {
   typedef base::OnceCallback<void(std::unique_ptr<NTPCatalog>)> Callback;
 
   explicit NTPJsonFetcher(content::BrowserContext* browser_context);
+
+  NTPJsonFetcher(const NTPJsonFetcher&) = delete;
+  NTPJsonFetcher& operator=(const NTPJsonFetcher&) = delete;
+
   ~NTPJsonFetcher();
 
   // Starts to fetch results for the given |query_url|.
@@ -46,16 +46,14 @@ class NTPJsonFetcher {
  private:
   // Invoked from SimpleURLLoader after download is complete.
   void OnSimpleLoaderComplete(std::unique_ptr<std::string> response_body);
-  // Callbacks for SafeJsonParser.
-  void OnJsonParseSuccess(base::Value parsed_json);
+  // Callback for DataDecoder.
+  void OnJsonParse(data_decoder::DataDecoder::ValueOrError result);
   void OnJsonParseError(const std::string& error);
 
   Callback callback_;
-  content::BrowserContext* browser_context_;
+  raw_ptr<content::BrowserContext> browser_context_;
   std::unique_ptr<network::SimpleURLLoader> simple_loader_;
-  base::WeakPtrFactory<NTPJsonFetcher> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(NTPJsonFetcher);
+  base::WeakPtrFactory<NTPJsonFetcher> weak_factory_{this};
 };
 
 }  // namespace explore_sites

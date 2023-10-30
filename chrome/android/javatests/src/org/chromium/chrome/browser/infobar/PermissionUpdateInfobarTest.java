@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,10 @@ package org.chromium.chrome.browser.infobar;
 
 import android.Manifest;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.MediumTest;
 
+import androidx.test.filters.MediumTest;
+
+import org.hamcrest.Matchers;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -16,21 +18,25 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.preferences.website.ContentSettingValues;
-import org.chromium.chrome.browser.preferences.website.PermissionInfo;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.InfoBarTestAnimationListener;
+import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
 import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
+import org.chromium.components.browser_ui.site_settings.PermissionInfo;
+import org.chromium.components.content_settings.ContentSettingValues;
+import org.chromium.components.content_settings.ContentSettingsType;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServer;
-import org.chromium.ui.base.AndroidPermissionDelegate;
-import org.chromium.ui.base.PermissionCallback;
+import org.chromium.ui.permissions.AndroidPermissionDelegate;
+import org.chromium.ui.permissions.PermissionCallback;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -45,6 +51,7 @@ import java.util.concurrent.TimeoutException;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@DisableFeatures({ChromeFeatureList.MESSAGES_FOR_ANDROID_PERMISSION_UPDATE})
 public class PermissionUpdateInfobarTest {
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
@@ -64,7 +71,7 @@ public class PermissionUpdateInfobarTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -73,7 +80,7 @@ public class PermissionUpdateInfobarTest {
     @Test
     @MediumTest
     public void testInfobarShutsDownCleanlyForGeolocation()
-            throws IllegalArgumentException, InterruptedException, TimeoutException {
+            throws IllegalArgumentException, TimeoutException {
         ChromeTabUtils.newTabFromMenu(
                 InstrumentationRegistry.getInstrumentation(), mActivityTestRule.getActivity());
 
@@ -82,7 +89,7 @@ public class PermissionUpdateInfobarTest {
                 () -> mActivityTestRule.getInfoBarContainer() != null);
         InfoBarContainer container = mActivityTestRule.getInfoBarContainer();
         mListener =  new InfoBarTestAnimationListener();
-        container.addAnimationListener(mListener);
+        TestThreadUtils.runOnUiThreadBlocking(() -> container.addAnimationListener(mListener));
 
         final String locationUrl = mTestServer.getURL(GEOLOCATION_PAGE);
         final PermissionInfo geolocationSettings =
@@ -90,7 +97,7 @@ public class PermissionUpdateInfobarTest {
                     @Override
                     public PermissionInfo call() {
                         return new PermissionInfo(
-                                PermissionInfo.Type.GEOLOCATION, locationUrl, null, false);
+                                ContentSettingsType.GEOLOCATION, locationUrl, null, false);
                     }
                 });
 
@@ -101,7 +108,10 @@ public class PermissionUpdateInfobarTest {
 
         try {
             TestThreadUtils.runOnUiThreadBlocking(
-                    () -> geolocationSettings.setContentSetting(ContentSettingValues.ALLOW));
+                    ()
+                            -> geolocationSettings.setContentSetting(
+                                    Profile.getLastUsedRegularProfile(),
+                                    ContentSettingValues.ALLOW));
 
             mActivityTestRule.loadUrl(mTestServer.getURL(GEOLOCATION_PAGE));
             mListener.addInfoBarAnimationFinished("InfoBar not added");
@@ -110,7 +120,7 @@ public class PermissionUpdateInfobarTest {
             final WebContents webContents =
                     TestThreadUtils.runOnUiThreadBlockingNoException(new Callable<WebContents>() {
                         @Override
-                        public WebContents call() throws Exception {
+                        public WebContents call() {
                             return mActivityTestRule.getActivity()
                                     .getActivityTab()
                                     .getWebContents();
@@ -120,25 +130,21 @@ public class PermissionUpdateInfobarTest {
 
             ChromeTabUtils.closeCurrentTab(
                     InstrumentationRegistry.getInstrumentation(), mActivityTestRule.getActivity());
-            CriteriaHelper.pollUiThread(new Criteria() {
-                @Override
-                public boolean isSatisfied() {
-                    return webContents.isDestroyed();
-                }
-            });
+            CriteriaHelper.pollUiThread(() -> webContents.isDestroyed());
 
-            CriteriaHelper.pollUiThread(Criteria.equals(1, new Callable<Integer>() {
-                @Override
-                public Integer call() {
-                    return mActivityTestRule.getActivity()
-                            .getTabModelSelector()
-                            .getModel(false)
-                            .getCount();
-                }
-            }));
+            CriteriaHelper.pollUiThread(() -> {
+                Criteria.checkThat(mActivityTestRule.getActivity()
+                                           .getTabModelSelector()
+                                           .getModel(false)
+                                           .getCount(),
+                        Matchers.is(1));
+            });
         } finally {
             TestThreadUtils.runOnUiThreadBlocking(
-                    () -> geolocationSettings.setContentSetting(ContentSettingValues.DEFAULT));
+                    ()
+                            -> geolocationSettings.setContentSetting(
+                                    Profile.getLastUsedRegularProfile(),
+                                    ContentSettingValues.DEFAULT));
         }
     }
 
@@ -184,5 +190,4 @@ public class PermissionUpdateInfobarTest {
             return false;
         }
     }
-
 }

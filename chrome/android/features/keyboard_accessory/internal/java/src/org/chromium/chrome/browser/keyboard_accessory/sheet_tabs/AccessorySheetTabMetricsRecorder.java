@@ -1,11 +1,14 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.keyboard_accessory.sheet_tabs;
 
 import static org.chromium.chrome.browser.keyboard_accessory.ManualFillingMetricsRecorder.getHistogramForType;
+import static org.chromium.chrome.browser.keyboard_accessory.sheet_tabs.AccessorySheetTabModel.AccessorySheetDataPiece.Type.ADDRESS_INFO;
+import static org.chromium.chrome.browser.keyboard_accessory.sheet_tabs.AccessorySheetTabModel.AccessorySheetDataPiece.Type.CREDIT_CARD_INFO;
 import static org.chromium.chrome.browser.keyboard_accessory.sheet_tabs.AccessorySheetTabModel.AccessorySheetDataPiece.Type.PASSWORD_INFO;
+import static org.chromium.chrome.browser.keyboard_accessory.sheet_tabs.AccessorySheetTabModel.AccessorySheetDataPiece.Type.PROMO_CODE_INFO;
 import static org.chromium.chrome.browser.keyboard_accessory.sheet_tabs.AccessorySheetTabModel.AccessorySheetDataPiece.getType;
 
 import org.chromium.base.metrics.RecordHistogram;
@@ -33,16 +36,17 @@ class AccessorySheetTabMetricsRecorder {
      */
     static void recordSheetSuggestions(@AccessoryTabType int tabType,
             ListModel<AccessorySheetTabModel.AccessorySheetDataPiece> suggestionList) {
-        // TODO(crbug.com/926372): Add metrics capabilities for credit cards.
-        if (tabType == AccessoryTabType.CREDIT_CARDS) return;
-
         int interactiveSuggestions = 0;
         for (int i = 0; i < suggestionList.size(); ++i) {
-            if (getType(suggestionList.get(i)) == PASSWORD_INFO) {
+            if (getType(suggestionList.get(i)) == PASSWORD_INFO
+                    || getType(suggestionList.get(i)) == ADDRESS_INFO
+                    || getType(suggestionList.get(i)) == CREDIT_CARD_INFO) {
                 UserInfo info = (UserInfo) suggestionList.get(i).getDataPiece();
                 for (UserInfoField field : info.getFields()) {
                     if (field.isSelectable()) ++interactiveSuggestions;
                 }
+            } else if (getType(suggestionList.get(i)) == PROMO_CODE_INFO) {
+                ++interactiveSuggestions;
             }
         }
         RecordHistogram.recordCount100Histogram(

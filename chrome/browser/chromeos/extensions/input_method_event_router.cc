@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,16 +37,15 @@ void ExtensionInputMethodEventRouter::InputMethodChanged(
     bool show_message) {
   // If an event is recieved from a different profile, e.g. while switching
   // between multiple profiles, ignore it.
-  if (!profile->IsSameProfile(Profile::FromBrowserContext(context_)))
+  if (!profile->IsSameOrParent(Profile::FromBrowserContext(context_)))
     return;
 
   extensions::EventRouter* router = extensions::EventRouter::Get(context_);
   if (!router->HasEventListener(OnChanged::kEventName))
     return;
 
-  std::unique_ptr<base::ListValue> args(new base::ListValue());
-  args->AppendString(
-      manager->GetActiveIMEState()->GetCurrentInputMethod().id());
+  base::Value::List args;
+  args.Append(manager->GetActiveIMEState()->GetCurrentInputMethod().id());
 
   // The router will only send the event to extensions that are listening.
   auto event = std::make_unique<extensions::Event>(

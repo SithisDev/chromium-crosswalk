@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,14 +10,10 @@ using ::testing::_;
 using ::testing::Return;
 
 MediaGalleriesDialogControllerMock::MediaGalleriesDialogControllerMock() {
-  ON_CALL(*this, GetHeader()).
-      WillByDefault(Return(base::ASCIIToUTF16("Title")));
-  ON_CALL(*this, GetSubtext()).
-      WillByDefault(Return(base::ASCIIToUTF16("Desc")));
-  ON_CALL(*this, GetAcceptButtonText()).
-      WillByDefault(Return(base::ASCIIToUTF16("OK")));
-  ON_CALL(*this, GetAuxiliaryButtonText()).
-      WillByDefault(Return(base::ASCIIToUTF16("Button")));
+  ON_CALL(*this, GetHeader()).WillByDefault(Return(u"Title"));
+  ON_CALL(*this, GetSubtext()).WillByDefault(Return(u"Desc"));
+  ON_CALL(*this, GetAcceptButtonText()).WillByDefault(Return(u"OK"));
+  ON_CALL(*this, GetAuxiliaryButtonText()).WillByDefault(Return(u"Button"));
   ON_CALL(*this, GetSectionEntries(_)).
       WillByDefault(Return(Entries()));
 }

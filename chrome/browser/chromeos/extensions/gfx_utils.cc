@@ -1,22 +1,22 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/extensions/gfx_utils.h"
 
+#include "base/containers/cxx20_erase.h"
 #include "base/lazy_instance.h"
-#include "base/stl_util.h"
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/app_icon_resources.h"
 #include "components/prefs/pref_service.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/constants.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
 
@@ -38,21 +38,18 @@ const struct {
     {"com.google.android.gm", extension_misc::kGmailAppId},
     {"com.google.android.gm", "bjdhhokmhgelphffoafoejjmlfblpdha"},
     // Google Drive
-    {"com.google.android.apps.docs", extension_misc::kDriveHostedAppId},
+    {"com.google.android.apps.docs", extension_misc::kGoogleDriveAppId},
     {"com.google.android.apps.docs", "mdhnphfgagkpdhndljccoackjjhghlif"},
     // Google Maps
     {"com.google.android.apps.maps", "lneaknkopdijkpnocmklfnjbeapigfbh"},
     // Calculator
     {"com.google.android.calculator", "joodangkbfjnajiiifokapkpmhfnpleo"},
-    // Chrome Remote Desktop
-    {"com.google.chromeremotedesktop", "gbchcmhmhahfdphkhkmpfmihenigjmpp"},
-    {"com.google.chromeremotedesktop", "cdjikkcakjcdjemakobkmijmikhkegcj"},
     // Google Calender
     {"com.google.android.calendar", "ejjicmeblgpmajnghnpcppodonldlgfn"},
     {"com.google.android.calendar", "fpgfohogebplgnamlafljlcidjedbdeb"},
     // Google Docs
     {"com.google.android.apps.docs.editors.docs",
-     extension_misc::kGoogleDocAppId},
+     extension_misc::kGoogleDocsAppId},
     {"com.google.android.apps.docs.editors.docs",
      "npnjdccdffhdndcbeappiamcehbhjibf"},
     // Google Slides
@@ -109,13 +106,16 @@ class AppDualBadgeMap {
   using ExtensionToArcAppMap = std::unordered_map<std::string, std::string>;
 
   AppDualBadgeMap() {
-    for (size_t i = 0; i < base::size(kDualBadgeMap); ++i) {
+    for (size_t i = 0; i < std::size(kDualBadgeMap); ++i) {
       arc_app_to_extensions_map_[kDualBadgeMap[i].arc_package_name].push_back(
           kDualBadgeMap[i].extension_id);
       extension_to_arc_app_map_[kDualBadgeMap[i].extension_id] =
           kDualBadgeMap[i].arc_package_name;
     }
   }
+
+  AppDualBadgeMap(const AppDualBadgeMap&) = delete;
+  AppDualBadgeMap& operator=(const AppDualBadgeMap&) = delete;
 
   std::vector<std::string> GetExtensionIdsForArcPackageName(
       std::string arc_package_name) {
@@ -135,8 +135,6 @@ class AppDualBadgeMap {
  private:
   ArcAppToExtensionsMap arc_app_to_extensions_map_;
   ExtensionToArcAppMap extension_to_arc_app_map_;
-
-  DISALLOW_COPY_AND_ASSIGN(AppDualBadgeMap);
 };
 
 base::LazyInstance<AppDualBadgeMap>::DestructorAtExit g_dual_badge_map =
@@ -171,6 +169,12 @@ bool GetEquivalentInstalledArcApps(content::BrowserContext* context,
   return !arc_apps->empty();
 }
 
+const std::vector<std::string> GetEquivalentInstalledAppIds(
+    const std::string& arc_package_name) {
+  return g_dual_badge_map.Get().GetExtensionIdsForArcPackageName(
+      arc_package_name);
+}
+
 const std::vector<std::string> GetEquivalentInstalledExtensions(
     content::BrowserContext* context,
     const std::string& arc_package_name) {
@@ -195,7 +199,7 @@ bool ShouldApplyChromeBadge(content::BrowserContext* context,
 
   Profile* profile = Profile::FromBrowserContext(context);
   // Only apply Chrome badge for the primary profile.
-  if (!chromeos::ProfileHelper::IsPrimaryProfile(profile) ||
+  if (!ash::ProfileHelper::IsPrimaryProfile(profile) ||
       !multi_user_util::IsProfileFromActiveUser(profile)) {
     return false;
   }
@@ -210,12 +214,44 @@ bool ShouldApplyChromeBadge(content::BrowserContext* context,
   return true;
 }
 
-void ApplyChromeBadge(gfx::ImageSkia* icon_out) {
+bool ShouldApplyChromeBadgeToWebApp(content::BrowserContext* context,
+                                    const std::string& web_app_id) {
+  DCHECK(context);
+
+  Profile* profile = Profile::FromBrowserContext(context);
+  // Only apply Chrome badge for the primary profile.
+  if (!ash::ProfileHelper::IsPrimaryProfile(profile) ||
+      !multi_user_util::IsProfileFromActiveUser(profile)) {
+    return false;
+  }
+
+  if (!HasEquivalentInstalledArcApp(context, web_app_id))
+    return false;
+
+  return true;
+}
+
+void ApplyBadge(gfx::ImageSkia* icon_out, ChromeAppIcon::Badge badge_type) {
   DCHECK(icon_out);
+  DCHECK_NE(ChromeAppIcon::Badge::kNone, badge_type);
+
+  int badge_res = 0;
+  switch (badge_type) {
+    case ChromeAppIcon::Badge::kChrome:
+      badge_res = IDR_CHROME_ICON_BADGE;
+      break;
+    case ChromeAppIcon::Badge::kBlocked:
+      badge_res = IDR_BLOCK_ICON_BADGE;
+      break;
+    case ChromeAppIcon::Badge::kPaused:
+      badge_res = IDR_HOURGLASS_ICON_BADGE;
+      break;
+    default:
+      NOTREACHED();
+  }
 
   const gfx::ImageSkia* badge_image =
-      ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-          IDR_ARC_DUAL_ICON_BADGE);
+      ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(badge_res);
   DCHECK(badge_image);
 
   gfx::ImageSkia resized_badge_image = *badge_image;

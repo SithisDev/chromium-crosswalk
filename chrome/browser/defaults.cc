@@ -1,55 +1,64 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "build/build_config.h"
 #include "chrome/browser/defaults.h"
+
+#include "build/branding_buildflags.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
 namespace browser_defaults {
 
-#if defined(OS_CHROMEOS) || defined(OS_MACOSX)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_MAC)
 const bool kBrowserAliveWithNoWindows = true;
+const bool kShowExitMenuItem = false;
+#elif BUILDFLAG(IS_CHROMEOS_LACROS)
+// Note: Lacros can get kicked out of memory when the last window closes.
+const bool kBrowserAliveWithNoWindows = false;
 const bool kShowExitMenuItem = false;
 #else
 const bool kBrowserAliveWithNoWindows = false;
 const bool kShowExitMenuItem = true;
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 const bool kShowUpgradeMenuItem = false;
 const bool kShowImportOnBookmarkBar = false;
 const bool kAlwaysOpenIncognitoWindow = true;
-const bool kAlwaysCreateTabbedBrowserOnSessionRestore = false;
 #else
 const bool kShowUpgradeMenuItem = true;
 const bool kShowImportOnBookmarkBar = true;
 const bool kAlwaysOpenIncognitoWindow = false;
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS)
+const bool kAlwaysCreateTabbedBrowserOnSessionRestore = false;
+#else
 const bool kAlwaysCreateTabbedBrowserOnSessionRestore = true;
 #endif
 
-#if defined(GOOGLE_CHROME_BUILD)
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 const bool kShowHelpMenuItemIcon = true;
 #else
 const bool kShowHelpMenuItemIcon = false;
 #endif
-#endif
 
 const bool kDownloadPageHasShowInFolder = true;
 
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 const bool kSyncAutoStarts = true;
 #else
 const bool kSyncAutoStarts = false;
 #endif
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX)
 const bool kScrollEventChangesTab = true;
 #else
 const bool kScrollEventChangesTab = false;
 #endif
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 const bool kPasswordEchoEnabled = false;
 #endif
 

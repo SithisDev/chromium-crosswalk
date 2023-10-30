@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,7 +53,7 @@ const base::FilePath& DeleteTreeWorkItem::GetBackupPath() {
 }
 
 bool DeleteTreeWorkItem::DeleteRoot() {
-  if (base::DeleteFile(root_path_, true))
+  if (base::DeletePathRecursively(root_path_))
     return true;
   LOG(ERROR) << "Failed to delete " << root_path_.value();
   return false;
@@ -67,7 +67,7 @@ bool DeleteTreeWorkItem::MoveRootToBackup() {
     moved_to_backup_ = true;
     return true;
   }
-  PLOG(ERROR) << "Failed to move " << root_path_.value()
-              << " to backup path " << backup.value();
+  PLOG(ERROR) << "Failed to move " << root_path_.value() << " to backup path "
+              << backup.value();
   return false;
 }

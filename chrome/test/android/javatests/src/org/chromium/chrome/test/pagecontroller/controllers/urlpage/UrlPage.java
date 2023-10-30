@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,12 +18,12 @@ import org.chromium.chrome.test.pagecontroller.utils.UiLocatorHelper;
 public class UrlPage extends PageController {
     private static final long PAGE_LOAD_TIMEOUT = 10000L;
     private static final IUi2Locator LOCATOR_WEB_VIEW =
-            Ui2Locators.withPath(Ui2Locators.withResEntries(R.id.content),
+            Ui2Locators.withPath(Ui2Locators.withAnyResEntry(R.id.content),
                     Ui2Locators.withClassRegex("android\\.webkit\\.WebView"));
-    private static final IUi2Locator LOCATOR_URL_BAR = Ui2Locators.withResEntries(R.id.url_bar);
+    private static final IUi2Locator LOCATOR_URL_BAR = Ui2Locators.withAnyResEntry(R.id.url_bar);
     private static final IUi2Locator LOCATOR_TAB_SWITCHER =
-            Ui2Locators.withResEntries(R.id.tab_switcher_button);
-    private static final IUi2Locator LOCATOR_MENU = Ui2Locators.withResEntries(R.id.menu_button);
+            Ui2Locators.withAnyResEntry(R.id.tab_switcher_button);
+    private static final IUi2Locator LOCATOR_MENU = Ui2Locators.withAnyResEntry(R.id.menu_button);
 
     private static final UrlPage sInstance = new UrlPage();
     private UrlPage() {}
@@ -32,10 +32,10 @@ public class UrlPage extends PageController {
     }
 
     @Override
-    public boolean isCurrentPageThis() {
-        long savedTimeout = mUtils.getTimeout();
+    public UrlPage verifyActive() {
         UiLocatorHelper helper = mUtils.getLocatorHelper(PAGE_LOAD_TIMEOUT);
-        return helper.isOnScreen(LOCATOR_WEB_VIEW);
+        helper.verifyOnScreen(LOCATOR_WEB_VIEW);
+        return this;
     }
 
     public String getUrl() {
@@ -50,8 +50,6 @@ public class UrlPage extends PageController {
 
     public TabSwitcherController openTabSwitcher() {
         mUtils.click(LOCATOR_TAB_SWITCHER);
-        TabSwitcherController inst = TabSwitcherController.getInstance();
-        inst.verify();
-        return inst;
+        return TabSwitcherController.getInstance().verifyActive();
     }
 }

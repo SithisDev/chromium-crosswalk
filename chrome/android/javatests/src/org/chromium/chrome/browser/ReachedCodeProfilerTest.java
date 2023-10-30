@@ -1,10 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser;
 
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -12,11 +12,15 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.BaseSwitches;
+import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.test.ReachedCodeProfiler;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
-import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
 import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 
@@ -27,11 +31,7 @@ import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public final class ReachedCodeProfilerTest {
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
-
-    // Shared preferences key for the reached code profiler.
-    private static final String REACHED_CODE_PROFILER_ENABLED_KEY = "reached_code_profiler_enabled";
+    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
     private static final String FAKE_GROUP_NAME = "FakeGroup";
 
@@ -42,7 +42,7 @@ public final class ReachedCodeProfilerTest {
     @SmallTest
     @DisableFeatures(ChromeFeatureList.REACHED_CODE_PROFILER)
     @CommandLineFlags.Add(BaseSwitches.ENABLE_REACHED_CODE_PROFILER)
-    public void testExplicitlyEnableViaCommandLineSwitch() throws Exception {
+    public void testExplicitlyEnableViaCommandLineSwitch() {
         mActivityTestRule.startMainActivityFromLauncher();
         assertReachedCodeProfilerIsEnabled();
     }
@@ -53,11 +53,17 @@ public final class ReachedCodeProfilerTest {
      */
     @Test
     @SmallTest
-    @EnableFeatures(ChromeFeatureList.REACHED_CODE_PROFILER)
-    public void testEnabledViaCachedSharedPreference() throws Exception {
-        setReachedCodeProfilerSharedPreference(true);
+    @CommandLineFlags.Add({"enable-features=" + ChromeFeatureList.REACHED_CODE_PROFILER + "<"
+                    + ChromeFeatureList.REACHED_CODE_PROFILER,
+            "force-fieldtrials=" + ChromeFeatureList.REACHED_CODE_PROFILER + "/" + FAKE_GROUP_NAME,
+            "force-fieldtrial-params=" + ChromeFeatureList.REACHED_CODE_PROFILER + "."
+                    + FAKE_GROUP_NAME + ":sampling_interval_us/42"})
+    public void
+    testEnabledViaCachedSharedPreference() {
+        LibraryLoader.setReachedCodeProfilerEnabledOnNextRuns(true, 42);
         mActivityTestRule.startMainActivityFromLauncher();
         assertReachedCodeProfilerIsEnabled();
+        Assert.assertEquals(42, LibraryLoader.getReachedCodeSamplingIntervalUs());
     }
 
     /**
@@ -67,10 +73,10 @@ public final class ReachedCodeProfilerTest {
     @Test
     @SmallTest
     @EnableFeatures(ChromeFeatureList.REACHED_CODE_PROFILER)
-    public void testSharedPreferenceIsCached_Enable() throws Exception {
+    public void testSharedPreferenceIsCached_Enable() {
         mActivityTestRule.startMainActivityFromLauncher();
 
-        Assert.assertTrue(getReachedCodeProfilerSharedPreference());
+        Assert.assertEquals(10000, LibraryLoader.getReachedCodeSamplingIntervalUs());
         // Enabling takes effect only on the second startup.
         Assert.assertFalse(ReachedCodeProfiler.isEnabled());
     }
@@ -83,11 +89,10 @@ public final class ReachedCodeProfilerTest {
     @Test
     @SmallTest
     @DisableFeatures(ChromeFeatureList.REACHED_CODE_PROFILER)
-    public void testSharedPreferenceIsCached_Disable() throws Exception {
-        setReachedCodeProfilerSharedPreference(true);
+    public void testSharedPreferenceIsCached_Disable() {
+        LibraryLoader.setReachedCodeProfilerEnabledOnNextRuns(true, 0);
         mActivityTestRule.startMainActivityFromLauncher();
-
-        Assert.assertFalse(getReachedCodeProfilerSharedPreference());
+        Assert.assertEquals(0, LibraryLoader.getReachedCodeSamplingIntervalUs());
         // Disabling takes effect only on the second startup.
         assertReachedCodeProfilerIsEnabled();
     }
@@ -100,11 +105,11 @@ public final class ReachedCodeProfilerTest {
     @SmallTest
     @CommandLineFlags.
     Add("force-fieldtrials=" + ChromeFeatureList.REACHED_CODE_PROFILER + "/" + FAKE_GROUP_NAME)
-    public void testSharedPreferenceTrialGroupIsCached() throws Exception {
+    public void testSharedPreferenceTrialGroupIsCached() {
         mActivityTestRule.startMainActivityFromLauncher();
         Assert.assertEquals(FAKE_GROUP_NAME,
-                ChromePreferenceManager.getInstance().readString(
-                        ChromePreferenceManager.REACHED_CODE_PROFILER_GROUP_KEY, null));
+                SharedPreferencesManager.getInstance().readString(
+                        ChromePreferenceKeys.REACHED_CODE_PROFILER_GROUP, null));
     }
 
     /**
@@ -118,15 +123,5 @@ public final class ReachedCodeProfilerTest {
         }
 
         Assert.assertTrue(ReachedCodeProfiler.isEnabled());
-    }
-
-    private boolean getReachedCodeProfilerSharedPreference() {
-        return ChromePreferenceManager.getInstance().readBoolean(
-                REACHED_CODE_PROFILER_ENABLED_KEY, false);
-    }
-
-    private void setReachedCodeProfilerSharedPreference(boolean value) {
-        ChromePreferenceManager.getInstance().writeBoolean(
-                REACHED_CODE_PROFILER_ENABLED_KEY, value);
     }
 }

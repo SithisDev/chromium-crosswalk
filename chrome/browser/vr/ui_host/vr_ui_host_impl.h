@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,21 @@
 #define CHROME_BROWSER_VR_UI_HOST_VR_UI_HOST_IMPL_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/cancelable_callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
+#include "base/time/time.h"
 #include "chrome/browser/media/webrtc/desktop_media_picker_manager.h"
-#include "chrome/browser/permissions/permission_request_manager.h"
 #include "chrome/browser/vr/model/capturing_state_model.h"
-#include "chrome/browser/vr/service/browser_xr_runtime.h"
-#include "chrome/browser/vr/service/vr_ui_host.h"
-#include "components/bubble/bubble_manager.h"
+#include "components/permissions/permission_request_manager.h"
+#include "content/public/browser/browser_xr_runtime.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/xr_integration_client.h"
+#include "device/vr/public/mojom/isolated_xr_service.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/geolocation_config.mojom.h"
 
 namespace vr {
@@ -25,20 +29,18 @@ class VRBrowserRendererThreadWin;
 
 // Concrete implementation of VRBrowserRendererHost, part of the "browser"
 // component. Used on the browser's main thread.
-class VRUiHostImpl : public VRUiHost,
-                     public PermissionRequestManager::Observer,
-                     public BrowserXRRuntimeObserver,
-                     public BubbleManager::BubbleManagerObserver,
+class VRUiHostImpl : public content::VrUiHost,
+                     public permissions::PermissionRequestManager::Observer,
+                     public content::BrowserXRRuntime::Observer,
                      public DesktopMediaPickerManager::DialogObserver {
  public:
   VRUiHostImpl(device::mojom::XRDeviceId device_id,
-               device::mojom::XRCompositorHostPtr compositor);
-  ~VRUiHostImpl() override;
+               mojo::PendingRemote<device::mojom::XRCompositorHost> compositor);
 
-  // Factory for use with VRUiHost::{Set,Get}Factory
-  static std::unique_ptr<VRUiHost> Create(
-      device::mojom::XRDeviceId device_id,
-      device::mojom::XRCompositorHostPtr compositor);
+  VRUiHostImpl(const VRUiHostImpl&) = delete;
+  VRUiHostImpl& operator=(const VRUiHostImpl&) = delete;
+
+  ~VRUiHostImpl() override;
 
  private:
   // This class manages the transience of each of a CapturingStateModel's flags.
@@ -66,12 +68,14 @@ class VRUiHostImpl : public VRUiHost,
     base::Time bluetooth_indicator_start_;
     base::Time usb_indicator_start_;
     base::Time midi_indicator_start_;
-    CapturingStateModel* active_capture_state_model_;  // Not owned.
+    raw_ptr<CapturingStateModel> active_capture_state_model_;  // Not owned.
   };
 
-  // BrowserXRRuntimeObserver implementation.
-  void SetWebXRWebContents(content::WebContents* contents) override;
-  void SetVRDisplayInfo(device::mojom::VRDisplayInfoPtr display_info) override;
+  // content::BrowserXRRuntime::Observer implementation.
+  void WebXRWebContentsChanged(content::WebContents* contents) override;
+  void WebXRFramesThrottledChanged(bool throttled) override;
+  void SetDefaultXrViews(
+      const std::vector<device::mojom::XRViewPtr>& views) override;
 
   // Internal methods used to start/stop the UI rendering thread that is used
   // for drawing browser UI (such as permission prompts) for display in VR.
@@ -81,12 +85,6 @@ class VRUiHostImpl : public VRUiHost,
   // PermissionRequestManager::Observer
   void OnBubbleAdded() override;
   void OnBubbleRemoved() override;
-
-  // content::BubbleManager::BubbleManagerObserver
-  void OnBubbleNeverShown(BubbleReference bubble) override;
-  void OnBubbleClosed(BubbleReference bubble,
-                      BubbleCloseReason reason) override;
-  void OnBubbleShown(BubbleReference bubble) override;
 
   // DesktopMediaPickerManager::DialogObserver
   // These are dialogs displayed in response to getDisplayMedia()
@@ -100,14 +98,12 @@ class VRUiHostImpl : public VRUiHost,
   void InitCapturingStates();
   void PollCapturingState();
 
-  device::mojom::XRCompositorHostPtr compositor_;
+  mojo::Remote<device::mojom::XRCompositorHost> compositor_;
   std::unique_ptr<VRBrowserRendererThreadWin> ui_rendering_thread_;
-  device::mojom::VRDisplayInfoPtr info_;
-  content::WebContents* web_contents_ = nullptr;
-  PermissionRequestManager* permission_request_manager_ = nullptr;
+  raw_ptr<content::WebContents> web_contents_ = nullptr;
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
 
-  base::CancelableClosure external_prompt_timeout_task_;
+  base::CancelableOnceClosure external_prompt_timeout_task_;
   bool is_external_prompt_showing_in_headset_ = false;
 
   CapturingStateModel active_capturing_;
@@ -119,15 +115,15 @@ class VRUiHostImpl : public VRUiHost,
   base::Time indicators_shown_start_time_;
   bool indicators_visible_ = false;
   bool indicators_showing_first_time_ = true;
+  bool frames_throttled_ = false;
+  std::vector<device::mojom::XRViewPtr> default_views_;
 
-  device::mojom::GeolocationConfigPtr geolocation_config_;
-  base::CancelableClosure poll_capturing_state_task_;
+  mojo::Remote<device::mojom::GeolocationConfig> geolocation_config_;
+  base::CancelableOnceClosure poll_capturing_state_task_;
 
   THREAD_CHECKER(thread_checker_);
 
   base::WeakPtrFactory<VRUiHostImpl> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(VRUiHostImpl);
 };
 
 }  // namespace vr

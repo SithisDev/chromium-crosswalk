@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,10 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/files/file_path.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
@@ -61,19 +62,19 @@ class MTPDeviceDelegateImplWinTest : public ChromeRenderViewHostTestHarness {
   void TearDown() override;
 
   void ProcessAttach(const std::string& id,
-                     const base::string16& name,
+                     const std::u16string& name,
                      const base::FilePath::StringType& location);
   std::string AttachDevice(StorageInfo::Type type,
                            const std::string& unique_id,
                            const base::FilePath& location);
   void CheckGalleryInfo(const MediaFileSystemInfo& info,
-                        const base::string16& name,
+                        const std::u16string& name,
                         const base::FilePath& path,
                         bool removable,
                         bool media_device);
 
   // Pointer to the storage monitor. Owned by TestingBrowserProcess.
-  TestStorageMonitorWin* monitor_;
+  raw_ptr<TestStorageMonitorWin> monitor_;
   scoped_refptr<extensions::Extension> extension_;
 
   EnsureMediaDirectoriesExists media_directories_;
@@ -83,12 +84,12 @@ void MTPDeviceDelegateImplWinTest::SetUp() {
   ChromeRenderViewHostTestHarness::SetUp();
 
   TestStorageMonitor::Destroy();
-  TestPortableDeviceWatcherWin* portable_device_watcher =
-      new TestPortableDeviceWatcherWin;
-  TestVolumeMountWatcherWin* mount_watcher = new TestVolumeMountWatcherWin;
+  auto portable_device_watcher =
+      std::make_unique<TestPortableDeviceWatcherWin>();
   portable_device_watcher->set_use_dummy_mtp_storage_info(true);
-  std::unique_ptr<TestStorageMonitorWin> monitor(
-      new TestStorageMonitorWin(mount_watcher, portable_device_watcher));
+  auto monitor = std::make_unique<TestStorageMonitorWin>(
+      std::make_unique<TestVolumeMountWatcherWin>(),
+      std::move(portable_device_watcher));
   TestingBrowserProcess* browser_process = TestingBrowserProcess::GetGlobal();
   DCHECK(browser_process);
   monitor_ = monitor.get();
@@ -123,9 +124,9 @@ void MTPDeviceDelegateImplWinTest::TearDown() {
 
 void MTPDeviceDelegateImplWinTest::ProcessAttach(
     const std::string& id,
-    const base::string16& label,
+    const std::u16string& label,
     const base::FilePath::StringType& location) {
-  StorageInfo info(id, location, label, base::string16(), base::string16(), 0);
+  StorageInfo info(id, location, label, std::u16string(), std::u16string(), 0);
   monitor_->receiver()->ProcessAttach(info);
 }
 
@@ -135,7 +136,7 @@ std::string MTPDeviceDelegateImplWinTest::AttachDevice(
     const base::FilePath& location) {
   std::string device_id = StorageInfo::MakeDeviceId(type, unique_id);
   DCHECK(StorageInfo::IsRemovableDevice(device_id));
-  base::string16 label = location.LossyDisplayName();
+  std::u16string label = location.LossyDisplayName();
   ProcessAttach(device_id, label, location.value());
   base::RunLoop().RunUntilIdle();
   return device_id;
@@ -143,7 +144,7 @@ std::string MTPDeviceDelegateImplWinTest::AttachDevice(
 
 void MTPDeviceDelegateImplWinTest::CheckGalleryInfo(
     const MediaFileSystemInfo& info,
-    const base::string16& name,
+    const std::u16string& name,
     const base::FilePath& path,
     bool removable,
     bool media_device) {
@@ -171,7 +172,7 @@ TEST_F(MTPDeviceDelegateImplWinTest, DISABLED_GalleryNameMTP) {
       g_browser_process->media_file_system_registry();
   registry->GetMediaFileSystemsForExtension(
       web_contents(), extension_.get(),
-      base::Bind(&GetGalleryInfoCallback, base::Unretained(&results)));
+      base::BindOnce(&GetGalleryInfoCallback, base::Unretained(&results)));
   content::RunAllTasksUntilIdle();
 
   ASSERT_EQ(media_directories_.num_galleries() + 1u, results.size());

@@ -1,22 +1,23 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_ASH_ASH_TEST_UTIL_H_
 #define CHROME_BROWSER_UI_ASH_ASH_TEST_UTIL_H_
 
-namespace aura {
-class Window;
+namespace chromeos {
+enum class WindowStateType;
 }
 
-namespace ash {
-enum class WindowStateType;
+namespace aura {
+class Window;
 }
 
 namespace test {
 
 // The snap window. This will activate the |window|.
-void ActivateAndSnapWindow(aura::Window* window, ash::WindowStateType type);
+void ActivateAndSnapWindow(aura::Window* window,
+                           chromeos::WindowStateType type);
 
 }  // namespace test
 

@@ -1,16 +1,19 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 
-#include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/login/login_handler.h"
+#include "chrome/browser/ui/login/login_tab_helper.h"
+#include "chrome/test/base/chrome_render_view_host_test_harness.h"
+#include "content/public/test/mock_navigation_handle.h"
 #include "net/base/auth.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
+#include "url/scheme_host_port.h"
 
 namespace {
 
@@ -97,19 +100,31 @@ const struct TestCase {
      {"https://www.nowhere.org", "", "https://www.nowhere.org/Foo"}},
 };
 
-base::string16 ExpectedAuthority(bool is_proxy, const char* prefix) {
-  base::string16 str = base::ASCIIToUTF16(prefix);
+std::u16string ExpectedAuthority(bool is_proxy, const char* prefix) {
+  std::u16string str = base::ASCIIToUTF16(prefix);
   // Proxies and Android have additional surrounding text. Otherwise, only the
   // host URL is shown.
   bool extra_text = is_proxy;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   extra_text = true;
 #endif
   if (extra_text)
-    str += base::ASCIIToUTF16(" requires a username and password.");
+    str += u" requires a username and password.";
 
   return str;
 }
+
+class LoginHandlerWithWebContentsTest : public ChromeRenderViewHostTestHarness {
+ public:
+  LoginHandlerWithWebContentsTest() {}
+
+  LoginHandlerWithWebContentsTest(const LoginHandlerWithWebContentsTest&) =
+      delete;
+  LoginHandlerWithWebContentsTest& operator=(
+      const LoginHandlerWithWebContentsTest&) = delete;
+
+  ~LoginHandlerWithWebContentsTest() override {}
+};
 
 }  // namespace
 
@@ -120,7 +135,7 @@ TEST(LoginHandlerTest, DialogStringsAndRealm) {
     auth_info.is_proxy = test_case.auth_info.target_type == PROXY;
     auth_info.scheme = test_case.auth_info.scheme;
     auth_info.realm = test_case.auth_info.realm;
-    auth_info.challenger = url::Origin::Create(
+    auth_info.challenger = url::SchemeHostPort(
         test_case.auth_info.challenger ? GURL(test_case.auth_info.challenger)
                                        : request_url);
 
@@ -130,8 +145,8 @@ TEST(LoginHandlerTest, DialogStringsAndRealm) {
                  << " scheme:'" << auth_info.scheme << "' realm:'"
                  << auth_info.realm << "' challenger:'"
                  << auth_info.challenger.Serialize() << "' }");
-    base::string16 authority;
-    base::string16 explanation;
+    std::u16string authority;
+    std::u16string explanation;
 
     LoginHandler::GetDialogStrings(request_url, auth_info, &authority,
                                    &explanation);
@@ -144,4 +159,19 @@ TEST(LoginHandlerTest, DialogStringsAndRealm) {
     EXPECT_STREQ(test_case.expected.signon_realm,
                  LoginHandler::GetSignonRealm(request_url, auth_info).c_str());
   }
+}
+
+// Tests that LoginTabHelper does not crash if
+// WillProcessMainFrameUnauthorizedResponse() is called when there is no pending
+// entry. Regression test for https://crbug.com/1015787.
+TEST_F(LoginHandlerWithWebContentsTest, NoPendingEntryDoesNotCrash) {
+  LoginTabHelper::CreateForWebContents(web_contents());
+  LoginTabHelper* helper = LoginTabHelper::FromWebContents(web_contents());
+  net::AuthChallengeInfo challenge;
+  content::MockNavigationHandle handle;
+  handle.SetAuthChallengeInfo(challenge);
+  handle.set_global_request_id({0, 1});
+  content::NavigationThrottle::ThrottleCheckResult result =
+      helper->WillProcessMainFrameUnauthorizedResponse(&handle);
+  EXPECT_EQ(content::NavigationThrottle::CANCEL, result.action());
 }

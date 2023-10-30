@@ -1,11 +1,14 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/offline_pages/offline_page_utils.h"
 
-#include "base/logging.h"
 #include "chrome/browser/android/tab_android.h"
+#include "chrome/browser/android/tab_web_contents_delegate_android.h"
+#include "chrome/browser/download/android/download_dialog_utils.h"
+#include "chrome/browser/download/android/duplicate_download_dialog_bridge.h"
+#include "chrome/browser/flags/android/chrome_feature_list.h"
 #include "chrome/browser/offline_pages/android/downloads/offline_page_download_bridge.h"
 #include "chrome/browser/offline_pages/android/downloads/offline_page_infobar_delegate.h"
 #include "content/public/browser/web_contents.h"
@@ -14,6 +17,15 @@
 // TODO(dimich): consider callsites to generalize.
 
 namespace offline_pages {
+
+namespace {
+
+void OnDuplicateDialogConfirmed(base::OnceClosure callback, bool accepted) {
+  if (accepted)
+    std::move(callback).Run();
+}
+
+}  // namespace
 
 // static
 bool OfflinePageUtils::GetTabId(content::WebContents* web_contents,
@@ -28,19 +40,22 @@ bool OfflinePageUtils::GetTabId(content::WebContents* web_contents,
 // static
 bool OfflinePageUtils::CurrentlyShownInCustomTab(
     content::WebContents* web_contents) {
-  TabAndroid* tab_android = TabAndroid::FromWebContents(web_contents);
-  DCHECK(tab_android);
-  return tab_android && tab_android->IsCurrentlyACustomTab();
+  auto* delegate = static_cast<::android::TabWebContentsDelegateAndroid*>(
+      web_contents->GetDelegate());
+  return delegate && delegate->IsCustomTab();
 }
 
 // static
 void OfflinePageUtils::ShowDuplicatePrompt(
-    const base::Closure& confirm_continuation,
+    base::OnceClosure confirm_continuation,
     const GURL& url,
     bool exists_duplicate_request,
     content::WebContents* web_contents) {
-  OfflinePageInfoBarDelegate::Create(
-      confirm_continuation, url, exists_duplicate_request, web_contents);
+  DuplicateDownloadDialogBridge::GetInstance()->Show(
+      url.spec(), DownloadDialogUtils::GetDisplayURLForPageURL(url),
+      -1 /*total_bytes*/, exists_duplicate_request, web_contents,
+      base::BindOnce(&OnDuplicateDialogConfirmed,
+                     std::move(confirm_continuation)));
 }
 
 // static

@@ -1,32 +1,30 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/android/bottombar/overlay_panel_content.h"
 
+#include <memory>
 #include <set>
 
 #include "base/android/jni_string.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "cc/input/browser_controls_state.h"
 #include "chrome/android/chrome_jni_headers/OverlayPanelContent_jni.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/ui/android/view_android_helper.h"
-#include "chrome/common/chrome_render_frame.mojom.h"
 #include "components/embedder_support/android/delegate/web_contents_delegate_android.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/browser_controls_state.h"
-#include "net/url_request/url_fetcher_impl.h"
-#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "ui/android/view_android.h"
 
 using base::android::JavaParamRef;
@@ -78,8 +76,8 @@ void OverlayPanelContent::RemoveLastHistoryEntry(
   // The deletion window is from the time a search URL was put in history, up
   // to a short amount of time later.
   base::Time begin_time = base::Time::FromJsTime(search_start_time_ms);
-  base::Time end_time = begin_time +
-      base::TimeDelta::FromSeconds(kHistoryDeletionWindowSeconds);
+  base::Time end_time =
+      begin_time + base::Seconds(kHistoryDeletionWindowSeconds);
 
   history::HistoryService* service = HistoryServiceFactory::GetForProfile(
       ProfileManager::GetActiveUserProfile(),
@@ -118,19 +116,22 @@ void OverlayPanelContent::SetWebContents(
   // TODO(pedrosimonetti): confirm if we need this after promoting it
   // to a real tab.
   TabAndroid::AttachTabHelpers(web_contents_.get());
-  web_contents_delegate_.reset(
-      new web_contents_delegate_android::WebContentsDelegateAndroid(
-          env, jweb_contents_delegate));
+  web_contents_delegate_ = std::make_unique<
+      web_contents_delegate_android::WebContentsDelegateAndroid>(
+      env, jweb_contents_delegate);
   web_contents_->SetDelegate(web_contents_delegate_.get());
-  ViewAndroidHelper::FromWebContents(web_contents_.get())
-      ->SetViewAndroid(web_contents_->GetNativeView());
 }
 
 void OverlayPanelContent::DestroyWebContents(
     JNIEnv* env,
     const JavaParamRef<jobject>& jobj) {
   DCHECK(web_contents_.get());
-  web_contents_.reset();
+  // At the time this is called we may be deeply nested in a callback from
+  // WebContents. WebContents does not support being deleted from a callback
+  // (crashes). To avoid this problem DeleteSoon() is used. See
+  // https://crbug.com/1262098.
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE,
+                                                  web_contents_.release());
   // |web_contents_delegate_| may already be NULL at this point.
   web_contents_delegate_.reset();
 }
@@ -156,19 +157,12 @@ void OverlayPanelContent::UpdateBrowserControlsState(
   if (!web_contents_)
     return;
 
-  content::BrowserControlsState state = content::BROWSER_CONTROLS_STATE_SHOWN;
+  cc::BrowserControlsState state = cc::BrowserControlsState::kShown;
   if (are_controls_hidden)
-    state = content::BROWSER_CONTROLS_STATE_HIDDEN;
+    state = cc::BrowserControlsState::kHidden;
 
-  chrome::mojom::ChromeRenderFrameAssociatedPtr renderer;
-  web_contents_->GetMainFrame()->GetRemoteAssociatedInterfaces()->GetInterface(
-      &renderer);
-
-  if (!renderer.is_bound())
-    return;
-
-  renderer->UpdateBrowserControlsState(
-      state, content::BROWSER_CONTROLS_STATE_BOTH, false);
+  web_contents_->UpdateBrowserControlsState(
+      state, cc::BrowserControlsState::kBoth, false);
 }
 
 jlong JNI_OverlayPanelContent_Init(JNIEnv* env,

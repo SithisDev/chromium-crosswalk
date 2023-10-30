@@ -1,12 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.signin;
 
 import android.content.Context;
-import android.content.Intent;
-import android.provider.Settings;
 import android.util.AttributeSet;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -15,15 +13,13 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import org.chromium.base.task.PostTask;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.preferences.PreferencesLauncher;
-import org.chromium.chrome.browser.preferences.sync.SyncAndServicesPreferences;
-import org.chromium.chrome.browser.signin.SigninActivity.AccessPoint;
-import org.chromium.chrome.browser.util.IntentUtils;
-import org.chromium.components.sync.AndroidSyncSettings;
-import org.chromium.components.sync.AndroidSyncSettings.AndroidSyncSettingsObserver;
-import org.chromium.content_public.browser.UiThreadTaskTraits;
+import org.chromium.chrome.browser.settings.SettingsLauncherImpl;
+import org.chromium.chrome.browser.sync.SyncService;
+import org.chromium.chrome.browser.sync.settings.ManageSyncSettings;
+import org.chromium.chrome.browser.ui.signin.SyncConsentActivityLauncher.AccessPoint;
+import org.chromium.components.browser_ui.settings.SettingsLauncher;
+import org.chromium.components.signin.metrics.SigninAccessPoint;
 
 /**
  * A View that shows the user the next step they must complete to start syncing their data (eg.
@@ -31,7 +27,7 @@ import org.chromium.content_public.browser.UiThreadTaskTraits;
  * If inflated manually, {@link SyncPromoView#init(int)} must be called before
  * attaching this View to a ViewGroup.
  */
-public class SyncPromoView extends LinearLayout implements AndroidSyncSettingsObserver {
+public class SyncPromoView extends LinearLayout implements SyncService.SyncStateChangedListener {
     private @AccessPoint int mAccessPoint;
     private boolean mInitialized;
 
@@ -58,6 +54,9 @@ public class SyncPromoView extends LinearLayout implements AndroidSyncSettingsOb
      */
     public SyncPromoView(Context context, AttributeSet attrs) {
         super(context, attrs);
+        // This promo is about enabling sync, so no sense in showing it if
+        // syncing isn't possible.
+        assert SyncService.get() != null;
     }
 
     @Override
@@ -93,9 +92,8 @@ public class SyncPromoView extends LinearLayout implements AndroidSyncSettingsOb
 
     private void update() {
         ViewState viewState;
-        if (!AndroidSyncSettings.get().isMasterSyncEnabled()) {
-            viewState = getStateForEnableAndroidSync();
-        } else if (!AndroidSyncSettings.get().isChromeSyncEnabled()) {
+        if (!SyncService.get().isSyncRequested()
+                || SyncService.get().getSelectedTypes().isEmpty()) {
             viewState = getStateForEnableChromeSync();
         } else {
             viewState = getStateForStartUsing();
@@ -142,6 +140,8 @@ public class SyncPromoView extends LinearLayout implements AndroidSyncSettingsOb
         private final int mTextResource;
         private final OnClickListener mOnClickListener;
 
+        // TODO(crbug.com/1107904): Once Chrome is decoupled from auto-sync,
+        // |onClickListener| can be inlined.
         public ButtonPresent(int textResource, OnClickListener onClickListener) {
             mTextResource = textResource;
             mOnClickListener = onClickListener;
@@ -155,29 +155,16 @@ public class SyncPromoView extends LinearLayout implements AndroidSyncSettingsOb
         }
     }
 
-    private ViewState getStateForEnableAndroidSync() {
-        assert mAccessPoint == SigninAccessPoint.RECENT_TABS
-                : "Enable Android Sync should not be showing from bookmarks";
-
-        int descId = R.string.recent_tabs_sync_promo_enable_android_sync;
-
-        ButtonState positiveButton = new ButtonPresent(R.string.open_settings_button, view -> {
-            IntentUtils.safeStartActivity(getContext(), new Intent(Settings.ACTION_SYNC_SETTINGS));
-        });
-
-        return new ViewState(descId, positiveButton);
-    }
-
     private ViewState getStateForEnableChromeSync() {
         int descId = mAccessPoint == SigninAccessPoint.BOOKMARK_MANAGER
                 ? R.string.bookmarks_sync_promo_enable_sync
                 : R.string.recent_tabs_sync_promo_enable_chrome_sync;
 
-        ButtonState positiveButton = new ButtonPresent(R.string.enable_sync_button,
-                view
-                -> PreferencesLauncher.launchSettingsPageCompat(getContext(),
-                        SyncAndServicesPreferences.class,
-                        SyncAndServicesPreferences.createArguments(false)));
+        ButtonState positiveButton = new ButtonPresent(R.string.enable_sync_button, view -> {
+            SettingsLauncher settingsLauncher = new SettingsLauncherImpl();
+            settingsLauncher.launchSettingsActivity(getContext(), ManageSyncSettings.class,
+                    ManageSyncSettings.createArguments(false));
+        });
 
         return new ViewState(descId, positiveButton);
     }
@@ -196,20 +183,19 @@ public class SyncPromoView extends LinearLayout implements AndroidSyncSettingsOb
         assert mInitialized : "init(...) must be called on SyncPromoView before use.";
 
         super.onAttachedToWindow();
-        AndroidSyncSettings.get().registerObserver(this);
+        SyncService.get().addSyncStateChangedListener(this);
         update();
     }
 
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        AndroidSyncSettings.get().unregisterObserver(this);
+        SyncService.get().removeSyncStateChangedListener(this);
     }
 
-    // AndroidSyncStateObserver
+    // SyncService.SyncStateChangedListener
     @Override
-    public void androidSyncSettingsChanged() {
-        // AndroidSyncSettings calls this method from non-UI threads.
-        PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, this::update);
+    public void syncStateChanged() {
+        update();
     }
 }

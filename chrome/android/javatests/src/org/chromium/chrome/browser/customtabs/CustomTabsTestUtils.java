@@ -1,31 +1,35 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.customtabs;
 
+import static org.chromium.chrome.browser.customtabs.CustomTabActivityTestRule.LONG_TIMEOUT_MS;
+
 import android.content.ComponentName;
-import android.content.Context;
-import android.content.Intent;
-import android.net.Uri;
+import android.content.res.Resources;
+import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.os.Process;
-import android.support.customtabs.CustomTabsCallback;
-import android.support.customtabs.CustomTabsClient;
-import android.support.customtabs.CustomTabsIntent;
-import android.support.customtabs.CustomTabsServiceConnection;
-import android.support.customtabs.CustomTabsSession;
-import android.support.customtabs.CustomTabsSessionToken;
 import android.support.test.InstrumentationRegistry;
 
+import androidx.browser.customtabs.CustomTabsCallback;
+import androidx.browser.customtabs.CustomTabsClient;
+import androidx.browser.customtabs.CustomTabsServiceConnection;
+import androidx.browser.customtabs.CustomTabsSession;
+
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 
+import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.document.ChromeLauncherActivity;
+import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.concurrent.TimeoutException;
@@ -34,7 +38,11 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Utility class that contains convenience calls related with custom tabs testing.
  */
+@JNINamespace("customtabs")
 public class CustomTabsTestUtils {
+    /** Intent extra to specify an id to a custom tab.*/
+    public static final String EXTRA_CUSTOM_TAB_ID =
+            "android.support.customtabs.extra.tests.CUSTOM_TAB_ID";
 
     /** A plain old data class that holds the return value from {@link #bindWithCallback}. */
     public static class ClientAndSession {
@@ -48,23 +56,6 @@ public class CustomTabsTestUtils {
         }
     }
 
-    /**
-     * Creates the simplest intent that is sufficient to let {@link ChromeLauncherActivity} launch
-     * the {@link CustomTabActivity}.
-     */
-    public static Intent createMinimalCustomTabIntent(
-            Context context, String url) {
-        CustomTabsIntent.Builder builder = new CustomTabsIntent.Builder(
-                CustomTabsSession.createMockSessionForTesting(
-                        new ComponentName(context, ChromeLauncherActivity.class)));
-        CustomTabsIntent customTabsIntent = builder.build();
-        Intent intent = customTabsIntent.intent;
-        intent.setAction(Intent.ACTION_VIEW);
-        intent.setData(Uri.parse(url));
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        return intent;
-    }
-
     public static CustomTabsConnection setUpConnection() {
         CustomTabsConnection connection = CustomTabsConnection.getInstance();
         connection.resetThrottling(Process.myUid());
@@ -72,11 +63,11 @@ public class CustomTabsTestUtils {
     }
 
     public static void cleanupSessions(final CustomTabsConnection connection) {
-        TestThreadUtils.runOnUiThreadBlocking(connection::cleanupAll);
+        TestThreadUtils.runOnUiThreadBlocking(connection::cleanupAllForTesting);
     }
 
     public static ClientAndSession bindWithCallback(final CustomTabsCallback callback)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         final AtomicReference<CustomTabsSession> sessionReference = new AtomicReference<>();
         final AtomicReference<CustomTabsClient> clientReference = new AtomicReference<>();
         final CallbackHelper waitForConnection = new CallbackHelper();
@@ -99,8 +90,7 @@ public class CustomTabsTestUtils {
     }
 
     /** Calls warmup() and waits for all the tasks to complete. Fails the test otherwise. */
-    public static CustomTabsConnection warmUpAndWait()
-            throws InterruptedException, TimeoutException {
+    public static CustomTabsConnection warmUpAndWait() throws TimeoutException {
         CustomTabsConnection connection = setUpConnection();
         final CallbackHelper startupCallbackHelper = new CallbackHelper();
         CustomTabsSession session = bindWithCallback(new CustomTabsCallback() {
@@ -126,11 +116,37 @@ public class CustomTabsTestUtils {
                 "App menu was not shown");
     }
 
-    public static void setHideCctTopBarOnModuleManagedUrls(Intent intent, boolean hideCctTopBar)
-            throws InterruptedException, TimeoutException {
-        CustomTabsConnection connection = warmUpAndWait();
-        CustomTabsSessionToken token = CustomTabsSessionToken.getSessionTokenFromIntent(intent);
-        connection.newSession(token);
-        connection.setHideCCTTopBarOnModuleManagedUrls(token, hideCctTopBar);
+    /**
+     * @return The test bitmap which can be used to represent an action item on the Toolbar.
+     */
+    public static Bitmap createTestBitmap(int widthDp, int heightDp) {
+        Resources testRes = InstrumentationRegistry.getTargetContext().getResources();
+        float density = testRes.getDisplayMetrics().density;
+        return Bitmap.createBitmap(
+                (int) (widthDp * density), (int) (heightDp * density), Bitmap.Config.ARGB_8888);
+    }
+
+    /**
+     * @param id Id of the variation to search for.
+     *
+     * @return true Whether id is a registered variation id.
+     */
+    public static boolean hasVariationId(int id) {
+        return CustomTabsTestUtilsJni.get().hasVariationId(id);
+    }
+
+    /** Waits for the speculation of |url| for the |connection| to complete. */
+    public static void ensureCompletedSpeculationForUrl(
+            final CustomTabsConnection connection, final String url) {
+        CriteriaHelper.pollUiThread(() -> {
+            Criteria.checkThat("Tab was not created", connection.getSpeculationParamsForTesting(),
+                    Matchers.notNullValue());
+        }, LONG_TIMEOUT_MS, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
+        ChromeTabUtils.waitForTabPageLoaded(connection.getSpeculationParamsForTesting().tab, url);
+    }
+
+    @NativeMethods
+    interface Natives {
+        boolean hasVariationId(int id);
     }
 }

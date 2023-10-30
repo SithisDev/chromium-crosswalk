@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/win/win_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -35,7 +34,7 @@ TEST(ModuleListTest, TestCase) {
   HMODULE new_dll = ::LoadLibrary(L"msvidc32.dll");
   ASSERT_NE(static_cast<HMODULE>(NULL), new_dll);
   base::ScopedClosureRunner release_new_dll(
-      base::Bind(base::IgnoreResult(&::FreeLibrary), new_dll));
+      base::BindOnce(base::IgnoreResult(&::FreeLibrary), new_dll));
 
   // Verify that there is an increase in the snapshot size.
   ASSERT_TRUE(

@@ -1,20 +1,20 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.toolbar;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ThemeColorProvider;
-import org.chromium.chrome.browser.compositor.layouts.EmptyOverviewModeObserver;
-import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
-import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior.OverviewModeObserver;
-import org.chromium.chrome.browser.device.DeviceClassManager;
-import org.chromium.chrome.browser.toolbar.IncognitoStateProvider.IncognitoStateObserver;
-import org.chromium.chrome.browser.util.ColorUtils;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.layouts.LayoutStateProvider;
+import org.chromium.chrome.browser.layouts.LayoutType;
+import org.chromium.chrome.browser.tabmodel.IncognitoStateProvider;
+import org.chromium.chrome.browser.tabmodel.IncognitoStateProvider.IncognitoStateObserver;
+import org.chromium.chrome.browser.theme.ThemeColorProvider;
+import org.chromium.chrome.browser.theme.ThemeUtils;
+import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
+import org.chromium.components.browser_ui.styles.ChromeColors;
 
 /** A ThemeColorProvider for the app theme (incognito or standard theming). */
 public class AppThemeColorProvider extends ThemeColorProvider implements IncognitoStateObserver {
@@ -27,11 +27,11 @@ public class AppThemeColorProvider extends ThemeColorProvider implements Incogni
     /** Used to know when incognito mode is entered or exited. */
     private IncognitoStateProvider mIncognitoStateProvider;
 
-    /** The overview mode manager. */
-    private OverviewModeBehavior mOverviewModeBehavior;
+    /** Used to know the Layout state. */
+    private LayoutStateProvider mLayoutStateProvider;
 
-    /** Observer to know when overview mode is entered/exited. */
-    private final OverviewModeObserver mOverviewModeObserver;
+    /** Observer to know when Layout state is changed, e.g show/hide. */
+    private final LayoutStateProvider.LayoutStateObserver mLayoutStateObserver;
 
     /** Whether app is in incognito mode. */
     private boolean mIsIncognito;
@@ -46,20 +46,25 @@ public class AppThemeColorProvider extends ThemeColorProvider implements Incogni
         super(context);
 
         mActivityContext = context;
-        mStandardPrimaryColor = ColorUtils.getDefaultThemeColor(context.getResources(), false);
-        mIncognitoPrimaryColor = ColorUtils.getDefaultThemeColor(context.getResources(), true);
+        mStandardPrimaryColor = ChromeColors.getDefaultThemeColor(context, false);
+        mIncognitoPrimaryColor = ChromeColors.getDefaultThemeColor(context, true);
 
-        mOverviewModeObserver = new EmptyOverviewModeObserver() {
+        mLayoutStateObserver = new LayoutStateProvider.LayoutStateObserver() {
             @Override
-            public void onOverviewModeStartedShowing(boolean showToolbar) {
-                mIsOverviewVisible = true;
-                updateTheme();
+            public void onStartedShowing(@LayoutType int layoutType, boolean showToolbar) {
+                if (layoutType == LayoutType.TAB_SWITCHER) {
+                    mIsOverviewVisible = true;
+                    updateTheme();
+                }
             }
 
             @Override
-            public void onOverviewModeStartedHiding(boolean showToolbar, boolean delayAnimation) {
-                mIsOverviewVisible = false;
-                updateTheme();
+            public void onStartedHiding(
+                    @LayoutType int layoutType, boolean showToolbar, boolean delayAnimation) {
+                if (layoutType == LayoutType.TAB_SWITCHER) {
+                    mIsOverviewVisible = false;
+                    updateTheme();
+                }
             }
         };
     }
@@ -75,23 +80,26 @@ public class AppThemeColorProvider extends ThemeColorProvider implements Incogni
         updateTheme();
     }
 
-    void setOverviewModeBehavior(OverviewModeBehavior overviewModeBehavior) {
-        mOverviewModeBehavior = overviewModeBehavior;
-        mOverviewModeBehavior.addOverviewModeObserver(mOverviewModeObserver);
+    void setLayoutStateProvider(LayoutStateProvider layoutStateProvider) {
+        mLayoutStateProvider = layoutStateProvider;
+        mLayoutStateProvider.addObserver(mLayoutStateObserver);
     }
 
     private void updateTheme() {
-        final boolean isAccessibilityEnabled = DeviceClassManager.enableAccessibilityLayout();
-        final boolean isHorizontalTabSwitcherEnabled =
-                ChromeFeatureList.isEnabled(ChromeFeatureList.HORIZONTAL_TAB_SWITCHER_ANDROID);
-        final boolean isTabGridEnabled = FeatureUtilities.isGridTabSwitcherEnabled();
         final boolean shouldUseIncognitoBackground = mIsIncognito
-                && (isAccessibilityEnabled || isHorizontalTabSwitcherEnabled || isTabGridEnabled
-                        || !mIsOverviewVisible);
+                && (!mIsOverviewVisible
+                        || ToolbarColors.canUseIncognitoToolbarThemeColorInOverview(
+                                mActivityContext));
 
         updatePrimaryColor(
                 shouldUseIncognitoBackground ? mIncognitoPrimaryColor : mStandardPrimaryColor,
                 false);
+        final @BrandedColorScheme int brandedColorScheme = shouldUseIncognitoBackground
+                ? BrandedColorScheme.INCOGNITO
+                : BrandedColorScheme.APP_DEFAULT;
+        final ColorStateList iconTint =
+                ThemeUtils.getThemedToolbarIconTint(mActivityContext, brandedColorScheme);
+        updateTint(iconTint, brandedColorScheme);
     }
 
     @Override
@@ -101,9 +109,9 @@ public class AppThemeColorProvider extends ThemeColorProvider implements Incogni
             mIncognitoStateProvider.removeObserver(this);
             mIncognitoStateProvider = null;
         }
-        if (mOverviewModeBehavior != null) {
-            mOverviewModeBehavior.removeOverviewModeObserver(mOverviewModeObserver);
-            mOverviewModeBehavior = null;
+        if (mLayoutStateProvider != null) {
+            mLayoutStateProvider.removeObserver(mLayoutStateObserver);
+            mLayoutStateProvider = null;
         }
     }
 }

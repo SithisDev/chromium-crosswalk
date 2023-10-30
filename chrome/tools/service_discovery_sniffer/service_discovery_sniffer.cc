@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/at_exit.h"
 #include "base/bind.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_executor.h"
 #include "chrome/browser/local_discovery/service_discovery_client_impl.h"
@@ -19,15 +20,12 @@ namespace local_discovery {
 ServicePrinter::ServicePrinter(ServiceDiscoveryClient* client,
                                const std::string& service_name)
     : changed_(false) {
-  service_resolver_ =
-      client->CreateServiceResolver(
-          service_name,
-          base::Bind(&ServicePrinter::OnServiceResolved,
-                     base::Unretained(this)));
+  service_resolver_ = client->CreateServiceResolver(
+      service_name, base::BindOnce(&ServicePrinter::OnServiceResolved,
+                                   base::Unretained(this)));
 }
 
-ServicePrinter::~ServicePrinter() {
-}
+ServicePrinter::~ServicePrinter() = default;
 
 void ServicePrinter::Added() {
   changed_ = false;
@@ -68,8 +66,8 @@ ServiceTypePrinter::ServiceTypePrinter(ServiceDiscoveryClient* client,
                                        const std::string& service_type)
     : client_(client)  {
   watcher_ = client_->CreateServiceWatcher(
-      service_type, base::Bind(&ServiceTypePrinter::OnServiceUpdated,
-                               base::Unretained(this)));
+      service_type, base::BindRepeating(&ServiceTypePrinter::OnServiceUpdated,
+                                        base::Unretained(this)));
 }
 
 void ServiceTypePrinter::Start() {
@@ -98,7 +96,7 @@ void ServiceTypePrinter::OnServiceUpdated(ServiceWatcher::UpdateType update,
 
 int main(int argc, char** argv) {
   base::AtExitManager at_exit_manager;
-  base::SingleThreadTaskExecutor io_task_executor(base::MessagePump::Type::IO);
+  base::SingleThreadTaskExecutor io_task_executor(base::MessagePumpType::IO);
 
   if (argc != 2) {
     printf("Please provide exactly 1 argument.\n");

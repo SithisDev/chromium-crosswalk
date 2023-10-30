@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "chrome/browser/notifications/notification_ui_manager_impl.h"
@@ -6,13 +6,14 @@
 #include <memory>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "build/build_config.h"
 #include "chrome/browser/notifications/fullscreen_notification_blocker.h"
 #include "chrome/browser/notifications/popups_only_ui_controller.h"
 #include "chrome/browser/notifications/profile_notification.h"
 #include "chrome/browser/notifications/screen_lock_notification_blocker.h"
 #include "chrome/browser/profiles/profile.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
@@ -85,13 +86,16 @@ void NotificationUIManagerImpl::Add(
   MessageCenter::Get()->AddNotification(
       std::make_unique<message_center::Notification>(
           profile_notification->notification()));
+
+  if (profile && profile->IsOffTheRecord())
+    observed_otr_profiles_.AddObservation(profile);
 }
 
 bool NotificationUIManagerImpl::Update(
     const message_center::Notification& notification,
     Profile* profile) {
   const std::string profile_id = ProfileNotification::GetProfileNotificationId(
-      notification.id(), NotificationUIManager::GetProfileID(profile));
+      notification.id(), ProfileNotification::GetProfileID(profile));
   for (auto iter = profile_notifications_.begin();
        iter != profile_notifications_.end(); ++iter) {
     ProfileNotification* old_notification = (*iter).second.get();
@@ -103,7 +107,7 @@ bool NotificationUIManagerImpl::Update(
     DCHECK_EQ(old_notification->notification().origin_url(),
               notification.origin_url());
     DCHECK_EQ(old_notification->profile_id(),
-              NotificationUIManager::GetProfileID(profile));
+              ProfileNotification::GetProfileID(profile));
 
     // Changing the type from non-progress to progress does not count towards
     // the immediate update allowed in the message center.
@@ -111,14 +115,15 @@ bool NotificationUIManagerImpl::Update(
 
     // Add/remove notification in the local list but just update the same
     // one in MessageCenter.
-    auto new_notification =
+    auto new_profile_notification =
         std::make_unique<ProfileNotification>(profile, notification);
-    const message_center::Notification& notification =
-        new_notification->notification();
+    const message_center::Notification& new_notification =
+        new_profile_notification->notification();
     // Delete the old one after the new one is created to ensure we don't run
     // out of KeepAlives.
     profile_notifications_.erase(old_id);
-    profile_notifications_[notification.id()] = std::move(new_notification);
+    profile_notifications_[new_notification.id()] =
+        std::move(new_profile_notification);
 
     // TODO(liyanhou): Add routing updated notifications to alternative
     // providers.
@@ -127,7 +132,8 @@ bool NotificationUIManagerImpl::Update(
     // center via the notification within a ProfileNotification object or the
     // profile ID will not be correctly set for ChromeOS.
     MessageCenter::Get()->UpdateNotification(
-        old_id, std::make_unique<message_center::Notification>(notification));
+        old_id,
+        std::make_unique<message_center::Notification>(new_notification));
     return true;
   }
 
@@ -136,7 +142,7 @@ bool NotificationUIManagerImpl::Update(
 
 const message_center::Notification* NotificationUIManagerImpl::FindById(
     const std::string& id,
-    ProfileID profile_id) const {
+    ProfileNotification::ProfileID profile_id) const {
   std::string profile_notification_id =
       ProfileNotification::GetProfileNotificationId(id, profile_id);
   auto iter = profile_notifications_.find(profile_notification_id);
@@ -145,8 +151,9 @@ const message_center::Notification* NotificationUIManagerImpl::FindById(
   return &(iter->second->notification());
 }
 
-bool NotificationUIManagerImpl::CancelById(const std::string& id,
-                                           ProfileID profile_id) {
+bool NotificationUIManagerImpl::CancelById(
+    const std::string& id,
+    ProfileNotification::ProfileID profile_id) {
   std::string profile_notification_id =
       ProfileNotification::GetProfileNotificationId(id, profile_id);
   // See if this ID hasn't been shown yet.
@@ -162,7 +169,7 @@ bool NotificationUIManagerImpl::CancelById(const std::string& id,
 }
 
 std::set<std::string> NotificationUIManagerImpl::GetAllIdsByProfile(
-    ProfileID profile_id) {
+    ProfileNotification::ProfileID profile_id) {
   std::set<std::string> original_ids;
   for (const auto& pair : profile_notifications_) {
     if (pair.second->profile_id() == profile_id)
@@ -181,23 +188,6 @@ bool NotificationUIManagerImpl::CancelAllBySourceOrigin(const GURL& source) {
        loopiter != profile_notifications_.end();) {
     auto curiter = loopiter++;
     if ((*curiter).second->notification().origin_url() == source) {
-      const std::string id = curiter->first;
-      RemoveProfileNotification(id);
-      MessageCenter::Get()->RemoveNotification(id, /* by_user */ false);
-      removed = true;
-    }
-  }
-  return removed;
-}
-
-bool NotificationUIManagerImpl::CancelAllByProfile(ProfileID profile_id) {
-  // Same pattern as CancelAllBySourceOrigin.
-  bool removed = false;
-
-  for (auto loopiter = profile_notifications_.begin();
-       loopiter != profile_notifications_.end();) {
-    auto curiter = loopiter++;
-    if (profile_id == (*curiter).second->profile_id()) {
       const std::string id = curiter->first;
       RemoveProfileNotification(id);
       MessageCenter::Get()->RemoveNotification(id, /* by_user */ false);
@@ -226,6 +216,25 @@ void NotificationUIManagerImpl::OnNotificationRemoved(const std::string& id,
   RemoveProfileNotification(id);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// ProfileObserver
+
+void NotificationUIManagerImpl::OnProfileWillBeDestroyed(Profile* profile) {
+  observed_otr_profiles_.RemoveObservation(profile);
+
+  // Same pattern as CancelAllBySourceOrigin.
+  for (auto loopiter = profile_notifications_.begin();
+       loopiter != profile_notifications_.end();) {
+    auto curiter = loopiter++;
+    if (ProfileNotification::GetProfileID(profile) ==
+        (*curiter).second->profile_id()) {
+      const std::string id = curiter->first;
+      RemoveProfileNotification(id);
+      MessageCenter::Get()->RemoveNotification(id, /* by_user */ false);
+    }
+  }
+}
+
 void NotificationUIManagerImpl::ResetUiControllerForTest() {
   popups_only_ui_controller_.reset();
 }
@@ -233,8 +242,8 @@ void NotificationUIManagerImpl::ResetUiControllerForTest() {
 std::string NotificationUIManagerImpl::GetMessageCenterNotificationIdForTest(
     const std::string& id,
     Profile* profile) {
-  return ProfileNotification::GetProfileNotificationId(id,
-                                                       GetProfileID(profile));
+  return ProfileNotification::GetProfileNotificationId(
+      id, ProfileNotification::GetProfileID(profile));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -266,8 +275,8 @@ void NotificationUIManagerImpl::RemoveProfileNotification(
   // b) A crash like https://crbug.com/649971 because it can trigger
   //    shutdown process while we're still inside the call stack from UI
   //    framework.
-  content::BrowserThread::DeleteSoon(content::BrowserThread::UI, FROM_HERE,
-                                     it->second.release());
+  content::GetUIThreadTaskRunner({})->DeleteSoon(FROM_HERE,
+                                                 it->second.release());
   profile_notifications_.erase(it);
 }
 

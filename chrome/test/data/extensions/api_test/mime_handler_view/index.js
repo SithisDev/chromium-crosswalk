@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -144,14 +144,6 @@ var tests = [
         .then(chrome.test.succeed);
   },
 
-  function testDataUrl() {
-    // TODO(raymes): have separate checks for embedded/unembedded data URLs.
-    checkStreamDetailsNoFile();
-    fetchUrl(streamDetails.streamUrl)
-        .then(expectSuccessfulRead)
-        .then(chrome.test.succeed);
-  },
-
   function testDataUrlLong() {
     checkStreamDetailsNoFile();
     fetchUrl(streamDetails.streamUrl)
@@ -234,6 +226,28 @@ var tests = [
         () => document.body.webkitRequestFullscreen());
   },
 
+  function testFullscreenEscape() {
+    checkStreamDetails('testFullscreenEscape.csv', false);
+    var calls = 0;
+    var windowId;
+    window.addEventListener('webkitfullscreenchange', async e => {
+      switch(calls) {
+        case 0: // On fullscreen entered.
+          chrome.test.assertTrue(document.webkitIsFullScreen);
+          chrome.test.assertEq(document.body, document.webkitFullscreenElement);
+          break;
+        case 1: // On fullscreen exited.
+          chrome.test.assertFalse(document.webkitIsFullScreen);
+          chrome.test.assertEq(null, document.webkitFullscreenElement);
+          chrome.test.succeed();
+          break;
+      }
+      calls++;
+    });
+    chrome.test.runWithUserGesture(
+        () => document.body.webkitRequestFullscreen());
+  },
+
   function testBackgroundPage() {
     checkStreamDetails('testBackgroundPage.csv', false);
     chrome.runtime.getBackgroundPage(backgroundPage => {
@@ -274,6 +288,14 @@ var tests = [
     chrome.mimeHandlerPrivate.setShowBeforeUnloadDialog(
         true, chrome.test.succeed);
   },
+
+  // TODO(mustaq): Every test above have a unique csv, which seems redundant.
+  // This particular one is used in two browser tests.
+  function testBeforeUnloadWithUserActivation() {
+    checkStreamDetails('testBeforeUnloadWithUserActivation.csv', false);
+    chrome.mimeHandlerPrivate.setShowBeforeUnloadDialog(
+        true, chrome.test.succeed);
+  },
 ];
 
 var testsByName = {};
@@ -298,10 +320,6 @@ chrome.mimeHandlerPrivate.getStreamInfo(function(streamInfo) {
   // Run the test for data URLs.
   if (streamInfo.originalUrl.startsWith("data:")) {
     window.removeEventListener('message', queueMessage);
-    // Long data URLs get truncated.
-    if (streamInfo.originalUrl == "data:")
-      chrome.test.runTests([testsByName['testDataUrlLong']]);
-    else
-      chrome.test.runTests([testsByName['testDataUrl']]);
+    chrome.test.runTests([testsByName['testDataUrlLong']]);
   }
 });

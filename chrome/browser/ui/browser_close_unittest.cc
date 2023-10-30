@@ -1,31 +1,38 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/check_op.h"
+#include "base/command_line.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_core_service.h"
 #include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/buildflags/buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class TestingDownloadCoreService : public DownloadCoreService {
  public:
   TestingDownloadCoreService() : download_count_(0) {}
+
+  TestingDownloadCoreService(const TestingDownloadCoreService&) = delete;
+  TestingDownloadCoreService& operator=(const TestingDownloadCoreService&) =
+      delete;
+
   ~TestingDownloadCoreService() override {}
 
   // All methods that aren't expected to be called in the execution of
@@ -40,6 +47,11 @@ class TestingDownloadCoreService : public DownloadCoreService {
 
   // DownloadCoreService
   ChromeDownloadManagerDelegate* GetDownloadManagerDelegate() override {
+    ADD_FAILURE();
+    return nullptr;
+  }
+
+  DownloadUIController* GetDownloadUIController() override {
     ADD_FAILURE();
     return nullptr;
   }
@@ -67,15 +79,15 @@ class TestingDownloadCoreService : public DownloadCoreService {
     ADD_FAILURE();
   }
 
-  bool IsShelfEnabled() override { return true; }
+  bool IsDownloadUiEnabled() override { return true; }
+
+  bool IsDownloadObservedByExtension() override { return false; }
 
   // KeyedService
   void Shutdown() override {}
 
  private:
   int download_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestingDownloadCoreService);
 };
 
 static std::unique_ptr<KeyedService> CreateTestingDownloadCoreService(
@@ -86,7 +98,9 @@ static std::unique_ptr<KeyedService> CreateTestingDownloadCoreService(
 class BrowserCloseTest : public testing::Test {
  public:
   BrowserCloseTest()
-      : profile_manager_(TestingBrowserProcess::GetGlobal()), name_index_(0) {}
+      : profile_manager_(TestingBrowserProcess::GetGlobal()), name_index_(0) {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(switches::kNoFirstRun);
+  }
 
   ~BrowserCloseTest() override {}
 
@@ -123,8 +137,18 @@ class BrowserCloseTest : public testing::Test {
   Profile* CreateIncognitoProfile(Profile* profile,
                                   int windows,
                                   int downloads) {
-    Profile* otr_profile = profile->GetOffTheRecordProfile();
+    Profile* otr_profile =
+        profile->GetPrimaryOTRProfile(/*create_if_needed=*/true);
 
+    ConfigureCreatedProfile(otr_profile, windows, downloads);
+
+    return otr_profile;
+  }
+
+  Profile* CreateGuestProfile(int windows, int downloads) {
+    TestingProfile* profile = profile_manager_.CreateGuestProfile();
+    Profile* otr_profile =
+        profile->GetPrimaryOTRProfile(/*create_if_needed=*/true);
     ConfigureCreatedProfile(otr_profile, windows, downloads);
 
     return otr_profile;
@@ -157,9 +181,9 @@ class BrowserCloseTest : public testing::Test {
     for (int i = 0; i < num_windows; ++i) {
       TestBrowserWindow* window = new TestBrowserWindow();
       Browser::CreateParams params(profile, true);
-      params.type = Browser::TYPE_TABBED;
+      params.type = Browser::TYPE_NORMAL;
       params.window = window;
-      Browser* browser = new Browser(params);
+      Browser* browser = Browser::Create(params);
 
       windows.push_back(window);
       browsers.push_back(browser);
@@ -174,7 +198,7 @@ class BrowserCloseTest : public testing::Test {
   std::map<Profile*, std::vector<TestBrowserWindow*>> browser_windows_;
   std::map<Profile*, std::vector<Browser*>> browsers_;
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfileManager profile_manager_;
   int name_index_;
 };
@@ -186,7 +210,7 @@ TEST_F(BrowserCloseTest, LastWindowIncognito) {
   Browser* browser = GetProfileBrowser(incognito_profile, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_BROWSER_SHUTDOWN,
+  EXPECT_EQ(Browser::DownloadCloseType::kBrowserShutdown,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
   EXPECT_EQ(num_downloads_blocking, 1);
 }
@@ -198,7 +222,7 @@ TEST_F(BrowserCloseTest, LastIncognito) {
   Browser* browser(GetProfileBrowser(incognito_profile, 0));
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_LAST_WINDOW_IN_INCOGNITO_PROFILE,
+  EXPECT_EQ(Browser::DownloadCloseType::kLastWindowInIncognitoProfile,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
   EXPECT_EQ(num_downloads_blocking, 1);
 
@@ -212,7 +236,7 @@ TEST_F(BrowserCloseTest, LastIncognitoNoDownloads) {
   Browser* browser = GetProfileBrowser(incognito_profile, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_OK,
+  EXPECT_EQ(Browser::DownloadCloseType::kOk,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
 }
 
@@ -227,7 +251,7 @@ TEST_F(BrowserCloseTest, NoIncognitoCrossChat) {
   Browser* browser = GetProfileBrowser(incognito_profile1, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_OK,
+  EXPECT_EQ(Browser::DownloadCloseType::kOk,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
 }
 
@@ -238,7 +262,7 @@ TEST_F(BrowserCloseTest, NonLastIncognito) {
   Browser* browser = GetProfileBrowser(incognito_profile, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_OK,
+  EXPECT_EQ(Browser::DownloadCloseType::kOk,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
 }
 
@@ -248,7 +272,7 @@ TEST_F(BrowserCloseTest, NonLastRegular) {
   Browser* browser = GetProfileBrowser(profile, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_OK,
+  EXPECT_EQ(Browser::DownloadCloseType::kOk,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
 }
 
@@ -258,10 +282,10 @@ TEST_F(BrowserCloseTest, LastRegular) {
   Browser* browser = GetProfileBrowser(profile, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_BROWSER_SHUTDOWN,
+  EXPECT_EQ(Browser::DownloadCloseType::kBrowserShutdown,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
   EXPECT_EQ(num_downloads_blocking, 1);
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH)
   EXPECT_EQ(true, browser->CanCloseWithInProgressDownloads());
 #else
   EXPECT_EQ(false, browser->CanCloseWithInProgressDownloads());
@@ -277,7 +301,7 @@ TEST_F(BrowserCloseTest, LastRegularDifferentProfile) {
   Browser* browser = GetProfileBrowser(profile1, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_BROWSER_SHUTDOWN,
+  EXPECT_EQ(Browser::DownloadCloseType::kBrowserShutdown,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
   EXPECT_EQ(num_downloads_blocking, 1);
 }
@@ -290,7 +314,7 @@ TEST_F(BrowserCloseTest, LastRegularPlusIncognito) {
   Browser* browser = GetProfileBrowser(profile, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_OK,
+  EXPECT_EQ(Browser::DownloadCloseType::kOk,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
 }
 
@@ -302,7 +326,7 @@ TEST_F(BrowserCloseTest, LastRegularPlusOtherProfile) {
   Browser* browser = GetProfileBrowser(profile, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_OK,
+  EXPECT_EQ(Browser::DownloadCloseType::kOk,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
 }
 
@@ -315,7 +339,7 @@ TEST_F(BrowserCloseTest, LastRegularPlusOtherIncognito) {
   Browser* browser = GetProfileBrowser(profile1, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_OK,
+  EXPECT_EQ(Browser::DownloadCloseType::kOk,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
 }
 
@@ -327,7 +351,7 @@ TEST_F(BrowserCloseTest, LastRegularPlusIncognito2) {
   Browser* browser = GetProfileBrowser(profile, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_OK,
+  EXPECT_EQ(Browser::DownloadCloseType::kOk,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
 }
 
@@ -338,7 +362,7 @@ TEST_F(BrowserCloseTest, Plural) {
   Browser* browser = GetProfileBrowser(profile, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_BROWSER_SHUTDOWN,
+  EXPECT_EQ(Browser::DownloadCloseType::kBrowserShutdown,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
   EXPECT_EQ(2, num_downloads_blocking);
 }
@@ -351,7 +375,52 @@ TEST_F(BrowserCloseTest, PluralIncognito) {
   Browser* browser = GetProfileBrowser(incognito_profile, 0);
 
   int num_downloads_blocking = 0;
-  EXPECT_EQ(Browser::DOWNLOAD_CLOSE_LAST_WINDOW_IN_INCOGNITO_PROFILE,
+  EXPECT_EQ(Browser::DownloadCloseType::kLastWindowInIncognitoProfile,
             browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
   EXPECT_EQ(2, num_downloads_blocking);
+}
+
+// Last window close (guest window) will trigger warning.
+TEST_F(BrowserCloseTest, LastWindowGuest) {
+  Profile* guest_profile = CreateGuestProfile(1, 1);
+  Browser* browser = GetProfileBrowser(guest_profile, 0);
+
+  int num_downloads_blocking = 0;
+  EXPECT_EQ(Browser::DownloadCloseType::kBrowserShutdown,
+            browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
+  EXPECT_EQ(num_downloads_blocking, 1);
+}
+
+// Last guest window close triggers download warning.
+TEST_F(BrowserCloseTest, LastGuest) {
+  CreateProfile(1, 0);
+  Profile* profile = CreateGuestProfile(1, 1);
+  Browser* browser(GetProfileBrowser(profile, 0));
+
+  int num_downloads_blocking = 0;
+  EXPECT_EQ(Browser::DownloadCloseType::kLastWindowInGuestSession,
+            browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
+  EXPECT_EQ(num_downloads_blocking, 1);
+
+  EXPECT_EQ(false, browser->CanCloseWithInProgressDownloads());
+}
+
+// Last guest window close with no downloads => no warning.
+TEST_F(BrowserCloseTest, LastGuestNoDownloads) {
+  Profile* profile = CreateGuestProfile(1, 0);
+  Browser* browser = GetProfileBrowser(profile, 0);
+
+  int num_downloads_blocking = 0;
+  EXPECT_EQ(Browser::DownloadCloseType::kOk,
+            browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
+}
+
+// Non-last guest window => no warning.
+TEST_F(BrowserCloseTest, NonLastGuest) {
+  Profile* profile = CreateGuestProfile(2, 1);
+  Browser* browser = GetProfileBrowser(profile, 0);
+
+  int num_downloads_blocking = 0;
+  EXPECT_EQ(Browser::DownloadCloseType::kOk,
+            browser->OkToCloseWithInProgressDownloads(&num_downloads_blocking));
 }

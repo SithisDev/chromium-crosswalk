@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <utility>
 
 #include "base/strings/string_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/chrome_cleaner/engines/target/sandboxed_test_helpers.h"
 #include "chrome/chrome_cleaner/os/pre_fetched_paths.h"
 #include "chrome/chrome_cleaner/test/test_file_util.h"
@@ -190,9 +190,9 @@ MULTIPROCESS_TEST_MAIN(FindFirstFileMultiple) {
   }
   std::wstring first_found = data.cFileName;
 
-  base::string16 file_name_1 =
+  std::wstring file_name_1 =
       child_process->test_file_1_path().BaseName().value();
-  base::string16 file_name_2 =
+  std::wstring file_name_2 =
       child_process->test_file_2_path().BaseName().value();
   if (!base::EqualsCaseInsensitiveASCII(file_name_1, data.cFileName) &&
       !base::EqualsCaseInsensitiveASCII(file_name_2, data.cFileName)) {
@@ -250,7 +250,7 @@ MULTIPROCESS_TEST_MAIN(FindFirstFileNoHangs) {
       SandboxErrorCode::NULL_FIND_HANDLE,
       proxy->FindFirstFile(child_process->valid_utf8_path(), &data, nullptr));
 
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
   FindFileHandle handle;
   EXPECT_EQ(SandboxErrorCode::INTERNAL_ERROR,
             proxy->FindFirstFile(base::FilePath(L"Name"), &data, &handle));
@@ -262,7 +262,7 @@ MULTIPROCESS_TEST_MAIN(FindNextFileNoHangs) {
   auto child_process = SetupSandboxedChildProcess();
   if (!child_process)
     return 1;
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   scoped_refptr<EngineFileRequestsProxy> proxy(
       child_process->GetFileRequestsProxy());
@@ -279,7 +279,7 @@ MULTIPROCESS_TEST_MAIN(FindCloseNoHangs) {
   auto child_process = SetupSandboxedChildProcess();
   if (!child_process)
     return 1;
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   scoped_refptr<EngineFileRequestsProxy> proxy(
       child_process->GetFileRequestsProxy());
@@ -341,12 +341,12 @@ MULTIPROCESS_TEST_MAIN(OpenReadOnlyFileNoHangs) {
   scoped_refptr<EngineFileRequestsProxy> proxy(
       child_process->GetFileRequestsProxy());
 
-  const base::string16 too_long(std::numeric_limits<int16_t>::max() + 1, '0');
+  const std::wstring too_long(std::numeric_limits<int16_t>::max() + 1, '0');
   EXPECT_FALSE(
       proxy->OpenReadOnlyFile(base::FilePath(too_long), FILE_ATTRIBUTE_NORMAL)
           .IsValid());
 
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_FALSE(proxy->OpenReadOnlyFile(base::FilePath(), FILE_ATTRIBUTE_NORMAL)
                    .IsValid());
@@ -372,7 +372,7 @@ class EngineFileRequestsProxyTest
 };
 
 TEST_P(EngineFileRequestsProxyTest, TestRequest) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::TaskEnvironment task_environment;
 
   // Create resources that tests running in the sandbox will not have access to
   // create for themselves, even before calling LowerToken.

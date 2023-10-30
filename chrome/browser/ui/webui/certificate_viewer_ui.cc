@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/certificate_viewer_webui.h"
-#include "chrome/browser/ui/webui/localized_string.h"
+#include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
@@ -15,6 +15,8 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "services/network/public/mojom/content_security_policy.mojom.h"
+#include "ui/base/webui/web_ui_util.h"
 #include "ui/web_dialogs/web_dialog_delegate.h"
 
 namespace {
@@ -23,12 +25,12 @@ content::WebUIDataSource* GetWebUIDataSource(const std::string& host) {
   content::WebUIDataSource* html_source =
       content::WebUIDataSource::Create(host);
 
-  static constexpr LocalizedString kStrings[] = {
+  static constexpr webui::LocalizedString kStrings[] = {
       {"general", IDS_CERT_INFO_GENERAL_TAB_LABEL},
       {"details", IDS_CERT_INFO_DETAILS_TAB_LABEL},
       {"close", IDS_CLOSE},
       {"export", IDS_CERT_DETAILS_EXPORT_CERTIFICATE},
-      {"usages", IDS_CERT_INFO_VERIFIED_USAGES_GROUP},
+      {"exportA11yLabel", IDS_CERT_DETAILS_EXPORT_CERTIFICATE_A11Y_LABEL},
       {"issuedTo", IDS_CERT_INFO_SUBJECT_GROUP},
       {"issuedBy", IDS_CERT_INFO_ISSUER_GROUP},
       {"cn", IDS_CERT_INFO_COMMON_NAME_LABEL},
@@ -43,10 +45,18 @@ content::WebUIDataSource* GetWebUIDataSource(const std::string& host) {
       {"hierarchy", IDS_CERT_DETAILS_CERTIFICATE_HIERARCHY_LABEL},
       {"certFields", IDS_CERT_DETAILS_CERTIFICATE_FIELDS_LABEL},
       {"certFieldVal", IDS_CERT_DETAILS_CERTIFICATE_FIELD_VALUE_LABEL},
+      {"certError", IDS_CERT_DUMP_ERROR},
   };
-  AddLocalizedStringsBulk(html_source, kStrings, base::size(kStrings));
+  html_source->AddLocalizedStrings(kStrings);
 
-  html_source->SetJsonPath("strings.js");
+  html_source->OverrideContentSecurityPolicy(
+      network::mojom::CSPDirectiveName::TrustedTypes,
+      "trusted-types static-types certificate-test-script;");
+  html_source->OverrideContentSecurityPolicy(
+      network::mojom::CSPDirectiveName::ScriptSrc,
+      "script-src chrome://resources chrome://test 'self';");
+
+  html_source->UseStringsJs();
 
   // Add required resources.
   html_source->AddResourcePath("certificate_viewer.js",

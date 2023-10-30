@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,12 @@
 
 #include <string>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
 #include "net/base/completion_once_callback.h"
 #include "net/socket/tcp_client_socket.h"
+#include "net/websockets/websocket_frame.h"
 #include "net/websockets/websocket_frame_parser.h"
 #include "url/gurl.h"
 
@@ -31,6 +31,10 @@ class WebSocket {
   WebSocket(const GURL& url,
             WebSocketListener* listener,
             size_t read_buffer_size = 4096);
+
+  WebSocket(const WebSocket&) = delete;
+  WebSocket& operator=(const WebSocket&) = delete;
+
   virtual ~WebSocket();
 
   // Initializes the WebSocket connection. Invokes the given callback with
@@ -65,7 +69,7 @@ class WebSocket {
   base::ThreadChecker thread_checker_;
 
   GURL url_;
-  WebSocketListener* listener_;
+  raw_ptr<WebSocketListener> listener_;
   State state_;
   std::unique_ptr<net::TCPClientSocket> socket_;
 
@@ -78,9 +82,11 @@ class WebSocket {
 
   scoped_refptr<net::IOBufferWithSize> read_buffer_;
   net::WebSocketFrameParser parser_;
+  net::WebSocketMaskingKey current_masking_key_ = {};
+  bool is_current_frame_masked_ = false;
+  bool is_current_message_opcode_text_ = false;
+  uint64_t current_frame_offset_ = 0;
   std::string next_message_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebSocket);
 };
 
 // Listens for WebSocket messages and disconnects on the same thread as the

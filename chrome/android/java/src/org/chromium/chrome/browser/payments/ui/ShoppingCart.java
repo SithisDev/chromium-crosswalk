@@ -1,10 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.payments.ui;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -49,7 +49,7 @@ public class ShoppingCart {
 
     /**
      * Returns the shopping cart items, including both the original items and the additional items
-     * that vary depending on the selected payment instrument, e.g., debut card discounts.
+     * that vary depending on the selected payment apps, e.g., debit card discounts.
      *
      * @return The shopping cart items. Can be null. Should not be modified.
      */
@@ -73,8 +73,8 @@ public class ShoppingCart {
     }
 
     /**
-     * Update the additional shopping cart items that vary depending on the selected payment
-     * instrument, e.g., debit card discounts.
+     * Update the additional shopping cart items that vary depending on the selected payment app,
+     * e.g., debit card discounts.
      *
      * @param additionalContents The additional shopping cart items. Can be null.
      */

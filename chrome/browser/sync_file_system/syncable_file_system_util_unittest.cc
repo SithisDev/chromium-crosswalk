@@ -1,16 +1,17 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync_file_system/syncable_file_system_util.h"
 
 #include "base/files/scoped_temp_dir.h"
-#include "base/logging.h"
 #include "chrome/browser/sync_file_system/local/canned_syncable_file_system.h"
 #include "chrome/browser/sync_file_system/local/local_file_sync_context.h"
-#include "storage/browser/fileapi/external_mount_points.h"
-#include "storage/common/fileapi/file_system_types.h"
+#include "storage/browser/file_system/external_mount_points.h"
+#include "storage/common/file_system/file_system_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
+#include "url/gurl.h"
 
 using storage::ExternalMountPoints;
 using storage::FileSystemURL;
@@ -30,7 +31,8 @@ const char kOrigin[] = "http://www.example.com/";
 const base::FilePath::CharType kPath[] = FILE_PATH_LITERAL("dir/file");
 
 FileSystemURL CreateFileSystemURL(const std::string& url) {
-  return ExternalMountPoints::GetSystemInstance()->CrackURL(GURL(url));
+  return ExternalMountPoints::GetSystemInstance()->CrackURL(
+      GURL(url), blink::StorageKey::CreateFromStringForTesting(url));
 }
 
 base::FilePath CreateNormalizedFilePath(const base::FilePath::CharType* path) {

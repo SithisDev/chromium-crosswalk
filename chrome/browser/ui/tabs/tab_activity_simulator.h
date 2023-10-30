@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,7 @@
 #define CHROME_BROWSER_UI_TABS_TAB_ACTIVITY_SIMULATOR_H_
 
 #include <memory>
-#include <vector>
 
-#include "base/macros.h"
 #include "ui/base/page_transition_types.h"
 
 class GURL;
@@ -23,9 +21,9 @@ class WebContents;
 // activity, such as showing and hiding tabs when switching between them.
 class TabActivitySimulator {
  public:
-  class TestWebContentsObserver;
-
   TabActivitySimulator();
+  TabActivitySimulator(const TabActivitySimulator&) = delete;
+  TabActivitySimulator& operator=(const TabActivitySimulator&) = delete;
   ~TabActivitySimulator();
 
   // Simulates a navigation to |url| using the given transition type.
@@ -49,12 +47,6 @@ class TabActivitySimulator {
   // Sets |new_index| as the active tab in its tab strip, hiding the previously
   // active tab.
   void SwitchToTabAt(TabStripModel* tab_strip_model, int new_index);
-
- private:
-  // Owns the observers we've created.
-  std::vector<std::unique_ptr<TestWebContentsObserver>> observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabActivitySimulator);
 };
 
 #endif  // CHROME_BROWSER_UI_TABS_TAB_ACTIVITY_SIMULATOR_H_

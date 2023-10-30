@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,7 +50,7 @@ class DownloadFeedback {
   // |finish_callback| will be called when the upload completes or fails, but is
   // not called if the upload is cancelled by deleting the DownloadFeedback
   // while the upload is in progress.
-  virtual void Start(const base::Closure& finish_callback) = 0;
+  virtual void Start(base::OnceClosure finish_callback) = 0;
 
   virtual const std::string& GetPingRequestForTesting() const = 0;
   virtual const std::string& GetPingResponseForTesting() const = 0;

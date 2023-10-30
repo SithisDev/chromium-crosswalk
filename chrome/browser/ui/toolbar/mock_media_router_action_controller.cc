@@ -1,10 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/toolbar/mock_media_router_action_controller.h"
 
-#include "chrome/browser/media/router/media_router_factory.h"
+#include "components/media_router/browser/media_router_factory.h"
 
 MockMediaRouterActionController::MockMediaRouterActionController(
     Profile* profile)

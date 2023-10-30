@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,8 +20,8 @@
  *     (see Runner.prototype in mocha.js).
  */
 function BrowserTestReporter(runner) {
-  var passes = 0;
-  var failures = 0;
+  let passes = 0;
+  let failures = 0;
 
   // Increment passes for each passed test.
   runner.on('pass', function(test) {
@@ -32,13 +32,13 @@ function BrowserTestReporter(runner) {
   // failures are caught by test_api.js.
   runner.on('fail', function(test, err) {
     failures++;
-    var message = 'Mocha test failed: ' + test.fullTitle() + '\n';
+    let message = 'Mocha test failed: ' + test.fullTitle() + '\n';
 
     // Remove unhelpful mocha lines from stack trace.
     if (err.stack) {
-      var stack = err.stack.split('\n');
-      for (var i = 0; i < stack.length; i++) {
-        if (stack[i].indexOf('mocha.js:') == -1) {
+      const stack = err.stack.split('\n');
+      for (let i = 0; i < stack.length; i++) {
+        if (stack[i].indexOf('mocha.js:') === -1) {
           message += stack[i] + '\n';
         }
       }
@@ -51,7 +51,7 @@ function BrowserTestReporter(runner) {
 
   // Report the results to the test API.
   runner.on('end', function() {
-    if (failures == 0) {
+    if (failures === 0) {
       if (passes > 0) {
         testDone();
       } else {
@@ -62,7 +62,7 @@ function BrowserTestReporter(runner) {
     testDone([
       false,
       'Test Errors: ' + failures + '/' + (passes + failures) +
-          ' tests had failed assertions.'
+          ' tests had failed assertions.',
     ]);
   });
 }
@@ -75,6 +75,14 @@ function BrowserTestReporter(runner) {
 window.runMochaTest = function(suiteName, testName) {
   const escapedTestName = testName.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
   mocha.grep(new RegExp('^' + suiteName + ' ' + escapedTestName + '$')).run();
+};
+
+/**
+ * Helper function provided to make running a single Mocha suite more robust.
+ * @param {string} suiteName
+ */
+window.runMochaSuite = function(suiteName) {
+  mocha.grep(new RegExp('^' + suiteName + ' ')).run();
 };
 
 // Configure mocha.

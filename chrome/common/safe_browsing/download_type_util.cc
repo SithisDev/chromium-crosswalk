@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,9 @@
 
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/strings/string_util.h"
-#include "chrome/common/safe_browsing/file_type_policies.h"
-#include "components/safe_browsing/features.h"
+#include "components/safe_browsing/content/common/file_type_policies.h"
+#include "components/safe_browsing/core/common/features.h"
 
 namespace safe_browsing {
 namespace download_type_util {
@@ -74,7 +72,6 @@ ClientDownloadRequest::DownloadType GetDownloadType(
            file.MatchesExtension(FILE_PATH_LITERAL(".xldm")) ||
            file.MatchesExtension(FILE_PATH_LITERAL(".xltx")) ||
            file.MatchesExtension(FILE_PATH_LITERAL(".xltm")) ||
-           file.MatchesExtension(FILE_PATH_LITERAL(".xlsb")) ||
            file.MatchesExtension(FILE_PATH_LITERAL(".xla")) ||
            file.MatchesExtension(FILE_PATH_LITERAL(".xlam")) ||
            file.MatchesExtension(FILE_PATH_LITERAL(".xll")) ||
@@ -90,8 +87,8 @@ ClientDownloadRequest::DownloadType GetDownloadType(
            file.MatchesExtension(FILE_PATH_LITERAL(".ppsx")) ||
            file.MatchesExtension(FILE_PATH_LITERAL(".ppsm")) ||
            file.MatchesExtension(FILE_PATH_LITERAL(".sldx")) ||
-           file.MatchesExtension(FILE_PATH_LITERAL(".xldm")) ||
-           file.MatchesExtension(FILE_PATH_LITERAL(".rtf")))
+           file.MatchesExtension(FILE_PATH_LITERAL(".rtf")) ||
+           file.MatchesExtension(FILE_PATH_LITERAL(".wll")))
     return ClientDownloadRequest::DOCUMENT;
 
   return ClientDownloadRequest::WIN_EXECUTABLE;

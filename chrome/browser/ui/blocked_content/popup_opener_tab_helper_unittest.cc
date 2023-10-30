@@ -1,8 +1,8 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/ui/blocked_content/popup_opener_tab_helper.h"
+#include "components/blocked_content/popup_opener_tab_helper.h"
 
 #include <memory>
 #include <string>
@@ -10,40 +10,48 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/ui/blocked_content/list_item_position.h"
-#include "chrome/browser/ui/blocked_content/popup_tracker.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+#include "chrome/browser/content_settings/page_specific_content_settings_delegate.h"
 #include "chrome/browser/ui/blocked_content/tab_under_navigation_throttle.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/blocked_content/list_item_position.h"
+#include "components/blocked_content/popup_blocker_tab_helper.h"
+#include "components/blocked_content/popup_tracker.h"
+#include "components/content_settings/browser/page_specific_content_settings.h"
 #include "components/ukm/content/source_url_recorder.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/mock_navigation_handle.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_utils.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/input/web_mouse_event.h"
+#include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/scoped_java_ref.h"
-#include "chrome/browser/ui/android/infobars/infobar_android.h"
+#include "chrome/browser/android/framebust_intervention/framebust_blocked_delegate_android.h"
+#include "components/infobars/android/infobar_android.h"
+#include "components/messages/android/mock_message_dispatcher_bridge.h"
 #else
 #include "chrome/browser/ui/blocked_content/framebust_block_tab_helper.h"
 #endif
 
+namespace infobars {
 class InfoBarAndroid;
+}
 
 constexpr char kTabUnderVisibleTime[] = "Tab.TabUnder.VisibleTime";
 constexpr char kTabUnderVisibleTimeBefore[] = "Tab.TabUnder.VisibleTimeBefore";
@@ -53,26 +61,49 @@ constexpr char kTabUnderAction[] = "Tab.TabUnderAction";
 class PopupOpenerTabHelperTest : public ChromeRenderViewHostTestHarness {
  public:
   PopupOpenerTabHelperTest() : ChromeRenderViewHostTestHarness() {}
+
+  PopupOpenerTabHelperTest(const PopupOpenerTabHelperTest&) = delete;
+  PopupOpenerTabHelperTest& operator=(const PopupOpenerTabHelperTest&) = delete;
+
   ~PopupOpenerTabHelperTest() override {}
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
-    PopupOpenerTabHelper::CreateForWebContents(web_contents(), &raw_clock_);
-    InfoBarService::CreateForWebContents(web_contents());
-    TabSpecificContentSettings::CreateForWebContents(web_contents());
-#if !defined(OS_ANDROID)
+    blocked_content::PopupOpenerTabHelper::CreateForWebContents(
+        web_contents(), &raw_clock_,
+        HostContentSettingsMapFactory::GetForProfile(profile()));
+    content_settings::PageSpecificContentSettings::CreateForWebContents(
+        web_contents(),
+        std::make_unique<chrome::PageSpecificContentSettingsDelegate>(
+            web_contents()));
+    blocked_content::PopupBlockerTabHelper::CreateForWebContents(
+        web_contents());
+#if BUILDFLAG(IS_ANDROID)
+    message_dispatcher_bridge_.SetMessagesEnabledForEmbedder(true);
+    messages::MessageDispatcherBridge::SetInstanceForTesting(
+        &message_dispatcher_bridge_);
+    blocked_content::FramebustBlockedMessageDelegate::CreateForWebContents(
+        web_contents());
+    framebust_blocked_message_delegate_ =
+        blocked_content::FramebustBlockedMessageDelegate::FromWebContents(
+            web_contents());
+#endif
+#if !BUILDFLAG(IS_ANDROID)
     FramebustBlockTabHelper::CreateForWebContents(web_contents());
 #endif
 
     // The tick clock needs to be advanced manually so it isn't set to null,
     // which the code uses to determine if it is set yet.
-    raw_clock_.Advance(base::TimeDelta::FromMilliseconds(1));
+    raw_clock_.Advance(base::Milliseconds(1));
 
     EXPECT_EQ(web_contents()->GetVisibility(), content::Visibility::VISIBLE);
   }
 
   void TearDown() override {
     popups_.clear();
+#if BUILDFLAG(IS_ANDROID)
+    messages::MessageDispatcherBridge::SetInstanceForTesting(nullptr);
+#endif
     ChromeRenderViewHostTestHarness::TearDown();
   }
 
@@ -95,7 +126,9 @@ class PopupOpenerTabHelperTest : public ChromeRenderViewHostTestHarness {
     content::WebContents* raw_popup = popup.get();
     popups_.push_back(std::move(popup));
 
-    PopupTracker::CreateForWebContents(raw_popup, web_contents() /* opener */);
+    blocked_content::PopupTracker::CreateForWebContents(
+        raw_popup, web_contents() /* opener */,
+        WindowOpenDisposition::NEW_POPUP);
     web_contents()->WasHidden();
     raw_popup->WasShown();
     return raw_popup;
@@ -105,49 +138,63 @@ class PopupOpenerTabHelperTest : public ChromeRenderViewHostTestHarness {
 
   base::HistogramTester* histogram_tester() { return &histogram_tester_; }
 
+#if BUILDFLAG(IS_ANDROID)
+  messages::MessageWrapper* message_wrapper() {
+    return framebust_blocked_message_delegate_->message_for_testing();
+  }
+#endif
+
+  void expect_message() {
+#if BUILDFLAG(IS_ANDROID)
+    EXPECT_CALL(message_dispatcher_bridge_, EnqueueMessage)
+        .WillOnce(testing::Return(true));
+#endif
+  }
+
  private:
   base::HistogramTester histogram_tester_;
   base::SimpleTestTickClock raw_clock_;
-
   std::vector<std::unique_ptr<content::WebContents>> popups_;
-
-  DISALLOW_COPY_AND_ASSIGN(PopupOpenerTabHelperTest);
+#if BUILDFLAG(IS_ANDROID)
+  messages::MockMessageDispatcherBridge message_dispatcher_bridge_;
+  raw_ptr<blocked_content::FramebustBlockedMessageDelegate>
+      framebust_blocked_message_delegate_;
+#endif
 };
 
 TEST_F(PopupOpenerTabHelperTest, LogVisibleTime) {
   NavigateAndCommitWithoutGesture(GURL("https://first.test/"));
-  raw_clock()->Advance(base::TimeDelta::FromMinutes(1));
+  raw_clock()->Advance(base::Minutes(1));
 
   web_contents()->WasHidden();
 
   NavigateAndCommitWithoutGesture(GURL("https://example.test/"));
 
-  raw_clock()->Advance(base::TimeDelta::FromMinutes(1));
+  raw_clock()->Advance(base::Minutes(1));
   web_contents()->WasShown();
-  raw_clock()->Advance(base::TimeDelta::FromSeconds(1));
+  raw_clock()->Advance(base::Seconds(1));
 
   DeleteContents();
 
   histogram_tester()->ExpectUniqueSample(
-      "Tab.VisibleTime", base::TimeDelta::FromSeconds(60 + 1).InMilliseconds(),
-      1);
+      "Tab.VisibleTime", base::Seconds(60 + 1).InMilliseconds(), 1);
 }
 
 TEST_F(PopupOpenerTabHelperTest, SimpleTabUnder_LogsMetrics) {
   NavigateAndCommitWithoutGesture(GURL("https://first.test/"));
 
   // Spend 1s on the page before doing anything.
-  raw_clock()->Advance(base::TimeDelta::FromSeconds(1));
+  raw_clock()->Advance(base::Seconds(1));
 
   // Popup and then navigate 50ms after.
   SimulatePopup();
-  raw_clock()->Advance(base::TimeDelta::FromMilliseconds(50));
+  raw_clock()->Advance(base::Milliseconds(50));
   NavigateAndCommitWithoutGesture(GURL("https://example.test/"));
 
   // Spent 100 ms on the opener before closing it.
-  raw_clock()->Advance(base::TimeDelta::FromMinutes(1));
+  raw_clock()->Advance(base::Minutes(1));
   web_contents()->WasShown();
-  raw_clock()->Advance(base::TimeDelta::FromMilliseconds(100));
+  raw_clock()->Advance(base::Milliseconds(100));
   DeleteContents();
 
   histogram_tester()->ExpectUniqueSample(kTabUnderVisibleTimeBefore, 1050, 1);
@@ -160,7 +207,7 @@ TEST_F(PopupOpenerTabHelperTest, TabUnderAfterRedirect_LogsMetrics) {
 
   // Popup and then navigate 50ms after.
   SimulatePopup();
-  raw_clock()->Advance(base::TimeDelta::FromMilliseconds(50));
+  raw_clock()->Advance(base::Milliseconds(50));
 
   std::unique_ptr<content::NavigationSimulator> simulator =
       content::NavigationSimulator::CreateRendererInitiated(
@@ -172,15 +219,15 @@ TEST_F(PopupOpenerTabHelperTest, TabUnderAfterRedirect_LogsMetrics) {
   // currently, this time does not get accounted for in the visibility metrics,
   // though we may want to include it in the future.
   web_contents()->WasShown();
-  raw_clock()->Advance(base::TimeDelta::FromMilliseconds(10));
+  raw_clock()->Advance(base::Milliseconds(10));
 
   simulator->Redirect(GURL("https://example.test/"));
-  raw_clock()->Advance(base::TimeDelta::FromMilliseconds(15));
+  raw_clock()->Advance(base::Milliseconds(15));
 
   simulator->Commit();
 
   // Spent 100 additional ms on the opener before closing it.
-  raw_clock()->Advance(base::TimeDelta::FromMilliseconds(100));
+  raw_clock()->Advance(base::Milliseconds(100));
   DeleteContents();
 
   histogram_tester()->ExpectUniqueSample(kTabUnderVisibleTime, 115, 1);
@@ -191,7 +238,7 @@ TEST_F(PopupOpenerTabHelperTest, FirstNavigation_NoLogging) {
   SimulatePopup();
   web_contents()->WasHidden();
   NavigateAndCommitWithoutGesture(GURL("https://first.test/"));
-  raw_clock()->Advance(base::TimeDelta::FromMinutes(1));
+  raw_clock()->Advance(base::Minutes(1));
   DeleteContents();
   histogram_tester()->ExpectTotalCount(kTabUnderVisibleTime, 0);
 }
@@ -201,7 +248,7 @@ TEST_F(PopupOpenerTabHelperTest, VisibleNavigation_NoLogging) {
   SimulatePopup();
   web_contents()->WasShown();
   NavigateAndCommitWithoutGesture(GURL("https://example.test/"));
-  raw_clock()->Advance(base::TimeDelta::FromMinutes(1));
+  raw_clock()->Advance(base::Minutes(1));
   DeleteContents();
   histogram_tester()->ExpectTotalCount(kTabUnderVisibleTime, 0);
 }
@@ -220,7 +267,7 @@ TEST_F(PopupOpenerTabHelperTest, AbortedNavigationAfterStart_LogsMetrics) {
   simulator->SetHasUserGesture(false);
   simulator->Fail(net::ERR_ABORTED);
 
-  raw_clock()->Advance(base::TimeDelta::FromMinutes(1));
+  raw_clock()->Advance(base::Minutes(1));
   DeleteContents();
   histogram_tester()->ExpectTotalCount(kTabUnderVisibleTime, 1);
 }
@@ -236,7 +283,7 @@ TEST_F(PopupOpenerTabHelperTest, FailedNavigation_NoLogging) {
   simulator->SetHasUserGesture(false);
   simulator->Fail(net::ERR_CONNECTION_RESET);
 
-  raw_clock()->Advance(base::TimeDelta::FromMinutes(1));
+  raw_clock()->Advance(base::Minutes(1));
   DeleteContents();
   histogram_tester()->ExpectTotalCount(kTabUnderVisibleTime, 1);
 }
@@ -253,7 +300,7 @@ TEST_F(PopupOpenerTabHelperTest, AbortedNavigationBeforeRedirect_LogsMetrics) {
   simulator->Start();
   simulator->Fail(net::ERR_ABORTED);
 
-  raw_clock()->Advance(base::TimeDelta::FromMinutes(1));
+  raw_clock()->Advance(base::Minutes(1));
   DeleteContents();
   histogram_tester()->ExpectTotalCount(kTabUnderVisibleTime, 0);
 }
@@ -263,7 +310,7 @@ TEST_F(PopupOpenerTabHelperTest, SameOriginNavigation_NoLogging) {
   SimulatePopup();
   NavigateAndCommitWithoutGesture(GURL("https://first.test/path"));
 
-  raw_clock()->Advance(base::TimeDelta::FromMinutes(1));
+  raw_clock()->Advance(base::Minutes(1));
   DeleteContents();
   histogram_tester()->ExpectTotalCount(kTabUnderVisibleTime, 0);
 }
@@ -278,7 +325,7 @@ TEST_F(PopupOpenerTabHelperTest, HasUserGesture_NoLogging) {
   simulator->SetHasUserGesture(true);
   simulator->Commit();
 
-  raw_clock()->Advance(base::TimeDelta::FromMinutes(1));
+  raw_clock()->Advance(base::Minutes(1));
   DeleteContents();
   histogram_tester()->ExpectTotalCount(kTabUnderVisibleTime, 0);
 }
@@ -297,7 +344,7 @@ TEST_F(PopupOpenerTabHelperTest, SimulateTabUnderNavBeforePopup_LogsMetrics) {
   NavigateAndCommitWithoutGesture(GURL("https://first.test/"));
 
   // Start navigating, then popup, then commit.
-  raw_clock()->Advance(base::TimeDelta::FromMilliseconds(50));
+  raw_clock()->Advance(base::Milliseconds(50));
   std::unique_ptr<content::NavigationSimulator> simulator =
       content::NavigationSimulator::CreateRendererInitiated(
           GURL("https://example.test/"), main_rfh());
@@ -307,9 +354,9 @@ TEST_F(PopupOpenerTabHelperTest, SimulateTabUnderNavBeforePopup_LogsMetrics) {
   simulator->Commit();
 
   // Spent 100 ms on the opener before closing it.
-  raw_clock()->Advance(base::TimeDelta::FromMinutes(1));
+  raw_clock()->Advance(base::Minutes(1));
   web_contents()->WasShown();
-  raw_clock()->Advance(base::TimeDelta::FromMilliseconds(100));
+  raw_clock()->Advance(base::Milliseconds(100));
   DeleteContents();
 
   // No histograms are logged because:
@@ -320,35 +367,88 @@ TEST_F(PopupOpenerTabHelperTest, SimulateTabUnderNavBeforePopup_LogsMetrics) {
   histogram_tester()->ExpectTotalCount(kPopupToTabUnder, 0);
 }
 
+// Navigate to a site without pop-ups, verify the user popup settings are not
+// logged to ukm.
+TEST_F(PopupOpenerTabHelperTest,
+       PageWithNoPopups_NoProfileSettingsLoggedInUkm) {
+  ukm::InitializeSourceUrlRecorderForWebContents(web_contents());
+  ukm::TestAutoSetUkmRecorder test_ukm_recorder;
+
+  const GURL url("https://first.test/");
+  NavigateAndCommitWithoutGesture(url);
+  DeleteContents();
+
+  auto entries =
+      test_ukm_recorder.GetEntriesByName(ukm::builders::Popup_Page::kEntryName);
+  EXPECT_EQ(0u, entries.size());
+}
+
+// Navigate to a site, verify histogram for user site pop up settings
+// when there is at least one popup.
+TEST_F(PopupOpenerTabHelperTest,
+       PageWithDefaultPopupBlocker_ProfileSettingsLoggedInUkm) {
+  ukm::InitializeSourceUrlRecorderForWebContents(web_contents());
+  ukm::TestAutoSetUkmRecorder test_ukm_recorder;
+
+  const GURL url("https://first.test/");
+  NavigateAndCommitWithoutGesture(url);
+  SimulatePopup();
+  DeleteContents();
+
+  auto entries =
+      test_ukm_recorder.GetEntriesByName(ukm::builders::Popup_Page::kEntryName);
+  EXPECT_EQ(1u, entries.size());
+
+  test_ukm_recorder.ExpectEntrySourceHasUrl(entries[0], url);
+  test_ukm_recorder.ExpectEntryMetric(
+      entries[0], ukm::builders::Popup_Page::kAllowedName, false);
+}
+
+// Same as the test with the default pop up blocker, however, with the user
+// explicitly allowing popups on the site.
+TEST_F(PopupOpenerTabHelperTest,
+       PageWithPopupsAllowed_ProfileSettingsLoggedInUkm) {
+  ukm::InitializeSourceUrlRecorderForWebContents(web_contents());
+  ukm::TestAutoSetUkmRecorder test_ukm_recorder;
+
+  const GURL url("https://first.test/");
+
+  // Allow popups on url for the test profile.
+  TestingProfile* test_profile = profile();
+  HostContentSettingsMap* host_content_settings_map =
+      HostContentSettingsMapFactory::GetForProfile(test_profile);
+  host_content_settings_map->SetContentSettingDefaultScope(
+      url, url, ContentSettingsType::POPUPS, CONTENT_SETTING_ALLOW);
+
+  NavigateAndCommitWithoutGesture(url);
+  SimulatePopup();
+  DeleteContents();
+
+  auto entries =
+      test_ukm_recorder.GetEntriesByName(ukm::builders::Popup_Page::kEntryName);
+  EXPECT_EQ(1u, entries.size());
+
+  test_ukm_recorder.ExpectEntrySourceHasUrl(entries[0], url);
+  test_ukm_recorder.ExpectEntryMetric(
+      entries[0], ukm::builders::Popup_Page::kAllowedName, true);
+}
+
 class BlockTabUnderTest : public PopupOpenerTabHelperTest {
  public:
-  BlockTabUnderTest() {}
-  ~BlockTabUnderTest() override {}
-
-  void SetUp() override {
-    PopupOpenerTabHelperTest::SetUp();
+  BlockTabUnderTest() {
     scoped_feature_list_ = std::make_unique<base::test::ScopedFeatureList>();
     scoped_feature_list_->InitAndEnableFeature(
         TabUnderNavigationThrottle::kBlockTabUnders);
   }
 
-  InfoBarAndroid* GetInfoBar() {
-#if defined(OS_ANDROID)
-    auto* service = InfoBarService::FromWebContents(web_contents());
-    if (!service->infobar_count())
-      return nullptr;
-    EXPECT_EQ(1u, service->infobar_count());
-    InfoBarAndroid* infobar =
-        static_cast<InfoBarAndroid*>(service->infobar_at(0));
-    EXPECT_TRUE(infobar);
-    return infobar;
-#endif  // defined(OS_ANDROID)
-    return nullptr;
-  }
+  BlockTabUnderTest(const BlockTabUnderTest&) = delete;
+  BlockTabUnderTest& operator=(const BlockTabUnderTest&) = delete;
+
+  ~BlockTabUnderTest() override = default;
 
   void ExpectUIShown(bool shown) {
-#if defined(OS_ANDROID)
-    EXPECT_EQ(shown, !!GetInfoBar());
+#if BUILDFLAG(IS_ANDROID)
+    EXPECT_EQ(shown, !!message_wrapper());
 #else
     EXPECT_EQ(shown, FramebustBlockTabHelper::FromWebContents(web_contents())
                          ->HasBlockedUrls());
@@ -361,33 +461,20 @@ class BlockTabUnderTest : public PopupOpenerTabHelperTest {
     blocked_urls_.push_back(url);
   }
 
-  void DisableFeature() {
-    scoped_feature_list_ = std::make_unique<base::test::ScopedFeatureList>();
-    scoped_feature_list_->InitAndDisableFeature(
-        TabUnderNavigationThrottle::kBlockTabUnders);
-  }
+ protected:
+  std::unique_ptr<base::test::ScopedFeatureList> scoped_feature_list_;
 
  private:
   std::vector<GURL> blocked_urls_;
-  std::unique_ptr<base::test::ScopedFeatureList> scoped_feature_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(BlockTabUnderTest);
 };
 
 TEST_F(BlockTabUnderTest, SimpleTabUnder_IsBlocked) {
   EXPECT_TRUE(NavigateAndCommitWithoutGesture(GURL("https://first.test/")));
   SimulatePopup();
   const GURL blocked_url("https://example.test/");
+  expect_message();
   EXPECT_FALSE(NavigateAndCommitWithoutGesture(blocked_url));
   ExpectUIShown(true);
-}
-
-TEST_F(BlockTabUnderTest, NoFeature_NoBlocking) {
-  DisableFeature();
-  EXPECT_TRUE(NavigateAndCommitWithoutGesture(GURL("https://first.test/")));
-  SimulatePopup();
-  EXPECT_TRUE(NavigateAndCommitWithoutGesture(GURL("https://example.test/")));
-  ExpectUIShown(false);
 }
 
 TEST_F(BlockTabUnderTest, NoPopup_NoBlocking) {
@@ -439,6 +526,7 @@ TEST_F(BlockTabUnderTest, TabUnderCrossOriginRedirect_IsBlocked) {
   simulator->Start();
   EXPECT_EQ(content::NavigationThrottle::PROCEED,
             simulator->GetLastThrottleCheckResult());
+  expect_message();
   simulator->Redirect(blocked_url);
   EXPECT_EQ(content::NavigationThrottle::CANCEL,
             simulator->GetLastThrottleCheckResult());
@@ -453,8 +541,9 @@ TEST_F(BlockTabUnderTest, TabUnderWithLongWait_IsBlocked) {
 
   // Delay a long time before navigating the opener. Since there is no threshold
   // we always classify as a tab-under.
-  raw_clock()->Advance(base::TimeDelta::FromDays(10));
+  raw_clock()->Advance(base::Days(10));
 
+  expect_message();
   const GURL blocked_url("https://example.test/");
   EXPECT_FALSE(NavigateAndCommitWithoutGesture(blocked_url));
   ExpectUIShown(true);
@@ -471,8 +560,8 @@ TEST_F(BlockTabUnderTest, TabUnderWithSubsequentGesture_IsNotBlocked) {
   // Now, let the opener get a user gesture. Cast to avoid reaching into private
   // members.
   static_cast<content::WebContentsObserver*>(
-      PopupOpenerTabHelper::FromWebContents(web_contents()))
-      ->DidGetUserInteraction(blink::WebInputEvent::kMouseDown);
+      blocked_content::PopupOpenerTabHelper::FromWebContents(web_contents()))
+      ->DidGetUserInteraction(blink::WebMouseEvent());
 
   // A subsequent navigation should be allowed, even if it is classified as a
   // suspicious redirect.
@@ -485,6 +574,7 @@ TEST_F(BlockTabUnderTest, MultipleRedirectAttempts_AreBlocked) {
   SimulatePopup();
 
   const GURL blocked_url("https://example.test/");
+  expect_message();
   EXPECT_FALSE(NavigateAndCommitWithoutGesture(blocked_url));
   ExpectUIShown(true);
   EXPECT_FALSE(NavigateAndCommitWithoutGesture(blocked_url));
@@ -526,47 +616,23 @@ TEST_F(BlockTabUnderTest, ClickThroughAction) {
   SimulatePopup();
 
   // Populate two blocked URLs in the UI.
+  expect_message();
   const GURL blocked_url("https://example.test/");
   EXPECT_FALSE(NavigateAndCommitWithoutGesture(blocked_url));
   EXPECT_FALSE(NavigateAndCommitWithoutGesture(blocked_url));
-#if defined(OS_ANDROID)
-  InfoBarAndroid* infobar = GetInfoBar();
-  base::android::JavaParamRef<jobject> jobj(nullptr);
-  infobar->OnLinkClicked(nullptr /* env */, jobj);
+#if BUILDFLAG(IS_ANDROID)
+  message_wrapper()->HandleActionClick(base::android::AttachCurrentThread());
 #else
   FramebustBlockTabHelper* framebust =
       FramebustBlockTabHelper::FromWebContents(web_contents());
   framebust->OnBlockedUrlClicked(1);
   histogram_tester()->ExpectUniqueSample(
       "Tab.TabUnder.ClickThroughPosition",
-      static_cast<int>(ListItemPosition::kLastItem), 1);
+      static_cast<int>(blocked_content::ListItemPosition::kLastItem), 1);
 #endif
   histogram_tester()->ExpectBucketCount(
       kTabUnderAction,
       static_cast<int>(TabUnderNavigationThrottle::Action::kClickedThrough), 1);
-}
-
-// kDidTabUnder is not reported multiple times for redirects.
-TEST_F(BlockTabUnderTest, DisableFeature_LogsDidTabUnder) {
-  DisableFeature();
-  EXPECT_TRUE(NavigateAndCommitWithoutGesture(GURL("https://first.test/")));
-  SimulatePopup();
-
-  const GURL a_url("https://a.com/");
-  const GURL b_url("https://b.com/");
-  std::unique_ptr<content::NavigationSimulator> simulator =
-      content::NavigationSimulator::CreateRendererInitiated(a_url, main_rfh());
-  simulator->SetHasUserGesture(false);
-  simulator->Redirect(b_url);
-  simulator->Redirect(a_url);
-  simulator->Commit();
-  histogram_tester()->ExpectBucketCount(
-      kTabUnderAction,
-      static_cast<int>(TabUnderNavigationThrottle::Action::kStarted), 2);
-  histogram_tester()->ExpectBucketCount(
-      kTabUnderAction,
-      static_cast<int>(TabUnderNavigationThrottle::Action::kDidTabUnder), 1);
-  histogram_tester()->ExpectTotalCount(kTabUnderAction, 3);
 }
 
 TEST_F(BlockTabUnderTest, LogsUkm) {
@@ -578,7 +644,7 @@ TEST_F(BlockTabUnderTest, LogsUkm) {
   const GURL first_url("https://first.test/");
   EXPECT_TRUE(NavigateAndCommitWithoutGesture(first_url));
   SimulatePopup();
-  raw_clock()->Advance(base::TimeDelta::FromMilliseconds(15));
+  raw_clock()->Advance(base::Milliseconds(15));
   const GURL blocked_url("https://example.test/");
   EXPECT_FALSE(NavigateAndCommitWithoutGesture(blocked_url));
 
@@ -610,6 +676,7 @@ TEST_F(BlockTabUnderTest, LogsToConsole) {
       content::RenderFrameHostTester::For(main_rfh())->GetConsoleMessages();
 
   EXPECT_EQ(0u, messages.size());
+  expect_message();
   EXPECT_FALSE(NavigateAndCommitWithoutGesture(blocked_url));
   ExpectUIShown(true);
 
@@ -667,5 +734,56 @@ TEST_F(BlockTabUnderTest,
   EXPECT_EQ(content::NavigationThrottle::PROCEED,
             simulator->GetLastThrottleCheckResult());
   simulator->Commit();
+  ExpectUIShown(false);
+}
+
+TEST_F(BlockTabUnderTest, OnlyCreateThrottleForPrimaryMainframe) {
+  content::MockNavigationHandle handle(GURL("http://example.com"), main_rfh());
+  handle.set_is_in_primary_main_frame(true);
+  auto throttle = TabUnderNavigationThrottle::MaybeCreate(&handle);
+  EXPECT_NE(throttle, nullptr);
+
+  handle.set_is_in_primary_main_frame(false);
+  auto throttle2 = TabUnderNavigationThrottle::MaybeCreate(&handle);
+  EXPECT_EQ(throttle2, nullptr);
+}
+
+class BlockTabUnderDisabledTest : public BlockTabUnderTest {
+ public:
+  BlockTabUnderDisabledTest() {
+    scoped_feature_list_.InitAndDisableFeature(
+        TabUnderNavigationThrottle::kBlockTabUnders);
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+// kDidTabUnder is not reported multiple times for redirects.
+TEST_F(BlockTabUnderDisabledTest, DisableFeature_LogsDidTabUnder) {
+  EXPECT_TRUE(NavigateAndCommitWithoutGesture(GURL("https://first.test/")));
+  SimulatePopup();
+
+  const GURL a_url("https://a.com/");
+  const GURL b_url("https://b.com/");
+  std::unique_ptr<content::NavigationSimulator> simulator =
+      content::NavigationSimulator::CreateRendererInitiated(a_url, main_rfh());
+  simulator->SetHasUserGesture(false);
+  simulator->Redirect(b_url);
+  simulator->Redirect(a_url);
+  simulator->Commit();
+  histogram_tester()->ExpectBucketCount(
+      kTabUnderAction,
+      static_cast<int>(TabUnderNavigationThrottle::Action::kStarted), 2);
+  histogram_tester()->ExpectBucketCount(
+      kTabUnderAction,
+      static_cast<int>(TabUnderNavigationThrottle::Action::kDidTabUnder), 1);
+  histogram_tester()->ExpectTotalCount(kTabUnderAction, 3);
+}
+
+TEST_F(BlockTabUnderDisabledTest, NoFeature_NoBlocking) {
+  EXPECT_TRUE(NavigateAndCommitWithoutGesture(GURL("https://first.test/")));
+  SimulatePopup();
+  EXPECT_TRUE(NavigateAndCommitWithoutGesture(GURL("https://example.test/")));
   ExpectUIShown(false);
 }

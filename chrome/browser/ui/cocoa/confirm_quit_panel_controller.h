@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 @interface ConfirmQuitPanelController : NSWindowController<NSWindowDelegate> {
  @private
   // The content view of the window that this controller manages.
-  ConfirmQuitFrameView* contentView_;  // Weak, owned by the window.
+  ConfirmQuitFrameView* _contentView;  // Weak, owned by the window.
 }
 
 // Returns a singleton instance of the Controller. This will create one if it

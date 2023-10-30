@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,8 @@
 #include <vector>
 
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/scoped_observer.h"
+#include "base/time/time.h"
 #include "chrome/browser/ui/app_list/search/search_provider.h"
 
 class AppListControllerDelegate;
@@ -29,8 +28,6 @@ class OpenTabsUIDelegate;
 
 namespace app_list {
 
-class AppSearchResultRanker;
-
 class AppSearchProvider : public SearchProvider {
  public:
   class App;
@@ -44,14 +41,19 @@ class AppSearchProvider : public SearchProvider {
   AppSearchProvider(Profile* profile,
                     AppListControllerDelegate* list_controller,
                     base::Clock* clock,
-                    AppListModelUpdater* model_updater,
-                    AppSearchResultRanker* ranker);
+                    AppListModelUpdater* model_updater);
+
+  AppSearchProvider(const AppSearchProvider&) = delete;
+  AppSearchProvider& operator=(const AppSearchProvider&) = delete;
+
   ~AppSearchProvider() override;
 
   // SearchProvider overrides:
-  void Start(const base::string16& query) override;
+  void Start(const std::u16string& query) override;
+  void StartZeroState() override;
   void ViewClosing() override;
-  void Train(const std::string& id, RankingItemType type) override;
+  ash::AppListSearchResultType ResultType() const override;
+  bool ShouldBlockZeroState() const override;
 
   // Refreshes apps and updates results inline
   void RefreshAppsAndUpdateResults();
@@ -69,12 +71,13 @@ class AppSearchProvider : public SearchProvider {
     return open_tabs_ui_delegate_for_testing_;
   }
 
-  static std::string NormalizeIDForTest(const std::string& id);
-
  private:
   void UpdateResults();
+
+  // Updates the zero-state app recommendations ("recent apps").
   void UpdateRecommendedResults(
       const base::flat_map<std::string, uint16_t>& id_to_app_list_index);
+
   void UpdateQueriedResults();
 
   // Publishes either the queried results or recommendation.
@@ -88,22 +91,20 @@ class AppSearchProvider : public SearchProvider {
   // zero state recommendation latency.
   void MaybeRecordQueryLatencyHistogram(bool is_queried_search);
 
-  Profile* profile_;
   AppListControllerDelegate* const list_controller_;
-  base::string16 query_;
+  std::u16string query_;
   base::TimeTicks query_start_time_;
   bool record_query_uma_ = false;
   Apps apps_;
   AppListModelUpdater* const model_updater_;
   base::Clock* clock_;
   std::vector<std::unique_ptr<DataSource>> data_sources_;
-  AppSearchResultRanker* ranker_;
   sync_sessions::OpenTabsUIDelegate* open_tabs_ui_delegate_for_testing_ =
       nullptr;
-  base::WeakPtrFactory<AppSearchProvider> refresh_apps_factory_;
-  base::WeakPtrFactory<AppSearchProvider> update_results_factory_;
+  base::WeakPtrFactory<AppSearchProvider> refresh_apps_factory_{this};
+  base::WeakPtrFactory<AppSearchProvider> update_results_factory_{this};
 
-  DISALLOW_COPY_AND_ASSIGN(AppSearchProvider);
+  base::WeakPtrFactory<AppSearchProvider> weak_ptr_factory_{this};
 };
 
 }  // namespace app_list

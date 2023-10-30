@@ -8,13 +8,13 @@
         "options": [
             {
                 "domain": "Page",
-                "include": [ "enable", "disable", "setAdBlockingEnabled", "getInstallabilityErrors" ],
+                "include": [ "enable", "disable", "setAdBlockingEnabled", "getInstallabilityErrors", "getManifestIcons", "printToPDF", "getAppId", "setSPCTransactionMode" ],
                 "include_events": [],
-                "async": ["getInstallabilityErrors"]
+                "async": ["getInstallabilityErrors", "getManifestIcons", "printToPDF", "getAppId" ]
             },
             {
                 "domain": "Browser",
-                "include": [ "getWindowForTarget", "getWindowBounds", "setWindowBounds", "close", "grantPermissions", "resetPermissions", "setDockTile" ],
+                "include": [ "getWindowForTarget", "getWindowBounds", "setWindowBounds", "close", "setDockTile", "executeBrowserCommand" ],
                 "include_events": []
             },
             {
@@ -24,23 +24,29 @@
             },
             {
                 "domain": "Cast",
-                "async": ["startTabMirroring"]
+                "async": ["startDesktopMirroring", "startTabMirroring"]
+            },
+            {
+                "domain": "Emulation",
+                "include": ["disable", "setAutomationOverride"]
             },
             {
                 "domain": "WindowManager"
+            },
+            {
+                "domain": "Security",
+                "include": [ "enable", "disable" ],
+                "include_events": [ "visibleSecurityStateChanged" ]
             }
         ]
     },
     "lib": {
         "package": "chrome/browser/devtools/protocol",
         "output": "protocol",
-        "string_header": "chrome/browser/devtools/protocol/base_string_adapter.h"
+        "protocol_traits": "third_party/inspector_protocol/crdtp/chromium/protocol_traits.h"
     },
 
-    "encoding_lib": {
-        "namespace": "inspector_protocol_encoding"
-    },
-    "bindings_lib": {
-        "namespace": "inspector_protocol_bindings"
+    "crdtp": {
+        "namespace": "crdtp"
     }
 }

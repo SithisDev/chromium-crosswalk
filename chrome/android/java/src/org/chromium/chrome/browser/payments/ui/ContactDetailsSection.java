@@ -1,21 +1,21 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.payments.ui;
 
 import android.content.Context;
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.payments.AutofillAddress;
 import org.chromium.chrome.browser.payments.AutofillContact;
 import org.chromium.chrome.browser.payments.ContactEditor;
-import org.chromium.chrome.browser.payments.JourneyLogger;
-import org.chromium.chrome.browser.payments.PaymentRequestImpl;
-import org.chromium.chrome.browser.payments.Section;
+import org.chromium.components.payments.JourneyLogger;
+import org.chromium.components.payments.Section;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -29,8 +29,7 @@ import java.util.List;
 public class ContactDetailsSection extends SectionInformation {
     private final Context mContext;
     private final ContactEditor mContactEditor;
-
-    private List<AutofillProfile> mProfiles;
+    private final List<AutofillProfile> mProfiles;
 
     /**
      * Builds a Contact section from a list of AutofillProfile.
@@ -70,21 +69,18 @@ public class ContactDetailsSection extends SectionInformation {
                 createAutofillContactFromProfile(editedAddress.getProfile());
         if (null == updatedContact) return;
 
-        if (mItems != null) {
-            for (int i = 0; i < mItems.size(); i++) {
-                AutofillContact existingContact = (AutofillContact) mItems.get(i);
-                if (existingContact.getProfile().getGUID().equals(
-                            editedAddress.getProfile().getGUID())) {
-                    // We need to replace |existingContact| with |updatedContact|.
-                    mItems.remove(i);
-                    mItems.add(i, updatedContact);
-                    return;
-                }
+        for (int i = 0; i < mItems.size(); i++) {
+            AutofillContact existingContact = (AutofillContact) mItems.get(i);
+            if (existingContact.getProfile().getGUID().equals(
+                        editedAddress.getProfile().getGUID())) {
+                // We need to replace |existingContact| with |updatedContact|.
+                mItems.remove(i);
+                mItems.add(i, updatedContact);
+                return;
             }
         }
         // The contact didn't exist. Add the new address to |mItems| to the end of the list, in
         // anticipation of the contacts section refresh.
-        if (mItems == null) mItems = new ArrayList<>();
         mItems.add(updatedContact);
 
         // The selection is not updated.
@@ -137,7 +133,7 @@ public class ContactDetailsSection extends SectionInformation {
             if (isNewSuggestion) uniqueContacts.add(contact);
 
             // Limit the number of suggestions.
-            if (uniqueContacts.size() == PaymentRequestImpl.SUGGESTIONS_LIMIT) break;
+            if (uniqueContacts.size() == PaymentUiService.SUGGESTIONS_LIMIT) break;
         }
 
         // Automatically select the first address if it is complete.

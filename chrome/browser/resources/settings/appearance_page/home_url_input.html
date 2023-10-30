@@ -1,14 +1,3 @@
-<link rel="import" href="chrome://resources/html/polymer.html">
-
-<link rel="import" href="chrome://resources/cr_elements/cr_input/cr_input.html">
-<link rel="import" href="chrome://resources/html/assert.html">
-<link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_pref_behavior.html">
-<link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_pref_indicator.html">
-<link rel="import" href="../controls/pref_control_behavior.html">
-<link rel="import" href="appearance_browser_proxy.html">
-
-<dom-module id="home-url-input">
-  <template>
     <style>
       :host {
         cursor: auto;
@@ -29,7 +18,7 @@
     <cr-input id="input" value="{{value}}" error-message="$i18n{notValid}"
         placeholder="$i18n{enterCustomWebAddress}" maxlength="102400"
         on-change="onChange_" on-keydown="onKeydown_" on-input="validate_"
-        invalid="{{invalid}}" tabindex="[[getTabindex_(canTab)]]"
+        invalid="{{invalid}}" input-tabindex="[[getTabindex_(canTab)]]"
         disabled="[[isDisabled_(disabled, pref.*)]]" spellcheck="false"
         on-keyup="stopKeyEventPropagation_"
         on-keypress="stopKeyEventPropagation_">
@@ -39,6 +28,3 @@
         </cr-policy-pref-indicator>
       </template>
     </cr-input>
-  </template>
-  <script src="home_url_input.js"></script>
-</dom-module>

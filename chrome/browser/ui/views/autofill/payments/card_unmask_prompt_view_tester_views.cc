@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/views/autofill/payments/card_unmask_prompt_views.h"
 #include "ui/views/controls/textfield/textfield.h"
-#include "ui/views/window/dialog_client_view.h"
 
 namespace autofill {
 
@@ -30,8 +29,8 @@ void CardUnmaskPromptViewTesterViews::Close() {
 }
 
 void CardUnmaskPromptViewTesterViews::EnterCVCAndAccept() {
-  view_->cvc_input_->SetText(base::ASCIIToUTF16("123"));
-  view_->GetDialogClientView()->AcceptWindow();
+  view_->cvc_input_->SetText(u"123");
+  view_->AcceptDialog();
 }
 
 }  // namespace autofill

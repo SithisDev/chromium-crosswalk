@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,8 +30,6 @@ public final class ChromeRestriction {
     /** Specifies the test is valid only if run via SVR (smartphone VR), i.e. not on a standalone
      *  VR device. */
     public static final String RESTRICTION_TYPE_SVR = "Smartphone_VR";
-    /** Specifies the test is only valid if the VR settings service is enabled */
-    public static final String RESTRICTION_TYPE_VR_SETTINGS_SERVICE = "VR_Settings_Service";
-    /** Specifies the test is not valid on touchless devices. */
-    public static final String RESTRICTION_TYPE_REQUIRES_TOUCH = "Not_Touchless";
+    /** Specifies the test is only valid if the VR DON flow is enabled */
+    public static final String RESTRICTION_TYPE_VR_DON_ENABLED = "VR_DON_Enabled";
 }

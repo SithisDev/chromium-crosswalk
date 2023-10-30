@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,9 @@ ExtensionCommandsGlobalRegistry::ExtensionCommandsGlobalRegistry(
     content::BrowserContext* context)
     : ExtensionKeybindingRegistry(context,
                                   ExtensionKeybindingRegistry::ALL_EXTENSIONS,
-                                  NULL),
+                                  nullptr),
       browser_context_(context),
-      registry_for_active_window_(NULL) {
+      registry_for_active_window_(nullptr) {
   Init();
 }
 

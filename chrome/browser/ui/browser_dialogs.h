@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,21 +11,25 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/bookmarks/bookmark_editor.h"
-#include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/native_file_system_permission_context.h"
-#include "content/public/browser/resource_request_info.h"
+#include "chrome/browser/web_applications/web_app_callback_app_identity.h"
+#include "chrome/browser/web_applications/web_app_id.h"
+#include "content/public/browser/bluetooth_delegate.h"
+#include "content/public/browser/login_delegate.h"
+#include "extensions/buildflags/buildflags.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/interaction/element_identifier.h"
+#include "ui/base/models/dialog_model.h"
 #include "ui/gfx/native_widget_types.h"
 
 class Browser;
+class GURL;
 class LoginHandler;
 class Profile;
-struct WebApplicationInfo;
-enum class PermissionAction;
+struct WebAppInstallInfo;
 
 namespace base {
 class FilePath;
@@ -33,6 +37,7 @@ class FilePath;
 
 namespace content {
 class BrowserContext;
+class RenderFrameHost;
 class WebContents;
 }  // namespace content
 
@@ -44,10 +49,10 @@ namespace net {
 class AuthChallengeInfo;
 }
 
-namespace payments {
-class PaymentRequest;
-class PaymentRequestDialog;
-}  // namespace payments
+namespace permissions {
+class ChooserController;
+enum class PermissionAction;
+}  // namespace permissions
 
 namespace safe_browsing {
 class ChromeCleanerController;
@@ -65,10 +70,6 @@ class WebDialogDelegate;
 struct SelectedFileInfo;
 }  // namespace ui
 
-namespace url {
-class Origin;
-}  // namespace url
-
 namespace chrome {
 
 // Shows or hides the Task Manager. |browser| can be NULL when called from Ash.
@@ -85,7 +86,21 @@ void HideTaskManager();
 // to do so, i.e. before OnDialogClosed() is called on the delegate.
 gfx::NativeWindow ShowWebDialog(gfx::NativeView parent,
                                 content::BrowserContext* context,
-                                ui::WebDialogDelegate* delegate);
+                                ui::WebDialogDelegate* delegate,
+                                bool show = true);
+
+// Show `dialog_model` as a modal dialog to `browser`.
+void ShowBrowserModal(Browser* browser,
+                      std::unique_ptr<ui::DialogModel> dialog_model);
+
+// Show `dialog_model` as a bubble anchored to `anchor_element` in `browser`.
+// `anchor_element` must refer to an element currently present in `browser`.
+// TODO(pbos): Make utility functions for querying whether an anchor_element is
+// present in `browser` or `browser_window` and then refer to those here so that
+// a call site can provide fallback options for `anchor_element`.
+void ShowBubble(Browser* browser,
+                ui::ElementIdentifier anchor_element,
+                std::unique_ptr<ui::DialogModel> dialog_model);
 
 // Shows the create chrome app shortcut dialog box.
 // |close_callback| may be null.
@@ -93,57 +108,153 @@ void ShowCreateChromeAppShortcutsDialog(
     gfx::NativeWindow parent_window,
     Profile* profile,
     const extensions::Extension* app,
-    const base::Callback<void(bool /* created */)>& close_callback);
+    base::OnceCallback<void(bool /* created */)> close_callback);
+
+// Shows the create chrome app shortcut dialog box. Same as above but for a
+// WebApp instead of an Extension. |close_callback| may be null.
+void ShowCreateChromeAppShortcutsDialog(
+    gfx::NativeWindow parent_window,
+    Profile* profile,
+    const std::string& web_app_id,
+    base::OnceCallback<void(bool /* created */)> close_callback);
+
+#if PAIR_BLUETOOTH_ON_DEMAND()
+// Shows the dialog to request the Bluetooth credentials for the device
+// identified by |device_identifier|. |device_identifier| is the most
+// appropriate string to display to the user for device identification
+// (e.g. name, MAC address).
+void ShowBluetoothDeviceCredentialsDialog(
+    content::WebContents* web_contents,
+    const std::u16string& device_identifier,
+    content::BluetoothDelegate::PairPromptCallback close_callback);
+
+// Show a user prompt for pairing a Bluetooth device. |device_identifier|
+// is the most appropriate string to display for device identification
+// (e.g. name, MAC address). The |pin| is displayed (if specified),
+// so the user can confirm a matching value is displayed on the device.
+void ShowBluetoothDevicePairConfirmDialog(
+    content::WebContents* web_contents,
+    const std::u16string& device_identifier,
+    const absl::optional<std::u16string>& pin,
+    content::BluetoothDelegate::PairPromptCallback close_callback);
+#endif  // PAIR_BLUETOOTH_ON_DEMAND()
 
 // Callback used to indicate whether a user has accepted the installation of a
 // web app. The boolean parameter is true when the user accepts the dialog. The
-// WebApplicationInfo parameter contains the information about the app,
+// WebAppInstallInfo parameter contains the information about the app,
 // possibly modified by the user.
 using AppInstallationAcceptanceCallback =
-    base::OnceCallback<void(bool, std::unique_ptr<WebApplicationInfo>)>;
+    base::OnceCallback<void(bool, std::unique_ptr<WebAppInstallInfo>)>;
 
-// Shows the Bookmark App bubble.
-// See Extension::InitFromValueFlags::FROM_BOOKMARK for a description of
-// bookmark apps.
+// Shows the Web App install bubble.
 //
-// |web_app_info| is the WebApplicationInfo being converted into an app.
-void ShowBookmarkAppDialog(content::WebContents* web_contents,
-                           std::unique_ptr<WebApplicationInfo> web_app_info,
-                           AppInstallationAcceptanceCallback callback);
+// |web_app_info| is the WebAppInstallInfo being converted into an app.
+// |web_app_info.app_url| should contain a start url from a web app manifest
+// (for a Desktop PWA), or the current url (when creating a shortcut app).
+void ShowWebAppInstallDialog(content::WebContents* web_contents,
+                             std::unique_ptr<WebAppInstallInfo> web_app_info,
+                             AppInstallationAcceptanceCallback callback);
 
-// Sets whether |ShowBookmarkAppDialog| should accept immediately without any
-// user interaction.
-void SetAutoAcceptBookmarkAppDialogForTesting(bool auto_accept);
+// When an app changes its icon or name, that is considered an app identity
+// change which (for some types of apps) needs confirmation from the user.
+// This function shows that confirmation dialog. |app_id| is the unique id of
+// the app that is updating and |title_change| and |icon_change| specify which
+// piece of information is changing. Can be one or the other, or both (but
+// both cannot be |false|). |old_title| and |new_title|, as well as |old_icon|
+// and |new_icon| show the 'before' and 'after' values. A response is sent
+// back via the |callback|.
+void ShowWebAppIdentityUpdateDialog(
+    const std::string& app_id,
+    bool title_change,
+    bool icon_change,
+    const std::u16string& old_title,
+    const std::u16string& new_title,
+    const SkBitmap& old_icon,
+    const SkBitmap& new_icon,
+    content::WebContents* web_contents,
+    web_app::AppIdentityDialogCallback callback);
 
-// Shows the PWA installation confirmation modal dialog.
-//
-// |web_app_info| is the WebApplicationInfo to be installed.
-void ShowPWAInstallDialog(content::WebContents* web_contents,
-                          std::unique_ptr<WebApplicationInfo> web_app_info,
-                          AppInstallationAcceptanceCallback callback);
+// Returns true if the App Identity Dialog has been requested.
+bool AppIdentityUpdateDialogWasRequestedForTesting();
+
+// Sets whether |ShowWebAppIdentityUpdateDialog| should accept immediately
+// without any user interaction.
+void SetAutoAcceptAppIdentityUpdateForTesting(bool auto_accept);
+
+#if !BUILDFLAG(IS_ANDROID)
+// Callback used to indicate whether a user has accepted the launch of a
+// web app. The |allowed| is true when the user allows the app to launch.
+// |remember_user_choice| is true if the user wants to persist the decision.
+using WebAppLaunchAcceptanceCallback =
+    base::OnceCallback<void(bool allowed, bool remember_user_choice)>;
+
+// Shows the pre-launch dialog for protocol handling PWA launch. The user can
+// allow or block the launch.
+void ShowWebAppProtocolLaunchDialog(
+    const GURL& url,
+    Profile* profile,
+    const web_app::AppId& app_id,
+    WebAppLaunchAcceptanceCallback close_callback);
+
+// Shows the pre-launch dialog for a file handling PWA launch. The user can
+// allow or block the launch.
+void ShowWebAppFileLaunchDialog(const std::vector<base::FilePath>& file_paths,
+                                Profile* profile,
+                                const web_app::AppId& app_id,
+                                WebAppLaunchAcceptanceCallback close_callback);
+#endif  // !BUILDFLAG(IS_ANDROID)
+
+// Sets whether |ShowWebAppDialog| should accept immediately without any
+// user interaction. |auto_open_in_window| sets whether the open in window
+// checkbox is checked.
+void SetAutoAcceptWebAppDialogForTesting(bool auto_accept,
+                                         bool auto_open_in_window);
+
+// Sets an override title for the installation.
+void SetOverrideTitleForTesting(const char* title_to_use);
+
+// Describes the state of in-product-help being shown to the user.
+enum class PwaInProductHelpState {
+  // The in-product-help bubble was shown.
+  kShown,
+  // The in-product-help bubble was not shown.
+  kNotShown
+};
 
 // Shows the PWA installation confirmation bubble anchored off the PWA install
 // icon in the omnibox.
 //
-// |web_app_info| is the WebApplicationInfo to be installed.
-void ShowPWAInstallBubble(content::WebContents* web_contents,
-                          std::unique_ptr<WebApplicationInfo> web_app_info,
-                          AppInstallationAcceptanceCallback callback);
+// |web_app_info| is the WebAppInstallInfo to be installed.
+// |callback| is called when install bubble closed.
+// |iph_state| records whether PWA install iph is shown before Install bubble is
+// shown.
+void ShowPWAInstallBubble(
+    content::WebContents* web_contents,
+    std::unique_ptr<WebAppInstallInfo> web_app_info,
+    AppInstallationAcceptanceCallback callback,
+    PwaInProductHelpState iph_state = PwaInProductHelpState::kNotShown);
 
-// Sets whether |ShowPWAInstallDialog| and |ShowPWAInstallBubble| should accept
-// immediately without any user interaction.
+// Shows the Web App detailed install dialog.
+// The dialog shows app's detailed information including screenshots. Users then
+// confirm or cancel install in this dialog.
+void ShowWebAppDetailedInstallDialog(
+    content::WebContents* web_contents,
+    std::unique_ptr<WebAppInstallInfo> web_app_info,
+    AppInstallationAcceptanceCallback callback,
+    const std::vector<SkBitmap>& screenshots,
+    PwaInProductHelpState iph_state = PwaInProductHelpState::kNotShown);
+
+// Sets whether |ShowPWAInstallBubble| should accept immediately without any
+// user interaction.
 void SetAutoAcceptPWAInstallConfirmationForTesting(bool auto_accept);
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 
 // Bridging methods that show/hide the toolkit-views based Task Manager on Mac.
 task_manager::TaskManagerTableModel* ShowTaskManagerViews(Browser* browser);
 void HideTaskManagerViews();
 
-// Show the Views "Chrome Update" dialog.
-void ShowUpdateChromeDialogViews(gfx::NativeWindow parent);
-
-#endif  // OS_MACOSX
+#endif  // BUILDFLAG(IS_MAC)
 
 #if defined(TOOLKIT_VIEWS)
 
@@ -151,128 +262,11 @@ void ShowUpdateChromeDialogViews(gfx::NativeWindow parent);
 std::unique_ptr<LoginHandler> CreateLoginHandlerViews(
     const net::AuthChallengeInfo& auth_info,
     content::WebContents* web_contents,
-    LoginAuthRequiredCallback auth_required_callback);
-
-// Shows the toolkit-views based BookmarkEditor.
-void ShowBookmarkEditorViews(gfx::NativeWindow parent_window,
-                             Profile* profile,
-                             const BookmarkEditor::EditDetails& details,
-                             BookmarkEditor::Configuration configuration);
-
-payments::PaymentRequestDialog* CreatePaymentRequestDialog(
-    payments::PaymentRequest* request);
+    content::LoginDelegate::LoginAuthRequiredCallback auth_required_callback);
 
 #endif  // TOOLKIT_VIEWS
 
-// Values used in the Dialog.Creation UMA metric. Each value represents a
-// different type of dialog box.
-// These values are written to logs. New enum values can be added, but existing
-// enums must never be renumbered or deleted and reused.
-enum class DialogIdentifier {
-  UNKNOWN = 0,
-  TRANSLATE = 1,
-  BOOKMARK = 2,
-  BOOKMARK_EDITOR = 3,
-  DESKTOP_MEDIA_PICKER = 4,
-  OUTDATED_UPGRADE = 5,
-  ONE_CLICK_SIGNIN = 6,
-  PROFILE_SIGNIN_CONFIRMATION = 7,
-  HUNG_RENDERER = 8,
-  SESSION_CRASHED = 9,
-  CONFIRM_BUBBLE = 10,
-  UPDATE_RECOMMENDED = 11,
-  CRYPTO_PASSWORD = 12,
-  SAFE_BROWSING_DOWNLOAD_FEEDBACK = 13,
-  FIRST_RUN = 14,
-  NETWORK_SHARE_PROFILE_WARNING = 15,
-  // CONFLICTING_MODULE = 16,  Deprecated
-  CRITICAL_NOTIFICATION = 17,
-  IME_WARNING = 18,
-  TOOLBAR_ACTIONS_BAR = 19,
-  GLOBAL_ERROR = 20,
-  EXTENSION_INSTALL = 21,
-  EXTENSION_UNINSTALL = 22,
-  EXTENSION_INSTALLED = 23,
-  PAYMENT_REQUEST = 24,
-  SAVE_CARD = 25,
-  CARD_UNMASK = 26,
-  SIGN_IN = 27,
-  SIGN_IN_SYNC_CONFIRMATION = 28,
-  SIGN_IN_ERROR = 29,
-  SIGN_IN_EMAIL_CONFIRMATION = 30,
-  PROFILE_CHOOSER = 31,
-  ACCOUNT_CHOOSER = 32,
-  ARC_APP = 33,
-  AUTO_SIGNIN_FIRST_RUN = 34,
-  BOOKMARK_APP_CONFIRMATION = 35,
-  CHOOSER_UI = 36,
-  CHOOSER = 37,
-  COLLECTED_COOKIES = 38,
-  CONSTRAINED_WEB = 39,
-  CONTENT_SETTING_CONTENTS = 40,
-  CREATE_CHROME_APPLICATION_SHORTCUT = 41,
-  DOWNLOAD_DANGER_PROMPT = 42,
-  DOWNLOAD_IN_PROGRESS = 43,
-  ECHO = 44,
-  ENROLLMENT = 45,
-  EXTENSION = 46,
-  EXTENSION_POPUP_AURA = 47,
-  EXTERNAL_PROTOCOL = 48,
-  EXTERNAL_PROTOCOL_CHROMEOS = 49,
-  FIRST_RUN_DIALOG = 50,
-  HOME_PAGE_UNDO = 51,
-  IDLE_ACTION_WARNING = 52,
-  IMPORT_LOCK = 53,
-  INTENT_PICKER = 54,
-  INVERT = 55,
-  JAVA_SCRIPT = 56,
-  JAVA_SCRIPT_APP_MODAL_X11 = 57,
-  LOGIN_HANDLER = 58,
-  MANAGE_PASSWORDS = 59,
-  MEDIA_GALLERIES = 60,
-  MULTIPROFILES_INTRO = 61,
-  MULTIPROFILES_SESSION_ABORTED = 62,
-  NATIVE_CONTAINER = 63,
-  NETWORK_CONFIG = 64,
-  PERMISSIONS = 65,
-  PLATFORM_KEYS_CERTIFICATE_SELECTOR = 66,
-  PLATFORM_VERIFICATION = 67,
-  PROXIMITY_AUTH_ERROR = 68,
-  REQUEST_PIN = 69,
-  SSL_CLIENT_CERTIFICATE_SELECTOR = 70,
-  SIMPLE_MESSAGE_BOX = 71,
-  TAB_MODAL_CONFIRM = 72,
-  TASK_MANAGER = 73,
-  TELEPORT_WARNING = 74,
-  USER_MANAGER = 75,
-  USER_MANAGER_PROFILE = 76,
-  VALIDATION_MESSAGE = 77,
-  WEB_SHARE_TARGET_PICKER = 78,
-  ZOOM = 79,
-  LOCK_SCREEN_NOTE_APP_TOAST = 80,
-  PWA_CONFIRMATION = 81,
-  RELAUNCH_RECOMMENDED = 82,
-  CROSTINI_INSTALLER = 83,
-  RELAUNCH_REQUIRED = 84,
-  UNITY_SYNC_CONSENT_BUMP = 85,
-  CROSTINI_UNINSTALLER = 86,
-  DOWNLOAD_OPEN_CONFIRMATION = 87,
-  ARC_DATA_REMOVAL_CONFIRMATION = 88,
-  CROSTINI_UPGRADE = 89,
-  HATS_BUBBLE = 90,
-  CROSTINI_APP_RESTART = 91,
-  INCOGNITO_WINDOW_COUNT = 92,
-  CROSTINI_APP_UNINSTALLER = 93,
-  CROSTINI_CONTAINER_UPGRADE = 94,
-  // Add values above this line with a corresponding label in
-  // tools/metrics/histograms/enums.xml
-  MAX_VALUE
-};
-
-// Record an UMA metric counting the creation of a dialog box of this type.
-void RecordDialogCreation(DialogIdentifier identifier);
-
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 
 // Shows the settings reset prompt dialog asking the user if they want to reset
 // some of their settings.
@@ -295,7 +289,29 @@ void ShowChromeCleanerRebootPrompt(
     Browser* browser,
     safe_browsing::ChromeCleanerRebootDialogController* dialog_controller);
 
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
+
+// Returns a OnceClosure that client code can call to close the device chooser.
+// This OnceClosure references the actual dialog as a WeakPtr, so it's safe to
+// call at any point.
+#if defined(TOOLKIT_VIEWS)
+base::OnceClosure ShowDeviceChooserDialog(
+    content::RenderFrameHost* owner,
+    std::unique_ptr<permissions::ChooserController> controller);
+bool IsDeviceChooserShowingForTesting(Browser* browser);
+#endif
+
+// Show the prompt to set a window name for browser's window, optionally with
+// the given context.
+void ShowWindowNamePrompt(Browser* browser);
+std::unique_ptr<ui::DialogModel> CreateWindowNamePromptDialogModelForTesting(
+    Browser* browser);
+
+// Callback used to indicate whether Direct Sockets connection dialog is
+// accepted or not. If accepted, the remote address and port number are
+// provided.
+using OnProceedCallback = base::OnceCallback<
+    void(bool accepted, const std::string& address, const std::string& port)>;
 
 }  // namespace chrome
 
@@ -303,35 +319,6 @@ void ShowFolderUploadConfirmationDialog(
     const base::FilePath& path,
     base::OnceCallback<void(const std::vector<ui::SelectedFileInfo>&)> callback,
     std::vector<ui::SelectedFileInfo> selected_files,
-    content::WebContents* web_contents);
-
-// Displays a dialog to ask for write access to the given file or directory for
-// the native file system API.
-void ShowNativeFileSystemPermissionDialog(
-    const url::Origin& origin,
-    const base::FilePath& path,
-    bool is_directory,
-    base::OnceCallback<void(PermissionAction result)> callback,
-    content::WebContents* web_contents);
-
-// Displays a dialog to inform the user that the directory |path| they picked
-// using the native file system API is blocked by chrome.
-// |callback| is called when the user has dismissed the dialog.
-void ShowNativeFileSystemRestrictedDirectoryDialog(
-    const url::Origin& origin,
-    const base::FilePath& path,
-    base::OnceCallback<void(
-        content::NativeFileSystemPermissionContext::SensitiveDirectoryResult)>
-        callback,
-    content::WebContents* web_contents);
-
-// Displays a dialog to confirm that the user intended to give read access to a
-// specific directory. Similar to ShowFolderUploadConfirmationDialog above,
-// except for use by the Native File System API.
-void ShowNativeFileSystemDirectoryAccessConfirmationDialog(
-    const url::Origin& origin,
-    const base::FilePath& path,
-    base::OnceCallback<void(PermissionAction result)> callback,
     content::WebContents* web_contents);
 
 #endif  // CHROME_BROWSER_UI_BROWSER_DIALOGS_H_

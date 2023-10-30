@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,12 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time/time.h"
-#include "base/timer/timer.h"
+#include "base/scoped_multi_source_observation.h"
 #include "chrome/browser/notifications/notification_system_observer.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_observer.h"
 #include "ui/message_center/message_center_observer.h"
 #include "ui/message_center/message_center_types.h"
 #include "ui/message_center/public/cpp/notification.h"
@@ -35,9 +35,13 @@ FORWARD_DECLARE_TEST(NotificationTrayTest, ManuallyCloseMessageCenter);
 // of notifications to MessageCenter, doing necessary conversions. This is only
 // used on platforms that support non-native notifications.
 class NotificationUIManagerImpl : public NotificationUIManager,
-                                  public message_center::MessageCenterObserver {
+                                  public message_center::MessageCenterObserver,
+                                  public ProfileObserver {
  public:
   NotificationUIManagerImpl();
+  NotificationUIManagerImpl(const NotificationUIManagerImpl&) = delete;
+  NotificationUIManagerImpl& operator=(const NotificationUIManagerImpl&) =
+      delete;
   ~NotificationUIManagerImpl() override;
 
   // NotificationUIManager
@@ -47,18 +51,21 @@ class NotificationUIManagerImpl : public NotificationUIManager,
               Profile* profile) override;
   const message_center::Notification* FindById(
       const std::string& delegate_id,
-      ProfileID profile_id) const override;
+      ProfileNotification::ProfileID profile_id) const override;
   bool CancelById(const std::string& delegate_id,
-                  ProfileID profile_id) override;
-  std::set<std::string> GetAllIdsByProfile(ProfileID profile_id) override;
+                  ProfileNotification::ProfileID profile_id) override;
+  std::set<std::string> GetAllIdsByProfile(
+      ProfileNotification::ProfileID profile_id) override;
   bool CancelAllBySourceOrigin(const GURL& source_origin) override;
-  bool CancelAllByProfile(ProfileID profile_id) override;
   void CancelAll() override;
   void StartShutdown() override;
 
   // MessageCenterObserver:
   void OnNotificationRemoved(const std::string& notification_id,
                              bool by_user) override;
+
+  // ProfileObserver:
+  void OnProfileWillBeDestroyed(Profile* profile) override;
 
   // Resets the ui controller.
   void ResetUiControllerForTest();
@@ -95,6 +102,9 @@ class NotificationUIManagerImpl : public NotificationUIManager,
 
   NotificationSystemObserver system_observer_;
 
+  base::ScopedMultiSourceObservation<Profile, ProfileObserver>
+      observed_otr_profiles_{this};
+
   // Delegate of this class.
   std::unique_ptr<PopupsOnlyUiController> popups_only_ui_controller_;
 
@@ -103,8 +113,6 @@ class NotificationUIManagerImpl : public NotificationUIManager,
 
   // Tracks the current visibility status of the popup bubbles.
   bool popups_visible_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(NotificationUIManagerImpl);
 };
 
 #endif  // CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_UI_MANAGER_IMPL_H_

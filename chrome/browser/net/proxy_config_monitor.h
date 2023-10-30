@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,11 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "build/buildflag.h"
 #include "extensions/buildflags/buildflags.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "mojo/public/cpp/bindings/interface_ptr_set.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "mojo/public/cpp/bindings/remote_set.h"
 #include "net/proxy_resolution/proxy_config_service.h"
 #include "services/network/public/mojom/network_context.mojom-forward.h"
 #include "services/network/public/mojom/network_service.mojom-forward.h"
@@ -50,6 +50,9 @@ class ProxyConfigMonitor : public net::ProxyConfigService::Observer,
   // associated with a profile. Must be destroyed before |local_state|.
   explicit ProxyConfigMonitor(PrefService* local_state);
 
+  ProxyConfigMonitor(const ProxyConfigMonitor&) = delete;
+  ProxyConfigMonitor& operator=(const ProxyConfigMonitor&) = delete;
+
   ~ProxyConfigMonitor() override;
 
   // Populates proxy-related fields of |network_context_params|. Updated
@@ -84,17 +87,15 @@ class ProxyConfigMonitor : public net::ProxyConfigService::Observer,
   // Monitors global and Profile prefs related to proxy configuration.
   std::unique_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
 
-  mojo::BindingSet<network::mojom::ProxyConfigPollerClient> poller_binding_set_;
+  mojo::ReceiverSet<network::mojom::ProxyConfigPollerClient>
+      poller_receiver_set_;
 
-  mojo::InterfacePtrSet<network::mojom::ProxyConfigClient>
-      proxy_config_client_set_;
+  mojo::RemoteSet<network::mojom::ProxyConfigClient> proxy_config_client_set_;
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  mojo::BindingSet<network::mojom::ProxyErrorClient> error_binding_set_;
-  Profile* profile_ = nullptr;
+  mojo::ReceiverSet<network::mojom::ProxyErrorClient> error_receiver_set_;
+  raw_ptr<Profile> profile_ = nullptr;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(ProxyConfigMonitor);
 };
 
 #endif  // CHROME_BROWSER_NET_PROXY_CONFIG_MONITOR_H_

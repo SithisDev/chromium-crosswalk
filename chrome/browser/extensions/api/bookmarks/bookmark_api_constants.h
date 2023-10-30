@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,7 @@ extern const char kEditBookmarksDisabled[];
 extern const char kModifyManagedError[];
 extern const char kInvalidParamError[];
 extern const char kCannotSetUrlOfFolderError[];
+extern const char kBookmarkNodesNotFoundFromIdListError[];
 
 }  // namespace bookmark_api_constants
 }  // namespace extensions

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,8 @@ chrome.tabs.getCurrent(function(tab) {
               type: 'websocket',
               // TODO(pkalinnikov): Figure out why the frame URL is unknown.
               frameUrl: 'unknown frame URL',
-              initiator: getDomain(initiators.WEB_INITIATED)
+              initiator: getDomain(initiators.WEB_INITIATED),
+              documentId: 1
             },
           },
           { label: 'onBeforeSendHeaders',
@@ -27,7 +28,8 @@ chrome.tabs.getCurrent(function(tab) {
             details: {
               url: url,
               type: 'websocket',
-              initiator: getDomain(initiators.WEB_INITIATED)
+              initiator: getDomain(initiators.WEB_INITIATED),
+              documentId: 1
             },
           },
           { label: 'onSendHeaders',
@@ -35,7 +37,8 @@ chrome.tabs.getCurrent(function(tab) {
             details: {
               url: url,
               type: 'websocket',
-              initiator: getDomain(initiators.WEB_INITIATED)
+              initiator: getDomain(initiators.WEB_INITIATED),
+              documentId: 1
             },
           },
           { label: 'onHeadersReceived',
@@ -45,7 +48,8 @@ chrome.tabs.getCurrent(function(tab) {
               type: 'websocket',
               statusCode: 101,
               statusLine: 'HTTP/1.1 101 Switching Protocols',
-              initiator: getDomain(initiators.WEB_INITIATED)
+              initiator: getDomain(initiators.WEB_INITIATED),
+              documentId: 1
             },
           },
           { label: 'onResponseStarted',
@@ -57,7 +61,8 @@ chrome.tabs.getCurrent(function(tab) {
               fromCache: false,
               statusCode: 101,
               statusLine: 'HTTP/1.1 101 Switching Protocols',
-              initiator: getDomain(initiators.WEB_INITIATED)
+              initiator: getDomain(initiators.WEB_INITIATED),
+              documentId: 1
             },
           },
           { label: 'onCompleted',
@@ -69,7 +74,8 @@ chrome.tabs.getCurrent(function(tab) {
               fromCache: false,
               statusCode: 101,
               statusLine: 'HTTP/1.1 101 Switching Protocols',
-              initiator: getDomain(initiators.WEB_INITIATED)
+              initiator: getDomain(initiators.WEB_INITIATED),
+              documentId: 1
             }
           },
         ],
@@ -95,7 +101,8 @@ chrome.tabs.getCurrent(function(tab) {
               url: url,
               type: 'websocket',
               frameUrl: 'unknown frame URL',
-              initiator: getDomain(initiators.WEB_INITIATED)
+              initiator: getDomain(initiators.WEB_INITIATED),
+              documentId: 1
             },
             retval: {cancel: true}
           },
@@ -107,7 +114,8 @@ chrome.tabs.getCurrent(function(tab) {
               type: 'websocket',
               fromCache: false,
               initiator: getDomain(initiators.WEB_INITIATED),
-              error: 'net::ERR_BLOCKED_BY_CLIENT'
+              error: 'net::ERR_BLOCKED_BY_CLIENT',
+              documentId: 1
             }
           },
         ],
@@ -134,7 +142,8 @@ chrome.tabs.getCurrent(function(tab) {
               url: url,
               type: 'websocket',
               frameUrl: 'unknown frame URL',
-              initiator: getDomain(initiators.WEB_INITIATED)
+              initiator: getDomain(initiators.WEB_INITIATED),
+              documentId: 1
             },
             retval: {redirectUrl: redirectedUrl1}
           },
@@ -143,7 +152,8 @@ chrome.tabs.getCurrent(function(tab) {
             details: {
               url: url,
               type: 'websocket',
-              initiator: getDomain(initiators.WEB_INITIATED)
+              initiator: getDomain(initiators.WEB_INITIATED),
+              documentId: 1
             },
           },
           { label: 'onSendHeaders',
@@ -151,7 +161,8 @@ chrome.tabs.getCurrent(function(tab) {
             details: {
               url: url,
               type: 'websocket',
-              initiator: getDomain(initiators.WEB_INITIATED)
+              initiator: getDomain(initiators.WEB_INITIATED),
+              documentId: 1
             },
           },
           { label: 'onHeadersReceived',
@@ -161,7 +172,8 @@ chrome.tabs.getCurrent(function(tab) {
               type: 'websocket',
               statusCode: 101,
               statusLine: 'HTTP/1.1 101 Switching Protocols',
-              initiator: getDomain(initiators.WEB_INITIATED)
+              initiator: getDomain(initiators.WEB_INITIATED),
+              documentId: 1
             },
             retval: {redirectUrl: redirectedUrl2}
           },
@@ -175,6 +187,7 @@ chrome.tabs.getCurrent(function(tab) {
               initiator: getDomain(initiators.WEB_INITIATED),
               statusCode: 101,
               statusLine: 'HTTP/1.1 101 Switching Protocols',
+              documentId: 1
             },
           },
           { label: 'onCompleted',
@@ -187,6 +200,7 @@ chrome.tabs.getCurrent(function(tab) {
               initiator: getDomain(initiators.WEB_INITIATED),
               statusCode: 101,
               statusLine: 'HTTP/1.1 101 Switching Protocols',
+              documentId: 1
             }
           },
         ],
@@ -198,6 +212,45 @@ chrome.tabs.getCurrent(function(tab) {
         ['blocking']  // extraInfoSpec
       );
       testWebSocketConnection(url, true /* expectedToConnect */);
+    },
+
+    // Tries to open a WebSocket connection, with a blocking handler that
+    // cancels the request. The connection will not be established.
+    function handshakeRequestCancelledWithExtraHeaders() {
+      var url = getWSTestURL(testWebSocketPort);
+      expect(
+        [  // events
+          { label: 'onBeforeRequest',
+            event: 'onBeforeRequest',
+            details: {
+              url: url,
+              type: 'websocket',
+              frameUrl: 'unknown frame URL',
+              initiator: getDomain(initiators.WEB_INITIATED),
+              documentId: 1
+            },
+            retval: {cancel: true}
+          },
+          // Cancelling is considered an error.
+          { label: 'onErrorOccurred',
+            event: 'onErrorOccurred',
+            details: {
+              url: url,
+              type: 'websocket',
+              fromCache: false,
+              initiator: getDomain(initiators.WEB_INITIATED),
+              error: 'net::ERR_BLOCKED_BY_CLIENT',
+              documentId: 1
+            }
+          },
+        ],
+        [  // event order
+          ['onBeforeRequest', 'onErrorOccurred']
+        ],
+        {urls: ['ws://*/*']},  // filter
+        ['blocking', 'extraHeaders']  // extraInfoSpec
+      );
+      testWebSocketConnection(url, false /* expectedToConnect */);
     },
 
     // Tests that all the requests headers that are added by net/ are visible

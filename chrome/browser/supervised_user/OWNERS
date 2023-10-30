@@ -1,6 +1,11 @@
-# escordeiro@chromium.org
-hgrandinetti@chromium.org
-pam@chromium.org
-treib@chromium.org
+#ChromeOS
+agawronska@chromium.org
+danan@chromium.org
+llin@chromium.org
 
-# COMPONENT: Services>SupervisedUser
+#Chrome Browser
+fernandex@chromium.org
+ljjlee@google.com
+
+# Previous owner, feel free to add for any questions or historical context:
+# treib@chromium.org

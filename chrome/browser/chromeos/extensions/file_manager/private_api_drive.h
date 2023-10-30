@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -14,16 +14,11 @@
 #include <vector>
 
 #include "base/files/file.h"
-#include "chrome/browser/chromeos/extensions/file_manager/private_api_base.h"
-#include "chrome/browser/chromeos/file_manager/fileapi_util.h"
-#include "chromeos/components/drivefs/mojom/drivefs.mojom.h"
-#include "components/drive/chromeos/file_system_interface.h"
+#include "base/time/time.h"
+#include "chrome/browser/ash/file_manager/fileapi_util.h"
+#include "chrome/browser/chromeos/extensions/file_manager/logged_extension_function.h"
+#include "chromeos/ash/components/drivefs/mojom/drivefs.mojom-forward.h"
 #include "components/drive/file_errors.h"
-
-namespace drive {
-class ResourceEntry;
-struct SearchResultInfo;
-}
 
 namespace google_apis {
 class AuthService;
@@ -37,33 +32,11 @@ struct EntryProperties;
 }  // namespace file_manager_private
 }  // namespace api
 
-// Implements the chrome.fileManagerPrivate.ensureFileDownloaded method.
-class FileManagerPrivateInternalEnsureFileDownloadedFunction
-    : public LoggedUIThreadExtensionFunction {
- public:
-  FileManagerPrivateInternalEnsureFileDownloadedFunction();
-
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.ensureFileDownloaded",
-                             FILEMANAGERPRIVATE_ENSUREFILEDOWNLOADED)
-
- protected:
-  ~FileManagerPrivateInternalEnsureFileDownloadedFunction() override = default;
-
-  // ExtensionFunction overrides.
-  ResponseAction Run() override;
-
- private:
-  // Callback for Run().
-  void OnDownloadFinished(drive::FileError error,
-                          const base::FilePath& file_path,
-                          std::unique_ptr<drive::ResourceEntry> entry);
-};
-
 // Retrieves property information for an entry and returns it as a dictionary.
 // On error, returns a dictionary with the key "error" set to the error number
 // (base::File::Error).
 class FileManagerPrivateInternalGetEntryPropertiesFunction
-    : public LoggedUIThreadExtensionFunction {
+    : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.getEntryProperties",
                              FILEMANAGERPRIVATEINTERNAL_GETENTRYPROPERTIES)
@@ -89,7 +62,7 @@ class FileManagerPrivateInternalGetEntryPropertiesFunction
 
 // Implements the chrome.fileManagerPrivate.pinDriveFile method.
 class FileManagerPrivateInternalPinDriveFileFunction
-    : public LoggedUIThreadExtensionFunction {
+    : public LoggedExtensionFunction {
  public:
   FileManagerPrivateInternalPinDriveFileFunction();
 
@@ -103,34 +76,16 @@ class FileManagerPrivateInternalPinDriveFileFunction
   ResponseAction Run() override;
 
  private:
-  ResponseAction RunAsyncForDrive(const GURL& url, bool pin);
   ResponseAction RunAsyncForDriveFs(
       const storage::FileSystemURL& file_system_url,
       bool pin);
 
-  // Callback for RunAsyncForDrive() and RunAsyncForDriveFs.
+  // Callback for and RunAsyncForDriveFs().
   void OnPinStateSet(drive::FileError error);
 };
 
-// Implements the chrome.fileManagerPrivate.cancelFileTransfers method.
-class FileManagerPrivateInternalCancelFileTransfersFunction
-    : public UIThreadExtensionFunction {
+class FileManagerPrivateSearchDriveFunction : public LoggedExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.cancelFileTransfers",
-                             FILEMANAGERPRIVATEINTERNAL_CANCELFILETRANSFERS)
-
- protected:
-  ~FileManagerPrivateInternalCancelFileTransfersFunction() override = default;
-
-  // ExtensionFunction overrides.
-  ResponseAction Run() override;
-};
-
-class FileManagerPrivateSearchDriveFunction
-    : public LoggedUIThreadExtensionFunction {
- public:
-  typedef std::vector<drive::SearchResultInfo> SearchResultInfoList;
-
   FileManagerPrivateSearchDriveFunction();
 
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.searchDrive",
@@ -142,21 +97,7 @@ class FileManagerPrivateSearchDriveFunction
   ResponseAction Run() override;
 
  private:
-  // Callback for Search().
-  void OnSearch(
-      drive::FileError error,
-      const GURL& next_link,
-      std::unique_ptr<std::vector<drive::SearchResultInfo>> result_paths);
-
-  void OnSearchDriveFs(std::unique_ptr<base::ListValue> results);
-
-  // Called when |result_paths| in OnSearch() are converted to a list of
-  // entry definitions.
-  void OnEntryDefinitionList(
-      const GURL& next_link,
-      std::unique_ptr<SearchResultInfoList> search_result_info_list,
-      std::unique_ptr<file_manager::util::EntryDefinitionList>
-          entry_definition_list);
+  void OnSearchDriveFs(absl::optional<base::Value::List> results);
 
   base::TimeTicks operation_start_;
   bool is_offline_;
@@ -165,7 +106,7 @@ class FileManagerPrivateSearchDriveFunction
 // Similar to FileManagerPrivateSearchDriveFunction but this one is used for
 // searching drive metadata which is stored locally.
 class FileManagerPrivateSearchDriveMetadataFunction
-    : public LoggedUIThreadExtensionFunction {
+    : public LoggedExtensionFunction {
  public:
   enum class SearchType {
     kText,
@@ -184,21 +125,8 @@ class FileManagerPrivateSearchDriveMetadataFunction
   ResponseAction Run() override;
 
  private:
-  // Callback for SearchMetadata();
-  void OnSearchMetadata(
-      drive::FileError error,
-      std::unique_ptr<drive::MetadataSearchResultVector> results);
-
   void OnSearchDriveFs(const std::string& query_text,
-                       std::unique_ptr<base::ListValue> results);
-
-  // Called when |results| in OnSearchMetadata() are converted to a list of
-  // entry definitions.
-  void OnEntryDefinitionList(
-      std::unique_ptr<drive::MetadataSearchResultVector>
-          search_result_info_list,
-      std::unique_ptr<file_manager::util::EntryDefinitionList>
-          entry_definition_list);
+                       absl::optional<base::Value::List> results);
 
   base::TimeTicks operation_start_;
   SearchType search_type_;
@@ -207,7 +135,7 @@ class FileManagerPrivateSearchDriveMetadataFunction
 
 // Implements the chrome.fileManagerPrivate.getDriveConnectionState method.
 class FileManagerPrivateGetDriveConnectionStateFunction
-    : public UIThreadExtensionFunction {
+    : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.getDriveConnectionState",
                              FILEMANAGERPRIVATE_GETDRIVECONNECTIONSTATE)
@@ -218,47 +146,9 @@ class FileManagerPrivateGetDriveConnectionStateFunction
   ResponseAction Run() override;
 };
 
-// Implements the chrome.fileManagerPrivate.requestAccessToken method.
-class FileManagerPrivateRequestAccessTokenFunction
-    : public LoggedUIThreadExtensionFunction {
- public:
-  FileManagerPrivateRequestAccessTokenFunction();
-
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.requestAccessToken",
-                             FILEMANAGERPRIVATE_REQUESTACCESSTOKEN)
-
- protected:
-  ~FileManagerPrivateRequestAccessTokenFunction() override = default;
-
-  // ExtensionFunction overrides.
-  ResponseAction Run() override;
-
-  // Callback with a cached auth token (if available) or a fetched one.
-  void OnAccessTokenFetched(google_apis::DriveApiErrorCode code,
-                            const std::string& access_token);
-};
-
-// Implements the chrome.fileManagerPrivate.requestDriveShare method.
-class FileManagerPrivateInternalRequestDriveShareFunction
-    : public LoggedUIThreadExtensionFunction {
- public:
-  FileManagerPrivateInternalRequestDriveShareFunction();
-
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.requestDriveShare",
-                             FILEMANAGERPRIVATEINTERNAL_REQUESTDRIVESHARE)
-
- protected:
-  ~FileManagerPrivateInternalRequestDriveShareFunction() override = default;
-  ResponseAction Run() override;
-
- private:
-  // Called back after the drive file system operation is finished.
-  void OnAddPermission(drive::FileError error);
-};
-
 // Implements the chrome.fileManagerPrivate.getDownloadUrl method.
 class FileManagerPrivateInternalGetDownloadUrlFunction
-    : public LoggedUIThreadExtensionFunction {
+    : public LoggedExtensionFunction {
  public:
   FileManagerPrivateInternalGetDownloadUrlFunction();
 
@@ -272,16 +162,11 @@ class FileManagerPrivateInternalGetDownloadUrlFunction
   ResponseAction Run() override;
 
  private:
-  ResponseAction RunAsyncForDrive(const GURL& url);
-
-  void OnGetResourceEntry(drive::FileError error,
-                          std::unique_ptr<drive::ResourceEntry> entry);
-
   void OnGotDownloadUrl(GURL download_url);
 
   // Callback with an |access_token|, called by
   // drive::DriveReadonlyTokenFetcher.
-  void OnTokenFetched(google_apis::DriveApiErrorCode code,
+  void OnTokenFetched(google_apis::ApiErrorCode code,
                       const std::string& access_token);
 
   ResponseAction RunAsyncForDriveFs(
@@ -294,24 +179,43 @@ class FileManagerPrivateInternalGetDownloadUrlFunction
   std::unique_ptr<google_apis::AuthService> auth_service_;
 };
 
-class FileManagerPrivateInternalGetThumbnailFunction
-    : public LoggedUIThreadExtensionFunction {
+// Implements the chrome.fileManagerPrivate.notifyDriveDialogResult method.
+class FileManagerPrivateNotifyDriveDialogResultFunction
+    : public ExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.getThumbnail",
-                             FILEMANAGERPRIVATEINTERNAL_GETTHUMBNAIL)
-
-  FileManagerPrivateInternalGetThumbnailFunction();
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.notifyDriveDialogResult",
+                             FILEMANAGERPRIVATE_NOTIFYDRIVEDIALOGRESULT)
 
  protected:
-  ~FileManagerPrivateInternalGetThumbnailFunction() override;
+  ~FileManagerPrivateNotifyDriveDialogResultFunction() override = default;
 
-  // ExtensionFunction overrides.
   ResponseAction Run() override;
+};
 
- private:
-  void GotThumbnail(const base::Optional<std::vector<uint8_t>>& data);
+// Implements the chrome.fileManagerPrivate.pollDriveHostedFilePinStates method.
+class FileManagerPrivatePollDriveHostedFilePinStatesFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.pollDriveHostedFilePinStates",
+                             FILEMANAGERPRIVATE_POLLDRIVEHOSTEDFILEPINSTATES)
 
-  void SendEncodedThumbnail(std::string thumbnail_data_url);
+ protected:
+  ~FileManagerPrivatePollDriveHostedFilePinStatesFunction() override = default;
+
+  ResponseAction Run() override;
+};
+
+// Implements the chrome.fileManagerPrivate.openManageSyncSettings method.
+class FileManagerPrivateOpenManageSyncSettingsFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.openManageSyncSettings",
+                             FILEMANAGERPRIVATE_OPENMANAGESYNCSETTINGS)
+
+ protected:
+  ~FileManagerPrivateOpenManageSyncSettingsFunction() override = default;
+
+  ResponseAction Run() override;
 };
 
 }  // namespace extensions

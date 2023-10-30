@@ -1,12 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_OMNIBOX_ROUNDED_OMNIBOX_RESULTS_FRAME_H_
 #define CHROME_BROWSER_UI_VIEWS_OMNIBOX_ROUNDED_OMNIBOX_RESULTS_FRAME_H_
 
-#include <memory>
-
+#include "base/memory/raw_ptr.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -16,8 +16,12 @@ class LocationBarView;
 // A class that wraps a Widget's content view to provide a custom results frame.
 class RoundedOmniboxResultsFrame : public views::View {
  public:
+  METADATA_HEADER(RoundedOmniboxResultsFrame);
   RoundedOmniboxResultsFrame(views::View* contents,
-                             const LocationBarView* location_bar);
+                             LocationBarView* location_bar);
+  RoundedOmniboxResultsFrame(const RoundedOmniboxResultsFrame&) = delete;
+  RoundedOmniboxResultsFrame& operator=(const RoundedOmniboxResultsFrame&) =
+      delete;
   ~RoundedOmniboxResultsFrame() override;
 
   // Hook to customize Widget initialization.
@@ -34,7 +38,6 @@ class RoundedOmniboxResultsFrame : public views::View {
   static gfx::Insets GetShadowInsets();
 
   // views::View:
-  const char* GetClassName() const override;
   void Layout() override;
   void AddedToWidget() override;
 #if !defined(USE_AURA)
@@ -43,13 +46,9 @@ class RoundedOmniboxResultsFrame : public views::View {
 #endif  // !USE_AURA
 
  private:
-  std::unique_ptr<ui::LayerOwner> contents_mask_;
-
-  views::View* top_background_ = nullptr;
-  views::View* contents_host_ = nullptr;
-  views::View* contents_;
-
-  DISALLOW_COPY_AND_ASSIGN(RoundedOmniboxResultsFrame);
+  raw_ptr<views::View> top_background_ = nullptr;
+  raw_ptr<views::View> contents_host_ = nullptr;
+  raw_ptr<views::View> contents_;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_OMNIBOX_ROUNDED_OMNIBOX_RESULTS_FRAME_H_

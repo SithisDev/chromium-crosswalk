@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,14 @@ package org.chromium.chrome.browser.firstrun;
 
 import android.content.Context;
 import android.content.res.Resources;
-import android.support.annotation.AnyRes;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+
+import androidx.annotation.AnyRes;
 
 import org.chromium.chrome.R;
 
@@ -129,5 +130,12 @@ public class TabbedModeFirstRunActivity extends FirstRunActivity {
 
             super.onMeasure(widthMeasureSpec, heightMeasureSpec);
         }
+    }
+
+    @Override
+    public boolean canUseLandscapeLayout() {
+        // TabbedModeFirstRunActivity shows FRE in a dialog that always has the portrait
+        // orientation, so never use the landscape layout with that activity.
+        return false;
     }
 }

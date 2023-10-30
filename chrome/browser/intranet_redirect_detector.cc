@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,49 +6,59 @@
 
 #include <stddef.h>
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/location.h"
 #include "base/rand_util.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/system_network_context_manager.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/omnibox/browser/intranet_redirector_state.h"
+#include "components/omnibox/browser/omnibox_prefs.h"
+#include "components/omnibox/common/omnibox_features.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/storage_partition.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/network_service.mojom.h"
 
+// TODO(crbug.com/181671): Write test to verify we handle the policy toggling.
 IntranetRedirectDetector::IntranetRedirectDetector()
     : redirect_origin_(g_browser_process->local_state()->GetString(
-          prefs::kLastKnownIntranetRedirectOrigin)),
-      in_sleep_(true) {
+          prefs::kLastKnownIntranetRedirectOrigin)) {
   // Because this function can be called during startup, when kicking off a URL
   // fetch can eat up 20 ms of time, we delay seven seconds, which is hopefully
   // long enough to be after startup, but still get results back quickly.
   // Ideally, instead of this timer, we'd do something like "check if the
   // browser is starting up, and if so, come back later", but there is currently
   // no function to do this.
-  static const int kStartFetchDelaySeconds = 7;
+  static constexpr base::TimeDelta kStartFetchDelay = base::Seconds(7);
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(&IntranetRedirectDetector::FinishSleep,
                      weak_ptr_factory_.GetWeakPtr()),
-      base::TimeDelta::FromSeconds(kStartFetchDelaySeconds));
+      kStartFetchDelay);
 
   content::GetNetworkConnectionTracker()->AddNetworkConnectionObserver(this);
+  SetupDnsConfigClient();
 }
 
 IntranetRedirectDetector::~IntranetRedirectDetector() {
@@ -66,10 +76,44 @@ GURL IntranetRedirectDetector::RedirectOrigin() {
 void IntranetRedirectDetector::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterStringPref(prefs::kLastKnownIntranetRedirectOrigin,
                                std::string());
+  registry->RegisterBooleanPref(prefs::kDNSInterceptionChecksEnabled, true);
+  registry->RegisterIntegerPref(omnibox::kIntranetRedirectBehavior, 0);
+}
+
+void IntranetRedirectDetector::Restart() {
+  if (!IsEnabledByPolicy()) {
+    if (redirect_origin_.is_valid()) {
+      g_browser_process->local_state()->SetString(
+          prefs::kLastKnownIntranetRedirectOrigin, std::string());
+    }
+    redirect_origin_ = GURL();
+    return;
+  }
+  // If a request is already scheduled, do not scheduled yet another one.
+  if (in_sleep_)
+    return;
+
+  // Since presumably many programs open connections after network changes,
+  // delay this a little bit.
+  in_sleep_ = true;
+  static constexpr base::TimeDelta kRestartDelay = base::Seconds(1);
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(&IntranetRedirectDetector::FinishSleep,
+                     weak_ptr_factory_.GetWeakPtr()),
+      kRestartDelay);
 }
 
 void IntranetRedirectDetector::FinishSleep() {
   in_sleep_ = false;
+  if (!IsEnabledByPolicy()) {
+    if (redirect_origin_.is_valid()) {
+      g_browser_process->local_state()->SetString(
+          prefs::kLastKnownIntranetRedirectOrigin, std::string());
+    }
+    redirect_origin_ = GURL();
+    return;
+  }
 
   // If another fetch operation is still running, cancel it.
   simple_loaders_.clear();
@@ -118,7 +162,7 @@ void IntranetRedirectDetector::FinishSleep() {
     resource_request->method = "HEAD";
     // We don't want these fetches to affect existing state in the profile.
     resource_request->load_flags = net::LOAD_DISABLE_CACHE;
-    resource_request->allow_credentials = false;
+    resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
     network::mojom::URLLoaderFactory* loader_factory =
         g_browser_process->system_network_context_manager()
             ->GetURLLoaderFactory();
@@ -149,7 +193,7 @@ void IntranetRedirectDetector::OnSimpleLoaderComplete(
   // origin to that; otherwise we set it to nothing.
   if (response_body) {
     DCHECK(source->GetFinalURL().is_valid());
-    GURL origin(source->GetFinalURL().GetOrigin());
+    GURL origin(source->GetFinalURL().DeprecatedGetOriginAsURL());
     if (resulting_origins_.empty()) {
       resulting_origins_.push_back(origin);
       return;
@@ -192,19 +236,51 @@ void IntranetRedirectDetector::OnSimpleLoaderComplete(
 
 void IntranetRedirectDetector::OnConnectionChanged(
     network::mojom::ConnectionType type) {
-  if (type == network::mojom::ConnectionType::CONNECTION_NONE)
-    return;
-  // If a request is already scheduled, do not scheduled yet another one.
-  if (in_sleep_)
-    return;
+  if (type != network::mojom::ConnectionType::CONNECTION_NONE)
+    Restart();
+}
 
-  // Since presumably many programs open connections after network changes,
-  // delay this a little bit.
-  in_sleep_ = true;
-  static const int kNetworkSwitchDelayMS = 1000;
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE,
-      base::BindOnce(&IntranetRedirectDetector::FinishSleep,
-                     weak_ptr_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(kNetworkSwitchDelayMS));
+void IntranetRedirectDetector::OnDnsConfigChanged() {
+  Restart();
+}
+
+void IntranetRedirectDetector::SetupDnsConfigClient() {
+  DCHECK(!dns_config_client_receiver_.is_bound());
+
+  mojo::Remote<network::mojom::DnsConfigChangeManager> manager_remote;
+  content::GetNetworkService()->GetDnsConfigChangeManager(
+      manager_remote.BindNewPipeAndPassReceiver());
+  manager_remote->RequestNotifications(
+      dns_config_client_receiver_.BindNewPipeAndPassRemote());
+  dns_config_client_receiver_.set_disconnect_handler(base::BindOnce(
+      &IntranetRedirectDetector::OnDnsConfigClientConnectionError,
+      base::Unretained(this)));
+}
+
+void IntranetRedirectDetector::OnDnsConfigClientConnectionError() {
+  dns_config_client_receiver_.reset();
+  SetupDnsConfigClient();
+}
+
+bool IntranetRedirectDetector::IsEnabledByPolicy() {
+  // The InterceptionChecksBehavior pref and the older
+  // DNSInterceptionChecksEnabled policy should each be able to disable
+  // interception checks. Therefore, we enable the redirect detector iff allowed
+  // by both policies.
+
+  // Check IntranetRedirectorBehavior pref.
+  auto behavior =
+      omnibox::GetInterceptionChecksBehavior(g_browser_process->local_state());
+  if (behavior == omnibox::IntranetRedirectorBehavior::DISABLE_FEATURE ||
+      behavior == omnibox::IntranetRedirectorBehavior::
+                      DISABLE_INTERCEPTION_CHECKS_ENABLE_INFOBARS) {
+    return false;
+  }
+
+  // Consult previous DNSInterceptionChecksEnabled policy.
+  if (!g_browser_process->local_state()->GetBoolean(
+          prefs::kDNSInterceptionChecksEnabled))
+    return false;
+
+  return true;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,9 @@ chrome.runtime.onConnect.addListener(function(port) {
 });
 
 // continuation of testSendMessageFromFrame()
-if (location.search.lastIndexOf('?testSendMessageFromFrame', 0) === 0) {
+if (location.search.lastIndexOf('?testSendMessageFromFrame', 0) === 0 ||
+    location.search.lastIndexOf('?testSendMessageFromSandboxedFrame', 0) ===
+        0) {
   chrome.runtime.sendMessage({frameUrl: location.href});
 } else if (location.search === '?testConnectChildFrameAndNavigateSetup') {
   // continuation of connectChildFrameAndNavigate() 1/2

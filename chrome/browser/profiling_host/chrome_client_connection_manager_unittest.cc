@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,14 @@
 
 #include "chrome/test/base/testing_profile.h"
 #include "components/services/heap_profiling/public/cpp/settings.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_render_process_host.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace heap_profiling {
 
 TEST(ChromeClientConnectionManager, ShouldProfileNewRenderer) {
-  content::TestBrowserThreadBundle thread_bundle;
+  content::BrowserTaskEnvironment task_environment;
 
   ChromeClientConnectionManager manager(nullptr, Mode::kNone);
 
@@ -26,7 +26,8 @@ TEST(ChromeClientConnectionManager, ShouldProfileNewRenderer) {
   manager.SetModeForTesting(Mode::kAll);
   EXPECT_TRUE(manager.ShouldProfileNewRenderer(&rph));
 
-  Profile* incognito_profile = testing_profile.GetOffTheRecordProfile();
+  Profile* incognito_profile =
+      testing_profile.GetPrimaryOTRProfile(/*create_if_needed=*/true);
   content::MockRenderProcessHost incognito_rph(incognito_profile);
   EXPECT_FALSE(manager.ShouldProfileNewRenderer(&incognito_rph));
 }

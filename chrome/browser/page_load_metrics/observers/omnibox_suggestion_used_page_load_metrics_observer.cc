@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,103 +6,98 @@
 
 #include <algorithm>
 
-#include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
+#include "components/page_load_metrics/browser/page_load_metrics_util.h"
+#include "content/public/browser/navigation_handle.h"
+#include "ui/base/page_transition_types.h"
 
 namespace {
+
+const char kSearchInputToNavigationStart[] =
+    "Omnibox.SuggestionUsed.Search.InputToNavigationStart";
+const char kURLInputToNavigationStart[] =
+    "Omnibox.SuggestionUsed.URL.InputToNavigationStart";
 
 const char kSearchFirstContentfulPaint[] =
     "Omnibox.SuggestionUsed.Search.NavigationToFirstContentfulPaint";
 const char kURLFirstContentfulPaint[] =
     "Omnibox.SuggestionUsed.URL.NavigationToFirstContentfulPaint";
-const char kPrerenderSearchFirstContentfulPaint[] =
-    "Omnibox.SuggestionUsed.Search.ForegroundToFirstContentfulPaint.Prerender";
-const char kPrerenderURLFirstContentfulPaint[] =
-    "Omnibox.SuggestionUsed.URL.ForegroundToFirstContentfulPaint.Prerender";
 
 const char kSearchFirstMeaningfulPaint[] =
     "Omnibox.SuggestionUsed.Search.Experimental."
     "NavigationToFirstMeaningfulPaint";
 const char kURLFirstMeaningfulPaint[] =
     "Omnibox.SuggestionUsed.URL.Experimental.NavigationToFirstMeaningfulPaint";
-const char kPrerenderSearchFirstMeaningfulPaint[] =
-    "Omnibox.SuggestionUsed.Search.Experimental."
-    "ForegroundToFirstMeaningfulPaint.Prerender";
-const char kPrerenderURLFirstMeaningfulPaint[] =
-    "Omnibox.SuggestionUsed.URL.Experimental."
-    "ForegroundToFirstMeaningfulPaint.Prerender";
 
-const char kPrerenderSearchNavigationToFirstForeground[] =
-    "Omnibox.SuggestionUsed.Search.NavigationToFirstForeground.Prerender";
-const char kPrerenderURLNavigationToFirstForeground[] =
-    "Omnibox.SuggestionUsed.URL.NavigationToFirstForeground.Prerender";
+const char kSearchLargestContentfulPaint2[] =
+    "Omnibox.SuggestionUsed.Search.NavigationToLargestContentfulPaint2";
+const char kURLLargestContentfulPaint2[] =
+    "Omnibox.SuggestionUsed.URL.NavigationToLargestContentfulPaint2";
 
+const char kSearchLargestContentfulPaint2Above2s[] =
+    "Omnibox.SuggestionUsed.Search.NavigationToLargestContentfulPaint2Above2s";
 }  // namespace
 
-OmniboxSuggestionUsedMetricsObserver::OmniboxSuggestionUsedMetricsObserver(
-    bool is_prerender)
-    : is_prerender_(is_prerender) {}
+OmniboxSuggestionUsedMetricsObserver::OmniboxSuggestionUsedMetricsObserver() =
+    default;
 
 OmniboxSuggestionUsedMetricsObserver::~OmniboxSuggestionUsedMetricsObserver() {}
 
 page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+OmniboxSuggestionUsedMetricsObserver::OnFencedFramesStart(
+    content::NavigationHandle* navigation_handle,
+    const GURL& currently_committed_url) {
+  // This class is interested only in the primary page.
+  return STOP_OBSERVING;
+}
+
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
 OmniboxSuggestionUsedMetricsObserver::OnHidden(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
   return STOP_OBSERVING;
 }
 
 page_load_metrics::PageLoadMetricsObserver::ObservePolicy
 OmniboxSuggestionUsedMetricsObserver::OnCommit(
-    content::NavigationHandle* navigation_handle,
-    ukm::SourceId source_id) {
+    content::NavigationHandle* navigation_handle) {
   transition_type_ = navigation_handle->GetPageTransition();
+  if (!ui::PageTransitionIsNewNavigation(transition_type_)) {
+    return STOP_OBSERVING;
+  }
   return (transition_type_ & ui::PAGE_TRANSITION_FROM_ADDRESS_BAR) != 0
              ? CONTINUE_OBSERVING
              : STOP_OBSERVING;
 }
 
 void OmniboxSuggestionUsedMetricsObserver::OnFirstContentfulPaintInPage(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
   base::TimeDelta fcp = timing.paint_timing->first_contentful_paint.value();
 
-  if (info.started_in_foreground) {
+  if (GetDelegate().StartedInForeground()) {
     if (ui::PageTransitionCoreTypeIs(transition_type_,
                                      ui::PAGE_TRANSITION_GENERATED)) {
+      if (timing.input_to_navigation_start) {
+        PAGE_LOAD_HISTOGRAM(kSearchInputToNavigationStart,
+                            timing.input_to_navigation_start.value());
+      }
       PAGE_LOAD_HISTOGRAM(kSearchFirstContentfulPaint, fcp);
     } else if (ui::PageTransitionCoreTypeIs(transition_type_,
                                             ui::PAGE_TRANSITION_TYPED)) {
+      if (timing.input_to_navigation_start) {
+        PAGE_LOAD_HISTOGRAM(kURLInputToNavigationStart,
+                            timing.input_to_navigation_start.value());
+      }
       PAGE_LOAD_HISTOGRAM(kURLFirstContentfulPaint, fcp);
     }
     return;
-  }
-  // Since a page is not supposed to paint in the background,
-  // when this function gets called, first_foreground_time should be set.
-  // We add this check just to be safe.
-  if (is_prerender_ && info.first_foreground_time) {
-    base::TimeDelta perceived_fcp =
-        std::max(base::TimeDelta(), fcp - info.first_foreground_time.value());
-    if (ui::PageTransitionCoreTypeIs(transition_type_,
-                                     ui::PAGE_TRANSITION_GENERATED)) {
-      PAGE_LOAD_HISTOGRAM(kPrerenderSearchFirstContentfulPaint, perceived_fcp);
-      PAGE_LOAD_HISTOGRAM(kPrerenderSearchNavigationToFirstForeground,
-                          info.first_foreground_time.value());
-    } else if (ui::PageTransitionCoreTypeIs(transition_type_,
-                                            ui::PAGE_TRANSITION_TYPED)) {
-      PAGE_LOAD_HISTOGRAM(kPrerenderURLFirstContentfulPaint, perceived_fcp);
-      PAGE_LOAD_HISTOGRAM(kPrerenderURLNavigationToFirstForeground,
-                          info.first_foreground_time.value());
-    }
   }
 }
 
 void OmniboxSuggestionUsedMetricsObserver::
     OnFirstMeaningfulPaintInMainFrameDocument(
-        const page_load_metrics::mojom::PageLoadTiming& timing,
-        const page_load_metrics::PageLoadExtraInfo& info) {
+        const page_load_metrics::mojom::PageLoadTiming& timing) {
   base::TimeDelta fmp = timing.paint_timing->first_meaningful_paint.value();
 
-  if (info.started_in_foreground) {
+  if (GetDelegate().StartedInForeground()) {
     if (ui::PageTransitionCoreTypeIs(transition_type_,
                                      ui::PAGE_TRANSITION_GENERATED)) {
       PAGE_LOAD_HISTOGRAM(kSearchFirstMeaningfulPaint, fmp);
@@ -110,15 +105,77 @@ void OmniboxSuggestionUsedMetricsObserver::
                                             ui::PAGE_TRANSITION_TYPED)) {
       PAGE_LOAD_HISTOGRAM(kURLFirstMeaningfulPaint, fmp);
     }
-  } else if (is_prerender_ && info.first_foreground_time) {
-    base::TimeDelta perceived_fmp =
-        std::max(base::TimeDelta(), fmp - info.first_foreground_time.value());
+  }
+}
+
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+OmniboxSuggestionUsedMetricsObserver::FlushMetricsOnAppEnterBackground(
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (GetDelegate().DidCommit())
+    RecordSessionEndHistograms(timing);
+  return STOP_OBSERVING;
+}
+
+void OmniboxSuggestionUsedMetricsObserver::OnTimingUpdate(
+    content::RenderFrameHost* subframe_rfh,
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  RecordSearchLCP2Above2s();
+}
+
+void OmniboxSuggestionUsedMetricsObserver::RecordSearchLCP2Above2s() {
+  if (lcp2_above_2s_recorded_) {
+    return;
+  }
+  const page_load_metrics::ContentfulPaintTimingInfo& paint =
+      GetDelegate()
+          .GetLargestContentfulPaintHandler()
+          .MergeMainFrameAndSubframes();
+  if (!paint.ContainsValidTime() || paint.Time()->InMilliseconds() < 2000) {
+    return;
+  }
+  if (!ui::PageTransitionCoreTypeIs(transition_type_,
+                                    ui::PAGE_TRANSITION_GENERATED)) {
+    // Not a Search load.
+    return;
+  }
+
+  if (!page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          paint.Time(), GetDelegate())) {
+    // Page was started in background or was backgrounded before reaching this
+    // LCP value.
+    return;
+  }
+  PAGE_LOAD_HISTOGRAM(kSearchLargestContentfulPaint2Above2s,
+                      paint.Time().value());
+  lcp2_above_2s_recorded_ = true;
+}
+
+void OmniboxSuggestionUsedMetricsObserver::OnComplete(
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  RecordSessionEndHistograms(timing);
+}
+
+void OmniboxSuggestionUsedMetricsObserver::RecordSessionEndHistograms(
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  DCHECK(GetDelegate().DidCommit());
+
+  RecordSearchLCP2Above2s();
+
+  const page_load_metrics::ContentfulPaintTimingInfo& largest_contentful_paint =
+      GetDelegate()
+          .GetLargestContentfulPaintHandler()
+          .MergeMainFrameAndSubframes();
+  if (largest_contentful_paint.ContainsValidTime() &&
+      page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          largest_contentful_paint.Time(), GetDelegate())) {
     if (ui::PageTransitionCoreTypeIs(transition_type_,
                                      ui::PAGE_TRANSITION_GENERATED)) {
-      PAGE_LOAD_HISTOGRAM(kPrerenderSearchFirstMeaningfulPaint, perceived_fmp);
+      PAGE_LOAD_HISTOGRAM(kSearchLargestContentfulPaint2,
+                          largest_contentful_paint.Time().value());
     } else if (ui::PageTransitionCoreTypeIs(transition_type_,
                                             ui::PAGE_TRANSITION_TYPED)) {
-      PAGE_LOAD_HISTOGRAM(kPrerenderURLFirstMeaningfulPaint, perceived_fmp);
+      PAGE_LOAD_HISTOGRAM(kURLLargestContentfulPaint2,
+                          largest_contentful_paint.Time().value());
     }
   }
 }

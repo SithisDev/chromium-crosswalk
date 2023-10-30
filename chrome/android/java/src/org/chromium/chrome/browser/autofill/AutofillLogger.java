@@ -1,10 +1,9 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.autofill;
 
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 
@@ -25,12 +24,10 @@ public class AutofillLogger {
             mProfileFullName = profileFullName;
         }
 
-        @VisibleForTesting
         public String getAutofilledValue() {
             return mAutofilledValue;
         }
 
-        @VisibleForTesting
         public String getProfileFullName() {
             return mProfileFullName;
         }
@@ -47,12 +44,10 @@ public class AutofillLogger {
     private static Logger sLogger;
     private static Logger sLoggerForTest;
 
-    @VisibleForTesting
     public static void setLogger(Logger logger) {
         sLogger = logger;
     }
 
-    @VisibleForTesting
     public static void setLoggerForTesting(Logger logger) {
         sLoggerForTest = logger;
     }

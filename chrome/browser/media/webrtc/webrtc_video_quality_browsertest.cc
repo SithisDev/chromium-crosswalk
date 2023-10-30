@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,24 +20,25 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/media/webrtc/webrtc_browsertest_base.h"
 #include "chrome/browser/media/webrtc/webrtc_browsertest_common.h"
+#include "chrome/browser/media/webrtc/webrtc_browsertest_perf.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/infobars/content/content_infobar_manager.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/common/buildflags.h"
-#include "content/public/common/feature_h264_with_openh264_ffmpeg.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "media/base/media_switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/python_utils.h"
 #include "testing/perf/perf_test.h"
+#include "third_party/blink/public/common/features.h"
 #include "ui/gl/gl_switches.h"
 
 namespace {
@@ -48,7 +49,7 @@ std::string MakeLabel(const char* test_name, const std::string& video_codec) {
 }  // namespace
 
 static const base::FilePath::CharType kFrameAnalyzerExecutable[] =
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     FILE_PATH_LITERAL("frame_analyzer.exe");
 #else
     FILE_PATH_LITERAL("frame_analyzer");
@@ -115,7 +116,6 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
         .AddExtension(test::kY4mFileExtension);
     command_line->AppendSwitchPath(switches::kUseFileForFakeVideoCapture,
                                    webrtc_reference_video_y4m_);
-    command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
 
     // The video playback will not work without a GPU, so force its use here.
     command_line->AppendSwitch(switches::kUseGpuInTests);
@@ -158,6 +158,8 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     ffmpeg_command.AppendArg(base::StringPrintf("%dx%d", width, height));
     ffmpeg_command.AppendArg("-b:v");
     ffmpeg_command.AppendArg(base::StringPrintf("%d", 120 * width * height));
+    ffmpeg_command.AppendArg("-vsync");
+    ffmpeg_command.AppendArg("passthrough");
     ffmpeg_command.AppendArgPath(yuv_video_filename);
 
     // We produce an output file that will later be used as an input to the
@@ -182,7 +184,7 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
       const base::FilePath& captured_video_filename,
       const base::FilePath& reference_video_filename) {
     base::FilePath path_to_analyzer = base::MakeAbsoluteFilePath(
-        GetBrowserDir().Append(kFrameAnalyzerExecutable));
+        GetTestBinaryDir().Append(kFrameAnalyzerExecutable));
     base::FilePath path_to_compare_script = GetSourceDir().Append(
         FILE_PATH_LITERAL("third_party/webrtc/rtc_tools/compare_videos.py"));
 
@@ -201,7 +203,7 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     // Note: don't append switches to this command since it will mess up the
     // -u in the python invocation!
     base::CommandLine compare_command(base::CommandLine::NO_PROGRAM);
-    EXPECT_TRUE(GetPythonCommand(&compare_command));
+    EXPECT_TRUE(GetPython3Command(&compare_command));
 
     compare_command.AppendArgPath(path_to_compare_script);
     compare_command.AppendArg("--label=" + test_label);
@@ -225,18 +227,31 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     printf("Output was:\n\n%s\n", output.c_str());
     bool has_result_lines = output.find("RESULT") != std::string::npos;
     if (!ok || !has_result_lines) {
-      LOG(ERROR) << "Failed to compare videos; see output above to see what "
-                 << "the error was.";
+      LOG(ERROR) << "Failed to compare videos; see output to see what "
+                 << "the error was:\n\n"
+                 << output;
       return false;
     }
+    // TODO(http://crbug.com/1874811): Enable this and drop the printf above
+    // when ready to switch to histogram sets.
+    // if (!test::WriteCompareVideosOutputAsHistogram(test_label, output))
+    //  return false;
+
     return true;
   }
 
   void TestVideoQuality(const std::string& video_codec,
                         bool prefer_hw_video_codec) {
+    ASSERT_GE(TestTimeouts::test_launcher_timeout().InSeconds(), 150)
+        << "This is a long-running test; you must specify "
+           "--test-launcher-timeout to have a value of at least 150000.";
     ASSERT_GE(TestTimeouts::action_max_timeout().InSeconds(), 150)
         << "This is a long-running test; you must specify "
            "--ui-test-action-max-timeout to have a value of at least 150000.";
+    ASSERT_LT(TestTimeouts::action_max_timeout(),
+              TestTimeouts::test_launcher_timeout())
+        << "action_max_timeout needs to be strictly-less-than "
+           "test_launcher_timeout";
     ASSERT_TRUE(test::HasReferenceFilesInCheckout());
     ASSERT_TRUE(embedded_test_server()->Start());
 
@@ -300,9 +315,10 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     return source_dir;
   }
 
-  base::FilePath GetBrowserDir() {
+  base::FilePath GetTestBinaryDir() {
     base::FilePath browser_dir;
-    EXPECT_TRUE(base::PathService::Get(base::DIR_MODULE, &browser_dir));
+    EXPECT_TRUE(
+        base::PathService::Get(base::DIR_GEN_TEST_DATA_ROOT, &browser_dir));
     return browser_dir;
   }
 
@@ -315,22 +331,38 @@ INSTANTIATE_TEST_SUITE_P(WebRtcVideoQualityBrowserTests,
                          WebRtcVideoQualityBrowserTest,
                          testing::ValuesIn(kVideoConfigurations));
 
+// WebRTC's frame_analyzer doesn't build from a Chromium's component build.
+#if defined(COMPONENT_BUILD)
+#define MAYBE_MANUAL_TestVideoQualityVp8 DISABLED_MANUAL_TestVideoQualityVp8
+#else
+#define MAYBE_MANUAL_TestVideoQualityVp8 MANUAL_TestVideoQualityVp8
+#endif
 IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
-                       MANUAL_TestVideoQualityVp8) {
+                       MAYBE_MANUAL_TestVideoQualityVp8) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   TestVideoQuality("VP8", false /* prefer_hw_video_codec */);
 }
 
+// Flaky on windows and WebRTC's frame_analyzer doesn't build from a Chromium's
+// component build.
+// TODO(crbug.com/1008766): re-enable when flakiness is investigated, diagnosed
+// and resolved.
+#if BUILDFLAG(IS_WIN) || defined(COMPONENT_BUILD)
+#define MAYBE_MANUAL_TestVideoQualityVp9 DISABLED_MANUAL_TestVideoQualityVp9
+#else
+#define MAYBE_MANUAL_TestVideoQualityVp9 MANUAL_TestVideoQualityVp9
+#endif
 IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
-                       MANUAL_TestVideoQualityVp9) {
+                       MAYBE_MANUAL_TestVideoQualityVp9) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   TestVideoQuality("VP9", true /* prefer_hw_video_codec */);
 }
 
 #if BUILDFLAG(RTC_USE_H264)
 
-// Flaky on mac: crbug.com/754684
-#if defined(OS_MACOSX)
+// Flaky on mac (crbug.com/754684) and WebRTC's frame_analyzer doesn't build
+// from a Chromium's component build.
+#if BUILDFLAG(IS_MAC) || defined(COMPONENT_BUILD)
 #define MAYBE_MANUAL_TestVideoQualityH264 DISABLED_MANUAL_TestVideoQualityH264
 #else
 #define MAYBE_MANUAL_TestVideoQualityH264 MANUAL_TestVideoQualityH264
@@ -340,7 +372,8 @@ IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
                        MAYBE_MANUAL_TestVideoQualityH264) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   // Only run test if run-time feature corresponding to |rtc_use_h264| is on.
-  if (!base::FeatureList::IsEnabled(content::kWebRtcH264WithOpenH264FFmpeg)) {
+  if (!base::FeatureList::IsEnabled(
+          blink::features::kWebRtcH264WithOpenH264FFmpeg)) {
     LOG(WARNING) << "Run-time feature WebRTC-H264WithOpenH264FFmpeg disabled. "
         "Skipping WebRtcVideoQualityBrowserTest.MANUAL_TestVideoQualityH264 "
         "(test \"OK\")";

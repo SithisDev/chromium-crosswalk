@@ -1,14 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_OOBE_DISPLAY_CHOOSER_H_
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_OOBE_DISPLAY_CHOOSER_H_
 
-#include "ash/public/interfaces/cros_display_config.mojom.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
+#include "chromeos/crosapi/mojom/cros_display_config.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "ui/events/devices/device_data_manager.h"
 #include "ui/events/devices/input_device_event_observer.h"
 
 namespace ui {
@@ -20,15 +22,21 @@ namespace chromeos {
 class OobeDisplayChooser : public ui::InputDeviceEventObserver {
  public:
   OobeDisplayChooser();
+
+  OobeDisplayChooser(const OobeDisplayChooser&) = delete;
+  OobeDisplayChooser& operator=(const OobeDisplayChooser&) = delete;
+
   ~OobeDisplayChooser() override;
 
   // Tries to put the OOBE UI on a connected touch display (if available).
   // Must be called on the BrowserThread::UI thread.
   void TryToPlaceUiOnTouchDisplay();
 
-  void set_cros_display_config_ptr_for_test(
-      ash::mojom::CrosDisplayConfigControllerPtr cros_display_config_ptr) {
-    cros_display_config_ptr_ = std::move(cros_display_config_ptr);
+  void set_cros_display_config_for_test(
+      mojo::PendingRemote<crosapi::mojom::CrosDisplayConfigController>
+          cros_display_config) {
+    cros_display_config_.reset();
+    cros_display_config_.Bind(std::move(cros_display_config));
   }
 
  private:
@@ -43,13 +51,12 @@ class OobeDisplayChooser : public ui::InputDeviceEventObserver {
   void OnTouchDeviceAssociationChanged() override;
   void OnDeviceListsComplete() override;
 
-  ScopedObserver<ui::DeviceDataManager, ui::InputDeviceEventObserver>
-      scoped_observer_;
-  ash::mojom::CrosDisplayConfigControllerPtr cros_display_config_ptr_;
+  base::ScopedObservation<ui::DeviceDataManager, ui::InputDeviceEventObserver>
+      scoped_observation_{this};
+  mojo::Remote<crosapi::mojom::CrosDisplayConfigController>
+      cros_display_config_;
 
-  base::WeakPtrFactory<OobeDisplayChooser> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(OobeDisplayChooser);
+  base::WeakPtrFactory<OobeDisplayChooser> weak_ptr_factory_{this};
 };
 
 }  // namespace chromeos

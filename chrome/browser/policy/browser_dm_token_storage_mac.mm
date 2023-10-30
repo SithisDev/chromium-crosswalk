@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,28 +8,27 @@
 
 #include "base/base64url.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "base/files/important_file_writer.h"
 #include "base/hash/sha1.h"
-#include "base/logging.h"
 #include "base/mac/foundation_util.h"
+#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_ioobject.h"
-#include "base/no_destructor.h"
-#include "base/optional.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/notreached.h"
 #include "base/path_service.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/syslog_logging.h"
-#include "base/task/post_task.h"
-#include "base/task_runner_util.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chrome/common/chrome_paths.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace policy {
 
@@ -39,14 +38,8 @@ const char kDmTokenBaseDir[] =
     FILE_PATH_LITERAL("Google/Chrome Cloud Enrollment/");
 const CFStringRef kEnrollmentTokenPolicyName =
     CFSTR("CloudManagementEnrollmentToken");
-// TODO(crbug.com/907589) : Remove once no longer in use.
-const CFStringRef kEnrollmentTokenOldPolicyName =
-    CFSTR("MachineLevelUserCloudPolicyEnrollmentToken");
 const char kEnrollmentTokenFilePath[] =
     FILE_PATH_LITERAL("/Library/Google/Chrome/CloudManagementEnrollmentToken");
-// TODO(crbug.com/907589) : Remove once no longer in use.
-const char kEnrollmentTokenOldFilePath[] = FILE_PATH_LITERAL(
-    "/Library/Google/Chrome/MachineLevelUserCloudPolicyEnrollmentToken");
 
 // Enrollment Mandatory Option
 const CFStringRef kEnrollmentMandatoryOptionPolicyName =
@@ -59,6 +52,15 @@ const char kEnrollmentMandatoryOption[] = "Mandatory";
 // app's bundle ID actually is. All channels of Chrome should obey the same
 // policies.
 const CFStringRef kBundleId = CFSTR("com.google.Chrome");
+
+constexpr char kEnrollmentTokenMetricsName[] =
+    "Enterprise.CloudManagementEnrollmentTokenLocation.Mac";
+
+enum EnrollmentTokenLocation {
+  kPolicy = 0,
+  kFile = 1,
+  kMaxValue = kFile,
+};
 
 bool GetDmTokenFilePath(base::FilePath* token_file_path,
                         const std::string& client_id,
@@ -82,12 +84,22 @@ bool GetDmTokenFilePath(base::FilePath* token_file_path,
 bool StoreDMTokenInDirAppDataDir(const std::string& token,
                                  const std::string& client_id) {
   base::FilePath token_file_path;
-  if (!GetDmTokenFilePath(&token_file_path, client_id, true)) {
+  if (!GetDmTokenFilePath(&token_file_path, client_id, /*create_dir=*/true)) {
     NOTREACHED();
     return false;
   }
 
   return base::ImportantFileWriter::WriteFileAtomically(token_file_path, token);
+}
+
+bool DeleteDMTokenFromAppDataDir(const std::string& client_id) {
+  base::FilePath token_file_path;
+  if (!GetDmTokenFilePath(&token_file_path, client_id, /*create_dir=*/false)) {
+    NOTREACHED();
+    return false;
+  }
+
+  return base::DeleteFile(token_file_path);
 }
 
 // Get the enrollment token from policy file: /Library/com.google.Chrome.plist.
@@ -103,13 +115,7 @@ bool GetEnrollmentTokenFromPolicy(std::string* enrollment_token) {
   // is no token set.
   if (!value ||
       !CFPreferencesAppValueIsForced(kEnrollmentTokenPolicyName, kBundleId)) {
-    // TODO(crbug.com/907589) : Remove once no longer in use.
-    value.reset(
-        CFPreferencesCopyAppValue(kEnrollmentTokenOldPolicyName, kBundleId));
-    if (!value || !CFPreferencesAppValueIsForced(kEnrollmentTokenOldPolicyName,
-                                                 kBundleId)) {
-      return false;
-    }
+    return false;
   }
   CFStringRef value_string = base::mac::CFCast<CFStringRef>(value);
   if (!value_string)
@@ -125,119 +131,105 @@ bool GetEnrollmentTokenFromFile(std::string* enrollment_token) {
   // is no token set.
   if (!base::ReadFileToString(base::FilePath(kEnrollmentTokenFilePath),
                               enrollment_token)) {
-    // TODO(crbug.com/907589) : Remove once no longer in use.
-    if (!base::ReadFileToString(base::FilePath(kEnrollmentTokenOldFilePath),
-                                enrollment_token)) {
-      return false;
-    }
+    return false;
   }
   *enrollment_token =
-      base::TrimWhitespaceASCII(*enrollment_token, base::TRIM_ALL).as_string();
+      std::string(base::TrimWhitespaceASCII(*enrollment_token, base::TRIM_ALL));
   return true;
 }
 
-base::Optional<bool> IsEnrollmentMandatoryByPolicy() {
+absl::optional<bool> IsEnrollmentMandatoryByPolicy() {
   base::ScopedCFTypeRef<CFPropertyListRef> value(CFPreferencesCopyAppValue(
       kEnrollmentMandatoryOptionPolicyName, kBundleId));
 
   if (!value || !CFPreferencesAppValueIsForced(
                     kEnrollmentMandatoryOptionPolicyName, kBundleId)) {
-    return base::Optional<bool>();
+    return absl::optional<bool>();
   }
 
   CFBooleanRef value_bool = base::mac::CFCast<CFBooleanRef>(value);
   if (!value_bool)
-    return base::Optional<bool>();
+    return absl::optional<bool>();
   return value_bool == kCFBooleanTrue;
 }
 
-base::Optional<bool> IsEnrollmentMandatoryByFile() {
+absl::optional<bool> IsEnrollmentMandatoryByFile() {
   std::string options;
   if (!base::ReadFileToString(base::FilePath(kEnrollmentOptionsFilePath),
                               &options)) {
-    return base::Optional<bool>();
+    return absl::optional<bool>();
   }
-  return base::TrimWhitespaceASCII(options, base::TRIM_ALL).as_string() ==
+  return std::string(base::TrimWhitespaceASCII(options, base::TRIM_ALL)) ==
          kEnrollmentMandatoryOption;
 }
 
 }  // namespace
 
-// static
-BrowserDMTokenStorage* BrowserDMTokenStorage::Get() {
-  if (storage_for_testing_)
-    return storage_for_testing_;
-
-  static base::NoDestructor<BrowserDMTokenStorageMac> storage;
-  return storage.get();
-}
-
-BrowserDMTokenStorageMac::BrowserDMTokenStorageMac() : weak_factory_(this) {}
+BrowserDMTokenStorageMac::BrowserDMTokenStorageMac()
+    : task_runner_(base::ThreadPool::CreateTaskRunner({base::MayBlock()})) {}
 
 BrowserDMTokenStorageMac::~BrowserDMTokenStorageMac() {}
 
 std::string BrowserDMTokenStorageMac::InitClientId() {
-  // Returns the device s/n.
-  base::mac::ScopedIOObject<io_service_t> expert_device(
-      IOServiceGetMatchingService(kIOMasterPortDefault,
-                                  IOServiceMatching("IOPlatformExpertDevice")));
-  if (!expert_device) {
-    SYSLOG(ERROR) << "Error retrieving the machine serial number.";
-    return std::string();
+  if (client_id_.empty()) {
+    client_id_ = base::mac::GetPlatformSerialNumber();
   }
 
-  base::ScopedCFTypeRef<CFTypeRef> serial_number(
-      IORegistryEntryCreateCFProperty(expert_device,
-                                      CFSTR(kIOPlatformSerialNumberKey),
-                                      kCFAllocatorDefault, 0));
-  CFStringRef serial_number_cfstring =
-      base::mac::CFCast<CFStringRef>(serial_number);
-  if (!serial_number_cfstring) {
-    SYSLOG(ERROR) << "Error retrieving the machine serial number.";
-    return std::string();
-  }
-
-  return base::SysCFStringRefToUTF8(serial_number_cfstring);
+  return client_id_;
 }
 
 std::string BrowserDMTokenStorageMac::InitEnrollmentToken() {
   std::string enrollment_token;
-  if (GetEnrollmentTokenFromPolicy(&enrollment_token))
+  if (GetEnrollmentTokenFromPolicy(&enrollment_token)) {
+    base::UmaHistogramEnumeration(kEnrollmentTokenMetricsName,
+                                  EnrollmentTokenLocation::kPolicy);
     return enrollment_token;
+  }
 
-  if (GetEnrollmentTokenFromFile(&enrollment_token))
+  if (GetEnrollmentTokenFromFile(&enrollment_token)) {
+    base::UmaHistogramEnumeration(kEnrollmentTokenMetricsName,
+                                  EnrollmentTokenLocation::kFile);
     return enrollment_token;
+  }
 
   return std::string();
 }
 
 std::string BrowserDMTokenStorageMac::InitDMToken() {
   base::FilePath token_file_path;
-  if (!GetDmTokenFilePath(&token_file_path, RetrieveClientId(), false))
+  if (!GetDmTokenFilePath(&token_file_path, InitClientId(),
+                          /*create_dir=*/false))
     return std::string();
 
   std::string token;
   if (!base::ReadFileToString(token_file_path, &token))
     return std::string();
 
-  return token;
+  return std::string(base::TrimWhitespaceASCII(token, base::TRIM_ALL));
 }
 
 bool BrowserDMTokenStorageMac::InitEnrollmentErrorOption() {
-  base::Optional<bool> is_mandatory = IsEnrollmentMandatoryByPolicy();
+  absl::optional<bool> is_mandatory = IsEnrollmentMandatoryByPolicy();
   if (is_mandatory)
     return is_mandatory.value();
 
   return IsEnrollmentMandatoryByFile().value_or(false);
 }
 
-void BrowserDMTokenStorageMac::SaveDMToken(const std::string& token) {
-  std::string client_id = RetrieveClientId();
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::MayBlock()},
-      base::BindOnce(&StoreDMTokenInDirAppDataDir, token, client_id),
-      base::BindOnce(&BrowserDMTokenStorage::OnDMTokenStored,
-                     weak_factory_.GetWeakPtr()));
+BrowserDMTokenStorage::StoreTask BrowserDMTokenStorageMac::SaveDMTokenTask(
+    const std::string& token,
+    const std::string& client_id) {
+  return base::BindOnce(&StoreDMTokenInDirAppDataDir, token, client_id);
+}
+
+BrowserDMTokenStorage::StoreTask BrowserDMTokenStorageMac::DeleteDMTokenTask(
+    const std::string& client_id) {
+  return base::BindOnce(&DeleteDMTokenFromAppDataDir, client_id);
+}
+
+scoped_refptr<base::TaskRunner>
+BrowserDMTokenStorageMac::SaveDMTokenTaskRunner() {
+  return task_runner_;
 }
 
 }  // namespace policy

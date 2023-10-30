@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <stddef.h>
 
-#include "base/macros.h"
 #include "base/time/time.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
@@ -15,7 +14,6 @@
 
 class LocationBarTesting;
 class OmniboxView;
-class Profile;
 
 namespace content {
 class WebContents;
@@ -28,13 +26,12 @@ class WebContents;
 // location bar to be mocked for testing.
 class LocationBar {
  public:
-  explicit LocationBar(Profile* profile);
-
   // The details necessary to open the user's desired omnibox match.
   virtual GURL GetDestinationURL() const = 0;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const = 0;
   virtual ui::PageTransition GetPageTransition() const = 0;
   virtual base::TimeTicks GetMatchSelectionTimestamp() const = 0;
+  virtual bool IsInputTypedUrlWithoutScheme() const = 0;
 
   // Accepts the current string of text entered in the location bar.
   virtual void AcceptInput() = 0;
@@ -44,31 +41,21 @@ class LocationBar {
   // latency of page loads starting at user input.
   virtual void AcceptInput(base::TimeTicks match_selection_timestamp) = 0;
 
-  // Focuses the location bar.  Optionally also selects its contents.
+  // Focuses the location bar. User-initiated focuses (like pressing Ctrl+L)
+  // should have |is_user_initiated| set to true. In those cases, we want to
+  // take some extra steps, like selecting everything and maybe uneliding.
   //
-  // User-initiated focuses should have |select_all| set to true, as users
-  // are accustomed to being able to use Ctrl+L to select-all in the omnibox.
-  //
-  // Renderer-initiated focuses should have |select_all| set to false, as the
-  // user may be in the middle of typing while the tab finishes loading.
-  // In that case, we don't want to select-all and cause the user to clobber
-  // their already-typed text.
-  virtual void FocusLocation(bool select_all) = 0;
+  // Renderer-initiated focuses (like browser startup or NTP finished loading),
+  // should have |is_user_initiated| set to false, so we can avoid disrupting
+  // user actions and avoid requesting on-focus suggestions.
+  virtual void FocusLocation(bool is_user_initiated) = 0;
 
   // Puts the user into keyword mode with their default search provider.
+  // TODO(tommycli): See if there's a more descriptive name for this method.
   virtual void FocusSearch() = 0;
 
   // Updates the state of the images showing the content settings status.
   virtual void UpdateContentSettingsIcons() = 0;
-
-  // Updates the visibility and toggled state of the save credit card icon.
-  virtual void UpdateSaveCreditCardIcon() = 0;
-
-  // Updates the visibility and toggled state of the local card migration icon.
-  virtual void UpdateLocalCardMigrationIcon() = 0;
-
-  // Updates the visibility of the bookmark star.
-  virtual void UpdateBookmarkStarVisibility() = 0;
 
   // Saves the state of the location bar to the specified WebContents, so that
   // it can be restored later. (Done when switching tabs).
@@ -83,29 +70,12 @@ class LocationBar {
   // Returns a pointer to the testing interface.
   virtual LocationBarTesting* GetLocationBarForTesting() = 0;
 
-  Profile* profile() const { return profile_; }
-
  protected:
-  virtual ~LocationBar();
-
-  // Checks if any extension has requested that the bookmark star be hidden.
-  bool IsBookmarkStarHiddenByExtension() const;
-
- private:
-  class ExtensionLoadObserver;
-
-  Profile* profile_;
-
-  std::unique_ptr<ExtensionLoadObserver> extension_load_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(LocationBar);
+  virtual ~LocationBar() = default;
 };
 
 class LocationBarTesting {
  public:
-  // Returns whether or not the bookmark star decoration is visible.
-  virtual bool GetBookmarkStarVisibility() = 0;
-
   // Invokes the content setting image at |index|, displaying the bubble.
   // Returns false if there is none.
   virtual bool TestContentSettingImagePressed(size_t index) = 0;
@@ -114,7 +84,7 @@ class LocationBarTesting {
   virtual bool IsContentSettingBubbleShowing(size_t index) = 0;
 
  protected:
-  virtual ~LocationBarTesting() {}
+  virtual ~LocationBarTesting() = default;
 };
 
 #endif  // CHROME_BROWSER_UI_LOCATION_BAR_LOCATION_BAR_H_

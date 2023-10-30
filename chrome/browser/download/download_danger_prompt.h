@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_DANGER_PROMPT_H_
 
 #include "base/callback_forward.h"
-#include "components/safe_browsing/proto/csd.pb.h"
+#include "components/safe_browsing/core/common/proto/csd.pb.h"
 
 namespace content {
 class WebContents;
@@ -34,7 +34,7 @@ class DownloadDangerPrompt {
     // The user dismissed the dialog without making an explicit choice.
     DISMISS,
   };
-  typedef base::Callback<void(Action)> OnDone;
+  typedef base::OnceCallback<void(Action)> OnDone;
 
   // Return a new self-deleting DownloadDangerPrompt. The returned
   // DownloadDangerPrompt* is only used for testing. The caller does not own the
@@ -47,7 +47,7 @@ class DownloadDangerPrompt {
   static DownloadDangerPrompt* Create(download::DownloadItem* item,
                                       content::WebContents* web_contents,
                                       bool show_context,
-                                      const OnDone& done);
+                                      OnDone done);
 
   // Only to be used by tests. Subclasses must override to manually call the
   // respective button click handler.
@@ -62,7 +62,7 @@ class DownloadDangerPrompt {
   static void SendSafeBrowsingDownloadReport(
       safe_browsing::ClientSafeBrowsingReportRequest::ReportType report_type,
       bool did_proceed,
-      const download::DownloadItem& download);
+      download::DownloadItem* download);
 
  protected:
   // Records UMA stats for a download danger prompt event.

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,9 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "chrome/common/available_offline_content.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 // Notice: this file is only included on OS_ANDROID.
 
@@ -23,6 +24,11 @@ class AvailableOfflineContentHelper {
                               const std::string& offline_content_json)>;
 
   AvailableOfflineContentHelper();
+
+  AvailableOfflineContentHelper(const AvailableOfflineContentHelper&) = delete;
+  AvailableOfflineContentHelper& operator=(
+      const AvailableOfflineContentHelper&) = delete;
+
   ~AvailableOfflineContentHelper();
 
   // Fetch available offline content and return a JSON representation.
@@ -40,6 +46,10 @@ class AvailableOfflineContentHelper {
   // Abort previous requests and free the mojo connection.
   void Reset();
 
+  using Binder = base::RepeatingCallback<void(
+      mojo::PendingReceiver<chrome::mojom::AvailableOfflineContentProvider>)>;
+  static void OverrideBinderForTesting(Binder binder);
+
  private:
   void AvailableContentReceived(
       AvailableContentCallback callback,
@@ -49,7 +59,7 @@ class AvailableOfflineContentHelper {
   // Binds |provider_| if necessary. Returns true if the provider is bound.
   bool BindProvider();
 
-  chrome::mojom::AvailableOfflineContentProviderPtr provider_;
+  mojo::Remote<chrome::mojom::AvailableOfflineContentProvider> provider_;
   // This is the result of the last FetchAvailableContent call. It is retained
   // only so that metrics can be recorded properly on call to LaunchItem().
   std::vector<chrome::mojom::AvailableOfflineContentPtr> fetched_content_;
@@ -57,8 +67,6 @@ class AvailableOfflineContentHelper {
   // Records if the last received content message indicated that prefetched
   // articles are available or not.
   bool has_prefetched_content_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(AvailableOfflineContentHelper);
 };
 
 #endif  // CHROME_RENDERER_NET_AVAILABLE_OFFLINE_CONTENT_HELPER_H_

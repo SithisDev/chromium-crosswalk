@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,30 +19,22 @@ import java.util.regex.Pattern;
  */
 public class TabSwitcherController extends PageController {
     private static final Pattern PATTERN_NUMBER_OF_OPEN_TABS = Pattern.compile("^(\\d+) .*");
-    private static final IUi2Locator LOCATOR_CLOSE_ALL_TABS =
-            Ui2Locators.withResEntries(R.id.close_all_tabs_button);
     private static final IUi2Locator LOCATOR_NEW_TAB =
-            Ui2Locators.withResEntries(R.id.tab_switcher_new_tab_button, R.id.new_tab_button);
-    private static final IUi2Locator LOCATOR_TAB_SWITCHER_BUTTON = Ui2Locators.withResEntries(
+            Ui2Locators.withAnyResEntry(R.id.new_tab_button);
+    private static final IUi2Locator LOCATOR_TAB_SWITCHER_BUTTON = Ui2Locators.withAnyResEntry(
             R.id.tab_switcher_button, R.id.tab_switcher_mode_tab_switcher_button);
-    private static final IUi2Locator LOCATOR_MENU = Ui2Locators.withResEntries(R.id.menu_button);
+    private static final IUi2Locator LOCATOR_MENU = Ui2Locators.withAnyResEntry(R.id.menu_button);
 
     private static final TabSwitcherController sInstance = new TabSwitcherController();
 
-    static public TabSwitcherController getInstance() {
+    public static TabSwitcherController getInstance() {
         return sInstance;
     }
 
     private TabSwitcherController() {}
 
     public void clickCloseAllTabs() {
-        // Default to  use the close all tabs button.
-        if (mLocatorHelper.isOnScreen(LOCATOR_CLOSE_ALL_TABS)) {
-            mUtils.click(LOCATOR_CLOSE_ALL_TABS);
-        } else {
-            // If it's not found for whatever reason, then do it through the menu.
-            clickMenu().clickCloseAllTabs();
-        }
+        clickMenu().clickCloseAllTabs();
     }
 
     public void clickTabSwitcher() {
@@ -62,20 +54,17 @@ public class TabSwitcherController extends PageController {
     }
     public NewTabPageController clickNewTab() {
         mUtils.click(LOCATOR_NEW_TAB);
-        NewTabPageController inst = NewTabPageController.getInstance();
-        inst.verify();
-        return inst;
+        return NewTabPageController.getInstance().verifyActive();
     }
 
     public TabSwitcherMenuController clickMenu() {
         mUtils.click(LOCATOR_MENU);
-        TabSwitcherMenuController inst = TabSwitcherMenuController.getInstance();
-        inst.verify();
-        return inst;
+        return TabSwitcherMenuController.getInstance().verifyActive();
     }
 
     @Override
-    public boolean isCurrentPageThis() {
-        return mLocatorHelper.isOnScreen(LOCATOR_NEW_TAB);
+    public TabSwitcherController verifyActive() {
+        mLocatorHelper.verifyOnScreen(LOCATOR_NEW_TAB);
+        return this;
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,8 @@
 
 namespace vr {
 
-// When adding values, insert them before kCount and add them to
-// VRSuppressedElement in enums.xml. Do not reuse values.
-// Also, remove kPlaceholderForPreviousHighValue.
-// When values become obsolete, comment them out here and mark them deprecated
-// in enums.xml.
+// When adding values, insert them before kCount, do not reuse values, and also
+// remove kPlaceholderForPreviousHighValue.
 enum class UiSuppressedElement : int {
   kFileChooser = 0,
   kBluetoothChooser = 1,

@@ -1,16 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 
+#include "base/files/file_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/metrics/subprocess_metrics_provider.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -18,6 +18,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_utils.h"
@@ -45,7 +46,7 @@ class ExtensionFunctionalTest : public ExtensionBrowserTest {
     scoped_refptr<CrxInstaller> installer(CrxInstaller::CreateSilent(service));
     installer->set_is_gallery_install(false);
     installer->set_allow_silent_install(true);
-    installer->set_install_source(Manifest::INTERNAL);
+    installer->set_install_source(mojom::ManifestLocation::kInternal);
     installer->set_off_store_install_allow_reason(
         CrxInstaller::OffStoreInstallAllowedInTest);
 
@@ -65,13 +66,7 @@ class ExtensionFunctionalTest : public ExtensionBrowserTest {
   }
 };
 
-// Failing on Linux: http://crbug.com/654945
-#if defined(OS_LINUX)
-#define MAYBE_TestSetExtensionsState DISABLED_TestSetExtensionsState
-#else
-#define MAYBE_TestSetExtensionsState TestSetExtensionsState
-#endif
-IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest, MAYBE_TestSetExtensionsState) {
+IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest, TestSetExtensionsState) {
   InstallExtensionSilently(extension_service(), "google_talk.crx");
 
   // Disable the extension and verify.
@@ -106,17 +101,17 @@ IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest,
   GURL extension_url = extension->GetResourceURL("file.html");
 
   // Load the extension in two unrelated tabs.
-  ui_test_utils::NavigateToURL(browser(), extension_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), extension_url));
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), extension_url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
 
   // Sanity-check test setup: 2 frames share a renderer process, but are not in
   // a related browsing instance.
   content::RenderFrameHost* tab1 =
-      browser()->tab_strip_model()->GetWebContentsAt(0)->GetMainFrame();
+      browser()->tab_strip_model()->GetWebContentsAt(0)->GetPrimaryMainFrame();
   content::RenderFrameHost* tab2 =
-      browser()->tab_strip_model()->GetWebContentsAt(1)->GetMainFrame();
+      browser()->tab_strip_model()->GetWebContentsAt(1)->GetPrimaryMainFrame();
   EXPECT_EQ(tab1->GetProcess(), tab2->GetProcess());
   EXPECT_FALSE(
       tab1->GetSiteInstance()->IsRelatedSiteInstance(tab2->GetSiteInstance()));
@@ -137,8 +132,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest,
         &did_create_popup));
     ASSERT_TRUE(did_create_popup);
     content::WebContents* popup_window = new_window_observer.GetWebContents();
-    WaitForLoadStop(popup_window);
-    tab1_popup = popup_window->GetMainFrame();
+    EXPECT_TRUE(WaitForLoadStop(popup_window));
+    tab1_popup = popup_window->GetPrimaryMainFrame();
   }
   EXPECT_EQ(GURL(url::kAboutBlankURL), tab1_popup->GetLastCommittedURL());
 
@@ -154,8 +149,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest,
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest, DownloadExtensionResource) {
-  auto* download_manager =
-      content::BrowserContext::GetDownloadManager(profile());
+  auto* download_manager = profile()->GetDownloadManager();
   content::DownloadTestObserverTerminal download_observer(
       download_manager, 1,
       content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT);

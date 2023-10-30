@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,41 +17,36 @@ function setCompositionTest() {
   }, chrome.test.callbackPass());
 }
 
-
 function clearCompositionTest() {
   chrome.input.ime.clearComposition({
     "contextID": 1
   }, chrome.test.callbackPass());
 }
 
-
 function commitTextTest() {
   chrome.input.ime.commitText({
-    "contextID": 2,
+    "contextID": 1,
     "text": "Seaguls"
   }, chrome.test.callbackPass());
 }
 
-
-// Disabled: crbug.com/641425.
-// function setCandidateWindowPropertiesTest() {
-//   chrome.input.ime.setCandidateWindowProperties({
-//     "engineID": "test",
-//     "properties": {
-//       "visible": true,
-//       "cursorVisible": false,
-//       "vertical": true,
-//       "pageSize": 6,
-//       "auxiliaryText": "notes",
-//       "auxiliaryTextVisible": true
-//     }
-//   }, chrome.test.callbackPass());
-// }
-
+function setCandidateWindowPropertiesTest() {
+  chrome.input.ime.setCandidateWindowProperties({
+    "engineID": "test",
+    "properties": {
+      "visible": true,
+      "cursorVisible": false,
+      "vertical": true,
+      "pageSize": 6,
+      "auxiliaryText": "notes",
+      "auxiliaryTextVisible": true
+    }
+  }, chrome.test.callbackPass());
+}
 
 function setCandidatesTest() {
   chrome.input.ime.setCandidates({
-    "contextID": 8,
+    "contextID": 1,
     "candidates": [{
       "candidate": "one",
       "id": 1,
@@ -71,67 +66,69 @@ function setCandidatesTest() {
   }, chrome.test.callbackPass());
 }
 
-
 function setCursorPositionTest() {
   chrome.input.ime.setCursorPosition({
-    "contextID": 9,
+    "contextID": 1,
     "candidateID": 1
   }, chrome.test.callbackPass());
 }
 
+function setMenuItemsTest() {
+  chrome.input.ime.setMenuItems({
+    "engineID": "test",
+    "items": [{
+      "id": "Menu 1",
+      "label": "Menu 1",
+      "style": "check",
+      "visible": true,
+      "enabled": true
+    }, {
+      "id": "Menu 2",
+      "label": "Menu 2",
+      "style": "radio",
+      "visible": true,
+      "enabled": true
+    }]
+  }, chrome.test.callbackPass());
+}
 
-// Disabled: crbug.com/641425.
-// function setMenuItemsTest() {
-//   chrome.input.ime.setMenuItems({
-//     "engineID": "test",
-//     "items": [{
-//       "id": "Menu 1",
-//       "label": "Menu 1",
-//       "style": "check",
-//       "visible": true,
-//       "enabled": true
-//     }, {
-//       "id": "Menu 2",
-//       "label": "Menu 2",
-//       "style": "radio",
-//       "visible": true,
-//       "enabled": true
-//     }]
-//   }, chrome.test.callbackPass());
-// }
+function updateMenuItemsTest() {
+  chrome.input.ime.updateMenuItems({
+    "engineID": "test",
+    "items": [{
+      "id": "Menu 1",
+      "enabled": false
+    }, {
+      "id": "Menu 2",
+      "visible": false,
+    }]
+  }, chrome.test.callbackPass());
+}
 
-// Disabled: crbug.com/641425.
-// function updateMenuItemsTest() {
-//   chrome.input.ime.updateMenuItems({
-//     "engineID": "test",
-//     "items": [{
-//       "id": "Menu 1",
-//       "enabled": false
-//     }, {
-//       "id": "Menu 2",
-//       "visible": false,
-//     }]
-//   }, chrome.test.callbackPass());
-// }
+function deleteSurroundingText() {
+  chrome.input.ime.deleteSurroundingText({
+    "engineID": "test",
+    "contextID": 1,
+    "offset": -1,
+    "length": 1
+  }, chrome.test.callbackPass());
+}
 
-// Disabled: crbug.com/641425.
-// function deleteSurroundingText() {
-//   chrome.input.ime.deleteSurroundingText({
-//     "engineID": "test",
-//     "contextID": 1,
-//     "offset": -1,
-//     "length": 1
-//   }, chrome.test.callbackPass());
-// }
+function setUp() {
+  chrome.inputMethodPrivate.setCurrentInputMethod(
+      '_ext_ime_ilanclmaeigfpnmdlgelmhkpkegdioiptest',
+      chrome.test.succeed());
+}
 
 chrome.test.runTests([
-    setCompositionTest,
-    clearCompositionTest,
-    commitTextTest,
-    // setCandidateWindowPropertiesTest,
-    setCandidatesTest,
-    setCursorPositionTest,
-    // setMenuItemsTest,
-    // updateMenuItemsTest,
-    // deleteSurroundingText,
+  setUp,
+  setCompositionTest,
+  clearCompositionTest,
+  commitTextTest,
+  setCandidateWindowPropertiesTest,
+  setCandidatesTest,
+  setCursorPositionTest,
+  setMenuItemsTest,
+  updateMenuItemsTest,
+  deleteSurroundingText,
 ]);

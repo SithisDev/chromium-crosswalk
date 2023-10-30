@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "chrome/android/chrome_jni_headers/LayerTitleCache_jni.h"
 #include "chrome/browser/android/compositor/decoration_title.h"
 #include "ui/android/resources/resource_manager.h"
+#include "ui/android/resources/resource_manager_impl.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -37,17 +38,17 @@ LayerTitleCache::LayerTitleCache(JNIEnv* env,
                                  jint favicon_start_padding,
                                  jint favicon_end_padding,
                                  jint spinner_resource_id,
-                                 jint spinner_incognito_resource_id)
+                                 jint spinner_incognito_resource_id,
+                                 ui::ResourceManager* resource_manager)
     : weak_java_title_cache_(env, obj),
       fade_width_(fade_width),
       favicon_start_padding_(favicon_start_padding),
       favicon_end_padding_(favicon_end_padding),
       spinner_resource_id_(spinner_resource_id),
       spinner_incognito_resource_id_(spinner_incognito_resource_id),
-      resource_manager_(nullptr) {
-}
+      resource_manager_(resource_manager) {}
 
-void LayerTitleCache::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
+void LayerTitleCache::Destroy(JNIEnv* env) {
   delete this;
 }
 
@@ -90,6 +91,10 @@ void LayerTitleCache::UpdateFavicon(JNIEnv* env,
 void LayerTitleCache::ClearExcept(JNIEnv* env,
                                   const JavaParamRef<jobject>& obj,
                                   jint except_id) {
+  if (except_id == -1) {
+    layer_cache_.Clear();
+    return;
+  }
   base::IDMap<std::unique_ptr<DecorationTitle>>::iterator iter(&layer_cache_);
   for (; !iter.IsAtEnd(); iter.Advance()) {
     const int id = iter.GetCurrentKey();
@@ -108,16 +113,6 @@ DecorationTitle* LayerTitleCache::GetTitleLayer(int tab_id) {
   return layer_cache_.Lookup(tab_id);
 }
 
-void LayerTitleCache::SetResourceManager(
-    ui::ResourceManager* resource_manager) {
-  resource_manager_ = resource_manager;
-
-  base::IDMap<std::unique_ptr<DecorationTitle>>::iterator iter(&layer_cache_);
-  for (; !iter.IsAtEnd(); iter.Advance()) {
-    iter.GetCurrentValue()->SetResourceManager(resource_manager_);
-  }
-}
-
 LayerTitleCache::~LayerTitleCache() {
 }
 
@@ -131,10 +126,13 @@ jlong JNI_LayerTitleCache_Init(JNIEnv* env,
                                jint favicon_start_padding,
                                jint favicon_end_padding,
                                jint spinner_resource_id,
-                               jint spinner_incognito_resource_id) {
+                               jint spinner_incognito_resource_id,
+                               const JavaParamRef<jobject>& jresource_manager) {
+  ui::ResourceManager* resource_manager =
+      ui::ResourceManagerImpl::FromJavaObject(jresource_manager);
   LayerTitleCache* cache = new LayerTitleCache(
       env, obj, fade_width, favicon_start_padding, favicon_end_padding,
-      spinner_resource_id, spinner_incognito_resource_id);
+      spinner_resource_id, spinner_incognito_resource_id, resource_manager);
   return reinterpret_cast<intptr_t>(cache);
 }
 

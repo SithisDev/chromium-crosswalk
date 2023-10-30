@@ -1,11 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/applescript/bookmark_folder_applescript.h"
 
 #import "base/mac/scoped_nsobject.h"
-#import "base/strings/string16.h"
 #include "base/strings/sys_string_conversions.h"
 #import "chrome/browser/ui/cocoa/applescript/bookmark_item_applescript.h"
 #import "chrome/browser/ui/cocoa/applescript/constants_applescript.h"
@@ -20,9 +19,9 @@ using bookmarks::BookmarkNode;
 
 - (NSArray*)bookmarkFolders {
   NSMutableArray* bookmarkFolders =
-      [NSMutableArray arrayWithCapacity:bookmarkNode_->children().size()];
+      [NSMutableArray arrayWithCapacity:_bookmarkNode->children().size()];
 
-  for (const auto& node : bookmarkNode_->children()) {
+  for (const auto& node : _bookmarkNode->children()) {
     if (!node->is_folder())
       continue;
     base::scoped_nsobject<BookmarkFolderAppleScript> bookmarkFolder(
@@ -45,7 +44,7 @@ using bookmarks::BookmarkNode;
     return;
 
   const BookmarkNode* node = model->AddFolder(
-      bookmarkNode_, bookmarkNode_->children().size(), base::string16());
+      _bookmarkNode, _bookmarkNode->children().size(), std::u16string());
   if (!node) {
     AppleScript::SetError(AppleScript::errCreateBookmarkFolder);
     return;
@@ -65,9 +64,8 @@ using bookmarks::BookmarkNode;
   if (!model)
     return;
 
-  const BookmarkNode* node = model->AddFolder(bookmarkNode_,
-                                              position,
-                                              base::string16());
+  const BookmarkNode* node =
+      model->AddFolder(_bookmarkNode, position, std::u16string());
   if (!node) {
     AppleScript::SetError(AppleScript::errCreateBookmarkFolder);
     return;
@@ -83,14 +81,14 @@ using bookmarks::BookmarkNode;
   if (!model)
     return;
 
-  model->Remove(bookmarkNode_->children()[position].get());
+  model->Remove(_bookmarkNode->children()[position].get());
 }
 
 - (NSArray*)bookmarkItems {
   NSMutableArray* bookmarkItems =
-      [NSMutableArray arrayWithCapacity:bookmarkNode_->children().size()];
+      [NSMutableArray arrayWithCapacity:_bookmarkNode->children().size()];
 
-  for (const auto& node : bookmarkNode_->children()) {
+  for (const auto& node : _bookmarkNode->children()) {
     if (!node->is_url())
       continue;
     base::scoped_nsobject<BookmarkItemAppleScript> bookmarkItem(
@@ -119,8 +117,8 @@ using bookmarks::BookmarkNode;
     return;
   }
 
-  const BookmarkNode* node = model->AddURL(
-      bookmarkNode_, bookmarkNode_->children().size(), base::string16(), url);
+  const BookmarkNode* node = model->AddNewURL(
+      _bookmarkNode, _bookmarkNode->children().size(), std::u16string(), url);
   if (!node) {
     AppleScript::SetError(AppleScript::errCreateBookmarkItem);
     return;
@@ -147,10 +145,8 @@ using bookmarks::BookmarkNode;
     return;
   }
 
-  const BookmarkNode* node = model->AddURL(bookmarkNode_,
-                                           position,
-                                           base::string16(),
-                                           url);
+  const BookmarkNode* node =
+      model->AddNewURL(_bookmarkNode, position, std::u16string(), url);
   if (!node) {
     AppleScript::SetError(AppleScript::errCreateBookmarkItem);
     return;
@@ -166,7 +162,7 @@ using bookmarks::BookmarkNode;
   if (!model)
     return;
 
-  model->Remove(bookmarkNode_->children()[position].get());
+  model->Remove(_bookmarkNode->children()[position].get());
 }
 
 - (size_t)calculatePositionOfBookmarkFolderAt:(size_t)index {
@@ -176,7 +172,7 @@ using bookmarks::BookmarkNode;
   ++index;
   size_t count = 0;
   while (index) {
-    if (bookmarkNode_->children()[count++]->is_folder())
+    if (_bookmarkNode->children()[count++]->is_folder())
       --index;
   }
   return count - 1;
@@ -189,7 +185,7 @@ using bookmarks::BookmarkNode;
   ++index;
   size_t count = 0;
   while (index) {
-    if (bookmarkNode_->children()[count++]->is_url())
+    if (_bookmarkNode->children()[count++]->is_url())
       --index;
   }
   return count - 1;

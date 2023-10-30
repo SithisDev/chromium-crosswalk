@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,24 +7,24 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/strcat.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/test/multiprocess_test.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/chrome_cleaner/constants/quarantine_constants.h"
-#include "chrome/chrome_cleaner/mojom/zip_archiver.mojom.h"
 #include "chrome/chrome_cleaner/ipc/mojo_task_runner.h"
+#include "chrome/chrome_cleaner/mojom/zip_archiver.mojom.h"
 #include "chrome/chrome_cleaner/os/disk_util.h"
 #include "chrome/chrome_cleaner/zip_archiver/broker/sandbox_setup.h"
 #include "chrome/chrome_cleaner/zip_archiver/sandboxed_zip_archiver.h"
 #include "chrome/chrome_cleaner/zip_archiver/target/sandbox_setup.h"
 #include "chrome/chrome_cleaner/zip_archiver/test_zip_archiver_util.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/system/platform_handle.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "sandbox/win/src/sandbox.h"
 #include "sandbox/win/src/sandbox_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -61,7 +61,7 @@ class ZipArchiverSandboxedArchiverTest : public base::MultiProcessTest {
     ASSERT_EQ(RESULT_CODE_SUCCESS,
               StartSandboxTarget(MakeCmdLine("SandboxedZipArchiverTargetMain"),
                                  &setup_hooks, SandboxType::kTest));
-    UniqueZipArchiverPtr zip_archiver_ptr = setup_hooks.TakeZipArchiverPtr();
+    RemoteZipArchiverPtr zip_archiver = setup_hooks.TakeZipArchiverRemote();
 
     test_file_.Initialize();
     const base::FilePath& src_file_path = test_file_.GetSourceFilePath();
@@ -69,7 +69,7 @@ class ZipArchiverSandboxedArchiverTest : public base::MultiProcessTest {
     std::string src_file_hash;
     ComputeSHA256DigestOfPath(src_file_path, &src_file_hash);
 
-    const base::string16 zip_filename = internal::ConstructZipArchiveFileName(
+    const std::wstring zip_filename = internal::ConstructZipArchiveFileName(
         src_file_path.BaseName().value(), src_file_hash,
         /*max_filename_length=*/255);
 
@@ -77,7 +77,7 @@ class ZipArchiverSandboxedArchiverTest : public base::MultiProcessTest {
     expect_zip_file_path_ = dst_archive_folder.Append(zip_filename);
 
     zip_archiver_ = std::make_unique<SandboxedZipArchiver>(
-        mojo_task_runner, std::move(zip_archiver_ptr), dst_archive_folder,
+        mojo_task_runner, std::move(zip_archiver), dst_archive_folder,
         kTestPassword);
   }
 
@@ -97,7 +97,7 @@ class ZipArchiverSandboxedArchiverTest : public base::MultiProcessTest {
   base::FilePath expect_zip_file_path_;
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<SandboxedZipArchiver> zip_archiver_;
 };
 
@@ -107,26 +107,25 @@ class ZipArchiverSandboxedArchiverTest : public base::MultiProcessTest {
 // before sending requests to the sandbox. It doesn't do real archiving.
 class ArgumentVerifyingFakeArchiver : public mojom::ZipArchiver {
  public:
-  explicit ArgumentVerifyingFakeArchiver(mojom::ZipArchiverRequest request)
-      : binding_(this, std::move(request)) {
-    binding_.set_connection_error_handler(base::BindOnce(
+  explicit ArgumentVerifyingFakeArchiver(
+      mojo::PendingReceiver<mojom::ZipArchiver> receiver)
+      : receiver_(this, std::move(receiver)) {
+    receiver_.set_disconnect_handler(base::BindOnce(
         [] { FAIL() << "ZipArchiver sandbox connection error"; }));
   }
 
+  ArgumentVerifyingFakeArchiver(const ArgumentVerifyingFakeArchiver&) = delete;
+  ArgumentVerifyingFakeArchiver& operator=(
+      const ArgumentVerifyingFakeArchiver&) = delete;
+
   ~ArgumentVerifyingFakeArchiver() override = default;
 
-  void Archive(mojo::ScopedHandle src_file_handle,
-               mojo::ScopedHandle zip_file_handle,
+  void Archive(mojo::PlatformHandle src_file_handle,
+               mojo::PlatformHandle zip_file_handle,
                const std::string& filename_in_zip,
                const std::string& password,
                ArchiveCallback callback) override {
-    HANDLE raw_src_file_handle;
-    if (mojo::UnwrapPlatformFile(std::move(src_file_handle),
-                                 &raw_src_file_handle) != MOJO_RESULT_OK) {
-      std::move(callback).Run(ZipArchiverResultCode::kErrorInvalidParameter);
-      return;
-    }
-    base::File src_file(raw_src_file_handle);
+    base::File src_file(src_file_handle.TakeHandle());
     if (!src_file.IsValid()) {
       std::move(callback).Run(ZipArchiverResultCode::kErrorInvalidParameter);
       return;
@@ -138,13 +137,7 @@ class ArgumentVerifyingFakeArchiver : public mojom::ZipArchiver {
       return;
     }
 
-    HANDLE raw_zip_file_handle;
-    if (mojo::UnwrapPlatformFile(std::move(zip_file_handle),
-                                 &raw_zip_file_handle) != MOJO_RESULT_OK) {
-      std::move(callback).Run(ZipArchiverResultCode::kErrorInvalidParameter);
-      return;
-    }
-    base::File zip_file(raw_zip_file_handle);
+    base::File zip_file(zip_file_handle.TakeHandle());
     if (!zip_file.IsValid()) {
       std::move(callback).Run(ZipArchiverResultCode::kErrorInvalidParameter);
       return;
@@ -182,9 +175,7 @@ class ArgumentVerifyingFakeArchiver : public mojom::ZipArchiver {
     return false;
   }
 
-  mojo::Binding<mojom::ZipArchiver> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(ArgumentVerifyingFakeArchiver);
+  mojo::Receiver<mojom::ZipArchiver> receiver_;
 };
 
 }  // namespace
@@ -212,7 +203,7 @@ TEST_F(ZipArchiverSandboxedArchiverTest, Archive) {
 }
 
 TEST_F(ZipArchiverSandboxedArchiverTest, SourceFileNotFound) {
-  ASSERT_TRUE(base::DeleteFile(test_file_.GetSourceFilePath(), false));
+  ASSERT_TRUE(base::DeleteFile(test_file_.GetSourceFilePath()));
 
   EXPECT_EQ(ZipArchiverResultCode::kErrorCannotOpenSourceFile,
             Archive(test_file_.GetSourceFilePath()));
@@ -229,9 +220,9 @@ TEST_F(ZipArchiverSandboxedArchiverTest, ZipFileExists) {
 TEST_F(ZipArchiverSandboxedArchiverTest, SourceIsSymbolicLink) {
   base::FilePath symlink_path =
       test_file_.GetTempDirPath().AppendASCII(kTestSymlink);
-  ASSERT_TRUE(::CreateSymbolicLink(
-      symlink_path.AsUTF16Unsafe().c_str(),
-      test_file_.GetSourceFilePath().AsUTF16Unsafe().c_str(), 0));
+  ASSERT_TRUE(
+      ::CreateSymbolicLink(symlink_path.value().c_str(),
+                           test_file_.GetSourceFilePath().value().c_str(), 0));
 
   EXPECT_EQ(ZipArchiverResultCode::kIgnoredSourceFile, Archive(symlink_path));
 }
@@ -242,8 +233,8 @@ TEST_F(ZipArchiverSandboxedArchiverTest, SourceIsDirectory) {
 }
 
 TEST_F(ZipArchiverSandboxedArchiverTest, SourceIsDefaultFileStream) {
-  base::FilePath stream_path(base::StrCat(
-      {test_file_.GetSourceFilePath().AsUTF16Unsafe(), L"::$data"}));
+  base::FilePath stream_path(
+      base::StrCat({test_file_.GetSourceFilePath().value(), L"::$data"}));
 
   EXPECT_EQ(ZipArchiverResultCode::kSuccess, Archive(stream_path));
 
@@ -253,8 +244,8 @@ TEST_F(ZipArchiverSandboxedArchiverTest, SourceIsDefaultFileStream) {
 }
 
 TEST_F(ZipArchiverSandboxedArchiverTest, SourceIsNonDefaultFileStream) {
-  base::FilePath stream_path(base::StrCat(
-      {test_file_.GetSourceFilePath().AsUTF16Unsafe(), L":stream:$data"}));
+  base::FilePath stream_path(
+      base::StrCat({test_file_.GetSourceFilePath().value(), L":stream:$data"}));
   base::File stream_file(stream_path, base::File::FLAG_CREATE);
   ASSERT_TRUE(stream_file.IsValid());
 
@@ -284,8 +275,8 @@ class ZipArchiverSandboxCheckTest : public base::MultiProcessTest {
   ZipArchiverSandboxCheckTest()
       : mojo_task_runner_(MojoTaskRunner::Create()),
         impl_ptr_(nullptr, base::OnTaskRunnerDeleter(mojo_task_runner_)) {
-    UniqueZipArchiverPtr zip_archiver_ptr(
-        new mojom::ZipArchiverPtr(),
+    RemoteZipArchiverPtr zip_archiver(
+        new mojo::Remote<mojom::ZipArchiver>(),
         base::OnTaskRunnerDeleter(mojo_task_runner_));
 
     // Initialize the |impl_ptr_| in the mojo task and wait until it completed.
@@ -293,15 +284,15 @@ class ZipArchiverSandboxCheckTest : public base::MultiProcessTest {
     mojo_task_runner_->PostTask(
         FROM_HERE, base::BindOnce(&ZipArchiverSandboxCheckTest::
                                       InitializeArgumentVerifyingFakeArchiver,
-                                  base::Unretained(this),
-                                  zip_archiver_ptr.get(), loop.QuitClosure()));
+                                  base::Unretained(this), zip_archiver.get(),
+                                  loop.QuitClosure()));
     loop.Run();
 
     test_file_.Initialize();
 
     zip_archiver_ = std::make_unique<SandboxedZipArchiver>(
-        mojo_task_runner_, std::move(zip_archiver_ptr),
-        test_file_.GetTempDirPath(), kTestPassword);
+        mojo_task_runner_, std::move(zip_archiver), test_file_.GetTempDirPath(),
+        kTestPassword);
   }
 
  protected:
@@ -320,14 +311,14 @@ class ZipArchiverSandboxCheckTest : public base::MultiProcessTest {
 
  private:
   void InitializeArgumentVerifyingFakeArchiver(
-      mojom::ZipArchiverPtr* zip_archiver_ptr,
+      mojo::Remote<mojom::ZipArchiver>* zip_archiver,
       base::OnceClosure callback) {
-    impl_ptr_.reset(
-        new ArgumentVerifyingFakeArchiver(mojo::MakeRequest(zip_archiver_ptr)));
+    impl_ptr_.reset(new ArgumentVerifyingFakeArchiver(
+        zip_archiver->BindNewPipeAndPassReceiver()));
     std::move(callback).Run();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   scoped_refptr<MojoTaskRunner> mojo_task_runner_;
   std::unique_ptr<SandboxedZipArchiver> zip_archiver_;
   std::unique_ptr<ArgumentVerifyingFakeArchiver, base::OnTaskRunnerDeleter>

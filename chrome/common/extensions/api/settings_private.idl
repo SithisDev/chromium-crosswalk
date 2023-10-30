@@ -1,10 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Use the <code>chrome.settingsPrivate</code> API to get or set preferences
-// from the settings UI. Access is restricted to a whitelisted set of user
-// facing preferences.
+// from the settings UI. Access is restricted to a set of allowed user facing
+// preferences.
 namespace settingsPrivate {
   enum PrefType { BOOLEAN, NUMBER, STRING, URL, LIST, DICTIONARY };
 
@@ -20,10 +20,19 @@ namespace settingsPrivate {
 
     // Preferences are controlled neither by parent nor the child user.
     // Preference values are hard-coded values and can not be changed.
-    CHILD_RESTRICTIONS
+    CHILD_RESTRICTION
   };
 
-  enum Enforcement { ENFORCED, RECOMMENDED };
+  enum Enforcement {
+    // Value cannot be changed by user.
+    ENFORCED,
+    // Value can be changed, but the administrator recommends a default.
+    RECOMMENDED,
+    // Value is protected by a code that only parents can access. The logic to
+    // require the code is NOT automatically added to a preference using this
+    // enforcement. This is only used to display the correct pref indicator.
+    PARENT_SUPERVISED
+  };
 
   dictionary PrefObject {
     // The key for the pref.
@@ -33,7 +42,7 @@ namespace settingsPrivate {
     PrefType type;
 
     // The current value of the pref.
-    any value;
+    any? value;
 
     // The policy source of the pref; an undefined value means there is no
     // policy.
@@ -50,6 +59,17 @@ namespace settingsPrivate {
 
     // The recommended value if enforcement == RECOMMENDED.
     any? recommendedValue;
+
+    // If enforcement == ENFORCED this optionally specifies preference values
+    // that are still available for selection by the user. If set, must contain
+    // at least 2 distinct values, as must contain |value| and
+    // |recommendedValue| (if present).
+    any[]? userSelectableValues;
+
+    // If true, user control of the preference is disabled for reasons unrelated
+    // to controlledBy (e.g. no signed-in profile is present). A false value is
+    // a no-op.
+    boolean? userControlDisabled;
 
     // The extension ID if controlledBy == EXTENSION.
     DOMString? extensionId;
@@ -71,23 +91,28 @@ namespace settingsPrivate {
     // |value|: The new value of the pref.
     // |pageId|: An optional user metrics identifier.
     // |callback|: The callback for whether the pref was set or not.
-    static void setPref(DOMString name, any value,
-        optional DOMString pageId, optional OnPrefSetCallback callback);
+    [supportsPromises] static void setPref(DOMString name,
+                                           any value,
+                                           optional DOMString pageId,
+                                           optional OnPrefSetCallback callback);
 
     // Gets an array of all the prefs.
-    static void getAllPrefs(GetAllPrefsCallback callback);
+    [supportsPromises] static void getAllPrefs(GetAllPrefsCallback callback);
 
     // Gets the value of a specific pref.
-    static void getPref(DOMString name, GetPrefCallback callback);
+    [supportsPromises] static void getPref(DOMString name,
+                                           GetPrefCallback callback);
 
     // Gets the default page zoom factor. Possible values are currently between
     // 0.25 and 5. For a full list, see zoom::kPresetZoomFactors.
-    static void getDefaultZoom(GetDefaultZoomCallback callback);
+    [supportsPromises] static void getDefaultZoom(
+        GetDefaultZoomCallback callback);
 
     // Sets the page zoom factor. Must be less than 0.001 different than a value
     // in zoom::kPresetZoomFactors.
-    static void setDefaultZoom(
-        double zoom, optional SetDefaultZoomCallback callback);
+    [supportsPromises] static void setDefaultZoom(
+        double zoom,
+        optional SetDefaultZoomCallback callback);
   };
 
   interface Events {

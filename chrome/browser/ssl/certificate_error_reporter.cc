@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,9 +64,9 @@ constexpr net::NetworkTrafficAnnotationTag
             "details of possible security incidents to Google' setting under "
             "'Privacy'. The feature is disabled by default."
           chrome_policy {
-            SafeBrowsingExtendedReportingOptInAllowed {
+            SafeBrowsingExtendedReportingEnabled {
               policy_options {mode: MANDATORY}
-              SafeBrowsingExtendedReportingOptInAllowed: false
+              SafeBrowsingExtendedReportingEnabled: false
             }
           }
         })");

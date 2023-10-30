@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,7 @@ import org.junit.rules.ExternalResource;
 
 import org.chromium.base.Log;
 import org.chromium.chrome.test.pagecontroller.controllers.PageController;
-import org.chromium.chrome.test.pagecontroller.controllers.first_run.DataSaverController;
-import org.chromium.chrome.test.pagecontroller.controllers.first_run.SyncController;
+import org.chromium.chrome.test.pagecontroller.controllers.first_run.SyncConfirmationViewPageController;
 import org.chromium.chrome.test.pagecontroller.controllers.first_run.TOSController;
 import org.chromium.chrome.test.pagecontroller.controllers.ntp.NewTabPageController;
 import org.chromium.chrome.test.pagecontroller.utils.UiAutomatorUtils;
@@ -21,8 +20,8 @@ import org.chromium.chrome.test.pagecontroller.utils.UiLocationException;
  * Test rule that provides access to a Chrome application.
  */
 public class ChromeUiApplicationTestRule extends ExternalResource {
-    // TODO(aluo): Adjust according to https://crrev.com/c/1585142.
-    public static final String PACKAGE_NAME_ARG = "PackageUnderTest";
+    public static final String PACKAGE_NAME_ARG = "org.chromium.chrome.test.pagecontroller.rules."
+            + "ChromeUiApplicationTestRule.PackageUnderTest";
     private static final String TAG = "ChromeUiAppTR";
 
     private String mPackageName;
@@ -31,7 +30,7 @@ public class ChromeUiApplicationTestRule extends ExternalResource {
      * Returns an instance of the page controller that corresponds to the current page.
      * @param controllers      List of possible page controller instances to search among.
      * @return                 The detected page controller.
-     * @throws UiLocationError If page can't be determined.
+     * @throws UiLocationException If page can't be determined.
      */
     public static PageController detectPageAmong(PageController... controllers) {
         for (PageController instance : controllers) {
@@ -60,12 +59,8 @@ public class ChromeUiApplicationTestRule extends ExternalResource {
             ((TOSController) controller).acceptAndContinue();
             controller = detectPageOnFirstRun();
         }
-        if (controller instanceof DataSaverController) {
-            ((DataSaverController) controller).clickNext();
-            controller = detectPageOnFirstRun();
-        }
-        if (controller instanceof SyncController) {
-            ((SyncController) controller).clickNoThanks();
+        if (controller instanceof SyncConfirmationViewPageController) {
+            ((SyncConfirmationViewPageController) controller).clickNoThanks();
             controller = detectPageOnFirstRun();
         }
         if (controller instanceof NewTabPageController) {
@@ -102,10 +97,11 @@ public class ChromeUiApplicationTestRule extends ExternalResource {
      * launch or after application data was cleared.
      * Add potential page controllers that could show up before the New Tab Page here.
      * @return                 The detected page controller.
-     * @throws UiLocationError If page can't be determined.
+     * @throws UiLocationException If page can't be determined.
      */
     private static PageController detectPageOnFirstRun() {
-        return detectPageAmong(TOSController.getInstance(), SyncController.getInstance(),
-                DataSaverController.getInstance(), NewTabPageController.getInstance());
+        return detectPageAmong(TOSController.getInstance(),
+                SyncConfirmationViewPageController.getInstance(),
+                NewTabPageController.getInstance());
     }
 }

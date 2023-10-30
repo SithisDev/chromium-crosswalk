@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,16 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #include <windows.h>
 
 class ModuleWatcherTest : public testing::Test {
+ public:
+  ModuleWatcherTest(const ModuleWatcherTest&) = delete;
+  ModuleWatcherTest& operator=(const ModuleWatcherTest&) = delete;
+
  protected:
   ModuleWatcherTest()
       : module_(nullptr),
@@ -55,14 +59,14 @@ class ModuleWatcherTest : public testing::Test {
     module_ = nullptr;
   }
 
-  void RunUntilIdle() { scoped_task_environment_.RunUntilIdle(); }
+  void RunUntilIdle() { task_environment_.RunUntilIdle(); }
 
   std::unique_ptr<ModuleWatcher> Create() {
-    return ModuleWatcher::Create(
-        base::Bind(&ModuleWatcherTest::OnModuleEvent, base::Unretained(this)));
+    return ModuleWatcher::Create(base::BindRepeating(
+        &ModuleWatcherTest::OnModuleEvent, base::Unretained(this)));
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   // Holds a handle to a loaded module.
   HMODULE module_;
@@ -72,9 +76,6 @@ class ModuleWatcherTest : public testing::Test {
   int module_already_loaded_event_count_;
   // Total number of MODULE_LOADED events seen.
   int module_loaded_event_count_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ModuleWatcherTest);
 };
 
 TEST_F(ModuleWatcherTest, SingleModuleWatcherOnly) {

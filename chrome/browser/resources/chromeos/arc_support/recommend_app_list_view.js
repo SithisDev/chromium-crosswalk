@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,6 @@ function generateContents(appIcon, appTitle, appPackageName) {
   item.classList.add('item');
   item.setAttribute('data-packagename', appPackageName);
 
-  const imagePicker = doc.createElement('div');
-  imagePicker.classList.add('image-picker');
-  imagePicker.addEventListener('click', toggleCheckStatus_);
-  item.appendChild(imagePicker);
-
   const chip = doc.createElement('div');
   chip.classList.add('chip');
   chip.tabIndex = 0;
@@ -27,8 +22,9 @@ function generateContents(appIcon, appTitle, appPackageName) {
   // Add keyboard events
   let keyEventFired = false;
   chip.addEventListener('keydown', function(e) {
-    if (!keyEventFired && isConfirmKey_(e))
+    if (!keyEventFired && isConfirmKey_(e)) {
       addRippleCircle_(e);
+    }
     keyEventFired = true;
   });
   chip.addEventListener('keyup', function(e) {
@@ -55,6 +51,11 @@ function generateContents(appIcon, appTitle, appPackageName) {
 
   chipContent.appendChild(img);
   chipContent.appendChild(title);
+
+  const imagePicker = doc.createElement('div');
+  imagePicker.classList.add('image-picker');
+  imagePicker.addEventListener('click', toggleCheckStatus_);
+  item.appendChild(imagePicker);
 
   recommendAppsContainer.appendChild(item);
 }
@@ -112,33 +113,6 @@ function getSelectedPackages() {
   return selectedPackages;
 }
 
-function toggleScrollShadow_(container) {
-  const shadowThreshold = 5;
-  const doc = document;
-  doc.getElementById('scroll-top')
-      .classList.toggle('shadow', container.scrollTop > shadowThreshold);
-  doc.getElementById('scroll-bottom')
-      .classList.toggle(
-          'shadow',
-          container.scrollHeight - container.clientHeight -
-                  container.scrollTop >=
-              shadowThreshold);
-}
-
-/**
- * Add the scroll shadow effect. This contains two parts. First initialize the
- * effect after all the contents have been generated. Then attach it to the
- * onscroll event.
- */
-function addScrollShadowEffect() {
-  const doc = document;
-  const container = doc.getElementById('recommend-apps-container');
-  toggleScrollShadow_(container);
-  container.onscroll = function() {
-    toggleScrollShadow_(this);
-  };
-}
-
 function isConfirmKey_(e) {
   return e.keyCode === 13   // Enter
       || e.keyCode === 32;  // Space
@@ -159,6 +133,18 @@ function sendNumberOfSelectedApps() {
 function onMessage_(e) {
   appWindow = e.source;
   appOrigin = e.origin;
+}
+
+/**
+ * Mark all recommended apps as checked.
+ */
+function selectAll() {
+  const allItems = document.getElementsByClassName('item');
+  for (const item of allItems) {
+    item.classList.add('checked');
+  }
+
+  sendNumberOfSelectedApps();
 }
 
 window.addEventListener('message', onMessage_);

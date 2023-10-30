@@ -1,11 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 
 #include "ash/public/cpp/multi_user_window_manager.h"
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_helper.h"
 #include "components/account_id/account_id.h"
@@ -17,9 +17,8 @@ namespace multi_user_util {
 AccountId GetAccountIdFromProfile(const Profile* profile) {
   // This will guarantee an nonempty AccountId be returned if a valid profile is
   // provided.
-  const user_manager::User* user =
-      chromeos::ProfileHelper::Get()->GetUserByProfile(
-          profile->GetOriginalProfile());
+  const user_manager::User* user = ash::ProfileHelper::Get()->GetUserByProfile(
+      profile->GetOriginalProfile());
   return user ? user->GetAccountId() : EmptyAccountId();
 }
 
@@ -33,8 +32,7 @@ AccountId GetAccountIdFromEmail(const std::string& email) {
 Profile* GetProfileFromAccountId(const AccountId& account_id) {
   const user_manager::User* user =
       user_manager::UserManager::Get()->FindUser(account_id);
-  return user ? chromeos::ProfileHelper::Get()->GetProfileByUser(user)
-              : nullptr;
+  return user ? ash::ProfileHelper::Get()->GetProfileByUser(user) : nullptr;
 }
 
 Profile* GetProfileFromWindow(aura::Window* window) {
@@ -67,8 +65,10 @@ const AccountId GetCurrentAccountId() {
 
 // Move the window to the current user's desktop.
 void MoveWindowToCurrentDesktop(aura::Window* window) {
-  if (!MultiUserWindowManagerHelper::GetInstance()->IsWindowOnDesktopOfUser(
-          window, GetCurrentAccountId())) {
+  MultiUserWindowManagerHelper* helper =
+      MultiUserWindowManagerHelper::GetInstance();
+  if (helper &&
+      !helper->IsWindowOnDesktopOfUser(window, GetCurrentAccountId())) {
     MultiUserWindowManagerHelper::GetWindowManager()->ShowWindowForUser(
         window, GetCurrentAccountId());
   }

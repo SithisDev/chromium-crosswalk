@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
-#include "chrome/services/app_service/public/mojom/types.mojom.h"
-#include "ui/gfx/image/image.h"
+#include "ui/base/models/image_model.h"
 
 namespace apps {
 
@@ -41,13 +39,12 @@ enum class PreferredPlatform {
   // Either there was an error or there is no preferred app at all.
   NONE,
 
-  // The preferred app is Chrome.
-  NATIVE_CHROME,
+  // The preferred app is Chrome browser.
+  CHROME_BROWSER,
 
   // The preferred app is an ARC app.
   ARC,
 
-  // TODO(crbug.com/826982) Not needed until app registry is in use.
   // The preferred app is a PWA app.
   PWA,
 };
@@ -60,38 +57,53 @@ enum class AppsNavigationAction {
   RESUME,
 };
 
-// This enum backs an UMA histogram and must be treated as append-only.
-enum class Source {
-  kHttpOrHttps = 0,
-  kExternalProtocol = 1,
-  kMaxValue = kExternalProtocol
+// The type of an entry in the intent picker for the user to choose from.
+enum class PickerEntryType {
+  kUnknown = 0,
+  kArc,
+  kWeb,
+  kDevice,
+  kMacOs,
 };
 
 // Represents the data required to display an app in a picker to the user.
 struct IntentPickerAppInfo {
-  IntentPickerAppInfo(apps::mojom::AppType type,
-                      const gfx::Image& icon,
+  IntentPickerAppInfo(PickerEntryType type,
+                      const ui::ImageModel& icon_model,
                       const std::string& launch_name,
                       const std::string& display_name);
 
   IntentPickerAppInfo(IntentPickerAppInfo&& other);
 
+  IntentPickerAppInfo(const IntentPickerAppInfo&) = delete;
+  IntentPickerAppInfo& operator=(const IntentPickerAppInfo&) = delete;
   IntentPickerAppInfo& operator=(IntentPickerAppInfo&& other);
 
   // The type of app that this object represents.
-  apps::mojom::AppType type;
+  PickerEntryType type;
 
-  // The icon to be displayed for this app in the picker.
-  gfx::Image icon;
+  // The icon ImageModel to be displayed for this app in the picker.
+  ui::ImageModel icon_model;
 
-  // The string used to launch this app. Represents an Android package name
-  // when type is ARC.
+  // The string used to launch this app. Represents an Android package name when
+  // |type| is kArc, and when |type| is kMacOs, it is the file path of the
+  // native app to use.
   std::string launch_name;
 
   // The string shown to the user to identify this app in the intent picker.
   std::string display_name;
+};
 
-  DISALLOW_COPY_AND_ASSIGN(IntentPickerAppInfo);
+// The variant of the Intent Picker bubble to display. Used to customize some
+// strings and behavior.
+enum class IntentPickerBubbleType {
+  // Used to select an app to handle http/https links.
+  kLinkCapturing,
+  // Used to select an app to handle external protocol links (e.g. sms:).
+  kExternalProtocol,
+  // Special case of kExternalProtocol for tel: links, which can also be handled
+  // by Android devices.
+  kClickToCall,
 };
 
 // Callback to allow app-platform-specific code to asynchronously signal what
@@ -114,7 +126,7 @@ using GetAppsCallback =
 // values of the launch name, app type, and persistence boolean are all ignored.
 using IntentPickerResponse =
     base::OnceCallback<void(const std::string& launch_name,
-                            apps::mojom::AppType app_type,
+                            apps::PickerEntryType entry_type,
                             apps::IntentPickerCloseReason close_reason,
                             bool should_persist)>;
 

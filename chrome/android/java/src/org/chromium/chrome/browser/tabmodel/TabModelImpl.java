@@ -1,26 +1,38 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.tabmodel;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
+import org.chromium.base.MathUtils;
 import org.chromium.base.ObserverList;
 import org.chromium.base.TraceEvent;
+import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
-import org.chromium.chrome.browser.ntp.RecentlyClosedBridge;
-import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
-import org.chromium.chrome.browser.tab.InterceptNavigationDelegateImpl;
+import org.chromium.chrome.browser.flags.ActivityType;
+import org.chromium.chrome.browser.homepage.HomepageManager;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.tab.InterceptNavigationDelegateTabHelper;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.TabCreatorManager.TabCreator;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.chrome.browser.util.MathUtils;
+import org.chromium.chrome.browser.tab.TabCreationState;
+import org.chromium.chrome.browser.tab.TabLaunchType;
+import org.chromium.chrome.browser.tab.TabSelectionType;
+import org.chromium.chrome.browser.tab.state.CriticalPersistedTabData;
+import org.chromium.chrome.browser.tabmodel.NextTabPolicy.NextTabPolicySupplier;
+import org.chromium.components.external_intents.InterceptNavigationDelegateImpl;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.ResourceRequestBody;
 import org.chromium.ui.mojom.WindowOpenDisposition;
+import org.chromium.url.GURL;
+import org.chromium.url.Origin;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -37,60 +49,95 @@ public class TabModelImpl extends TabModelJniBridge {
     /**
      * The main list of tabs.  Note that when this changes, all pending closures must be committed
      * via {@link #commitAllTabClosures()} as the indices are no longer valid. Also
-     * {@link RewoundList#resetRewoundState()} must be called so that the full model will be up to
-     * date.
+     * {@link PendingTabClosureManager#resetState()} must be called so that the full model will be
+     * up to date.
      */
     private final List<Tab> mTabs = new ArrayList<Tab>();
 
     private final TabCreator mRegularTabCreator;
     private final TabCreator mIncognitoTabCreator;
-    private final TabModelSelectorUma mUma;
     private final TabModelOrderController mOrderController;
     private final TabContentManager mTabContentManager;
-    private final TabPersistentStore mTabSaver;
     private final TabModelDelegate mModelDelegate;
     private final ObserverList<TabModelObserver> mObservers;
-    private RecentlyClosedBridge mRecentlyClosedBridge;
+    private final NextTabPolicySupplier mNextTabPolicySupplier;
+    private final AsyncTabParamsManager mAsyncTabParamsManager;
 
     // Undo State Tracking -------------------------------------------------------------------------
 
-    /**
-     * A {@link TabList} that represents the complete list of {@link Tab}s. This is so that
-     * certain UI elements can call {@link TabModel#getComprehensiveModel()} to get a full list of
-     * {@link Tab}s that includes rewindable entries, as the typical {@link TabModel} does not
-     * return rewindable entries.
-     */
-    private final RewoundList mRewoundList = new RewoundList();
+    private PendingTabClosureManager mPendingTabClosureManager;
 
     /**
      * This specifies the current {@link Tab} in {@link #mTabs}.
      */
     private int mIndex = INVALID_TAB_INDEX;
+    private boolean mActive;
 
-    /**
-     * Whether this tab model supports undoing.
-     */
-    private boolean mIsUndoSupported = true;
-
-    public TabModelImpl(boolean incognito, boolean isTabbedActivity, TabCreator regularTabCreator,
-            TabCreator incognitoTabCreator, TabModelSelectorUma uma,
-            TabModelOrderController orderController, TabContentManager tabContentManager,
-            TabPersistentStore tabSaver, TabModelDelegate modelDelegate, boolean supportUndo) {
-        super(incognito, isTabbedActivity);
+    public TabModelImpl(@NonNull Profile profile, @ActivityType int activityType,
+            TabCreator regularTabCreator, TabCreator incognitoTabCreator,
+            TabModelOrderController orderController, @NonNull TabContentManager tabContentManager,
+            NextTabPolicySupplier nextTabPolicySupplier,
+            AsyncTabParamsManager asyncTabParamsManager, TabModelDelegate modelDelegate,
+            boolean supportUndo) {
+        super(profile, activityType);
         mRegularTabCreator = regularTabCreator;
         mIncognitoTabCreator = incognitoTabCreator;
-        mUma = uma;
         mOrderController = orderController;
         mTabContentManager = tabContentManager;
-        mTabSaver = tabSaver;
+        assert mTabContentManager != null;
+        mNextTabPolicySupplier = nextTabPolicySupplier;
+        mAsyncTabParamsManager = asyncTabParamsManager;
         mModelDelegate = modelDelegate;
-        mIsUndoSupported = supportUndo;
+        if (supportUndo && !isIncognito()) {
+            mPendingTabClosureManager = new PendingTabClosureManager(
+                    this, new PendingTabClosureManager.PendingTabClosureDelegate() {
+                        @Override
+                        public void insertUndoneTabClosureAt(Tab tab, int insertIndex) {
+                            if (mIndex >= insertIndex) mIndex++;
+                            mTabs.add(insertIndex, tab);
+
+                            WebContents webContents = tab.getWebContents();
+                            if (webContents != null) webContents.setAudioMuted(false);
+
+                            boolean activeModel = isActiveModel();
+
+                            if (mIndex == INVALID_TAB_INDEX) {
+                                // If we're the active model call setIndex to actually select this
+                                // tab, otherwise just set mIndex but don't kick off everything that
+                                // happens when calling setIndex().
+                                if (activeModel) {
+                                    TabModelUtils.setIndex(TabModelImpl.this, insertIndex, false,
+                                            TabSelectionType.FROM_UNDO);
+                                } else {
+                                    mIndex = insertIndex;
+                                }
+                            }
+
+                            for (TabModelObserver obs : mObservers) obs.tabClosureUndone(tab);
+                        }
+
+                        @Override
+                        public void finalizeClosure(Tab tab) {
+                            finalizeTabClosure(tab, true);
+                        }
+
+                        @Override
+                        public void notifyAllTabsClosureUndone() {
+                            for (TabModelObserver obs : mObservers) {
+                                obs.allTabsClosureUndone();
+                            }
+                        }
+
+                        @Override
+                        public void notifyOnFinishingMultipleTabClosure(List<Tab> tabs) {
+                            TabModelImpl.this.notifyOnFinishingMultipleTabClosure(tabs);
+                        }
+                    });
+        }
         mObservers = new ObserverList<TabModelObserver>();
         // The call to initializeNative() should be as late as possible, as it results in calling
-        // observers on the native side, which may in turn call |addObserver()| on this object. This
-        // needs to be before the call to getProfile() to ensure native is running.
-        initializeNative();
-        mRecentlyClosedBridge = new RecentlyClosedBridge(getProfile());
+        // observers on the native side, which may in turn call |addObserver()| on this object.
+        initializeNative(profile);
     }
 
     @Override
@@ -102,20 +149,46 @@ public class TabModelImpl extends TabModelJniBridge {
 
     @Override
     public void destroy() {
+        commitAllTabClosures();
         for (Tab tab : mTabs) {
+            // When reparenting tabs, we skip destroying tabs that we're intentionally keeping in
+            // memory.
+            if (mModelDelegate.isReparentingInProgress()
+                    && mAsyncTabParamsManager.hasParamsForTabId(tab.getId())) {
+                continue;
+            }
+
             if (tab.isInitialized()) tab.destroy();
         }
 
-        mRewoundList.destroy();
+        if (mPendingTabClosureManager != null) {
+            if (mModelDelegate.isReparentingInProgress()) {
+                mPendingTabClosureManager.destroyWhileReparentingInProgress();
+            } else {
+                mPendingTabClosureManager.destroy();
+            }
+        }
         mTabs.clear();
         mObservers.clear();
-        mRecentlyClosedBridge.destroy();
         super.destroy();
     }
 
     @Override
     public void broadcastSessionRestoreComplete() {
         super.broadcastSessionRestoreComplete();
+
+        // This is to make sure TabModel has a valid index when it has at least one valid Tab after
+        // TabState is initialized. Otherwise, TabModel can have an invalid index even though it has
+        // valid tabs, if the TabModel becomes active before any Tab is restored to that model.
+        if (hasValidTab() && mIndex == INVALID_TAB_INDEX) {
+            // Actually select the first tab if it is the active model, otherwise just set mIndex.
+            if (isActiveModel()) {
+                TabModelUtils.setIndex(this, 0, false);
+            } else {
+                mIndex = 0;
+            }
+        }
+
         for (TabModelObserver observer : mObservers) observer.restoreCompleted();
     }
 
@@ -134,13 +207,15 @@ public class TabModelImpl extends TabModelJniBridge {
      * step notifications.
      */
     @Override
-    public void addTab(Tab tab, int index, @TabLaunchType int type) {
+    public void addTab(
+            Tab tab, int index, @TabLaunchType int type, @TabCreationState int creationState) {
         try {
             TraceEvent.begin("TabModelImpl.addTab");
 
             for (TabModelObserver obs : mObservers) obs.willAddTab(tab, type);
 
-            boolean selectTab = mOrderController.willOpenInForeground(type, isIncognito());
+            boolean selectTab = mOrderController.willOpenInForeground(type, isIncognito())
+                    || (mTabs.size() == 0 && type == TabLaunchType.FROM_LONGPRESS_BACKGROUND);
 
             index = mOrderController.determineInsertionIndex(type, index, tab);
             assert index <= mTabs.size();
@@ -161,22 +236,24 @@ public class TabModelImpl extends TabModelJniBridge {
                 }
             }
 
-            if (!isCurrentModel()) {
+            if (!isActiveModel()) {
                 // When adding new tabs in the background, make sure we set a valid index when the
                 // first one is added.  When in the foreground, calls to setIndex will take care of
                 // this.
                 mIndex = Math.max(mIndex, 0);
             }
 
-            mRewoundList.resetRewoundState();
+            if (supportsPendingClosures()) {
+                mPendingTabClosureManager.resetState();
+            }
 
             int newIndex = indexOf(tab);
             tabAddedToModel(tab);
 
-            for (TabModelObserver obs : mObservers) obs.didAddTab(tab, type);
+            for (TabModelObserver obs : mObservers) obs.didAddTab(tab, type, creationState);
 
             // setIndex takes care of making sure the appropriate model is active.
-            if (selectTab) setIndex(newIndex, TabSelectionType.FROM_NEW);
+            if (selectTab) setIndex(newIndex, TabSelectionType.FROM_NEW, false);
         } finally {
             TraceEvent.end("TabModelImpl.addTab");
         }
@@ -208,7 +285,9 @@ public class TabModelImpl extends TabModelJniBridge {
             ++mIndex;
         }
 
-        mRewoundList.resetRewoundState();
+        if (supportsPendingClosures()) {
+            mPendingTabClosureManager.resetState();
+        }
 
         for (TabModelObserver obs : mObservers) obs.didMoveTab(tab, newIndex, curIndex);
     }
@@ -225,28 +304,36 @@ public class TabModelImpl extends TabModelJniBridge {
     }
 
     @Override
-    public Tab getNextTabIfClosed(int id) {
+    public Tab getNextTabIfClosed(int id, boolean uponExit) {
         Tab tabToClose = TabModelUtils.getTabById(this, id);
         Tab currentTab = TabModelUtils.getCurrentTab(this);
         if (tabToClose == null) return currentTab;
 
         int closingTabIndex = indexOf(tabToClose);
         Tab adjacentTab = getTabAt((closingTabIndex == 0) ? 1 : closingTabIndex - 1);
-        Tab parentTab = findTabInAllTabModels(tabToClose.getParentId());
+        Tab parentTab =
+                findTabInAllTabModels(CriticalPersistedTabData.from(tabToClose).getParentId());
+        Tab nextMostRecentTab = null;
+        if (uponExit) {
+            nextMostRecentTab = TabModelUtils.getMostRecentTab(this, id);
+        }
 
         // Determine which tab to select next according to these rules:
         //   * If closing a background tab, keep the current tab selected.
+        //   * Otherwise, if closing the tab upon exit select the next most recent tab.
         //   * Otherwise, if not in overview mode, select the parent tab if it exists.
         //   * Otherwise, select an adjacent tab if one exists.
         //   * Otherwise, if closing the last incognito tab, select the current normal tab.
         //   * Otherwise, select nothing.
         Tab nextTab = null;
-        if (!isCurrentModel()) {
+        if (!isActiveModel()) {
             nextTab = TabModelUtils.getCurrentTab(mModelDelegate.getCurrentModel());
         } else if (tabToClose != currentTab && currentTab != null && !currentTab.isClosing()) {
             nextTab = currentTab;
+        } else if (nextMostRecentTab != null && !nextMostRecentTab.isClosing()) {
+            nextTab = nextMostRecentTab;
         } else if (parentTab != null && !parentTab.isClosing()
-                && !mModelDelegate.isInOverviewMode()) {
+                && mNextTabPolicySupplier.get() == NextTabPolicy.HIERARCHICAL) {
             nextTab = parentTab;
         } else if (adjacentTab != null && !adjacentTab.isClosing()) {
             nextTab = adjacentTab;
@@ -259,114 +346,81 @@ public class TabModelImpl extends TabModelJniBridge {
 
     @Override
     public boolean isClosurePending(int tabId) {
-        return mRewoundList.getPendingRewindTab(tabId) != null;
+        if (!supportsPendingClosures()) return false;
+
+        return mPendingTabClosureManager.isClosurePending(tabId);
     }
 
     @Override
     public boolean supportsPendingClosures() {
-        return !isIncognito() && mIsUndoSupported;
+        assert mPendingTabClosureManager == null || !isIncognito();
+        return mPendingTabClosureManager != null;
     }
 
     @Override
     public TabList getComprehensiveModel() {
         if (!supportsPendingClosures()) return this;
-        return mRewoundList;
+        return mPendingTabClosureManager.getRewoundList();
     }
 
     @Override
     public void cancelTabClosure(int tabId) {
-        Tab tab = mRewoundList.getPendingRewindTab(tabId);
-        if (tab == null) return;
+        if (!supportsPendingClosures()) return;
 
-        tab.setClosing(false);
-
-        // Find a valid previous tab entry so we know what tab to insert after.  With the following
-        // example, calling cancelTabClosure(4) would need to know to insert after 2.  So we have to
-        // track across mRewoundTabs and mTabs and see what the last valid mTabs entry was (2) when
-        // we hit the 4 in the rewound list.  An insertIndex of -1 represents the beginning of the
-        // list, as this is the index of tab to insert after.
-        // mTabs:       0   2     5
-        // mRewoundTabs 0 1 2 3 4 5
-        int prevIndex = -1;
-        final int stopIndex = mRewoundList.indexOf(tab);
-        for (int rewoundIndex = 0; rewoundIndex < stopIndex; rewoundIndex++) {
-            Tab rewoundTab = mRewoundList.getTabAt(rewoundIndex);
-            if (prevIndex == mTabs.size() - 1) break;
-            if (rewoundTab == mTabs.get(prevIndex + 1)) prevIndex++;
-        }
-
-        // Figure out where to insert the tab.  Just add one to prevIndex, as -1 represents the
-        // beginning of the list, so we'll insert at 0.
-        int insertIndex = prevIndex + 1;
-        if (mIndex >= insertIndex) mIndex++;
-        mTabs.add(insertIndex, tab);
-
-        WebContents webContents = tab.getWebContents();
-        if (webContents != null) webContents.setAudioMuted(false);
-
-        boolean activeModel = isCurrentModel();
-
-        if (mIndex == INVALID_TAB_INDEX) {
-            // If we're the active model call setIndex to actually select this tab, otherwise just
-            // set mIndex but don't kick off everything that happens when calling setIndex().
-            if (activeModel) {
-                TabModelUtils.setIndex(this, insertIndex);
-            } else {
-                mIndex = insertIndex;
-            }
-        }
-
-        // Re-save the tab list now that it is being kept.
-        mTabSaver.saveTabListAsynchronously();
-
-        for (TabModelObserver obs : mObservers) obs.tabClosureUndone(tab);
+        mPendingTabClosureManager.cancelTabClosure(tabId);
     }
 
     @Override
     public void commitTabClosure(int tabId) {
-        Tab tab = mRewoundList.getPendingRewindTab(tabId);
-        if (tab == null) return;
+        if (!supportsPendingClosures()) return;
 
-        // We're committing the close, actually remove it from the lists and finalize the closing
-        // operation.
-        mRewoundList.removeTab(tab);
-        finalizeTabClosure(tab, true);
+        mPendingTabClosureManager.commitTabClosure(tabId);
     }
 
     @Override
     public void commitAllTabClosures() {
-        while (mRewoundList.getCount() > mTabs.size()) {
-            commitTabClosure(mRewoundList.getNextRewindableTab().getId());
-        }
+        if (!supportsPendingClosures()) return;
 
-        assert !mRewoundList.hasPendingClosures();
+        mPendingTabClosureManager.commitAllTabClosures();
 
-        if (supportsPendingClosures()) {
-            for (TabModelObserver obs : mObservers) obs.allTabsClosureCommitted();
-        }
+        for (TabModelObserver obs : mObservers) obs.allTabsClosureCommitted(isIncognito());
+    }
+
+    @Override
+    public void notifyAllTabsClosureUndone() {
+        if (!supportsPendingClosures()) return;
+
+        mPendingTabClosureManager.notifyAllTabsClosureUndone();
     }
 
     @Override
     public boolean closeTab(Tab tabToClose, boolean animate, boolean uponExit, boolean canUndo) {
-        return closeTab(tabToClose, null, animate, uponExit, canUndo, canUndo);
+        return closeTab(tabToClose, null, animate, uponExit, canUndo, canUndo, true);
     }
 
     @Override
     public boolean closeTab(
             Tab tab, Tab recommendedNextTab, boolean animate, boolean uponExit, boolean canUndo) {
-        return closeTab(tab, recommendedNextTab, animate, uponExit, canUndo, canUndo);
+        return closeTab(tab, recommendedNextTab, animate, uponExit, canUndo, canUndo, true);
     }
 
     /**
      * See TabModel.java documentation for description of other parameters.
-     * @param notify Whether or not to notify observers about the pending closure. If this is
-     *               {@code true}, {@link #supportsPendingClosures()} is {@code true},
-     *               and canUndo is {@code true}, observers will be notified of the pending
-     *               closure. Observers will still be notified of a committed/cancelled closure
-     *               even if they are not notified of a pending closure to start with.
+     * @param notifyPending Whether or not to notify observers about the pending closure. If this is
+     *                      {@code true}, {@link #supportsPendingClosures()} is {@code true},
+     *                      and canUndo is {@code true}, observers will be notified of the pending
+     *                      closure. Observers will still be notified of a committed/cancelled
+     *                      closure even if they are not notified of a pending closure to start
+     *                      with.
+     * @param didCloseAlone Used to notify observers that this tab is closing by itself for
+     *                      {@link TabModelObserver#onFinishingMultipleTabClosure} if the
+     *                      closure cannot be undone and for {@link
+     *                      TabModelObserver#willCloseTab}. This should be {@code true} if
+     *                      closing the tab by itself, and {@code false} if closing as part
+     *                      of a multiple / all tab closure.
      */
     private boolean closeTab(Tab tabToClose, Tab recommendedNextTab, boolean animate,
-            boolean uponExit, boolean canUndo, boolean notify) {
+            boolean uponExit, boolean canUndo, boolean notifyPending, boolean didCloseAlone) {
         if (tabToClose == null) {
             assert false : "Tab is null!";
             return false;
@@ -379,11 +433,17 @@ public class TabModelImpl extends TabModelJniBridge {
 
         canUndo &= supportsPendingClosures();
 
-        startTabClosure(tabToClose, recommendedNextTab, animate, uponExit, canUndo);
-        if (notify && canUndo) {
+        startTabClosure(tabToClose, recommendedNextTab, animate, uponExit, canUndo, didCloseAlone);
+        if (notifyPending && canUndo) {
+            mPendingTabClosureManager.addTabClosureEvent(Collections.singletonList(tabToClose));
             for (TabModelObserver obs : mObservers) obs.tabPendingClosure(tabToClose);
         }
-        if (!canUndo) finalizeTabClosure(tabToClose, false);
+        if (!canUndo) {
+            if (didCloseAlone) {
+                notifyOnFinishingMultipleTabClosure(Collections.singletonList(tabToClose));
+            }
+            finalizeTabClosure(tabToClose, false);
+        }
 
         return true;
     }
@@ -396,73 +456,59 @@ public class TabModelImpl extends TabModelJniBridge {
                 continue;
             }
             tab.setClosing(true);
-            closeTab(tab, null, false, false, canUndo, false);
         }
-        if (canUndo && supportsPendingClosures()) {
+        final boolean allowUndo = canUndo && supportsPendingClosures();
+        if (!allowUndo) {
+            notifyOnFinishingMultipleTabClosure(tabs);
+        }
+        for (TabModelObserver obs : mObservers) obs.willCloseMultipleTabs(allowUndo, tabs);
+        for (Tab tab : tabs) {
+            closeTab(tab, null, false, false, canUndo, false, false);
+        }
+        if (allowUndo) {
+            mPendingTabClosureManager.addTabClosureEvent(tabs);
             for (TabModelObserver obs : mObservers) obs.multipleTabsPendingClosure(tabs, false);
         }
     }
 
     @Override
     public void closeAllTabs() {
-        closeAllTabs(true, false);
+        closeAllTabs(false);
     }
 
     @Override
-    public void closeAllTabs(boolean allowDelegation, boolean uponExit) {
-        mTabSaver.cancelLoadingTabs(isIncognito());
+    public void closeAllTabs(boolean uponExit) {
+        for (TabModelObserver obs : mObservers) obs.willCloseAllTabs(isIncognito());
 
-        if (uponExit) {
+        // Force close immediately upon exit or if Chrome needs to close with a zero-state.
+        if (uponExit || HomepageManager.shouldCloseAppWithZeroTabs()) {
             commitAllTabClosures();
 
             for (int i = 0; i < getCount(); i++) getTabAt(i).setClosing(true);
-            while (getCount() > 0) TabModelUtils.closeTabByIndex(this, 0);
+            notifyOnFinishingMultipleTabClosure(mTabs);
+            while (getCount() > 0) {
+                Tab tab = getTabAt(0);
+                closeTab(tab, null, true, uponExit, false, false, false);
+            }
             return;
         }
 
-        if (allowDelegation && mModelDelegate.closeAllTabsRequest(isIncognito())) return;
-
-        if (HomepageManager.shouldCloseAppWithZeroTabs()) {
-            commitAllTabClosures();
-
-            for (int i = 0; i < getCount(); i++) getTabAt(i).setClosing(true);
-            while (getCount() > 0) TabModelUtils.closeTabByIndex(this, 0);
-            return;
-        }
-
-        // TODO(meiliang): This is a band-aid fix, should remove after LayoutManager is able to
-        // manage the Grid Tab Switcher.
-        // Disable animation if GridTabSwitcher or TabGroup is enabled.
-        boolean animate = !FeatureUtilities.isGridTabSwitcherEnabled();
-
-        closeAllTabs(animate, false, true);
-    }
-
-    /**
-     * Close all tabs on this model without notifying observers about pending tab closures.
-     *
-     * @param animate true iff the closing animation should be displayed
-     * @param uponExit true iff the tabs are being closed upon application exit (after user presses
-     *                 the system back button)
-     * @param canUndo Whether or not this action can be undone. If this is {@code true} and
-     *                {@link #supportsPendingClosures()} is {@code true}, these {@link Tab}s
-     *                will not actually be closed until {@link #commitTabClosure(int)} or
-     *                {@link #commitAllTabClosures()} is called, but they will be effectively
-     *                removed from this list.
-     */
-    public void closeAllTabs(boolean animate, boolean uponExit, boolean canUndo) {
+        // Close with the opportunity to undo if this TabModel supports pending closures.
         for (int i = 0; i < getCount(); i++) getTabAt(i).setClosing(true);
-
-        List<Tab> closedTabs = new ArrayList<>();
+        List<Tab> closedTabs = new ArrayList<>(mTabs);
+        if (!supportsPendingClosures()) {
+            notifyOnFinishingMultipleTabClosure(closedTabs);
+        }
         while (getCount() > 0) {
             Tab tab = getTabAt(0);
-            closedTabs.add(tab);
-            closeTab(tab, null, animate, uponExit, canUndo, false);
+            closeTab(tab, null, false, false, true, false, false);
         }
 
-        if (!uponExit && canUndo && supportsPendingClosures()) {
-            for (TabModelObserver obs : mObservers)
+        if (supportsPendingClosures()) {
+            mPendingTabClosureManager.addTabClosureEvent(closedTabs);
+            for (TabModelObserver obs : mObservers) {
                 obs.multipleTabsPendingClosure(closedTabs, true);
+            }
         }
     }
 
@@ -502,14 +548,14 @@ public class TabModelImpl extends TabModelJniBridge {
 
     // This function is complex and its behavior depends on persisted state, including mIndex.
     @Override
-    public void setIndex(int i, final @TabSelectionType int type) {
+    public void setIndex(int i, final @TabSelectionType int type, boolean skipLoadingTab) {
         try {
             TraceEvent.begin("TabModelImpl.setIndex");
             int lastId = getLastId(type);
 
             // This can cause recursive entries into setIndex, which causes duplicate notifications
             // and UMA records.
-            if (!isCurrentModel()) mModelDelegate.selectModel(isIncognito());
+            if (!isActiveModel()) mModelDelegate.selectModel(isIncognito());
 
             if (!hasValidTab()) {
                 mIndex = INVALID_TAB_INDEX;
@@ -519,15 +565,15 @@ public class TabModelImpl extends TabModelJniBridge {
 
             Tab tab = TabModelUtils.getCurrentTab(this);
 
-            mModelDelegate.requestToShowTab(tab, type);
+            if (!skipLoadingTab || tab == null) mModelDelegate.requestToShowTab(tab, type);
 
             if (tab != null) {
                 for (TabModelObserver obs : mObservers) obs.didSelectTab(tab, type, lastId);
 
                 boolean wasAlreadySelected = tab.getId() == lastId;
-                if (!wasAlreadySelected && type == TabSelectionType.FROM_USER && mUma != null) {
+                if (!wasAlreadySelected && type == TabSelectionType.FROM_USER) {
                     // We only want to record when the user actively switches to a different tab.
-                    mUma.userSwitchedToTab();
+                    RecordUserAction.record("MobileTabSwitched");
                 }
             }
         } finally {
@@ -536,42 +582,48 @@ public class TabModelImpl extends TabModelJniBridge {
     }
 
     @Override
-    public boolean isCurrentModel() {
-        return mModelDelegate.isCurrentModel(this);
+    public boolean isActiveModel() {
+        return mActive;
     }
 
     /**
      * Performs the necessary actions to remove this {@link Tab} from this {@link TabModel}.
      * This does not actually destroy the {@link Tab} (see
      * {@link #finalizeTabClosure(Tab)}.
-     *
-     * @param tab The {@link Tab} to remove from this {@link TabModel}.
+     *  @param tab The {@link Tab} to remove from this {@link TabModel}.
      * @param animate Whether or not to animate the closing.
      * @param uponExit Whether or not this is closing while the Activity is exiting.
      * @param canUndo Whether or not this operation can be undone. Note that if this is {@code true}
      *                and {@link #supportsPendingClosures()} is {@code true},
      *                {@link #commitTabClosure(int)} or {@link #commitAllTabClosures()} needs to be
      *                called to actually delete and clean up {@code tab}.
+     * @param didCloseAlone Used to notify observers that this tab is closing by itself for
+     *                      {@link TabModelObserver#onFinishingMultipleTabClosure} if the
+     *                      closure cannot be undone and for {@link
+     *                      TabModelObserver#willCloseTab}. This should be {@code true} if
+     *                      closing the tab by itself, and {@code false} if closing as part
+     *                      of a multiple / all tab closure.
      */
-    private void startTabClosure(
-            Tab tab, Tab recommendedNextTab, boolean animate, boolean uponExit, boolean canUndo) {
+    private void startTabClosure(Tab tab, Tab recommendedNextTab, boolean animate, boolean uponExit,
+            boolean canUndo, boolean didCloseAlone) {
         tab.setClosing(true);
 
-        for (TabModelObserver obs : mObservers) obs.willCloseTab(tab, animate);
+        for (TabModelObserver obs : mObservers) obs.willCloseTab(tab, animate, didCloseAlone);
 
         @TabSelectionType
         int selectionType = uponExit ? TabSelectionType.FROM_EXIT : TabSelectionType.FROM_CLOSE;
         boolean pauseMedia = canUndo;
-        boolean updateRewoundList = !canUndo;
+        boolean updatePendingTabClosureManager = !canUndo;
         removeTabAndSelectNext(
-                tab, recommendedNextTab, selectionType, pauseMedia, updateRewoundList);
+                tab, recommendedNextTab, selectionType, pauseMedia, updatePendingTabClosureManager);
     }
 
     /**
      * Removes the given tab from the tab model and selects a new tab.
      */
     private void removeTabAndSelectNext(Tab tab, Tab recommendedNextTab,
-            @TabSelectionType int selectionType, boolean pauseMedia, boolean updateRewoundList) {
+            @TabSelectionType int selectionType, boolean pauseMedia,
+            boolean updatePendingTabClosureManager) {
         assert selectionType == TabSelectionType.FROM_CLOSE
                 || selectionType == TabSelectionType.FROM_EXIT;
 
@@ -580,11 +632,12 @@ public class TabModelImpl extends TabModelJniBridge {
 
         Tab currentTabInModel = TabModelUtils.getCurrentTab(this);
         Tab adjacentTabInModel = getTabAt(closingTabIndex == 0 ? 1 : closingTabIndex - 1);
-        Tab nextTab =
-                recommendedNextTab == null ? getNextTabIfClosed(closingTabId) : recommendedNextTab;
+        Tab nextTab = recommendedNextTab == null
+                ? getNextTabIfClosed(closingTabId, /*uponExit=*/false)
+                : recommendedNextTab;
 
         // TODO(dtrainor): Update the list of undoable tabs instead of committing it.
-        if (updateRewoundList) commitAllTabClosures();
+        if (updatePendingTabClosureManager) commitAllTabClosures();
 
         // Cancel or mute any media currently playing.
         if (pauseMedia) {
@@ -606,12 +659,14 @@ public class TabModelImpl extends TabModelJniBridge {
             if (nextIsIncognito != isIncognito()) mIndex = indexOf(adjacentTabInModel);
 
             TabModel nextModel = mModelDelegate.getModel(nextIsIncognito);
-            nextModel.setIndex(nextTabIndex, selectionType);
+            nextModel.setIndex(nextTabIndex, selectionType, false);
         } else {
             mIndex = nextTabIndex;
         }
 
-        if (updateRewoundList) mRewoundList.resetRewoundState();
+        if (updatePendingTabClosureManager && supportsPendingClosures()) {
+            mPendingTabClosureManager.resetState();
+        }
     }
 
     /**
@@ -621,12 +676,9 @@ public class TabModelImpl extends TabModelJniBridge {
      *     notification.
      */
     private void finalizeTabClosure(Tab tab, boolean notifyTabClosureCommitted) {
-        if (mTabContentManager != null) mTabContentManager.removeTabThumbnail(tab.getId());
-        mTabSaver.removeTabFromQueues(tab);
+        mTabContentManager.removeTabThumbnail(tab.getId());
 
-        if (!isIncognito()) tab.createHistoricalTab();
-
-        for (TabModelObserver obs : mObservers) obs.didCloseTab(tab.getId(), tab.isIncognito());
+        for (TabModelObserver obs : mObservers) obs.onFinishingTabClosure(tab);
         if (notifyTabClosureCommitted) {
             for (TabModelObserver obs : mObservers) obs.tabClosureCommitted(tab);
         }
@@ -634,127 +686,6 @@ public class TabModelImpl extends TabModelJniBridge {
         // Destroy the native tab after the observer notifications have fired, otherwise they risk a
         // use after free or null dereference.
         tab.destroy();
-    }
-
-    private class RewoundList implements TabList {
-        /**
-         * A list of {@link Tab}s that represents the completely rewound list (if all
-         * rewindable closes were undone). If there are no possible rewindable closes this list
-         * should match {@link #mTabs}.
-         */
-        private final List<Tab> mRewoundTabs = new ArrayList<Tab>();
-
-        @Override
-        public boolean isIncognito() {
-            return TabModelImpl.this.isIncognito();
-        }
-
-        /**
-         * If {@link TabModel} has a valid selected tab, this will return that same tab in the
-         * context of the rewound list of tabs.  If {@link TabModel} has no tabs but the rewound
-         * list is not empty, it will return 0, the first tab.  Otherwise it will return
-         * {@link TabModel#INVALID_TAB_INDEX}.
-         * @return The selected index of the rewound list of tabs (includes all pending closures).
-         */
-        @Override
-        public int index() {
-            if (TabModelImpl.this.index() != INVALID_TAB_INDEX) {
-                return mRewoundTabs.indexOf(TabModelUtils.getCurrentTab(TabModelImpl.this));
-            }
-            if (!mRewoundTabs.isEmpty()) return 0;
-            return INVALID_TAB_INDEX;
-        }
-
-        @Override
-        public int getCount() {
-            return mRewoundTabs.size();
-        }
-
-        @Override
-        public Tab getTabAt(int index) {
-            if (index < 0 || index >= mRewoundTabs.size()) return null;
-            return mRewoundTabs.get(index);
-        }
-
-        @Override
-        public int indexOf(Tab tab) {
-            return mRewoundTabs.indexOf(tab);
-        }
-
-        @Override
-        public boolean isClosurePending(int tabId) {
-            return TabModelImpl.this.isClosurePending(tabId);
-        }
-
-        /**
-         * Resets this list to match the original {@link TabModel}.  Note that if the
-         * {@link TabModel} doesn't support pending closures this model will be empty.  This should
-         * be called whenever {@link #mTabs} changes.
-         */
-        public void resetRewoundState() {
-            mRewoundTabs.clear();
-
-            if (TabModelImpl.this.supportsPendingClosures()) {
-                for (int i = 0; i < TabModelImpl.this.getCount(); i++) {
-                    mRewoundTabs.add(TabModelImpl.this.getTabAt(i));
-                }
-            }
-        }
-
-        /**
-         * Finds the {@link Tab} specified by {@code tabId} and only returns it if it is
-         * actually a {@link Tab} that is in the middle of being closed (which means that it
-         * is present in this model but not in {@link #mTabs}.
-         *
-         * @param tabId The id of the {@link Tab} to search for.
-         * @return The {@link Tab} specified by {@code tabId} as long as that tab only exists
-         *         in this model and not in {@link #mTabs}. {@code null} otherwise.
-         */
-        public Tab getPendingRewindTab(int tabId) {
-            if (!TabModelImpl.this.supportsPendingClosures()) return null;
-            if (TabModelUtils.getTabById(TabModelImpl.this, tabId) != null) return null;
-            return TabModelUtils.getTabById(this, tabId);
-        }
-
-        /**
-         * A utility method for easily finding a {@link Tab} that can be closed.
-         * @return The next tab that is in the middle of being closed.
-         */
-        public Tab getNextRewindableTab() {
-            if (!hasPendingClosures()) return null;
-
-            for (int i = 0; i < mRewoundTabs.size(); i++) {
-                Tab tab = i < TabModelImpl.this.getCount() ? TabModelImpl.this.getTabAt(i) : null;
-                Tab rewoundTab = mRewoundTabs.get(i);
-
-                if (tab == null || rewoundTab.getId() != tab.getId()) return rewoundTab;
-            }
-
-            return null;
-        }
-
-        /**
-         * Removes a {@link Tab} from this internal list.
-         * @param tab The {@link Tab} to remove.
-         */
-        public void removeTab(Tab tab) {
-            mRewoundTabs.remove(tab);
-        }
-
-        /**
-         * Destroy all tabs in this model.  This will check to see if the tab is already destroyed
-         * before destroying it.
-         */
-        public void destroy() {
-            for (Tab tab : mRewoundTabs) {
-                if (tab.isInitialized()) tab.destroy();
-            }
-        }
-
-        public boolean hasPendingClosures() {
-            return TabModelImpl.this.supportsPendingClosures()
-                    && mRewoundTabs.size() > TabModelImpl.this.getCount();
-        }
     }
 
     @Override
@@ -767,17 +698,20 @@ public class TabModelImpl extends TabModelJniBridge {
         return incognito ? mIncognitoTabCreator : mRegularTabCreator;
     }
 
+    /**
+     * Used to restore tabs from native.
+     */
     @Override
     protected boolean createTabWithWebContents(
-            Tab parent, boolean incognito, WebContents webContents) {
-        return getTabCreator(incognito).createTabWithWebContents(
-                parent, webContents, TabLaunchType.FROM_LONGPRESS_BACKGROUND);
+            Tab parent, Profile profile, WebContents webContents) {
+        return getTabCreator(profile.isOffTheRecord())
+                .createTabWithWebContents(parent, webContents, TabLaunchType.FROM_RECENT_TABS);
     }
 
     @Override
-    public void openNewTab(Tab parent, String url, String initiatorOrigin, String extraHeaders,
-            ResourceRequestBody postData, int disposition, boolean persistParentage,
-            boolean isRendererInitiated) {
+    public void openNewTab(Tab parent, GURL url, @Nullable Origin initiatorOrigin,
+            String extraHeaders, ResourceRequestBody postData, int disposition,
+            boolean persistParentage, boolean isRendererInitiated) {
         if (parent.isClosing()) return;
 
         boolean incognito = parent.isIncognito();
@@ -802,8 +736,12 @@ public class TabModelImpl extends TabModelJniBridge {
 
         // If shouldIgnoreNewTab returns true, the intent is handled by another
         // activity. As a result, don't launch a new tab to open the URL.
-        InterceptNavigationDelegateImpl delegate = InterceptNavigationDelegateImpl.get(parent);
-        if (delegate != null && delegate.shouldIgnoreNewTab(url, incognito)) return;
+        InterceptNavigationDelegateImpl delegate = InterceptNavigationDelegateTabHelper.get(parent);
+        if (delegate != null
+                && delegate.shouldIgnoreNewTab(
+                        url, incognito, isRendererInitiated, initiatorOrigin)) {
+            return;
+        }
 
         LoadUrlParams loadUrlParams = new LoadUrlParams(url);
         loadUrlParams.setInitiatorOrigin(initiatorOrigin);
@@ -830,18 +768,25 @@ public class TabModelImpl extends TabModelJniBridge {
     }
 
     @Override
-    public void openMostRecentlyClosedTab() {
-        // First try to recover tab from rewound list, same as {@link UndoBarController}.
-        if (mRewoundList.hasPendingClosures()) {
-            Tab tab = mRewoundList.getNextRewindableTab();
-            if (tab != null) cancelTabClosure(tab.getId());
+    public void openMostRecentlyClosedEntry() {
+        // First try to recover tab from rewound list.
+        if (supportsPendingClosures() && mPendingTabClosureManager.openMostRecentlyClosedEntry()) {
             return;
         }
 
-        // If there are no pending closures in the rewound list,
-        // then try to restore the tab from the native tab restore service.
-        mRecentlyClosedBridge.openRecentlyClosedTab();
+        // If there are no pending closures in the rewound list, then try to restore from the native
+        // tab restore service.
+        mModelDelegate.openMostRecentlyClosedEntry(this);
         // If there is only one tab, select it.
-        if (getCount() == 1) setIndex(0, TabSelectionType.FROM_NEW);
+        if (getCount() == 1) setIndex(0, TabSelectionType.FROM_NEW, false);
+    }
+
+    @Override
+    public void setActive(boolean active) {
+        mActive = active;
+    }
+
+    private void notifyOnFinishingMultipleTabClosure(List<Tab> tabs) {
+        for (TabModelObserver obs : mObservers) obs.onFinishingMultipleTabClosure(tabs);
     }
 }

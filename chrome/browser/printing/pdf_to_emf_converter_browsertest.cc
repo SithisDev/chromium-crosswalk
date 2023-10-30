@@ -1,12 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/browser/printing/pdf_to_emf_converter.h"
 
-#include <Windows.h>
+#include <stdint.h>
+#include <windows.h>
+
+#include <limits>
 
 #include "base/bind.h"
+#include "base/containers/span.h"
 #include "base/files/file_util.h"
 #include "base/hash/sha1.h"
 #include "base/memory/ref_counted_memory.h"
@@ -15,11 +19,16 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
-#include "chrome/browser/printing/pdf_to_emf_converter.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "content/public/test/browser_test.h"
 #include "printing/emf_win.h"
 #include "printing/metafile.h"
 #include "printing/pdf_render_settings.h"
+
+#ifndef NTDDI_WIN10_VB  // Windows 10.0.19041
+#error "Older Windows SDK unsupported"
+#endif
 
 namespace printing {
 
@@ -30,17 +39,19 @@ constexpr gfx::Size k200DpiSize = gfx::Size(200, 200);
 
 constexpr size_t kHeaderSize = sizeof(ENHMETAHEADER);
 
+constexpr uint32_t kInvalidPageCount = std::numeric_limits<uint32_t>::max();
+
 void StartCallbackImpl(base::OnceClosure quit_closure,
-                       int* page_count_out,
-                       int page_count_in) {
+                       uint32_t* page_count_out,
+                       uint32_t page_count_in) {
   *page_count_out = page_count_in;
   std::move(quit_closure).Run();
 }
 
 void GetPageCallbackImpl(base::OnceClosure quit_closure,
-                         int* page_number_out,
+                         uint32_t* page_number_out,
                          std::unique_ptr<MetafilePlayer>* file_out,
-                         int page_number_in,
+                         uint32_t page_number_in,
                          float scale_factor,
                          std::unique_ptr<MetafilePlayer> file_in) {
   *page_number_out = page_number_in;
@@ -48,7 +59,7 @@ void GetPageCallbackImpl(base::OnceClosure quit_closure,
   std::move(quit_closure).Run();
 }
 
-// |page_number| is 0-based. Returned result has 1-based page number.
+// `page_number` is 0-based. Returned result has 1-based page number.
 std::string GetFileNameForPageNumber(const std::string& name, int page_number) {
   std::string ret = name;
   ret += std::to_string(page_number + 1);
@@ -58,7 +69,7 @@ std::string GetFileNameForPageNumber(const std::string& name, int page_number) {
 
 std::unique_ptr<ENHMETAHEADER> GetEmfHeader(const std::string& emf_data) {
   Emf emf;
-  if (!emf.InitFromData(emf_data.data(), emf_data.length()))
+  if (!emf.InitFromData(base::as_bytes(base::make_span(emf_data))))
     return nullptr;
 
   auto meta_header = std::make_unique<ENHMETAHEADER>();
@@ -90,12 +101,16 @@ void CompareEmfHeaders(const ENHMETAHEADER& expected_header,
 }
 
 std::string HashData(const char* data, size_t len) {
-  unsigned char buf[base::kSHA1Length];
-  base::SHA1HashBytes(reinterpret_cast<const unsigned char*>(data), len, buf);
-  return base::HexEncode(buf, sizeof(buf));
+  auto span = base::make_span(reinterpret_cast<const uint8_t*>(data), len);
+  return base::HexEncode(base::SHA1HashSpan(span));
 }
 
 class PdfToEmfConverterBrowserTest : public InProcessBrowserTest {
+ public:
+  PdfToEmfConverterBrowserTest(const PdfToEmfConverterBrowserTest&) = delete;
+  PdfToEmfConverterBrowserTest& operator=(const PdfToEmfConverterBrowserTest&) =
+      delete;
+
  protected:
   PdfToEmfConverterBrowserTest() : test_data_dir_(GetTestDataDir()) {}
   ~PdfToEmfConverterBrowserTest() override = default;
@@ -132,9 +147,9 @@ class PdfToEmfConverterBrowserTest : public InProcessBrowserTest {
   }
 
   bool StartPdfConverter(const PdfRenderSettings& pdf_settings,
-                         int expected_page_count) {
+                         uint32_t expected_page_count) {
     base::RunLoop run_loop;
-    int page_count = -1;
+    uint32_t page_count = kInvalidPageCount;
     pdf_converter_ = PdfConverter::StartPdfConverter(
         test_input_, pdf_settings,
         base::BindOnce(&StartCallbackImpl, run_loop.QuitClosure(),
@@ -143,9 +158,9 @@ class PdfToEmfConverterBrowserTest : public InProcessBrowserTest {
     return pdf_converter_ && (expected_page_count == page_count);
   }
 
-  bool GetPage(int page_number_in) {
+  bool GetPage(uint32_t page_number_in) {
     base::RunLoop run_loop;
-    int page_number = -1;
+    uint32_t page_number = kInvalidPageCount;
     pdf_converter_->GetPage(
         page_number_in,
         base::BindRepeating(&GetPageCallbackImpl, run_loop.QuitClosure(),
@@ -169,8 +184,8 @@ class PdfToEmfConverterBrowserTest : public InProcessBrowserTest {
   void ComparePageEmfHeader() {
     // TODO(crbug.com/781403): the generated data can differ visually. Until
     // this is fixed only checking the output size and parts of the EMF header.
-    ASSERT_EQ(expected_current_emf_data_.length(),
-              actual_current_emf_data_.length());
+    ASSERT_EQ(expected_current_emf_data_.size(),
+              actual_current_emf_data_.size());
 
     std::unique_ptr<ENHMETAHEADER> expected_header =
         GetEmfHeader(expected_current_emf_data_);
@@ -182,10 +197,10 @@ class PdfToEmfConverterBrowserTest : public InProcessBrowserTest {
   }
 
   void ComparePageEmfPayload() {
-    ASSERT_EQ(expected_current_emf_data_.length(),
-              actual_current_emf_data_.length());
-    ASSERT_GT(expected_current_emf_data_.length(), kHeaderSize);
-    size_t size = expected_current_emf_data_.length() - kHeaderSize;
+    ASSERT_EQ(expected_current_emf_data_.size(),
+              actual_current_emf_data_.size());
+    ASSERT_GT(expected_current_emf_data_.size(), kHeaderSize);
+    size_t size = expected_current_emf_data_.size() - kHeaderSize;
     EXPECT_EQ(HashData(expected_current_emf_data_.data() + kHeaderSize, size),
               HashData(actual_current_emf_data_.data() + kHeaderSize, size));
   }
@@ -195,8 +210,6 @@ class PdfToEmfConverterBrowserTest : public InProcessBrowserTest {
     base::FilePath test_data_dir;
     if (base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir))
       test_data_dir = test_data_dir.AppendASCII("printing");
-    else
-      test_data_dir.clear();
     return test_data_dir;
   }
 
@@ -218,8 +231,6 @@ class PdfToEmfConverterBrowserTest : public InProcessBrowserTest {
   std::unique_ptr<MetafilePlayer> current_emf_file_;
   std::string expected_current_emf_data_;
   std::string actual_current_emf_data_;
-
-  DISALLOW_COPY_AND_ASSIGN(PdfToEmfConverterBrowserTest);
 };
 
 }  // namespace
@@ -228,12 +239,12 @@ IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest, FailureNoTempFile) {
   ScopedSimulateFailureCreatingTempFileForTests fail_creating_temp_file;
 
   base::RunLoop run_loop;
-  int page_count = -1;
+  uint32_t page_count = kInvalidPageCount;
   std::unique_ptr<PdfConverter> pdf_converter = PdfConverter::StartPdfConverter(
       base::MakeRefCounted<base::RefCountedStaticMemory>(), PdfRenderSettings(),
       base::BindOnce(&StartCallbackImpl, run_loop.QuitClosure(), &page_count));
   run_loop.Run();
-  EXPECT_EQ(0, page_count);
+  EXPECT_EQ(0u, page_count);
 }
 
 IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest, FailureBadPdf) {
@@ -241,12 +252,12 @@ IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest, FailureBadPdf) {
       base::MakeRefCounted<base::RefCountedStaticMemory>("0123456789", 10);
 
   base::RunLoop run_loop;
-  int page_count = -1;
+  uint32_t page_count = kInvalidPageCount;
   std::unique_ptr<PdfConverter> pdf_converter = PdfConverter::StartPdfConverter(
       bad_pdf_data, PdfRenderSettings(),
       base::BindOnce(&StartCallbackImpl, run_loop.QuitClosure(), &page_count));
   run_loop.Run();
-  EXPECT_EQ(0, page_count);
+  EXPECT_EQ(0u, page_count);
 }
 
 IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest, EmfBasic) {
@@ -254,6 +265,26 @@ IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest, EmfBasic) {
       kLetter200DpiRect, gfx::Point(0, 0), k200DpiSize,
       /*autorotate=*/false,
       /*use_color=*/true, PdfRenderSettings::Mode::NORMAL);
+  constexpr uint32_t kNumberOfPages = 3;
+
+  ASSERT_TRUE(GetTestInput("pdf_converter_basic.pdf"));
+  ASSERT_TRUE(StartPdfConverter(pdf_settings, kNumberOfPages));
+  for (uint32_t i = 0; i < kNumberOfPages; ++i) {
+    ASSERT_TRUE(GetPage(i));
+    ASSERT_TRUE(GetPageExpectedEmfData(
+        GetFileNameForPageNumber("pdf_converter_basic_emf_page_", i)));
+    ComparePageEmfHeader();
+    // TODO(thestig): Check if ComparePageEmfPayload() works on bots.
+  }
+}
+
+IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest,
+                       EmfWithReducedRasterizationBasic) {
+  const PdfRenderSettings pdf_settings(
+      kLetter200DpiRect, gfx::Point(0, 0), k200DpiSize,
+      /*autorotate=*/false,
+      /*use_color=*/true,
+      PdfRenderSettings::Mode::EMF_WITH_REDUCED_RASTERIZATION);
   constexpr int kNumberOfPages = 3;
 
   ASSERT_TRUE(GetTestInput("pdf_converter_basic.pdf"));
@@ -300,6 +331,26 @@ IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest, PostScriptLevel3Basic) {
     // The output is PS encapsulated in EMF.
     ASSERT_TRUE(GetPageExpectedEmfData(
         GetFileNameForPageNumber("pdf_converter_basic_ps_page_", i)));
+    ComparePageEmfHeader();
+    ComparePageEmfPayload();
+  }
+}
+
+IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest,
+                       PostScriptLevel3WithType42FontsBasic) {
+  const PdfRenderSettings pdf_settings(
+      kLetter200DpiRect, gfx::Point(0, 0), k200DpiSize,
+      /*autorotate=*/false, /*use_color=*/true,
+      PdfRenderSettings::Mode::POSTSCRIPT_LEVEL3_WITH_TYPE42_FONTS);
+  constexpr int kNumberOfPages = 3;
+
+  ASSERT_TRUE(GetTestInput("pdf_converter_basic.pdf"));
+  ASSERT_TRUE(StartPdfConverter(pdf_settings, kNumberOfPages));
+  for (int i = 0; i < kNumberOfPages; ++i) {
+    ASSERT_TRUE(GetPage(i));
+    // The output is PS encapsulated in EMF.
+    ASSERT_TRUE(GetPageExpectedEmfData(
+        GetFileNameForPageNumber("pdf_converter_basic_ps_type42_page_", i)));
     ComparePageEmfHeader();
     ComparePageEmfPayload();
   }
@@ -361,6 +412,62 @@ IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest,
       PdfRenderSettings::Mode::POSTSCRIPT_LEVEL3);
   RunSinglePagePdfToPostScriptConverterTest(pdf_settings, "bug_806746.pdf",
                                             "bug_806746.emf");
+}
+
+IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest,
+                       PostScriptLevel2WithLineCapLineJoin) {
+  const PdfRenderSettings pdf_settings(
+      kLetter200DpiRect, gfx::Point(0, 0), k200DpiSize,
+      /*autorotate=*/false, /*use_color=*/true,
+      PdfRenderSettings::Mode::POSTSCRIPT_LEVEL2);
+  RunSinglePagePdfToPostScriptConverterTest(pdf_settings, "bug_1030689.pdf",
+                                            "bug_1030689.emf");
+}
+
+IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest,
+                       PostScriptLevel3WithLineCapLineJoin) {
+  const PdfRenderSettings pdf_settings(
+      kLetter200DpiRect, gfx::Point(0, 0), k200DpiSize,
+      /*autorotate=*/false, /*use_color=*/true,
+      PdfRenderSettings::Mode::POSTSCRIPT_LEVEL3);
+  RunSinglePagePdfToPostScriptConverterTest(pdf_settings, "bug_1030689.pdf",
+                                            "bug_1030689.emf");
+}
+
+IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest, PostScriptLevel2Bezier) {
+  const PdfRenderSettings pdf_settings(
+      kLetter200DpiRect, gfx::Point(0, 0), k200DpiSize,
+      /*autorotate=*/false, /*use_color=*/true,
+      PdfRenderSettings::Mode::POSTSCRIPT_LEVEL2);
+  RunSinglePagePdfToPostScriptConverterTest(pdf_settings, "bezier.pdf",
+                                            "bezier.emf");
+}
+
+IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest, PostScriptLevel3Bezier) {
+  const PdfRenderSettings pdf_settings(
+      kLetter200DpiRect, gfx::Point(0, 0), k200DpiSize,
+      /*autorotate=*/false, /*use_color=*/true,
+      PdfRenderSettings::Mode::POSTSCRIPT_LEVEL3);
+  RunSinglePagePdfToPostScriptConverterTest(pdf_settings, "bezier.pdf",
+                                            "bezier.emf");
+}
+
+IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest, PostScriptLevel2Image) {
+  const PdfRenderSettings pdf_settings(
+      kLetter200DpiRect, gfx::Point(0, 0), k200DpiSize,
+      /*autorotate=*/false, /*use_color=*/true,
+      PdfRenderSettings::Mode::POSTSCRIPT_LEVEL2);
+  RunSinglePagePdfToPostScriptConverterTest(pdf_settings, "embedded_images.pdf",
+                                            "embedded_images_ps_level2.emf");
+}
+
+IN_PROC_BROWSER_TEST_F(PdfToEmfConverterBrowserTest, PostScriptLevel3Image) {
+  const PdfRenderSettings pdf_settings(
+      kLetter200DpiRect, gfx::Point(0, 0), k200DpiSize,
+      /*autorotate=*/false, /*use_color=*/true,
+      PdfRenderSettings::Mode::POSTSCRIPT_LEVEL3);
+  RunSinglePagePdfToPostScriptConverterTest(pdf_settings, "embedded_images.pdf",
+                                            "embedded_images_ps_level3.emf");
 }
 
 }  // namespace printing

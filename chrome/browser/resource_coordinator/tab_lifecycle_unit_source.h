@@ -1,23 +1,21 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_RESOURCE_COORDINATOR_TAB_LIFECYCLE_UNIT_SOURCE_H_
 #define CHROME_BROWSER_RESOURCE_COORDINATOR_TAB_LIFECYCLE_UNIT_SOURCE_H_
 
-#include <memory>
-
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
-#include "base/scoped_observer.h"
 #include "chrome/browser/resource_coordinator/lifecycle_unit_source_base.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/browser_tab_strip_tracker.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
-#include "services/resource_coordinator/public/mojom/lifecycle.mojom.h"
+#include "components/performance_manager/public/mojom/coordination_unit.mojom.h"
+#include "components/performance_manager/public/mojom/lifecycle.mojom-forward.h"
+#include "components/performance_manager/public/web_contents_proxy.h"
 
-class PrefChangeRegistrar;
-class PrefService;
 class TabStripModel;
 
 namespace content {
@@ -26,8 +24,6 @@ class WebContents;
 
 namespace resource_coordinator {
 
-class InterventionPolicyDatabase;
-class TabLifecylesEnterprisePreferenceMonitor;
 class TabLifecycleObserver;
 class TabLifecycleStateObserver;
 class TabLifecycleUnitExternal;
@@ -41,9 +37,11 @@ class TabLifecycleUnitSource : public BrowserListObserver,
   class TabLifecycleUnit;
   class LifecycleStateObserver;
 
-  TabLifecycleUnitSource(
-      InterventionPolicyDatabase* intervention_policy_database,
-      UsageClock* usage_clock);
+  explicit TabLifecycleUnitSource(UsageClock* usage_clock);
+
+  TabLifecycleUnitSource(const TabLifecycleUnitSource&) = delete;
+  TabLifecycleUnitSource& operator=(const TabLifecycleUnitSource&) = delete;
+
   ~TabLifecycleUnitSource() override;
 
   // Should be called once all the dependencies of this class have been created
@@ -63,41 +61,24 @@ class TabLifecycleUnitSource : public BrowserListObserver,
   // Pretend that |tab_strip| is the TabStripModel of the focused window.
   void SetFocusedTabStripModelForTesting(TabStripModel* tab_strip);
 
-  InterventionPolicyDatabase* intervention_policy_database() const {
-    return intervention_policy_database_;
+  // Returns the state of the MemoryLimitMbEnabled enterprise policy.
+  bool memory_limit_enterprise_policy() const {
+    return memory_limit_enterprise_policy_;
   }
 
-  // Returns the state of the tab lifecycles feature enterprise control. This
-  // returns true if the feature should be enabled, false otherwise.
-  bool tab_lifecycles_enterprise_policy() const {
-    return tab_lifecycles_enterprise_policy_;
-  }
+  void SetMemoryLimitEnterprisePolicyFlag(bool enabled);
 
  protected:
   class TabLifecycleUnitHolder;
-
-  // LifecycleUnitSourceBase:
-  void OnFirstLifecycleUnitCreated() override;
-  void OnAllLifecycleUnitsDestroyed() override;
 
  private:
   friend class TabLifecycleStateObserver;
   friend class TabLifecycleUnitTest;
   friend class TabManagerTest;
   friend class TabActivityWatcherTest;
-  FRIEND_TEST_ALL_PREFIXES(TabLifecycleUnitSourceTest,
-                           TabProactiveDiscardedByFrozenCallback);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, TabManagerWasDiscarded);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
                            TabManagerWasDiscardedCrossSiteSubFrame);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
-                           ProactiveFastShutdownSingleTabProcess);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
-                           ProactiveFastShutdownSharedTabProcess);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
-                           ProactiveFastShutdownWithUnloadHandler);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
-                           ProactiveFastShutdownWithBeforeunloadHandler);
 
   // Returns the TabLifecycleUnit instance associated with |web_contents|, or
   // nullptr if |web_contents| isn't a tab.
@@ -135,13 +116,20 @@ class TabLifecycleUnitSource : public BrowserListObserver,
                     TabChangeType change_type) override;
 
   // BrowserListObserver:
+  void OnBrowserRemoved(Browser* browser) override;
   void OnBrowserSetLastActive(Browser* browser) override;
   void OnBrowserNoLongerActive(Browser* browser) override;
 
   // This is called indirectly from the corresponding event on a PageNode in the
   // performance_manager Graph.
-  static void OnLifecycleStateChanged(content::WebContents* web_contents,
-                                      mojom::LifecycleState state);
+  static void OnLifecycleStateChanged(
+      content::WebContents* web_contents,
+      performance_manager::mojom::LifecycleState state);
+  static void OnIsHoldingWebLockChanged(content::WebContents* web_contents,
+                                        bool is_holding_weblock);
+  static void OnIsHoldingIndexedDBLockChanged(
+      content::WebContents* web_contents,
+      bool is_holding_indexeddb_lock);
 
   // Callback for TabLifecyclesEnterprisePreferenceMonitor.
   void SetTabLifecyclesEnterprisePolicy(bool enabled);
@@ -150,55 +138,20 @@ class TabLifecycleUnitSource : public BrowserListObserver,
   BrowserTabStripTracker browser_tab_strip_tracker_;
 
   // Pretend that this is the TabStripModel of the focused window, for testing.
-  TabStripModel* focused_tab_strip_model_for_testing_ = nullptr;
+  raw_ptr<TabStripModel> focused_tab_strip_model_for_testing_ = nullptr;
 
   // The currently focused TabLifecycleUnit. Updated by UpdateFocusedTab().
-  TabLifecycleUnit* focused_lifecycle_unit_ = nullptr;
+  raw_ptr<TabLifecycleUnit> focused_lifecycle_unit_ = nullptr;
 
   // Observers notified when the discarded or auto-discardable state of a tab
   // changes.
   base::ObserverList<TabLifecycleObserver>::Unchecked tab_lifecycle_observers_;
 
-  // The intervention policy database used to assist freezing/discarding
-  // decisions.
-  InterventionPolicyDatabase* intervention_policy_database_;
-
   // A clock that advances when Chrome is in use.
-  UsageClock* const usage_clock_;
+  const raw_ptr<UsageClock> usage_clock_;
 
-  // The enterprise policy for overriding the tab lifecycles feature.
-  bool tab_lifecycles_enterprise_policy_ = true;
-
-  // In official production builds this monitors policy settings and reflects
-  // them in |tab_lifecycles_enterprise_policy_|.
-  std::unique_ptr<TabLifecylesEnterprisePreferenceMonitor>
-      tab_lifecycles_enterprise_preference_monitor_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabLifecycleUnitSource);
-};
-
-// Helper class used for getting and monitoring enterprise-policy controlled
-// preferences that can control the tab lifecycles feature. Exposed for testing.
-class TabLifecylesEnterprisePreferenceMonitor {
- public:
-  using OnPreferenceChangedCallback = base::RepeatingCallback<void(bool)>;
-
-  // Creates a preference monitor that monitors the provided PrefService. When
-  // the preference is initially checked or changed its value is provided via
-  // the provided callback.
-  TabLifecylesEnterprisePreferenceMonitor(PrefService* pref_service,
-                                          OnPreferenceChangedCallback callback);
-
-  ~TabLifecylesEnterprisePreferenceMonitor();
-
- private:
-  void GetPref();
-
-  PrefService* pref_service_;
-  OnPreferenceChangedCallback callback_;
-  std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabLifecylesEnterprisePreferenceMonitor);
+  // The enterprise policy for setting a limit on total physical memory usage.
+  bool memory_limit_enterprise_policy_ = false;
 };
 
 }  // namespace resource_coordinator

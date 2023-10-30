@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,13 +25,12 @@ import org.chromium.base.task.PostTask;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Manual;
 import org.chromium.base.test.util.TimeoutScale;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.offlinepages.evaluation.OfflinePageEvaluationBridge;
 import org.chromium.chrome.browser.offlinepages.evaluation.OfflinePageEvaluationBridge.OfflinePageEvaluationObserver;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.components.offlinepages.BackgroundSavePageResult;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 
@@ -67,8 +66,7 @@ public class OfflinePageSavePageLaterEvaluationTest {
      */
 
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
+    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
     static class TimeDelta {
         public void setStartTime(Long startTime) {
@@ -82,7 +80,8 @@ public class OfflinePageSavePageLaterEvaluationTest {
             return mEndTime - mStartTime;
         }
 
-        private Long mStartTime, mEndTime;
+        private Long mStartTime;
+        private Long mEndTime;
     }
 
     static class RequestMetadata {
@@ -228,7 +227,9 @@ public class OfflinePageSavePageLaterEvaluationTest {
             throws InterruptedException {
         final Semaphore semaphore = new Semaphore(0);
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
-            Profile profile = Profile.getLastUsedProfile();
+            // TODO (https://crbug.com/714249):  Add incognito mode tests to check that
+            // OfflinePageEvaluationBridge is null for incognito.
+            Profile profile = Profile.getLastUsedRegularProfile();
             mBridge = new OfflinePageEvaluationBridge(profile, useTestingScheduler);
             if (mBridge == null) {
                 Assert.fail("OfflinePageEvaluationBridge initialization failed!");
@@ -316,8 +317,7 @@ public class OfflinePageSavePageLaterEvaluationTest {
      * @param url The url to be saved.
      * @param namespace The namespace this request belongs to.
      */
-    private void savePageLater(final String url, final String namespace)
-            throws InterruptedException {
+    private void savePageLater(final String url, final String namespace) {
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT,
                 () -> { mBridge.savePageLater(url, namespace, mIsUserRequested); });
     }
@@ -342,8 +342,7 @@ public class OfflinePageSavePageLaterEvaluationTest {
         log(TAG_PROGRESS, "Urls processing DONE.");
     }
 
-    private void getUrlListFromInputFile(String inputFilePath)
-            throws IOException, InterruptedException {
+    private void getUrlListFromInputFile(String inputFilePath) throws IOException {
         mUrls = new ArrayList<String>();
         try {
             BufferedReader bufferedReader = getInputStream(inputFilePath);
@@ -396,7 +395,7 @@ public class OfflinePageSavePageLaterEvaluationTest {
     /**
      * Get saved offline pages and align them with the metadata we got from testing.
      */
-    private void loadSavedPages() throws TimeoutException, InterruptedException {
+    private void loadSavedPages() throws TimeoutException {
         for (OfflinePageItem page : OfflineTestUtil.getAllPages()) {
             mRequestMetadata.get(page.getOfflineId()).mPage = page;
         }
@@ -434,7 +433,7 @@ public class OfflinePageSavePageLaterEvaluationTest {
      * At the end of the file there will be a summary:
      * Total requested URLs: XX, Completed: XX, Failed: XX, Failure Rate: XX.XX%
      */
-    private void writeResults() throws IOException, InterruptedException {
+    private void writeResults() throws IOException {
         loadSavedPages();
         OutputStreamWriter output = getOutputStream(RESULT_OUTPUT_FILE_PATH);
         try {

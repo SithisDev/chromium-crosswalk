@@ -1,14 +1,15 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/test_extension_dir.h"
@@ -108,11 +109,11 @@ class RequestContentScriptAPITest : public ExtensionBrowserTest {
       PermissionOrMatcherType script_matcher);
 
   std::unique_ptr<TestExtensionDir> test_extension_dir_;
-  const Extension* extension_;
+  raw_ptr<const Extension> extension_;
 };
 
 RequestContentScriptAPITest::RequestContentScriptAPITest()
-    : extension_(NULL) {}
+    : extension_(nullptr) {}
 
 testing::AssertionResult RequestContentScriptAPITest::RunTest(
     PermissionOrMatcherType manifest_permission,
@@ -127,16 +128,15 @@ testing::AssertionResult RequestContentScriptAPITest::RunTest(
 
   // Setup listener for actual injection of script.
   ExtensionTestMessageListener injection_succeeded_listener(
-      kInjectionSucceeded,
-      false /* won't reply */);
+      kInjectionSucceeded);
   injection_succeeded_listener.set_extension_id(extension_->id());
 
-  ui_test_utils::NavigateToURL(
-      browser(),
-      embedded_test_server()->GetURL("/extensions/test_file.html"));
+  EXPECT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/extensions/test_file.html")));
 
   content::WebContents* web_contents =
-      browser() ? browser()->tab_strip_model()->GetActiveWebContents() : NULL;
+      browser() ? browser()->tab_strip_model()->GetActiveWebContents()
+                : nullptr;
   if (!web_contents)
     return testing::AssertionFailure() << "No web contents.";
 
@@ -161,9 +161,7 @@ testing::AssertionResult RequestContentScriptAPITest::CreateAndLoadExtension(
     PermissionOrMatcherType manifest_permission,
     PermissionOrMatcherType script_matcher) {
   // Setup a listener to note when injection rules have been setup.
-  ExtensionTestMessageListener injection_setup_listener(
-      kInjectionSetup,
-      false /* won't reply */);
+  ExtensionTestMessageListener injection_setup_listener(kInjectionSetup);
 
   std::string manifest = base::StringPrintf(kManifest,
                                             kPermissions[manifest_permission]);

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "content/public/browser/navigation_throttle.h"
 
 namespace content {
@@ -22,9 +21,10 @@ class PlatformAppNavigationRedirector {
  public:
   static std::unique_ptr<content::NavigationThrottle> MaybeCreateThrottleFor(
       content::NavigationHandle* handle);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(PlatformAppNavigationRedirector);
+  PlatformAppNavigationRedirector(const PlatformAppNavigationRedirector&) =
+      delete;
+  PlatformAppNavigationRedirector& operator=(
+      const PlatformAppNavigationRedirector&) = delete;
 };
 
 #endif  // CHROME_BROWSER_APPS_PLATFORM_APPS_PLATFORM_APP_NAVIGATION_REDIRECTOR_H_

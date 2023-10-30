@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,7 +88,7 @@ void UrlText::SetDeemphasizedColor(const SkColor color) {
 }
 
 void UrlText::UpdateText() {
-  const base::string16 text = FormatUrlForVr(gurl_, &url_parsed_);
+  const std::u16string text = FormatUrlForVr(gurl_, &url_parsed_);
   SetText(text);
   SetFormatting(CreateUrlFormatting(text, url_parsed_, emphasized_color_,
                                     deemphasized_color_));

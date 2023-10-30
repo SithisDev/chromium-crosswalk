@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "chrome/browser/android/history_report/delta_file_backend_leveldb.h"
 #include "chrome/browser/android/history_report/delta_file_commons.h"
@@ -78,7 +78,7 @@ namespace history_report {
 using content::BrowserThread;
 
 DeltaFileService::DeltaFileService(const base::FilePath& dir)
-    : task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+    : task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskShutdownBehavior::BLOCK_SHUTDOWN})),
       delta_file_backend_(new DeltaFileBackend(dir)) {
   base::trace_event::MemoryDumpManager::GetInstance()

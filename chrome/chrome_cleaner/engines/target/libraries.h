@@ -1,15 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_CHROME_CLEANER_ENGINES_TARGET_LIBRARIES_H_
 #define CHROME_CHROME_CLEANER_ENGINES_TARGET_LIBRARIES_H_
 
-#include <set>
-
 #include "base/callback_forward.h"
 #include "base/files/file_path.h"
-#include "base/strings/string16.h"
 #include "chrome/chrome_cleaner/logging/proto/shared_data.pb.h"
 
 namespace chrome_cleaner {

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,22 @@
 
 namespace chrome {
 
-ScopedTabbedBrowserDisplayer::ScopedTabbedBrowserDisplayer(Profile* profile) {
+ScopedTabbedBrowserDisplayer::ScopedTabbedBrowserDisplayer(
+    Profile* profile,
+    bool should_trigger_session_restore) {
   browser_ = FindTabbedBrowser(profile, false);
-  if (!browser_)
-    browser_ = new Browser(Browser::CreateParams(profile, true));
+  if (!browser_ && Browser::GetCreationStatusForProfile(profile) ==
+                       Browser::CreationStatus::kOk) {
+    Browser::CreateParams params(profile, /*user_gesture=*/true);
+    params.should_trigger_session_restore = should_trigger_session_restore;
+    browser_ = Browser::Create(params);
+  }
 }
 
 ScopedTabbedBrowserDisplayer::~ScopedTabbedBrowserDisplayer() {
+  if (!browser_)
+    return;
+
   // Make sure to restore the window, since window()->Show() will not unminimize
   // it.
   if (browser_->window()->IsMinimized())

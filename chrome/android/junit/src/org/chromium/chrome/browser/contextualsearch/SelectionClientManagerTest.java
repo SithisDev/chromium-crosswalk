@@ -1,10 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.contextualsearch;
 
 import static org.junit.Assert.assertEquals;
+
+import androidx.annotation.Nullable;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -13,6 +15,7 @@ import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
+import org.chromium.content_public.browser.SelectAroundCaretResult;
 import org.chromium.content_public.browser.SelectionClient;
 
 /**
@@ -50,7 +53,7 @@ public class SelectionClientManagerTest {
         public void onSelectionEvent(int eventType, float posXPix, float posYPix) {}
 
         @Override
-        public void selectWordAroundCaretAck(boolean didSelect, int startAdjust, int endAdjust) {}
+        public void selectAroundCaretAck(@Nullable SelectAroundCaretResult result) {}
 
         @Override
         public void cancelAllRequests() {}
@@ -75,7 +78,7 @@ public class SelectionClientManagerTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         // Assume Smart Selection is enabled and we have a Smart Selection client for most tests.
         mSmartSelectionClientStub = new SelectionClientStub();
         mManager = new SelectionClientManager(mSmartSelectionClientStub, true);

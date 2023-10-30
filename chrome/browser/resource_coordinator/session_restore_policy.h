@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,15 @@
 #include <memory>
 
 #include "base/callback.h"
+#include "base/cancelable_callback.h"
 #include "base/containers/flat_map.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "chrome/browser/resource_coordinator/site_characteristics_data_reader.h"
+#include "build/build_config.h"
 #include "chrome/browser/resource_coordinator/tab_manager_features.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 class WebContents;
@@ -46,6 +49,9 @@ class SessionRestorePolicy {
   class Delegate;
 
   SessionRestorePolicy();
+
+  SessionRestorePolicy(const SessionRestorePolicy&) = delete;
+  SessionRestorePolicy& operator=(const SessionRestorePolicy&) = delete;
 
   // Overridden for testing.
   virtual ~SessionRestorePolicy();
@@ -129,27 +135,29 @@ class SessionRestorePolicy {
                                            size_t score);
 
  protected:
+#if !BUILDFLAG(IS_ANDROID)
+  friend class TabDataAccess;
+#endif
+
   // Holds a handful of data about a tab which is used to prioritize it during
   // session restore.
   struct TabData {
     TabData();
     TabData(const TabData&) = delete;
-    TabData(TabData&&);
+    TabData(TabData&&) = delete;
     ~TabData();
 
     TabData& operator=(const TabData&) = delete;
-    TabData& operator=(TabData&&);
+    TabData& operator=(TabData&&) = delete;
 
-    // This is used to populate |used_in_bg| once the reader is ready. The
-    // reader is not available on all platforms and test environments. The
-    // presence of a reader indicates that the tab is waiting for additional
-    // data and has not yet provided a final score to the embedder.
-    std::unique_ptr<SiteCharacteristicsDataReader> reader;
+    // Return true if |used_in_bg| is initialized and set to true, false
+    // otherwise.
+    bool UsedInBg() const;
 
     // Indicates whether or not the tab communicates with the user even when it
-    // is in the background (notifications, tab title changes, favicons, etc).
-    // This is set asynchronously.
-    bool used_in_bg = false;
+    // is in the background (tab title changes, favicons, etc).
+    // It is initialized to nullopt and set asynchronously to the proper value.
+    absl::optional<bool> used_in_bg;
 
     // Indicates whether or not the tab has been pinned by the user. Only
     // applicable on desktop platforms.
@@ -179,15 +187,21 @@ class SessionRestorePolicy {
     // is calculated based on the values of the above properties, which may
     // change as new data becomes available.
     float score = 0.0f;
+
+    struct SiteDataReaderData {
+      bool updates_favicon_in_bg = false;
+      bool updates_title_in_bg = false;
+    };
+
+    // Cancelable callback used to cancel the async initialization of the
+    // |used_in_bg| bit.
+    base::CancelableOnceCallback<void(SiteDataReaderData)>
+        used_in_bg_setter_cancel_callback;
   };
 
   // This is safe to call from the constructor if |delegate_| is already
   // initialized.
   size_t CalculateSimultaneousTabLoads() const;
-
-  // Initializes |used_in_bg| using the data from the |reader|. The reader must
-  // be initialized at the time this is called.
-  static void SetUsedInBg(TabData* tab_data);
 
   // Posts a task to invoke "NotifyAllTabsScored".
   void DispatchNotifyAllTabsScoredIfNeeded();
@@ -195,10 +209,6 @@ class SessionRestorePolicy {
   // Invokes the |notify_tab_scored_callback_| with a nullptr WebContents,
   // notifying the embedder that all tabs have final scores.
   void NotifyAllTabsScored();
-
-  // Callback that is invoked when the SiteCharacteristicsDataReader associated
-  // with a WebContents (see TabData above) is ready to use.
-  void OnDataLoaded(content::WebContents* contents);
 
   // This is a testing seam. By default it immediately redirects to ScoreTab.
   // This should return true if the score has changed, false otherwise.
@@ -222,7 +232,7 @@ class SessionRestorePolicy {
 
   // Delegate for interface with the system. This allows easy testing of only
   // the logic in this class.
-  const Delegate* const delegate_;
+  const raw_ptr<const Delegate> delegate_;
 
   // The minimum number of tabs to ever load simultaneously. This can be
   // exceeded by user actions or load timeouts. See TabLoader for details.
@@ -249,8 +259,7 @@ class SessionRestorePolicy {
 
   // The maximum time since last use of a tab in order for it to be restored.
   // Setting to zero means this logic does not apply.
-  base::TimeDelta max_time_since_last_use_to_restore_ =
-      base::TimeDelta::FromDays(30);
+  base::TimeDelta max_time_since_last_use_to_restore_ = base::Days(30);
 
   // The minimum site engagement score in order for a tab to be restored.
   // Setting this to zero means all tabs will be restored regardless of the
@@ -287,7 +296,10 @@ class SessionRestorePolicy {
 
   // The collection of tabs being tracked and various data used for scoring
   // them.
-  base::flat_map<content::WebContents*, TabData> tab_data_;
+  //
+  // Note that the value here is a unique_ptr instead of a TabData as this
+  // struct isn't movable.
+  base::flat_map<content::WebContents*, std::unique_ptr<TabData>> tab_data_;
 
   // The callback that is invoked in order to update tab restore order.
   NotifyTabScoreChangedCallback notify_tab_score_changed_callback_;
@@ -303,15 +315,18 @@ class SessionRestorePolicy {
   // notifications in flight. The messages are bound to a weak pointer so that
   // they are not delivered after the policy object is destroyed.
   base::WeakPtrFactory<SessionRestorePolicy> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SessionRestorePolicy);
 };
 
 // Abstracts away testing seams for the policy engine. In production code the
-// default implementation wraps to base::SysInfo and the SiteEngagementService.
+// default implementation wraps to base::SysInfo and the
+// site_engagement::SiteEngagementService.
 class SessionRestorePolicy::Delegate {
  public:
   Delegate();
+
+  Delegate(const Delegate&) = delete;
+  Delegate& operator=(const Delegate&) = delete;
+
   virtual ~Delegate();
 
   virtual size_t GetNumberOfCores() const = 0;
@@ -319,9 +334,6 @@ class SessionRestorePolicy::Delegate {
   virtual base::TimeTicks NowTicks() const = 0;
   virtual size_t GetSiteEngagementScore(
       content::WebContents* contents) const = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(Delegate);
 };
 
 }  // namespace resource_coordinator

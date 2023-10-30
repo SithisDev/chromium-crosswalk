@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@
 // A view that paints a solid color. Used to change the title bar background.
 @interface TitlebarBackgroundView : NSView {
  @private
-  base::scoped_nsobject<NSColor> color_;
-  base::scoped_nsobject<NSColor> inactiveColor_;
+  base::scoped_nsobject<NSColor> _color;
+  base::scoped_nsobject<NSColor> _inactiveColor;
 }
 
 // Adds a TitlebarBackgroundView to the [[window contentView] superView].

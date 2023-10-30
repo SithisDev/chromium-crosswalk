@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "chrome/common/url_constants.h"
 #include "components/dom_distiller/core/url_constants.h"
-#include "components/previews/core/previews_lite_page_redirect.h"
 #include "url/gurl.h"
 
 bool CanAddURLToHistory(const GURL& url) {
@@ -24,8 +23,7 @@ bool CanAddURLToHistory(const GURL& url) {
       url.SchemeIs(content::kViewSourceScheme) ||
       url.SchemeIs(chrome::kChromeNativeScheme) ||
       url.SchemeIs(chrome::kChromeSearchScheme) ||
-      url.SchemeIs(dom_distiller::kDomDistillerScheme) ||
-      previews::IsLitePageRedirectPreviewURL(url))
+      url.SchemeIs(dom_distiller::kDomDistillerScheme))
     return false;
 
   return true;

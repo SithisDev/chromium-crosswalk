@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,8 +32,8 @@ chrome.app.runtime.onLaunched.addListener(function() {
                                e.message);
         failedToAddLast = true;
       }
-      chrome.test.assertBool(
-          true, failedToAddLast,
+      chrome.test.assertTrue(
+          failedToAddLast,
           "there should be an error when adding the 11th listener");
 
       listeners.forEach(function(x) {

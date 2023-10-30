@@ -1,17 +1,15 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/media_galleries/media_galleries_dialog_controller_test_util.h"
 
 MockMediaGalleriesDialog::MockMediaGalleriesDialog(
-    const DialogDestroyedCallback& callback)
-    : update_count_(0),
-  dialog_destroyed_callback_(callback) {
-}
+    DialogDestroyedCallback callback)
+    : update_count_(0), dialog_destroyed_callback_(std::move(callback)) {}
 
 MockMediaGalleriesDialog::~MockMediaGalleriesDialog() {
-  dialog_destroyed_callback_.Run(update_count_);
+  std::move(dialog_destroyed_callback_).Run(update_count_);
 }
 
 void MockMediaGalleriesDialog::UpdateGalleries() {

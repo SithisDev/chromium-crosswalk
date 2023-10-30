@@ -1,11 +1,13 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/media/webrtc/webrtc_event_log_manager_unittest_helpers.h"
 
+#include "base/check.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
+#include "base/notreached.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace webrtc_event_logging {
@@ -29,7 +31,7 @@ std::unique_ptr<LogFileWriter::Factory> CreateLogFileWriterFactory(
   return nullptr;  // Appease compiler.
 }
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 void RemoveWritePermissions(const base::FilePath& path) {
   int permissions;
   ASSERT_TRUE(base::GetPosixFilePermissions(path, &permissions));
@@ -39,7 +41,7 @@ void RemoveWritePermissions(const base::FilePath& path) {
   permissions &= ~write_permissions;
   ASSERT_TRUE(base::SetPosixFilePermissions(path, permissions));
 }
-#endif  // defined(OS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX)
 
 std::unique_ptr<CompressedSizeEstimator> NullEstimator::Factory::Create()
     const {
@@ -62,7 +64,7 @@ PerfectGzipEstimator::PerfectGzipEstimator() {
   // will never be suppressed.
   GzipLogCompressorFactory factory(std::make_unique<NullEstimator::Factory>());
 
-  compressor_ = factory.Create(base::Optional<size_t>());
+  compressor_ = factory.Create(absl::optional<size_t>());
   DCHECK(compressor_);
 
   std::string ignored;

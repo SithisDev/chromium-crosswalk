@@ -1,10 +1,11 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/extension_install_error_menu_item_id_provider.h"
 
 #include <bitset>
+#include <ostream>
 
 #include "base/lazy_instance.h"
 #include "chrome/app/chrome_command_ids.h"

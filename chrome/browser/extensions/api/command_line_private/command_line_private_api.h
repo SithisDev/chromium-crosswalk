@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 namespace extensions {
 
-class CommandLinePrivateHasSwitchFunction : public UIThreadExtensionFunction {
+class CommandLinePrivateHasSwitchFunction : public ExtensionFunction {
   DECLARE_EXTENSION_FUNCTION("commandLinePrivate.hasSwitch",
                              COMMANDLINEPRIVATE_HASSWITCH)
  protected:

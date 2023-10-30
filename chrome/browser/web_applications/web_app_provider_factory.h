@@ -1,13 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_WEB_APPLICATIONS_WEB_APP_PROVIDER_FACTORY_H_
 #define CHROME_BROWSER_WEB_APPLICATIONS_WEB_APP_PROVIDER_FACTORY_H_
 
-#include "base/macros.h"
 #include "base/memory/singleton.h"
-#include "chrome/browser/web_applications/components/web_app_provider_base_factory.h"
+#include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
 namespace content {
 class BrowserContext;
@@ -20,18 +19,27 @@ namespace web_app {
 class WebAppProvider;
 
 // Singleton that owns all WebAppProviderFactories and associates them with
-// Profile.
-class WebAppProviderFactory : public WebAppProviderBaseFactory {
+// Profile. Clients of WebAppProvider cannot use this class to obtain
+// WebAppProvider instances, instead they should call WebAppProvider static
+// methods.
+class WebAppProviderFactory : public BrowserContextKeyedServiceFactory {
  public:
-  static WebAppProvider* GetForProfile(Profile* profile);
+  WebAppProviderFactory(const WebAppProviderFactory&) = delete;
+  WebAppProviderFactory& operator=(const WebAppProviderFactory&) = delete;
 
   static WebAppProviderFactory* GetInstance();
 
+  static bool IsServiceCreatedForProfile(Profile* profile);
+
  private:
   friend struct base::DefaultSingletonTraits<WebAppProviderFactory>;
+  friend class WebAppProvider;
 
   WebAppProviderFactory();
   ~WebAppProviderFactory() override;
+
+  // Called by WebAppProvider static methods.
+  static WebAppProvider* GetForProfile(Profile* profile);
 
   // BrowserContextKeyedServiceFactory
   KeyedService* BuildServiceInstanceFor(
@@ -39,8 +47,8 @@ class WebAppProviderFactory : public WebAppProviderBaseFactory {
   bool ServiceIsCreatedWithBrowserContext() const override;
   content::BrowserContext* GetBrowserContextToUse(
       content::BrowserContext* context) const override;
-
-  DISALLOW_COPY_AND_ASSIGN(WebAppProviderFactory);
+  void RegisterProfilePrefs(
+      user_prefs::PrefRegistrySyncable* registry) override;
 };
 
 }  // namespace web_app

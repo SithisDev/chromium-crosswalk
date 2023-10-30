@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,8 @@
 
 #include "base/cancelable_callback.h"
 #include "base/containers/queue.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/android/vr/web_xr_presentation_state.h"
 #include "chrome/browser/vr/base_graphics_delegate.h"
 #include "chrome/browser/vr/render_info.h"
 #include "device/vr/util/sliding_average.h"
@@ -27,6 +26,10 @@
 
 namespace base {
 class WaitableEvent;
+}
+
+namespace device {
+class WebXrPresentationState;
 }
 
 namespace gfx {
@@ -79,9 +82,13 @@ class GvrGraphicsDelegate : public BaseGraphicsDelegate {
                       bool pause_content,
                       bool low_density,
                       size_t sliding_time_size);
+
+  GvrGraphicsDelegate(const GvrGraphicsDelegate&) = delete;
+  GvrGraphicsDelegate& operator=(const GvrGraphicsDelegate&) = delete;
+
   ~GvrGraphicsDelegate() override;
 
-  void set_webxr_presentation_state(WebXrPresentationState* webxr) {
+  void set_webxr_presentation_state(device::WebXrPresentationState* webxr) {
     webxr_ = webxr;
   }
   void Init(base::WaitableEvent* gl_surface_created_event,
@@ -156,7 +163,7 @@ class GvrGraphicsDelegate : public BaseGraphicsDelegate {
   void WebVrWaitForServerFence();
   void MaybeDumpFrameBufferToDisk();
 
-  WebXrPresentationState* webxr_;
+  raw_ptr<device::WebXrPresentationState> webxr_;
 
   // samplerExternalOES texture data for WebVR content image.
   int webvr_texture_id_ = 0;
@@ -171,7 +178,7 @@ class GvrGraphicsDelegate : public BaseGraphicsDelegate {
   std::unique_ptr<gl::ScopedJavaSurface> ui_surface_;
   std::unique_ptr<gl::ScopedJavaSurface> content_overlay_surface_;
 
-  gvr::GvrApi* gvr_api_;
+  raw_ptr<gvr::GvrApi> gvr_api_;
   gvr::BufferViewportList viewport_list_;
   Viewport main_viewport_;
   Viewport webvr_viewport_;
@@ -196,7 +203,7 @@ class GvrGraphicsDelegate : public BaseGraphicsDelegate {
   const bool surfaceless_rendering_;
   bool content_paused_;
 
-  GlBrowserInterface* browser_;
+  raw_ptr<GlBrowserInterface> browser_;
 
   // This callback should be called once a GL context is active and textures
   // have been created.
@@ -216,9 +223,7 @@ class GvrGraphicsDelegate : public BaseGraphicsDelegate {
   std::string frame_buffer_dump_filepath_suffix_;
   unsigned int last_bound_buffer_index_;
 
-  base::WeakPtrFactory<GvrGraphicsDelegate> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(GvrGraphicsDelegate);
+  base::WeakPtrFactory<GvrGraphicsDelegate> weak_ptr_factory_{this};
 };
 
 }  // namespace vr

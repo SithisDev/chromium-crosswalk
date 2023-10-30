@@ -1,13 +1,15 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/test/bind_test_util.h"
+#include "base/memory/raw_ptr.h"
+#include "base/test/bind.h"
 #include "build/build_config.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/webauthn/authenticator_request_scheduler.h"
 #include "chrome/browser/webauthn/chrome_authenticator_request_delegate.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -15,8 +17,8 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/network_session_configurator/common/network_switches.h"
 #include "content/public/browser/authenticator_environment.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
-#include "content/public/test/test_service_manager_context.h"
 #include "device/fido/virtual_fido_device_factory.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -31,6 +33,9 @@ class WebAuthFocusTest : public InProcessBrowserTest,
       : https_server_(net::EmbeddedTestServer::TYPE_HTTPS),
         permission_requested_(false) {}
 
+  WebAuthFocusTest(const WebAuthFocusTest&) = delete;
+  WebAuthFocusTest& operator=(const WebAuthFocusTest&) = delete;
+
   void SetUpOnMainThread() override {
     host_resolver()->AddRule("*", "127.0.0.1");
     https_server_.ServeFilesFromSourceDirectory("content/test/data");
@@ -44,7 +49,7 @@ class WebAuthFocusTest : public InProcessBrowserTest,
 
   bool permission_requested() { return permission_requested_; }
 
-  AuthenticatorRequestDialogModel* dialog_model_;
+  raw_ptr<AuthenticatorRequestDialogModel> dialog_model_;
 
  private:
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -62,17 +67,16 @@ class WebAuthFocusTest : public InProcessBrowserTest,
     permission_requested_ = true;
   }
 
-  void OnModelDestroyed() override {}
+  void OnModelDestroyed(AuthenticatorRequestDialogModel* model) override {}
 
   net::EmbeddedTestServer https_server_;
 
   // Set to true when the permission sheet is triggered.
   bool permission_requested_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebAuthFocusTest);
 };
 
-IN_PROC_BROWSER_TEST_F(WebAuthFocusTest, Focus) {
+// TODO(crbug.com/1222768): Disabled for being flaky.
+IN_PROC_BROWSER_TEST_F(WebAuthFocusTest, DISABLED_Focus) {
   // Web Authentication requests will often trigger machine-wide indications,
   // such as a Security Key flashing for a touch. If background tabs were able
   // to trigger this, there would be a risk of user confusion since the user
@@ -81,8 +85,8 @@ IN_PROC_BROWSER_TEST_F(WebAuthFocusTest, Focus) {
   // the frame be in the foreground in a focused window.
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  ui_test_utils::NavigateToURL(browser(),
-                               GetHttpsURL("www.example.com", "/title1.html"));
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), GetHttpsURL("www.example.com", "/title1.html")));
 
   auto owned_virtual_device_factory =
       std::make_unique<device::test::VirtualFidoDeviceFactory>();
@@ -161,9 +165,8 @@ IN_PROC_BROWSER_TEST_F(WebAuthFocusTest, Focus) {
   DevToolsWindowTesting::CloseDevToolsWindowSync(dev_tools_window);
 
   // Open a second browser window.
-  ui_test_utils::BrowserAddedObserver browser_added_observer;
   chrome::NewWindow(browser());
-  Browser* new_window = browser_added_observer.WaitForSingleNewBrowser();
+  Browser* new_window = BrowserList::GetInstance()->GetLastActive();
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(new_window));
 
   // Operations in the (now unfocused) window should still succeed, as the
@@ -182,10 +185,9 @@ IN_PROC_BROWSER_TEST_F(WebAuthFocusTest, Focus) {
   // Requesting "direct" attestation will trigger a permissions prompt.
   virtual_device_factory->mutable_state()->simulate_press_callback =
       base::BindLambdaForTesting([&](device::VirtualFidoDevice* device) {
-        dialog_model_ =
-            AuthenticatorRequestScheduler::GetRequestDelegateForTest(
-                initial_web_contents)
-                ->WeakDialogModelForTesting();
+        dialog_model_ = AuthenticatorRequestScheduler::GetRequestDelegate(
+                            initial_web_contents)
+                            ->dialog_model();
         dialog_model_->AddObserver(this);
         return true;
       });

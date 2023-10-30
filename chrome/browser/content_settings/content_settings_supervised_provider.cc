@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/values.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service.h"
 
@@ -22,24 +23,26 @@ struct ContentSettingsFromSupervisedSettingsEntry {
 
 const ContentSettingsFromSupervisedSettingsEntry
     kContentSettingsFromSupervisedSettingsMap[] = {
-  {
-    supervised_users::kGeolocationDisabled,
-    CONTENT_SETTINGS_TYPE_GEOLOCATION,
-    CONTENT_SETTING_BLOCK,
-  }, {
-    supervised_users::kCameraMicDisabled,
-    CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
-    CONTENT_SETTING_BLOCK,
-  }, {
-    supervised_users::kCameraMicDisabled,
-    CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-    CONTENT_SETTING_BLOCK,
-  }, {
-    supervised_users::kCookiesAlwaysAllowed,
-    CONTENT_SETTINGS_TYPE_COOKIES,
-    CONTENT_SETTING_ALLOW,
-  }
-};
+        {
+            supervised_users::kGeolocationDisabled,
+            ContentSettingsType::GEOLOCATION,
+            CONTENT_SETTING_BLOCK,
+        },
+        {
+            supervised_users::kCameraMicDisabled,
+            ContentSettingsType::MEDIASTREAM_CAMERA,
+            CONTENT_SETTING_BLOCK,
+        },
+        {
+            supervised_users::kCameraMicDisabled,
+            ContentSettingsType::MEDIASTREAM_MIC,
+            CONTENT_SETTING_BLOCK,
+        },
+        {
+            supervised_users::kCookiesAlwaysAllowed,
+            ContentSettingsType::COOKIES,
+            CONTENT_SETTING_ALLOW,
+        }};
 
 }  // namespace
 
@@ -53,20 +56,19 @@ SupervisedProvider::SupervisedProvider(
   // This means this will get destroyed before the SUSS and will be
   // unsubscribed from it.
   user_settings_subscription_ =
-      supervised_user_settings_service->SubscribeForSettingsChange(base::Bind(
-          &content_settings::SupervisedProvider::OnSupervisedSettingsAvailable,
-          base::Unretained(this)));
+      supervised_user_settings_service->SubscribeForSettingsChange(
+          base::BindRepeating(&content_settings::SupervisedProvider::
+                                  OnSupervisedSettingsAvailable,
+                              base::Unretained(this)));
 }
 
-SupervisedProvider::~SupervisedProvider() {
-}
+SupervisedProvider::~SupervisedProvider() = default;
 
 std::unique_ptr<RuleIterator> SupervisedProvider::GetRuleIterator(
     ContentSettingsType content_type,
-    const ResourceIdentifier& resource_identifier,
     bool incognito) const {
   base::AutoLock auto_lock(lock_);
-  return value_map_.GetRuleIterator(content_type, resource_identifier);
+  return value_map_.GetRuleIterator(content_type);
 }
 
 void SupervisedProvider::OnSupervisedSettingsAvailable(
@@ -77,11 +79,9 @@ void SupervisedProvider::OnSupervisedSettingsAvailable(
     base::AutoLock auto_lock(lock_);
     for (const auto& entry : kContentSettingsFromSupervisedSettingsMap) {
       ContentSetting new_setting = CONTENT_SETTING_DEFAULT;
-      if (settings && settings->HasKey(entry.setting_name)) {
-        bool new_is_set = false;
-        bool is_bool = settings->GetBoolean(entry.setting_name, &new_is_set);
-        DCHECK(is_bool);
-        if (new_is_set)
+      if (settings && settings->FindKey(entry.setting_name)) {
+        DCHECK(settings->FindKey(entry.setting_name)->is_bool());
+        if (settings->FindBoolKey(entry.setting_name).value_or(false))
           new_setting = entry.content_setting;
       }
       if (new_setting != value_map_.GetContentSetting(entry.content_type)) {
@@ -91,8 +91,8 @@ void SupervisedProvider::OnSupervisedSettingsAvailable(
     }
   }
   for (ContentSettingsType type : to_notify) {
-    NotifyObservers(ContentSettingsPattern(), ContentSettingsPattern(),
-                    type, std::string());
+    NotifyObservers(ContentSettingsPattern::Wildcard(),
+                    ContentSettingsPattern::Wildcard(), type);
   }
 }
 
@@ -102,8 +102,8 @@ bool SupervisedProvider::SetWebsiteSetting(
     const ContentSettingsPattern& primary_pattern,
     const ContentSettingsPattern& secondary_pattern,
     ContentSettingsType content_type,
-    const ResourceIdentifier& resource_identifier,
-    std::unique_ptr<base::Value>&& value) {
+    base::Value&& value,
+    const ContentSettingConstraints& constraints) {
   return false;
 }
 
@@ -114,7 +114,7 @@ void SupervisedProvider::ClearAllContentSettingsRules(
 void SupervisedProvider::ShutdownOnUIThread() {
   DCHECK(CalledOnValidThread());
   RemoveAllObservers();
-  user_settings_subscription_.reset();
+  user_settings_subscription_ = {};
 }
 
 }  // namespace content_settings

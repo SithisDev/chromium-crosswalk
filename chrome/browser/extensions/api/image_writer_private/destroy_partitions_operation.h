@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@ class DestroyPartitionsOperation : public Operation {
  public:
   DestroyPartitionsOperation(
       base::WeakPtr<OperationManager> manager,
-      std::unique_ptr<service_manager::Connector> connector,
       const ExtensionId& extension_id,
       const std::string& storage_unit_id,
       const base::FilePath& download_folder);

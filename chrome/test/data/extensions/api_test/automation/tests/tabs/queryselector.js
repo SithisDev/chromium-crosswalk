@@ -1,11 +1,12 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 var allTests = [
   // Basic query from root node.
   function testQuerySelector() {
-    var cancelButton = rootNode.children[3];
+    var cancelButton = rootNode.children[4];
+    assertEq(chrome.automation.RoleType.BUTTON, cancelButton.role);
     function assertCorrectResult(queryResult) {
       assertEq(queryResult, cancelButton);
       chrome.test.succeed();
@@ -27,8 +28,10 @@ var allTests = [
   // element.
   function testQuerySelectorFromMain() {
     var main = rootNode.children[1];
+    assertEq(chrome.automation.RoleType.MAIN, main.role);
     // paragraph inside "main" element - not the first <p> on the page
     var p = main.firstChild;
+    assertTrue(Boolean(p));
     function assertCorrectResult(queryResult) {
       assertEq(queryResult, p);
       chrome.test.succeed();
@@ -36,12 +39,22 @@ var allTests = [
     main.domQuerySelector('p', assertCorrectResult);
   },
 
-  // Demonstrates that a query for an element which is ignored for accessibility
-  // returns its nearest ancestor.
-  function testQuerySelectorForSpanInsideButtonReturnsButton() {
-    var okButton = rootNode.children[2];
+  // Demonstrates that a query for an element, where the first match is ignored
+  // for accessibility returns the a later unignored match.
+  function testQuerySelectorFindsFirstUnignoredMatch() {
+    var unignored = rootNode.children[5]; // <div class="findme">
+    assertEq(chrome.automation.RoleType.GROUP, unignored.role);
     function assertCorrectResult(queryResult) {
-      assertEq(queryResult, okButton);
+      assertEq(unignored, queryResult);
+      assertEq('findme', unignored.className);
+      chrome.test.succeed();
+    }
+    rootNode.domQuerySelector('.findme', assertCorrectResult);
+  },
+
+  function testQuerySelectorForIgnoredReturnsNull() {
+    function assertCorrectResult(queryResult) {
+      assertEq(null, queryResult);
       chrome.test.succeed();
     }
     rootNode.domQuerySelector('#span-in-button', assertCorrectResult);
@@ -49,6 +62,7 @@ var allTests = [
 
   function testQuerySelectorFromRemovedNode() {
     var group = rootNode.firstChild;
+    assertEq(chrome.automation.RoleType.GROUP, group.role);
     function assertCorrectResult(queryResult) {
       assertEq(null, queryResult);
       var errorMsg =

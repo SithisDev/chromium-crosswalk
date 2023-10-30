@@ -1,18 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/webstore_install_helper.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/values.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/system_connector.h"
 #include "net/base/load_flags.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_request.h"
-#include "services/data_decoder/public/cpp/safe_json_parser.h"
+#include "net/url_request/referrer_policy.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 using content::BrowserThread;
 
@@ -42,10 +43,8 @@ void WebstoreInstallHelper::Start(
     network::mojom::URLLoaderFactory* loader_factory) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  data_decoder::SafeJsonParser::Parse(
-      content::GetSystemConnector(), manifest_,
-      base::BindOnce(&WebstoreInstallHelper::OnJSONParseSucceeded, this),
-      base::BindOnce(&WebstoreInstallHelper::OnJSONParseFailed, this));
+  data_decoder::DataDecoder::ParseJsonIsolated(
+      manifest_, base::BindOnce(&WebstoreInstallHelper::OnJSONParsed, this));
 
   if (icon_url_.is_empty()) {
     icon_decode_complete_ = true;
@@ -81,11 +80,11 @@ void WebstoreInstallHelper::Start(
               "Not implemented, considered not useful."
           })");
 
-    icon_fetcher_.reset(new BitmapFetcher(icon_url_, this, traffic_annotation));
+    icon_fetcher_ =
+        std::make_unique<BitmapFetcher>(icon_url_, this, traffic_annotation);
     icon_fetcher_->Init(
-        std::string(),
-        net::URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
-        net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES);
+        net::ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+        network::mojom::CredentialsMode::kOmit);
     icon_fetcher_->Start(loader_factory);
   }
 }
@@ -110,25 +109,19 @@ void WebstoreInstallHelper::OnFetchComplete(const GURL& url,
   Release();  // Balanced in Start().
 }
 
-void WebstoreInstallHelper::OnJSONParseSucceeded(base::Value result) {
+void WebstoreInstallHelper::OnJSONParsed(
+    data_decoder::DataDecoder::ValueOrError result) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   manifest_parse_complete_ = true;
-  if (result.is_dict()) {
+  if (result.has_value() && result->is_dict()) {
     parsed_manifest_ = base::DictionaryValue::From(
-        base::Value::ToUniquePtrValue(std::move(result)));
+        base::Value::ToUniquePtrValue(std::move(*result)));
   } else {
+    error_ = (!result.has_value() || result.error().empty())
+                 ? "Invalid JSON response"
+                 : result.error();
     parse_error_ = Delegate::MANIFEST_ERROR;
   }
-
-  ReportResultsIfComplete();
-}
-
-void WebstoreInstallHelper::OnJSONParseFailed(
-    const std::string& error_message) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  manifest_parse_complete_ = true;
-  error_ = error_message;
-  parse_error_ = Delegate::MANIFEST_ERROR;
   ReportResultsIfComplete();
 }
 

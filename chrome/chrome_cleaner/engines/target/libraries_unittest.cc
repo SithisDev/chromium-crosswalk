@@ -1,11 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/chrome_cleaner/engines/target/libraries.h"
 
 #include <string>
-#include <tuple>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
@@ -53,7 +52,7 @@ class ScopedChildProcessWithTempDir {
     // process is still able to create a temporary directory at this stage.
     CHECK(temp_dir_.CreateUniqueTempDir());
 
-    base::string16 engine_switch =
+    std::wstring engine_switch =
         child_process->command_line().GetSwitchValueNative(
             chrome_cleaner::kEngineSwitch);
     CHECK(!engine_switch.empty());
@@ -67,10 +66,10 @@ class ScopedChildProcessWithTempDir {
 
   base::FilePath temp_dir_path() const { return temp_dir_.GetPath(); }
 
-  base::string16 GetSampleDllName() const {
-    const std::set<base::string16> libraries = GetLibrariesToLoad(engine_);
+  std::wstring GetSampleDllName() const {
+    const std::set<std::wstring> libraries = GetLibrariesToLoad(engine_);
     if (libraries.empty())
-      return base::string16();
+      return std::wstring();
     return *libraries.begin();
   }
 
@@ -88,12 +87,12 @@ class ScopedChildProcessWithTempDir {
   Engine::Name engine_;
 };
 
-void DeleteSampleDll(const base::string16& sample_dll,
+void DeleteSampleDll(const std::wstring& sample_dll,
                      const base::FilePath& directory) {
-  CHECK(base::DeleteFile(directory.Append(sample_dll), /*recursive=*/false));
+  CHECK(base::DeleteFile(directory.Append(sample_dll)));
 }
 
-void ReplaceSampleDll(const base::string16& sample_dll,
+void ReplaceSampleDll(const std::wstring& sample_dll,
                       const base::FilePath& directory) {
   // Copy the current executable over the sample dll.
   CHECK(base::CopyFile(PreFetchedPaths::GetInstance()->GetExecutablePath(),
@@ -101,13 +100,11 @@ void ReplaceSampleDll(const base::string16& sample_dll,
 }
 
 TEST_P(LoadAndValidateLibrariesTest, RunTest) {
-  std::string test_function;
-  int engine;
-  std::tie(test_function, engine) = GetParam();
+  auto [test_function, engine] = GetParam();
 
   ASSERT_TRUE(Engine::Name_IsValid(engine));
   parent_process_->AppendSwitchNative(chrome_cleaner::kEngineSwitch,
-                                      base::NumberToString16(engine));
+                                      base::NumberToWString(engine));
 
   int32_t exit_code = -1;
   ASSERT_TRUE(
@@ -126,7 +123,7 @@ MULTIPROCESS_TEST_MAIN(MissingDll) {
   ScopedChildProcessWithTempDir child_process;
 
   // Skip this test (auto-succeed) if this engine has no DLL's to delete.
-  base::string16 sample_dll = child_process.GetSampleDllName();
+  std::wstring sample_dll = child_process.GetSampleDllName();
   if (sample_dll.empty())
     return 0;
 
@@ -161,7 +158,7 @@ MULTIPROCESS_TEST_MAIN(WrongDll) {
   ScopedChildProcessWithTempDir child_process;
 
   // Skip this test (auto-succeed) if this engine has no DLL's to replace.
-  base::string16 sample_dll = child_process.GetSampleDllName();
+  std::wstring sample_dll = child_process.GetSampleDllName();
   if (sample_dll.empty())
     return 0;
 

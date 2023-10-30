@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,8 @@
 #include <memory>
 #include <string>
 
+#include "base/values.h"
 #include "chrome/test/chromedriver/basic_types.h"
-
-namespace base {
-class DictionaryValue;
-class Value;
-}
 
 struct Session;
 class Status;
@@ -21,8 +17,7 @@ class WebView;
 
 std::string GetElementKey();
 
-std::unique_ptr<base::DictionaryValue> CreateElement(
-    const std::string& element_id);
+base::Value CreateElement(const std::string& element_id);
 
 std::unique_ptr<base::DictionaryValue> CreateValueFrom(const WebPoint& point);
 
@@ -36,6 +31,14 @@ Status FindElement(int interval_ms,
                    WebView* web_view,
                    const base::DictionaryValue& params,
                    std::unique_ptr<base::Value>* value);
+
+Status FindShadowElement(int interval_ms,
+                         bool only_one,
+                         const std::string* shadow_root_id,
+                         Session* session,
+                         WebView* web_view,
+                         const base::DictionaryValue& params,
+                         std::unique_ptr<base::Value>* value);
 
 Status GetActiveElement(Session* session,
                         WebView* web_view,
@@ -163,5 +166,10 @@ Status GetElementLocationInViewCenter(Session* session,
                                       WebView* web_view,
                                       const std::string& element_id,
                                       WebPoint* location);
+
+Status GetAXNodeByElementId(Session* session,
+                            WebView* web_view,
+                            const std::string& element_id,
+                            std::unique_ptr<base::Value>* axNode);
 
 #endif  // CHROME_TEST_CHROMEDRIVER_ELEMENT_UTIL_H_

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,11 @@ function testExecuteScriptInNewTab() {
     chrome.tabs.onUpdated.removeListener(listener);
     chrome.tabs.executeScript(tab.id, {file: 'script.js'}, function() {
       chrome.test.assertTrue(!!chrome.runtime.lastError);
+      const lastErrorMessage = chrome.runtime.lastError.message;
       chrome.test.assertTrue(
-          chrome.runtime.lastError.message.indexOf(
-              'Cannot access contents of') != -1,
-          chrome.runtime.lastError.message);
+          lastErrorMessage.indexOf('Cannot access contents of') != -1 ||
+              lastErrorMessage.indexOf('Cannot access a chrome:// URL') != -1,
+          lastErrorMessage);
       chrome.test.succeed();
     });
   });

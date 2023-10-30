@@ -1,10 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.omaha.metrics;
 
-import org.chromium.base.metrics.CachedMetrics;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.omaha.metrics.UpdateProtos.Tracking;
 import org.chromium.chrome.browser.omaha.metrics.UpdateProtos.Tracking.Source;
 import org.chromium.chrome.browser.omaha.metrics.UpdateProtos.Tracking.Type;
@@ -17,8 +17,7 @@ class HistogramUtils {
      * @param alreadyUpdating Whether or not an update is currently tracked as running.
      */
     public static void recordStartedUpdateHistogram(boolean alreadyUpdating) {
-        new CachedMetrics.BooleanHistogramSample("GoogleUpdate.StartingUpdateState")
-                .record(alreadyUpdating);
+        RecordHistogram.recordBooleanHistogram("GoogleUpdate.StartingUpdateState", alreadyUpdating);
     }
 
     /**
@@ -29,10 +28,8 @@ class HistogramUtils {
      */
     public static void recordResultHistogram(
             @AttributionType int attribution, Tracking info, boolean success) {
-        new CachedMetrics.BooleanHistogramSample(buildResultHistogram(attribution, null))
-                .record(success);
-        new CachedMetrics.BooleanHistogramSample(buildResultHistogram(attribution, info))
-                .record(success);
+        RecordHistogram.recordBooleanHistogram(buildResultHistogram(attribution, null), success);
+        RecordHistogram.recordBooleanHistogram(buildResultHistogram(attribution, info), success);
     }
 
     /**
@@ -53,8 +50,6 @@ class HistogramUtils {
     private static String typeToHistogram(Type type) {
         if (type == Type.INTENT) {
             return "Intent";
-        } else if (type == Type.INLINE) {
-            return "Inline";
         } else {
             return "Unknown";
         }

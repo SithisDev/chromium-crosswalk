@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,11 +14,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "components/policy/policy_constants.h"
 #include "components/version_info/version_info.h"
-
-bool ChromeCrashReporterClient::GetCrashMetricsLocation(
-    base::FilePath* metrics_dir) {
-  return base::PathService::Get(chrome::DIR_USER_DATA, metrics_dir);
-}
 
 bool ChromeCrashReporterClient::ReportingIsEnforcedByPolicy(
     bool* breakpad_enabled) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,10 @@ struct Session;
 class Status;
 class WebView;
 
-typedef base::Callback<Status(Session* session,
-                              WebView* web_view,
-                              const base::DictionaryValue&,
-                              std::unique_ptr<base::Value>*)>
+typedef base::RepeatingCallback<Status(Session* session,
+                                       WebView* web_view,
+                                       const base::DictionaryValue&,
+                                       std::unique_ptr<base::Value>*)>
     AlertCommand;
 
 // Executes an alert command.

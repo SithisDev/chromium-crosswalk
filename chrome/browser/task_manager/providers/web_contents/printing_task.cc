@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@ namespace task_manager {
 
 namespace {
 
-base::string16 PrefixPrintTitle(const base::string16& title) {
+std::u16string PrefixPrintTitle(const std::u16string& title) {
   return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_PRINT_PREFIX, title);
 }
 

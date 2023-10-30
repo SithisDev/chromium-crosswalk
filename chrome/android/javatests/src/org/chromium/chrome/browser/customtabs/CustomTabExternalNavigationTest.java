@@ -1,15 +1,16 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.customtabs;
 
 import android.app.Activity;
+import android.content.Intent;
+import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
-import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 
-import org.junit.After;
+import androidx.test.filters.SmallTest;
+
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -18,23 +19,29 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.base.test.util.DisableIf;
+import org.chromium.chrome.browser.browserservices.TrustedWebActivityTestUtil;
+import org.chromium.chrome.browser.browserservices.ui.controller.CurrentPageVerifier.VerificationStatus;
 import org.chromium.chrome.browser.customtabs.CustomTabDelegateFactory.CustomTabNavigationDelegate;
-import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler;
-import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler.OverrideUrlLoadingResult;
-import org.chromium.chrome.browser.externalnav.ExternalNavigationParams;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabDelegateFactory;
+import org.chromium.chrome.browser.tab.TabTestUtils;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.components.external_intents.ExternalNavigationHandler;
+import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResult;
+import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResultType;
+import org.chromium.components.external_intents.ExternalNavigationParams;
 import org.chromium.net.test.EmbeddedTestServer;
+import org.chromium.url.GURL;
+
+import java.util.concurrent.TimeoutException;
 
 /**
  * Instrumentation test for external navigation handling of a Custom Tab.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
-@RetryOnFailure
 public class CustomTabExternalNavigationTest {
     @Rule
     public CustomTabActivityTestRule mCustomTabActivityTestRule = new CustomTabActivityTestRule();
@@ -61,6 +68,7 @@ public class CustomTabExternalNavigationTest {
         }
     }
 
+    private static final String TWA_PACKAGE_NAME = "com.foo.bar";
     private static final String TEST_PATH = "/chrome/test/data/android/google.html";
     private CustomTabNavigationDelegate mNavigationDelegate;
     private EmbeddedTestServer mTestServer;
@@ -68,12 +76,12 @@ public class CustomTabExternalNavigationTest {
 
     @Before
     public void setUp() throws Exception {
-        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
-        mCustomTabActivityTestRule.startCustomTabActivityWithIntent(
-                CustomTabsTestUtils.createMinimalCustomTabIntent(
-                        InstrumentationRegistry.getTargetContext(), mTestServer.getURL(TEST_PATH)));
+        mCustomTabActivityTestRule.getEmbeddedTestServerRule().setServerUsesHttps(true);
+        mTestServer = mCustomTabActivityTestRule.getTestServer();
+
+        launchTwa(TWA_PACKAGE_NAME, mTestServer.getURL(TEST_PATH));
         Tab tab = mCustomTabActivityTestRule.getActivity().getActivityTab();
-        TabDelegateFactory delegateFactory = tab.getDelegateFactory();
+        TabDelegateFactory delegateFactory = TabTestUtils.getDelegateFactory(tab);
         Assert.assertTrue(delegateFactory instanceof CustomTabDelegateFactory);
         CustomTabDelegateFactory customTabDelegateFactory =
                 ((CustomTabDelegateFactory) delegateFactory);
@@ -85,9 +93,11 @@ public class CustomTabExternalNavigationTest {
                                       customTabDelegateFactory.getExternalNavigationDelegate();
     }
 
-    @After
-    public void tearDown() throws Exception {
-        mTestServer.stopAndDestroyServer();
+    private void launchTwa(String twaPackageName, String url) throws TimeoutException {
+        Intent intent = TrustedWebActivityTestUtil.createTrustedWebActivityIntent(url);
+        TrustedWebActivityTestUtil.spoofVerification(twaPackageName, url);
+        TrustedWebActivityTestUtil.createSession(intent, twaPackageName);
+        mCustomTabActivityTestRule.startCustomTabActivityWithIntent(intent);
     }
 
     /**
@@ -98,14 +108,14 @@ public class CustomTabExternalNavigationTest {
     @Test
     @SmallTest
     public void testExternalActivityStartedForDefaultUrl() {
-        final String testUrl = "customtab://customtabtest/intent";
+        final GURL testUrl = new GURL("customtab://customtabtest/intent");
         ExternalNavigationParams params = new ExternalNavigationParams.Builder(testUrl, false)
-                .build();
-        @OverrideUrlLoadingResult
-        int result = mUrlHandler.shouldOverrideUrlLoading(params);
-        Assert.assertEquals(OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT, result);
-        Assert.assertTrue("A dummy activity should have been started to handle the special url.",
-                mNavigationDelegate.hasExternalActivityStarted());
+                                                  .setIsMainFrame(true)
+                                                  .setIsRendererInitiated(true)
+                                                  .build();
+        OverrideUrlLoadingResult result = mUrlHandler.shouldOverrideUrlLoading(params);
+        Assert.assertEquals(
+                OverrideUrlLoadingResultType.OVERRIDE_WITH_EXTERNAL_INTENT, result.getResultType());
     }
 
     /**
@@ -114,14 +124,41 @@ public class CustomTabExternalNavigationTest {
      */
     @Test
     @SmallTest
-    public void testIntentPickerNotShownForNormalUrl() {
-        final String testUrl = "http://customtabtest.com";
+    @DisableIf.Build(supported_abis_includes = "x86", sdk_is_greater_than = VERSION_CODES.O_MR1,
+            sdk_is_less_than = VERSION_CODES.Q, message = "crbug.com/1188920")
+    public void
+    testIntentPickerNotShownForNormalUrl() {
+        final GURL testUrl = new GURL("http://customtabtest.com");
         ExternalNavigationParams params = new ExternalNavigationParams.Builder(testUrl, false)
                 .build();
-        @OverrideUrlLoadingResult
-        int result = mUrlHandler.shouldOverrideUrlLoading(params);
-        Assert.assertEquals(OverrideUrlLoadingResult.NO_OVERRIDE, result);
-        Assert.assertFalse("External activities should not be started to handle the url",
-                mNavigationDelegate.hasExternalActivityStarted());
+        OverrideUrlLoadingResult result = mUrlHandler.shouldOverrideUrlLoading(params);
+        Assert.assertEquals(OverrideUrlLoadingResultType.NO_OVERRIDE, result.getResultType());
+    }
+
+    private @VerificationStatus int getCurrentPageVerifierStatus() {
+        CustomTabActivity customTabActivity = mCustomTabActivityTestRule.getActivity();
+        return customTabActivity.getComponent().resolveCurrentPageVerifier().getState().status;
+    }
+
+    /**
+     * Tests that {@link CustomTabNavigationDelegate#shouldDisableExternalIntentRequestsForUrl()}
+     * disables forwarding URL requests to external intents for navigations within the TWA's
+     * origin.
+     */
+    @Test
+    @SmallTest
+    public void testShouldDisableExternalIntentRequestsForUrl() throws TimeoutException {
+        GURL insideVerifiedOriginUrl =
+                new GURL(mTestServer.getURL("/chrome/test/data/android/simple.html"));
+        GURL outsideVerifiedOriginUrl = new GURL("https://example.com/test.html");
+
+        TrustedWebActivityTestUtil.waitForCurrentPageVerifierToFinish(
+                mCustomTabActivityTestRule.getActivity());
+        Assert.assertEquals(VerificationStatus.SUCCESS, getCurrentPageVerifierStatus());
+
+        Assert.assertTrue(mNavigationDelegate.shouldDisableExternalIntentRequestsForUrl(
+                insideVerifiedOriginUrl));
+        Assert.assertFalse(mNavigationDelegate.shouldDisableExternalIntentRequestsForUrl(
+                outsideVerifiedOriginUrl));
     }
 }

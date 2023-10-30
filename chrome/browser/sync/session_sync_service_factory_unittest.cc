@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,11 @@ TEST(SessionSyncServiceFactoryTest, ShouldSyncURL) {
       GURL(chrome::kChromeUIVersionURL)));
   EXPECT_FALSE(SessionSyncServiceFactory::ShouldSyncURLForTesting(
       GURL("chrome-native://anything")));
+  EXPECT_FALSE(SessionSyncServiceFactory::ShouldSyncURLForTesting(
+      GURL("chrome-distiller://anything")));
 
+  EXPECT_FALSE(SessionSyncServiceFactory::ShouldSyncURLForTesting(
+      GURL("chrome-untrusted://anything")));
   EXPECT_TRUE(SessionSyncServiceFactory::ShouldSyncURLForTesting(
       GURL(chrome::kChromeUIHistoryURL)));
 }

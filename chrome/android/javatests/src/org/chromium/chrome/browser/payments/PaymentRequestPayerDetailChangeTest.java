@@ -1,15 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.payments;
 
-import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.HAVE_INSTRUMENTS;
-import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.IMMEDIATE_RESPONSE;
+import androidx.test.filters.MediumTest;
 
-import android.support.test.filters.MediumTest;
-
-import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -17,15 +13,13 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
-import org.chromium.chrome.browser.autofill.CardType;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
-import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.AppPresence;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.FactorySpeed;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ui.DisableAnimationsTestRule;
-import org.chromium.ui.modaldialog.ModalDialogProperties;
 
 import java.util.concurrent.TimeoutException;
 
@@ -36,27 +30,18 @@ import java.util.concurrent.TimeoutException;
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
         PaymentRequestTestRule.ENABLE_EXPERIMENTAL_WEB_PLATFORM_FEATURES})
 public class PaymentRequestPayerDetailChangeTest implements MainActivityStartCallback {
-    // Disable animations to reduce flakiness.
-    @ClassRule
-    public static DisableAnimationsTestRule sNoAnimationsRule = new DisableAnimationsTestRule();
-
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule =
             new PaymentRequestTestRule("payment_request_onpayerdetailchange.html", this);
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {
+    public void onMainActivityStarted() throws TimeoutException {
         AutofillTestHelper helper = new AutofillTestHelper();
 
-        String billing_address_id = helper.setProfile(new AutofillProfile("", "https://example.com",
-                true, "Jon Doe", "Google", "340 Main St", "CA", "Los Angeles", "", "90291", "",
-                "US", "333-333-3333", "jon.doe@gmail.com", "en-US"));
-        helper.setCreditCard(new CreditCard("", "https://example.com", true /* isLocal */,
-                true /* isCached */, "Jon Doe", "5555555555554444", "" /* obfuscatedNumber */, "12",
-                "2050", "mastercard", R.drawable.mc_card, CardType.UNKNOWN, billing_address_id,
-                "" /* serverId */));
-
-        mPaymentRequestTestRule.installPaymentApp(HAVE_INSTRUMENTS, IMMEDIATE_RESPONSE);
+        String billing_address_id = helper.setProfile(
+                new AutofillProfile("", "https://example.com", true, "" /* honorific prefix */,
+                        "Jon Doe", "Google", "340 Main St", "CA", "Los Angeles", "", "90291", "",
+                        "US", "333-333-3333", "jon.doe@gmail.com", "en-US"));
     }
 
     /**
@@ -65,15 +50,17 @@ public class PaymentRequestPayerDetailChangeTest implements MainActivityStartCal
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testPayerDetailChangeEvent() throws InterruptedException, TimeoutException {
-        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyForInput());
+    public void testPayerDetailChangeEvent() throws TimeoutException {
+        // Install a fake payment app. We only need one as we won't skip the PaymentRequest sheet
+        // due to requesting contact info as well.
+        mPaymentRequestTestRule.addPaymentAppFactory(
+                "https://bobpay.com", AppPresence.HAVE_APPS, FactorySpeed.FAST_FACTORY);
+
+        mPaymentRequestTestRule.triggerUIAndWait(
+                "buy", mPaymentRequestTestRule.getReadyToPay());
+
         mPaymentRequestTestRule.clickAndWait(
-                R.id.button_primary, mPaymentRequestTestRule.getReadyForUnmaskInput());
-        mPaymentRequestTestRule.setTextInCardUnmaskDialogAndWait(
-                R.id.card_unmask_input, "123", mPaymentRequestTestRule.getReadyToUnmask());
-        mPaymentRequestTestRule.clickCardUnmaskButtonAndWait(
-                ModalDialogProperties.ButtonType.POSITIVE,
-                mPaymentRequestTestRule.getPaymentResponseReady());
+                R.id.button_primary, mPaymentRequestTestRule.getPaymentResponseReady());
 
         mPaymentRequestTestRule.retryPaymentRequest("{}", mPaymentRequestTestRule.getReadyToPay());
 
@@ -88,11 +75,7 @@ public class PaymentRequestPayerDetailChangeTest implements MainActivityStartCal
                 R.id.editor_dialog_done_button, mPaymentRequestTestRule.getReadyToPay());
 
         mPaymentRequestTestRule.clickAndWait(
-                R.id.button_primary, mPaymentRequestTestRule.getReadyForUnmaskInput());
-        mPaymentRequestTestRule.setTextInCardUnmaskDialogAndWait(
-                R.id.card_unmask_input, "123", mPaymentRequestTestRule.getReadyToUnmask());
-        mPaymentRequestTestRule.clickCardUnmaskButtonAndWait(
-                ModalDialogProperties.ButtonType.POSITIVE, mPaymentRequestTestRule.getDismissed());
+                R.id.button_primary, mPaymentRequestTestRule.getDismissed());
 
         mPaymentRequestTestRule.expectResultContains(
                 new String[] {"Jane Doe", "6502530000", "jane.doe@gmail.com"});

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,15 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/macros.h"
-#include "base/test/bind_test_util.h"
+#include "base/files/file_util.h"
+#include "base/test/bind.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/browsertest_util.h"
 #include "chrome/browser/extensions/chrome_content_verifier_delegate.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "content/public/test/url_loader_interceptor.h"
 #include "extensions/browser/computed_hashes.h"
@@ -48,6 +50,10 @@ class ContentVerifierHashTest
       public testing::WithParamInterface<ContentVerificationMode> {
  public:
   ContentVerifierHashTest() = default;
+
+  ContentVerifierHashTest(const ContentVerifierHashTest&) = delete;
+  ContentVerifierHashTest& operator=(const ContentVerifierHashTest&) = delete;
+
   ~ContentVerifierHashTest() override {}
 
   enum TamperResourceType {
@@ -63,15 +69,15 @@ class ContentVerifierHashTest
     // ChromeContentVerifierDelegate.
     ChromeContentVerifierDelegate::SetDefaultModeForTesting(
         uses_enforce_strict_mode()
-            ? ChromeContentVerifierDelegate::ENFORCE_STRICT
-            : ChromeContentVerifierDelegate::ENFORCE);
+            ? ChromeContentVerifierDelegate::VerifyInfo::Mode::ENFORCE_STRICT
+            : ChromeContentVerifierDelegate::VerifyInfo::Mode::ENFORCE);
 
     ExtensionBrowserTest::SetUp();
   }
 
   void TearDown() override {
     ExtensionBrowserTest::TearDown();
-    ChromeContentVerifierDelegate::SetDefaultModeForTesting(base::nullopt);
+    ChromeContentVerifierDelegate::SetDefaultModeForTesting(absl::nullopt);
   }
 
   void TearDownOnMainThread() override {
@@ -110,7 +116,7 @@ class ContentVerifierHashTest
     }
 
     // Delete verified_contents.json:
-    if (!base::DeleteFile(verified_contents_path, false /* recursive */)) {
+    if (!base::DeleteFile(verified_contents_path)) {
       return testing::AssertionFailure()
              << "Could not delete verified_contents.json.";
     }
@@ -134,7 +140,7 @@ class ContentVerifierHashTest
     }
     base::FilePath computed_hashes_path =
         file_util::GetComputedHashesPath(info_->extension_root);
-    if (!base::DeleteFile(computed_hashes_path, false /* recursive */)) {
+    if (!base::DeleteFile(computed_hashes_path)) {
       return testing::AssertionFailure()
              << "Error deleting computed_hashes.json.";
     }
@@ -151,7 +157,7 @@ class ContentVerifierHashTest
     base::FilePath computed_hashes_path =
         file_util::GetComputedHashesPath(info_->extension_root);
     std::string extra = R"({hello:"world"})";
-    if (!base::AppendToFile(computed_hashes_path, extra.data(), extra.size())) {
+    if (!base::AppendToFile(computed_hashes_path, extra)) {
       return testing::AssertionFailure()
              << "Could not tamper computed_hashes.json";
     }
@@ -168,7 +174,7 @@ class ContentVerifierHashTest
     std::string extra = "some_extra_function_call();";
     base::FilePath real_path =
         info_->extension_root.AppendASCII(resource_to_tamper);
-    if (!base::AppendToFile(real_path, extra.data(), extra.size())) {
+    if (!base::AppendToFile(real_path, extra)) {
       return testing::AssertionFailure()
              << "Could not tamper " << resource_to_tamper << ".";
     }
@@ -206,8 +212,7 @@ class ContentVerifierHashTest
       EnableExtension(id());
       registry_observer.WaitForExtensionLoaded();
     }
-    if (!base::Contains(verifier_observer.completed_fetches(), id()))
-      verifier_observer.WaitForFetchComplete(id());
+    verifier_observer.EnsureFetchCompleted(id());
     LOG(INFO) << "Verifier observer has seen FetchComplete";
 
     if (job_observer) {
@@ -239,9 +244,10 @@ class ContentVerifierHashTest
 
   bool HasValidComputedHashes() {
     base::ScopedAllowBlockingForTesting allow_blocking;
-    ComputedHashes::Reader reader;
-    return reader.InitFromFile(
-        file_util::GetComputedHashesPath(info_->extension_root));
+    ComputedHashes::Status computed_hashes_status;
+    return ComputedHashes::CreateFromFile(
+               file_util::GetComputedHashesPath(info_->extension_root),
+               &computed_hashes_status) != absl::nullopt;
   }
 
   bool HasValidVerifiedContents() {
@@ -340,8 +346,7 @@ class ContentVerifierHashTest
     }
 
     const ExtensionId& extension_id = extension->id();
-    if (!base::Contains(verifier_observer.completed_fetches(), extension_id))
-      verifier_observer.WaitForFetchComplete(extension_id);
+    verifier_observer.EnsureFetchCompleted(extension_id);
 
     info_ = std::make_unique<ExtensionInfo>(extension, type);
 
@@ -408,14 +413,13 @@ class ContentVerifierHashTest
   std::string verified_contents_contents_;
 
   bool hash_fetching_disabled_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(ContentVerifierHashTest);
 };
 
 // Tests that corruption of a requested extension resource always disables the
 // extension.
+// Flaky test. See crbug.com/1276043.
 IN_PROC_BROWSER_TEST_P(ContentVerifierHashTest,
-                       TamperRequestedResourceKeepComputedHashes) {
+                       DISABLED_TamperRequestedResourceKeepComputedHashes) {
   ASSERT_TRUE(InstallDefaultResourceExtension());
 
   DisableExtension();
@@ -478,8 +482,16 @@ IN_PROC_BROWSER_TEST_P(ContentVerifierHashTest,
 
 // Tests that tampering a resource that will be requested by the extension and
 // tampering computed_hashes.json will always disable the extension.
+// TODO(crbug.com/1278994): Flaky.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#define MAYBE_TamperRequestedResourceTamperComputedHashes \
+  DISABLED_TamperRequestedResourceTamperComputedHashes
+#else
+#define MAYBE_TamperRequestedResourceTamperComputedHashes \
+  TamperRequestedResourceTamperComputedHashes
+#endif
 IN_PROC_BROWSER_TEST_P(ContentVerifierHashTest,
-                       TamperRequestedResourceTamperComputedHashes) {
+                       MAYBE_TamperRequestedResourceTamperComputedHashes) {
   ASSERT_TRUE(InstallDefaultResourceExtension());
 
   DisableExtension();
@@ -571,8 +583,7 @@ IN_PROC_BROWSER_TEST_P(ContentVerifierHashTest,
       EnableExtension(extension_id);
       registry_observer.WaitForExtensionLoaded();
     }
-    if (!base::Contains(verifier_observer.completed_fetches(), extension_id))
-      verifier_observer.WaitForFetchComplete(extension_id);
+    verifier_observer.EnsureFetchCompleted(extension_id);
     LOG(INFO) << "Verifier observer has seen FetchComplete";
 
     if (job_observer) {
@@ -782,9 +793,17 @@ IN_PROC_BROWSER_TEST_P(
 // Tests the behavior of loading a default resource extension with tampering
 // an extension resource that is not requested by default and tampering
 // computed_hashes.json.
+// TODO(crbug.com/1279323): Flaky.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#define MAYBE_DefaultRequestExtensionTamperNotRequestedResourceTamperComputedHashes \
+  DISABLED_DefaultRequestExtensionTamperNotRequestedResourceTamperComputedHashes
+#else
+#define MAYBE_DefaultRequestExtensionTamperNotRequestedResourceTamperComputedHashes \
+  DefaultRequestExtensionTamperNotRequestedResourceTamperComputedHashes
+#endif
 IN_PROC_BROWSER_TEST_P(
     ContentVerifierHashTest,
-    DefaultRequestExtensionTamperNotRequestedResourceTamperComputedHashes) {
+    MAYBE_DefaultRequestExtensionTamperNotRequestedResourceTamperComputedHashes) {
   ASSERT_TRUE(InstallDefaultResourceExtension());
 
   DisableExtension();

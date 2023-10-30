@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,10 @@
 
 @interface BridgedNativeWindowTracker : NSObject {
  @private
-  NSWindow* window_;
+  NSWindow* _window;
 }
 
-- (id)initWithNSWindow:(NSWindow*)window;
+- (instancetype)initWithNSWindow:(NSWindow*)window;
 - (bool)wasNSWindowClosed;
 - (void)onWindowWillClose:(NSNotification*)notification;
 
@@ -19,13 +19,13 @@
 
 @implementation BridgedNativeWindowTracker
 
-- (id)initWithNSWindow:(NSWindow*)window {
-  window_ = window;
+- (instancetype)initWithNSWindow:(NSWindow*)window {
+  _window = window;
   NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
   [center addObserver:self
              selector:@selector(onWindowWillClose:)
                  name:NSWindowWillCloseNotification
-               object:window_];
+               object:_window];
   return self;
 }
 
@@ -35,15 +35,15 @@
 }
 
 - (bool)wasNSWindowClosed {
-  return window_ == nil;
+  return _window == nil;
 }
 
 - (void)onWindowWillClose:(NSNotification*)notification {
   [[NSNotificationCenter defaultCenter]
       removeObserver:self
                 name:NSWindowWillCloseNotification
-              object:window_];
-  window_ = nil;
+              object:_window];
+  _window = nil;
 }
 
 @end

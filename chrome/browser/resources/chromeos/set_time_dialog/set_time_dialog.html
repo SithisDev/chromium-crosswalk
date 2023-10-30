@@ -1,30 +1,3 @@
-<!doctype html>
-<html dir="$i18n{textdirection}" lang="$i18n{language}">
-<head>
-<meta charset="utf-8">
-<title>$i18n{setTimeTitle}</title>
-
-<link rel="import" href="chrome://resources/html/polymer.html">
-
-<link rel="import" href="chrome://resources/cr_elements/cr_button/cr_button.html">
-<link rel="import" href="chrome://resources/cr_elements/cr_dialog/cr_dialog.html">
-<link rel="import" href="chrome://resources/cr_elements/shared_style_css.html">
-<link rel="import" href="chrome://resources/html/assert.html">
-<link rel="import" href="chrome://resources/html/load_time_data.html">
-<link rel="import" href="chrome://resources/cr_elements/cr_page_host_style_css.html">
-<link rel="import" href="chrome://resources/cr_elements/md_select_css.html">
-<link rel="import" href="chrome://resources/html/web_ui_listener_behavior.html">
-<link rel="import" href="set_time_browser_proxy.html">
-
-<link rel="stylesheet" href="chrome://resources/css/text_defaults_md.css">
-
-<script src="strings.js"></script>
-
-</head>
-
-<body>
-  <dom-module id="set-time-dialog">
-    <template>
       <style include="cr-page-host-style cr-shared-style md-select">
         :host {
           user-select: none;
@@ -62,17 +35,23 @@
         /* Style to match md-select. */
         input[type='date'],
         input[type='time'] {
-          background-color: var(--google-grey-refresh-100);
+          background-color: var(--cros-textfield-background-color);
           border: none;
           border-radius: 4px;
           box-sizing: border-box;
-          color: var(--google-grey-900);
+          color: var(--cros-textfield-input-color);
+          color-scheme: light dark;
           font-family: inherit;
           font-size: inherit;
           /* Ensure space for focus border. */
           margin-bottom: 2px;
           padding: 6px 8px;
           width: 100%;
+        }
+
+        input[type='date']:focus,
+        input[type='time']:focus {
+          outline: 2px solid var(--cros-focus-ring-color);
         }
 
         input[type='date']::-webkit-clear-button,
@@ -143,10 +122,3 @@
         </div>
       </cr-dialog>
     </template>
-    <script src="set_time_dialog.js"></script>
-  </dom-module>
-
-  <set-time-dialog></set-time-dialog>
-
-</body>
-</html>

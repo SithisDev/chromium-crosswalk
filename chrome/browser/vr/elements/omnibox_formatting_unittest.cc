@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -83,9 +83,10 @@ TEST_P(ElisionTest, ProperOffsetAndFading) {
   GURL gurl(base::UTF8ToUTF16(GetParam().url_string));
   ASSERT_TRUE(gurl.is_valid());
   url::Parsed parsed;
-  const base::string16 text = FormatUrlForVr(gurl, &parsed);
+  const std::u16string text = FormatUrlForVr(gurl, &parsed);
 
-  auto render_text = gfx::RenderText::CreateHarfBuzzInstance();
+  std::unique_ptr<gfx::RenderText> render_text =
+      gfx::RenderText::CreateRenderText();
   render_text->SetFontList(font_list);
   render_text->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   render_text->SetDirectionalityMode(gfx::DIRECTIONALITY_AS_URL);
@@ -141,7 +142,7 @@ TextFormatting CreateTextUrlFormatting(const std::string& url_string,
                                        const std::string& expected_string) {
   GURL url(base::UTF8ToUTF16(url_string));
   url::Parsed parsed;
-  const base::string16 formatted_url = FormatUrlForVr(url, &parsed);
+  const std::u16string formatted_url = FormatUrlForVr(url, &parsed);
   EXPECT_EQ(formatted_url, base::UTF8ToUTF16(expected_string));
   return CreateUrlFormatting(formatted_url, parsed, kEmphasizedColor,
                              kDeemphasizedColor);

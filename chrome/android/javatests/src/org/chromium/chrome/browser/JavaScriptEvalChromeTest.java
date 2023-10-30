@@ -1,11 +1,12 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.LargeTest;
+
+import androidx.test.filters.LargeTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -15,8 +16,9 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
+import org.chromium.chrome.browser.customtabs.CustomTabActivityTestRule;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
@@ -35,6 +37,9 @@ public class JavaScriptEvalChromeTest {
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
+    @Rule
+    public CustomTabActivityTestRule mCustomTabActivityTestRule = new CustomTabActivityTestRule();
+
     private static final String JSTEST_URL = UrlUtils.encodeHtmlDataUri(
             "<html><head><script>"
             + "  var counter = 0;"
@@ -44,7 +49,7 @@ public class JavaScriptEvalChromeTest {
             + "<body><button id=\"test\">Test button</button></body></html>");
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         mActivityTestRule.startMainActivityWithURL(JSTEST_URL);
     }
 
@@ -55,16 +60,15 @@ public class JavaScriptEvalChromeTest {
     @Test
     @LargeTest
     @Feature({"Browser"})
-    @RetryOnFailure
-    public void testJavaScriptEvalIsCorrectlyOrderedWithinOneTab()
-            throws InterruptedException, TimeoutException {
+    public void testJavaScriptEvalIsCorrectlyOrderedWithinOneTab() throws TimeoutException {
         Tab tab1 = mActivityTestRule.getActivity().getActivityTab();
+        Tab tab2;
         ChromeTabUtils.newTabFromMenu(
                 InstrumentationRegistry.getInstrumentation(), mActivityTestRule.getActivity());
-        Tab tab2 = mActivityTestRule.getActivity().getActivityTab();
+        tab2 = mActivityTestRule.getActivity().getActivityTab();
         mActivityTestRule.loadUrl(JSTEST_URL);
-
         ChromeTabUtils.switchTabInCurrentTabModel(mActivityTestRule.getActivity(), tab1.getId());
+
         Assert.assertFalse("Tab didn't open", tab1 == tab2);
 
         JavaScriptUtils.executeJavaScriptAndWaitForResult(

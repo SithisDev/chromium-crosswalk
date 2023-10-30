@@ -1,51 +1,48 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.ntp;
 
 import android.content.Context;
-import android.support.annotation.IntDef;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.base.task.PostTask;
-import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.favicon.FaviconHelper;
-import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconImageCallback;
-import org.chromium.chrome.browser.history.HistoryManagerUtils;
-import org.chromium.chrome.browser.invalidation.InvalidationController;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.invalidation.SessionsInvalidationManager;
 import org.chromium.chrome.browser.ntp.ForeignSessionHelper.ForeignSession;
 import org.chromium.chrome.browser.ntp.ForeignSessionHelper.ForeignSessionTab;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.signin.IdentityServicesProvider;
-import org.chromium.chrome.browser.signin.PersonalizedSigninPromoView;
-import org.chromium.chrome.browser.signin.ProfileDataCache;
-import org.chromium.chrome.browser.signin.SigninAccessPoint;
-import org.chromium.chrome.browser.signin.SigninManager;
-import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
-import org.chromium.chrome.browser.signin.SigninPromoController;
-import org.chromium.chrome.browser.signin.SigninPromoUtil;
+import org.chromium.chrome.browser.signin.SyncConsentActivityLauncherImpl;
+import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
+import org.chromium.chrome.browser.signin.services.ProfileDataCache;
+import org.chromium.chrome.browser.signin.services.SigninManager;
+import org.chromium.chrome.browser.signin.services.SigninManager.SignInStateObserver;
+import org.chromium.chrome.browser.sync.SyncService;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.components.signin.AccountManagerFacade;
+import org.chromium.chrome.browser.tabmodel.TabModel;
+import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.ui.favicon.FaviconHelper;
+import org.chromium.chrome.browser.ui.favicon.FaviconHelper.FaviconImageCallback;
+import org.chromium.chrome.browser.ui.signin.PersonalizedSigninPromoView;
+import org.chromium.chrome.browser.ui.signin.SyncPromoController;
+import org.chromium.chrome.browser.ui.signin.SyncPromoController.SyncPromoState;
+import org.chromium.components.signin.AccountManagerFacadeProvider;
 import org.chromium.components.signin.AccountsChangeObserver;
-import org.chromium.components.signin.ChromeSigninController;
-import org.chromium.components.sync.AndroidSyncSettings;
-import org.chromium.components.sync.AndroidSyncSettings.AndroidSyncSettingsObserver;
-import org.chromium.content_public.browser.UiThreadTaskTraits;
+import org.chromium.components.signin.identitymanager.ConsentLevel;
+import org.chromium.components.signin.metrics.SigninAccessPoint;
+import org.chromium.url.GURL;
 
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Provides the domain logic and data for RecentTabsPage and RecentTabsRowAdapter.
  */
-public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInStateObserver,
+public class RecentTabsManager implements SyncService.SyncStateChangedListener, SignInStateObserver,
                                           ProfileDataCache.Observer, AccountsChangeObserver {
     /**
      * Implement this to receive updates when the page contents change.
@@ -56,26 +53,22 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
          */
         void onUpdated();
     }
-    @Retention(RetentionPolicy.SOURCE)
-    @IntDef({PromoState.PROMO_NONE, PromoState.PROMO_SIGNIN_PERSONALIZED, PromoState.PROMO_SYNC})
-    @interface PromoState {
-        int PROMO_NONE = 0;
-        int PROMO_SIGNIN_PERSONALIZED = 1;
-        int PROMO_SYNC = 2;
-    }
 
-    private static final int RECENTLY_CLOSED_MAX_TAB_COUNT = 5;
+    private static final int RECENTLY_CLOSED_MAX_ENTRY_COUNT = 5;
 
     private static RecentlyClosedTabManager sRecentlyClosedTabManagerForTests;
 
     private final Profile mProfile;
-    private final Tab mTab;
-    private final Context mContext;
+    private final Tab mActiveTab;
+    private final TabModelSelector mTabModelSelector;
+    private final Runnable mShowHistoryManager;
 
+    private TabModel mTabModel;
+    private @SyncPromoState int mPromoState = SyncPromoState.NO_PROMO;
     private FaviconHelper mFaviconHelper;
     private ForeignSessionHelper mForeignSessionHelper;
     private List<ForeignSession> mForeignSessions;
-    private List<RecentlyClosedTab> mRecentlyClosedTabs;
+    private List<RecentlyClosedEntry> mRecentlyClosedEntries;
     private RecentTabsPagePrefs mPrefs;
     private RecentlyClosedTabManager mRecentlyClosedTabManager;
     private SigninManager mSignInManager;
@@ -83,47 +76,83 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
     private boolean mIsDestroyed;
 
     private final ProfileDataCache mProfileDataCache;
-    private final SigninPromoController mSigninPromoController;
+    private final SyncPromoController mSyncPromoController;
+    private final SyncService mSyncService;
+
+    /**
+     * Maps Session IDs to whether that entry was restored split by entry type. These are used to
+     * record historgrams on {@link #destroy()} to measure restore ratio. Cached Session IDs are
+     * used to de-duplicate as update would otherwise result in incorrect metrics.
+     */
+    private final Map<Integer, Boolean> mTabSessionIdsRestored = new HashMap<>();
+    private final Map<Integer, Boolean> mGroupSessionIdsRestored = new HashMap<>();
+    private final Map<Integer, Boolean> mBulkSessionIdsRestored = new HashMap<>();
 
     /**
      * Create an RecentTabsManager to be used with RecentTabsPage and RecentTabsRowAdapter.
      *
      * @param tab The Tab that is showing this recent tabs page.
+     * @param tabModelSelector The TabModelSelector that contains or will contain {@code tab}.
      * @param profile Profile that is associated with the current session.
      * @param context the Android context this manager will work in.
+     * @param showHistoryManager Runnable showing history manager UI.
      */
-    public RecentTabsManager(Tab tab, Profile profile, Context context) {
+    public RecentTabsManager(Tab tab, TabModelSelector tabModelSelector, Profile profile,
+            Context context, Runnable showHistoryManager) {
         mProfile = profile;
-        mTab = tab;
+        mActiveTab = tab;
+        mTabModelSelector = tabModelSelector;
+        mShowHistoryManager = showHistoryManager;
         mForeignSessionHelper = new ForeignSessionHelper(profile);
         mPrefs = new RecentTabsPagePrefs(profile);
         mFaviconHelper = new FaviconHelper();
         mRecentlyClosedTabManager = sRecentlyClosedTabManagerForTests != null
                 ? sRecentlyClosedTabManagerForTests
-                : new RecentlyClosedBridge(profile);
-        mSignInManager = IdentityServicesProvider.getSigninManager();
-        mContext = context;
+                : new RecentlyClosedBridge(profile, tabModelSelector);
+        mSignInManager = IdentityServicesProvider.get().getSigninManager(mProfile);
 
-        int imageSize = context.getResources().getDimensionPixelSize(R.dimen.user_picture_size);
-        mProfileDataCache = new ProfileDataCache(mContext, imageSize);
-        mSigninPromoController = new SigninPromoController(SigninAccessPoint.RECENT_TABS);
+        mProfileDataCache = ProfileDataCache.createWithDefaultImageSizeAndNoBadge(context);
+        mSyncPromoController = new SyncPromoController(
+                SigninAccessPoint.RECENT_TABS, SyncConsentActivityLauncherImpl.get());
+        mSyncService = SyncService.get();
 
-        mRecentlyClosedTabManager.setTabsUpdatedRunnable(() -> {
-            updateRecentlyClosedTabs();
-            postUpdate();
-        });
+        mRecentlyClosedTabManager.setEntriesUpdatedRunnable(this::updateRecentlyClosedEntries);
+        updateRecentlyClosedEntries();
 
-        updateRecentlyClosedTabs();
-        registerForForeignSessionUpdates();
+        mForeignSessionHelper.setOnForeignSessionCallback(this::updateForeignSessions);
         updateForeignSessions();
         mForeignSessionHelper.triggerSessionSync();
-        registerObservers();
 
-        if (ChromeFeatureList.isInitialized()
-                && ChromeFeatureList.isEnabled(ChromeFeatureList.FCM_INVALIDATIONS)) {
-            SessionsInvalidationManager.get(mProfile).onRecentTabsPageOpened();
-        } else {
-            InvalidationController.get().onRecentTabsPageOpened();
+        mSyncService.addSyncStateChangedListener(this);
+        mSignInManager.addSignInStateObserver(this);
+        mProfileDataCache.addObserver(this);
+        AccountManagerFacadeProvider.getInstance().addObserver(this);
+        updatePromoState();
+
+        SessionsInvalidationManager.get(mProfile).onRecentTabsPageOpened();
+    }
+
+    private static int countSessionIdsRestored(Map<Integer, Boolean> sessionIdToRestoredState) {
+        int count = 0;
+        for (Boolean state : sessionIdToRestoredState.values()) {
+            count += (state) ? 1 : 0;
+        }
+        return count;
+    }
+
+    private static void recordEntries(
+            String entryType, Map<Integer, Boolean> sessionIdToRestoredState) {
+        final int shownCount = sessionIdToRestoredState.size();
+        RecordHistogram.recordCount1000Histogram(
+                "Tabs.RecentlyClosed.EntriesShownInPage." + entryType, shownCount);
+        if (shownCount > 0) {
+            final int restoredCount = countSessionIdsRestored(sessionIdToRestoredState);
+            RecordHistogram.recordCount1000Histogram(
+                    "Tabs.RecentlyClosed.EntriesRestoredInPage." + entryType, restoredCount);
+            final int percentRestored = Math.round((restoredCount * 100.0f) / shownCount);
+            RecordHistogram.recordPercentageHistogram(
+                    "Tabs.RecentlyClosed.PercentOfEntriesRestoredInPage." + entryType,
+                    percentRestored);
         }
     }
 
@@ -132,13 +161,18 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
      */
     public void destroy() {
         mIsDestroyed = true;
-        AndroidSyncSettings.get().unregisterObserver(this);
+
+        recordEntries("Tab", mTabSessionIdsRestored);
+        recordEntries("Group", mGroupSessionIdsRestored);
+        recordEntries("Bulk", mBulkSessionIdsRestored);
+
+        mSyncService.removeSyncStateChangedListener(this);
 
         mSignInManager.removeSignInStateObserver(this);
         mSignInManager = null;
 
         mProfileDataCache.removeObserver(this);
-        AccountManagerFacade.get().removeObserver(this);
+        AccountManagerFacadeProvider.getInstance().removeObserver(this);
 
         mFaviconHelper.destroy();
         mFaviconHelper = null;
@@ -146,48 +180,45 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
         mRecentlyClosedTabManager.destroy();
         mRecentlyClosedTabManager = null;
 
-
         mUpdatedCallback = null;
 
         mPrefs.destroy();
         mPrefs = null;
 
-        if (ChromeFeatureList.isInitialized()
-                && ChromeFeatureList.isEnabled(ChromeFeatureList.FCM_INVALIDATIONS)) {
-            SessionsInvalidationManager.get(mProfile).onRecentTabsPageClosed();
-        } else {
-            InvalidationController.get().onRecentTabsPageClosed();
-        }
+        SessionsInvalidationManager.get(mProfile).onRecentTabsPageClosed();
 
         mForeignSessionHelper.destroy();
         mForeignSessionHelper = null;
     }
 
-    private void registerForForeignSessionUpdates() {
-        mForeignSessionHelper.setOnForeignSessionCallback(() -> {
-            updateForeignSessions();
-            postUpdate();
-        });
-    }
-
-    private void registerObservers() {
-        AndroidSyncSettings.get().registerObserver(this);
-        mSignInManager.addSignInStateObserver(this);
-
-        mProfileDataCache.addObserver(this);
-        AccountManagerFacade.get().addObserver(this);
-    }
-
-    private void updateRecentlyClosedTabs() {
-        mRecentlyClosedTabs =
-                mRecentlyClosedTabManager.getRecentlyClosedTabs(RECENTLY_CLOSED_MAX_TAB_COUNT);
+    private void updateRecentlyClosedEntries() {
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.BULK_TAB_RESTORE)) {
+            mRecentlyClosedEntries = mRecentlyClosedTabManager.getRecentlyClosedEntries(
+                    RECENTLY_CLOSED_MAX_ENTRY_COUNT);
+        } else {
+            mRecentlyClosedEntries =
+                    (List<RecentlyClosedEntry>) (List<? extends RecentlyClosedEntry>)
+                            mRecentlyClosedTabManager.getRecentlyClosedTabs(
+                                    RECENTLY_CLOSED_MAX_ENTRY_COUNT);
+        }
+        for (RecentlyClosedEntry entry : mRecentlyClosedEntries) {
+            if (entry instanceof RecentlyClosedTab
+                    && !mTabSessionIdsRestored.containsKey(entry.getSessionId())) {
+                mTabSessionIdsRestored.put(entry.getSessionId(), false);
+            } else if (entry instanceof RecentlyClosedGroup
+                    && !mGroupSessionIdsRestored.containsKey(entry.getSessionId())) {
+                mGroupSessionIdsRestored.put(entry.getSessionId(), false);
+            } else if (entry instanceof RecentlyClosedBulkEvent
+                    && !mBulkSessionIdsRestored.containsKey(entry.getSessionId())) {
+                mBulkSessionIdsRestored.put(entry.getSessionId(), false);
+            }
+        }
+        onUpdateDone();
     }
 
     private void updateForeignSessions() {
         mForeignSessions = mForeignSessionHelper.getForeignSessions();
-        if (mForeignSessions == null) {
-            mForeignSessions = Collections.emptyList();
-        }
+        onUpdateDone();
     }
 
     /**
@@ -200,8 +231,8 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
     /**
      * @return Most up-to-date list of recently closed tabs.
      */
-    public List<RecentlyClosedTab> getRecentlyClosedTabs() {
-        return mRecentlyClosedTabs;
+    public List<RecentlyClosedEntry> getRecentlyClosedEntries() {
+        return mRecentlyClosedEntries;
     }
 
     /**
@@ -215,7 +246,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
             int windowDisposition) {
         if (mIsDestroyed) return;
         RecordUserAction.record("MobileRecentTabManagerTabFromOtherDeviceOpened");
-        mForeignSessionHelper.openForeignSessionTab(mTab, session, tab, windowDisposition);
+        mForeignSessionHelper.openForeignSessionTab(mActiveTab, session, tab, windowDisposition);
     }
 
     /**
@@ -227,8 +258,31 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
      */
     public void openRecentlyClosedTab(RecentlyClosedTab tab, int windowDisposition) {
         if (mIsDestroyed) return;
+        mTabSessionIdsRestored.put(tab.getSessionId(), true);
         RecordUserAction.record("MobileRecentTabManagerRecentTabOpened");
-        mRecentlyClosedTabManager.openRecentlyClosedTab(mTab, tab, windowDisposition);
+        // Window disposition will select which tab to open.
+        mRecentlyClosedTabManager.openRecentlyClosedTab(getTabModel(), tab, windowDisposition);
+    }
+
+    /**
+     * Restores a recently closed entry. Use {@link #openRecentlyClosedTab()} for single tabs..
+     *
+     * @param entry The entry to open.
+     */
+    public void openRecentlyClosedEntry(RecentlyClosedEntry entry) {
+        if (mIsDestroyed) return;
+
+        assert !(entry instanceof RecentlyClosedTab)
+            : "Opening a RecentlyClosedTab should use openRecentlyClosedTab().";
+
+        if (entry instanceof RecentlyClosedGroup) {
+            mGroupSessionIdsRestored.put(entry.getSessionId(), true);
+            RecordUserAction.record("MobileRecentTabManagerRecentGroupOpened");
+        } else if (entry instanceof RecentlyClosedBulkEvent) {
+            mBulkSessionIdsRestored.put(entry.getSessionId(), true);
+            RecordUserAction.record("MobileRecentTabManagerRecentBulkEventOpened");
+        }
+        mRecentlyClosedTabManager.openRecentlyClosedEntry(getTabModel(), entry);
     }
 
     /**
@@ -236,7 +290,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
      */
     public void openHistoryPage() {
         if (mIsDestroyed) return;
-        HistoryManagerUtils.showHistoryManager(mTab.getActivity(), mTab);
+        mShowHistoryManager.run();
     }
 
     /**
@@ -244,7 +298,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
      * @return the tab instance being managed by this object.
      */
     public Tab activeTab() {
-        return mTab;
+        return mActiveTab;
     }
 
     /**
@@ -256,7 +310,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
      * @return favicon or null if favicon unavailable.
      */
     public boolean getForeignFaviconForUrl(
-            String url, int size, FaviconImageCallback faviconCallback) {
+            GURL url, int size, FaviconImageCallback faviconCallback) {
         return mFaviconHelper.getForeignFaviconImageForURL(mProfile, url, size, faviconCallback);
     }
 
@@ -269,8 +323,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
      *
      * @return may return false if we could not fetch the favicon.
      */
-    public boolean getLocalFaviconForUrl(String url, int size,
-            FaviconImageCallback faviconCallback) {
+    public boolean getLocalFaviconForUrl(GURL url, int size, FaviconImageCallback faviconCallback) {
         return mFaviconHelper.getLocalFaviconImageForURL(mProfile, url, size, faviconCallback);
     }
 
@@ -340,9 +393,10 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
     /**
      * Clears the list of recently closed tabs.
      */
-    public void clearRecentlyClosedTabs() {
+    public void clearRecentlyClosedEntries() {
         if (mIsDestroyed) return;
-        mRecentlyClosedTabManager.clearRecentlyClosedTabs();
+        RecordUserAction.record("MobileRecentTabManagerRecentTabsCleared");
+        mRecentlyClosedTabManager.clearRecentlyClosedEntries();
     }
 
     /**
@@ -364,48 +418,49 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
         return mPrefs.getSyncPromoCollapsed();
     }
 
-    /**
-     * @return The promo type that will be displayed on the screen.
-     */
-    @PromoState
-    int getPromoType() {
-        if (!ChromeSigninController.get().isSignedIn()) {
-            if (!mSignInManager.isSignInAllowed()) {
-                return PromoState.PROMO_NONE;
-            }
-            return PromoState.PROMO_SIGNIN_PERSONALIZED;
-        }
-
-        if (AndroidSyncSettings.get().isSyncEnabled()
-                && AndroidSyncSettings.get().isChromeSyncEnabled() && !mForeignSessions.isEmpty()) {
-            return PromoState.PROMO_NONE;
-        }
-        return PromoState.PROMO_SYNC;
+    /** Returns the current promo state. */
+    @SyncPromoState
+    int getPromoState() {
+        return mPromoState;
     }
 
-    void recordRecentTabMetrics() {
-        RecordHistogram.recordCountHistogram(
-                "Android.RecentTabsManager.RecentlyClosedTabs", mRecentlyClosedTabs.size());
-        RecordHistogram.recordCountHistogram(
-                "Android.RecentTabsManager.OtherDevices", mForeignSessions.size());
-
-        int totalCount = mRecentlyClosedTabs.size();
-        for (int i = 0; i < mForeignSessions.size(); i++) {
-            ForeignSession foreignSession = mForeignSessions.get(i);
-            for (int j = 0; j < foreignSession.windows.size(); j++) {
-                totalCount += foreignSession.windows.get(j).tabs.size();
+    private @SyncPromoState int calculatePromoState() {
+        if (!mSignInManager.getIdentityManager().hasPrimaryAccount(ConsentLevel.SYNC)) {
+            if (!mSignInManager.isSyncOptInAllowed()) {
+                return SyncPromoState.NO_PROMO;
             }
+            if (mSignInManager.getIdentityManager().hasPrimaryAccount(ConsentLevel.SIGNIN)) {
+                return SyncPromoState.PROMO_FOR_SIGNED_IN_STATE;
+            }
+            return SyncPromoState.PROMO_FOR_SIGNED_OUT_STATE;
         }
-        RecordHistogram.recordCountHistogram("Android.RecentTabsManager.TotalTabs", totalCount);
+
+        if (mSyncService.isSyncRequested() && !mForeignSessions.isEmpty()) {
+            return SyncPromoState.NO_PROMO;
+        }
+        return SyncPromoState.PROMO_FOR_SYNC_TURNED_OFF_STATE;
+    }
+
+    private void updatePromoState() {
+        final @SyncPromoState int newState = calculatePromoState();
+        if (newState == mPromoState) return;
+
+        final boolean hasSyncPromoStateChangedtoShown =
+                (mPromoState == SyncPromoState.NO_PROMO
+                        || mPromoState == SyncPromoState.PROMO_FOR_SYNC_TURNED_OFF_STATE)
+                && (newState == SyncPromoState.PROMO_FOR_SIGNED_IN_STATE
+                        || newState == SyncPromoState.PROMO_FOR_SIGNED_OUT_STATE);
+        if (hasSyncPromoStateChangedtoShown) {
+            mSyncPromoController.increasePromoShowCount();
+        }
+        mPromoState = newState;
     }
 
     /**
-     * Sets up the personalized signin promo and records user actions for promo impressions.
-     * @param view The view to be configured.
+     * Sets up the sync promo view.
      */
-    void setupPersonalizedSigninPromo(PersonalizedSigninPromoView view) {
-        SigninPromoUtil.setupPromoViewFromCache(
-                mSigninPromoController, mProfileDataCache, view, null);
+    void setUpSyncPromoView(PersonalizedSigninPromoView view) {
+        mSyncPromoController.setUpSyncPromoView(mProfileDataCache, view, null);
     }
 
     // SignInStateObserver implementation.
@@ -427,28 +482,39 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
 
     // ProfileDataCache.Observer implementation.
     @Override
-    public void onProfileDataUpdated(String accountId) {
+    public void onProfileDataUpdated(String accountEmail) {
         update();
     }
 
-    // AndroidSyncSettingsObserver implementation.
+    // SyncService.SyncStateChangedListener implementation.
     @Override
-    public void androidSyncSettingsChanged() {
+    public void syncStateChanged() {
         update();
     }
 
-    private void postUpdate() {
+    private void onUpdateDone() {
         if (mUpdatedCallback != null) {
             mUpdatedCallback.onUpdated();
         }
     }
 
     private void update() {
-        PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
-            if (mIsDestroyed) return;
-            updateForeignSessions();
-            postUpdate();
-        });
+        updatePromoState();
+        if (mIsDestroyed) return;
+        updateForeignSessions();
+        onUpdateDone();
+    }
+
+    private TabModel getTabModel() {
+        // When RecentTabsManager is created for a new tab then {@link mActiveTab} is being
+        // created and will not be present in a {@link TabModel} of {@link mTabModelSelector}.
+        // Defer finding the {@link TabModel} until the first time it is needed after the
+        // constructor has finished.
+        if (mTabModel != null) return mTabModel;
+
+        mTabModel = mTabModelSelector.getModelForTabId(mActiveTab.getId());
+        assert mTabModel != null;
+        return mTabModel;
     }
 
     @VisibleForTesting

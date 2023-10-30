@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,23 +8,19 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/common/conflicts/module_event_sink_win.mojom.h"
 #include "chrome/common/conflicts/module_watcher_win.h"
-#include "mojo/public/cpp/bindings/interface_ptr.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace base {
 class SingleThreadTaskRunner;
 struct OnTaskRunnerDeleter;
 }  // namespace base
-
-namespace service_manager {
-class Connector;
-}
 
 // This class is used to instantiate a ModuleWatcher instance in a child
 // process that forwards all the module events to the browser process via the
@@ -37,7 +33,10 @@ class RemoteModuleWatcher {
 
   // The amount of time this class waits before sending all the received module
   // events in one batch to the browser process.
-  static constexpr base::TimeDelta kIdleDelay = base::TimeDelta::FromSeconds(5);
+  static constexpr base::TimeDelta kIdleDelay = base::Seconds(5);
+
+  RemoteModuleWatcher(const RemoteModuleWatcher&) = delete;
+  RemoteModuleWatcher& operator=(const RemoteModuleWatcher&) = delete;
 
   ~RemoteModuleWatcher();
 
@@ -46,7 +45,7 @@ class RemoteModuleWatcher {
   // UniquePtr is destroyed.
   static UniquePtr Create(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      service_manager::Connector* connector);
+      mojo::PendingRemote<mojom::ModuleEventSink> remote_sink);
 
  private:
   explicit RemoteModuleWatcher(
@@ -55,7 +54,7 @@ class RemoteModuleWatcher {
   // Initializes this instance by connecting the |module_event_sink_| instance
   // and starting the |module_watcher_|. Called on |task_runner_|.
   void InitializeOnTaskRunner(
-      std::unique_ptr<service_manager::Connector> connector);
+      mojo::PendingRemote<mojom::ModuleEventSink> remote_sink);
 
   // Receives module load events from the |module_watcher_| and forwards them to
   // the |module_event_sink_|.
@@ -69,7 +68,7 @@ class RemoteModuleWatcher {
 
   // Module events from |module_watcher_| are forwarded to the browser process
   // through this sink.
-  mojo::InterfacePtr<mojom::ModuleEventSink> module_event_sink_;
+  mojo::Remote<mojom::ModuleEventSink> module_event_sink_;
 
   // Observes module load events.
   std::unique_ptr<ModuleWatcher> module_watcher_;
@@ -82,9 +81,7 @@ class RemoteModuleWatcher {
   // been received for |kIdleDelay| amount of time.
   base::DelayTimer delay_timer_;
 
-  base::WeakPtrFactory<RemoteModuleWatcher> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(RemoteModuleWatcher);
+  base::WeakPtrFactory<RemoteModuleWatcher> weak_ptr_factory_{this};
 };
 
 #endif  // CHROME_COMMON_CONFLICTS_REMOTE_MODULE_WATCHER_WIN_H_

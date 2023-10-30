@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,23 @@
 #include <string>
 
 #include "base/files/file_path.h"
+#include "build/chromeos_buildflags.h"
+#include "chrome/browser/web_applications/web_app_id.h"
 #include "chrome/common/buildflags.h"
+#include "components/services/app_service/public/cpp/file_handler.h"
 #include "url/gurl.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#error shell_integration_linux is for desktop linux only.
+#endif
 
 namespace base {
 class CommandLine;
 class Environment;
+}
+
+namespace web_app {
+struct DesktopActionInfo;
 }
 
 namespace shell_integration_linux {
@@ -34,9 +45,6 @@ std::string GetProgramClassName();
 
 // Gets the name for use as the res_class of the window's WM_CLASS property.
 std::string GetProgramClassClass();
-
-// Returns filename of the desktop shortcut used to launch the browser.
-std::string GetDesktopName(base::Environment* env);
 
 // Returns name of the browser icon (without a path or file extension).
 std::string GetIconName();
@@ -60,15 +68,19 @@ std::vector<base::FilePath> GetExistingProfileShortcutFilenames(
 
 // Returns contents for .desktop file based on |url| and |title|. If
 // |no_display| is true, the shortcut will not be visible to the user in menus.
-std::string GetDesktopFileContents(const base::FilePath& chrome_exe_path,
-                                   const std::string& app_name,
-                                   const GURL& url,
-                                   const std::string& extension_id,
-                                   const base::string16& title,
-                                   const std::string& icon_name,
-                                   const base::FilePath& profile_path,
-                                   const std::string& categories,
-                                   bool no_display);
+std::string GetDesktopFileContents(
+    const base::FilePath& chrome_exe_path,
+    const std::string& app_name,
+    const GURL& url,
+    const std::string& extension_id,
+    const std::u16string& title,
+    const std::string& icon_name,
+    const base::FilePath& profile_path,
+    const std::string& categories,
+    const std::string& mime_type,
+    bool no_display,
+    const std::string& run_on_os_login_mode,
+    std::set<web_app::DesktopActionInfo> action_info);
 
 // Returns contents for .desktop file that executes command_line. This is a more
 // general form of GetDesktopFileContents. If |no_display| is true, the shortcut
@@ -77,28 +89,40 @@ std::string GetDesktopFileContentsForCommand(
     const base::CommandLine& command_line,
     const std::string& app_name,
     const GURL& url,
-    const base::string16& title,
+    const std::u16string& title,
     const std::string& icon_name,
     const std::string& categories,
-    bool no_display);
+    const std::string& mime_type,
+    bool no_display,
+    std::set<web_app::DesktopActionInfo> action_info);
 
 // Returns contents for .directory file named |title| with icon |icon_name|. If
 // |icon_name| is empty, will use the Chrome icon.
-std::string GetDirectoryFileContents(const base::string16& title,
+std::string GetDirectoryFileContents(const std::u16string& title,
                                      const std::string& icon_name);
 
-#if BUILDFLAG(ENABLE_APP_LIST)
-// Create shortcuts in the application menu for the app launcher. Duplicate
-// shortcuts are avoided, so if a requested shortcut already exists it is
-// deleted first. Also creates the icon required by the shortcut.
-bool CreateAppListDesktopShortcut(const std::string& wm_class,
-                                  const std::string& title);
-#endif
+// Returns the filename for a .xml file, corresponding to a given |app_id|,
+// which is passed to `xdg-mime` to register one or more custom MIME types in
+// Linux.
+base::FilePath GetMimeTypesRegistrationFilename(
+    const base::FilePath& profile_path,
+    const web_app::AppId& app_id);
+
+// Returns the contents of a .xml file as specified by |file_handlers|, which is
+// passed to `xdg-mime` to register one or more custom MIME types in Linux.
+std::string GetMimeTypesRegistrationFileContents(
+    const apps::FileHandlers& file_handlers);
 
 // Windows that correspond to web apps need to have a deterministic (and
 // different) WMClass than normal chrome windows so the window manager groups
 // them as a separate application.
 std::string GetWMClassFromAppName(std::string app_name);
+
+// Wayland version of GetWMClassFromAppName explained above.
+// The XDG application ID must match the name of the desktop entry file, where
+// the latter looks like 'chrome-<web app id>-<profile name>.desktop'.
+std::string GetXdgAppIdForWebApp(std::string app_name,
+                                 const base::FilePath& profile_path);
 
 // Helper to launch xdg scripts. We don't want them to ask any questions on the
 // terminal etc. The function returns true if the utility launches and exits

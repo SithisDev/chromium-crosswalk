@@ -1,29 +1,36 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
 
-#include "base/optional.h"
+#include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/test/views/chrome_views_test_base.h"
 #include "components/strings/grit/components_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/test/event_generator.h"
+#include "ui/views/animation/ink_drop.h"
 #include "ui/views/animation/test/ink_drop_host_view_test_api.h"
 #include "ui/views/animation/test/test_ink_drop.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/widget/widget_utils.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ui/aura/window.h"
 #endif
 
-using views::test::InkDropHostViewTestApi;
+using views::test::InkDropHostTestApi;
 using views::test::TestInkDrop;
 
 namespace {
@@ -32,7 +39,6 @@ const int kStayOpenTimeMS = 100;
 const int kOpenTimeMS = 100;
 const int kAnimationDurationMS = (kOpenTimeMS * 2) + kStayOpenTimeMS;
 const int kImageSize = 15;
-const SkColor kTestColor = SkColorSetRGB(64, 64, 64);
 const int kNumberOfSteps = 300;
 
 class TestIconLabelBubbleView : public IconLabelBubbleView {
@@ -47,12 +53,15 @@ class TestIconLabelBubbleView : public IconLabelBubbleView {
     SHRINKING,
   };
 
-  explicit TestIconLabelBubbleView(const gfx::FontList& font_list)
-      : IconLabelBubbleView(font_list), value_(0), is_bubble_showing_(false) {
+  explicit TestIconLabelBubbleView(const gfx::FontList& font_list,
+                                   Delegate* delegate)
+      : IconLabelBubbleView(font_list, delegate) {
     GetImageView()->SetImageSize(gfx::Size(kImageSize, kImageSize));
-    SetLabel(base::ASCIIToUTF16("Label"));
-    separator_view()->set_disable_animation_for_test(true);
+    SetLabel(u"Label");
   }
+
+  TestIconLabelBubbleView(const TestIconLabelBubbleView&) = delete;
+  TestIconLabelBubbleView& operator=(const TestIconLabelBubbleView&) = delete;
 
   void SetCurrentAnimationValue(int value) {
     value_ = value;
@@ -65,9 +74,8 @@ class TestIconLabelBubbleView : public IconLabelBubbleView {
   const gfx::Rect& GetLabelBounds() const { return label()->bounds(); }
 
   State state() const {
-    const double kOpenFraction =
-        static_cast<double>(kOpenTimeMS) / kAnimationDurationMS;
-    double state = value_ / (double)kNumberOfSteps;
+    const double kOpenFraction = double{kOpenTimeMS} / kAnimationDurationMS;
+    double state = static_cast<double>(value_) / kNumberOfSteps;
     if (state < kOpenFraction)
       return GROWING;
     if (state > (1.0 - kOpenFraction))
@@ -76,36 +84,25 @@ class TestIconLabelBubbleView : public IconLabelBubbleView {
   }
 
   void HideBubble() {
-    AnimateInkDrop(views::InkDropState::HIDDEN, nullptr /* event */);
+    views::InkDrop::Get(this)->AnimateToState(views::InkDropState::HIDDEN,
+                                              nullptr /* event */);
     is_bubble_showing_ = false;
   }
 
   bool IsBubbleShowing() const override { return is_bubble_showing_; }
 
  protected:
-  // IconLabelBubbleView:
-  SkColor GetTextColor() const override { return kTestColor; }
-  SkColor GetInkDropBaseColor() const override { return kTestColor; }
-
-  bool ShouldShowLabel() const override {
-    return !IsShrinking() ||
-           (width() >
-            (image()->GetPreferredSize().width() +
-             GetLayoutInsets(LOCATION_BAR_ICON_INTERIOR_PADDING).width() +
-             2 * GetLayoutConstant(LOCATION_BAR_ELEMENT_PADDING)));
-  }
-
-  double WidthMultiplier() const override {
+  int GetWidthBetween(int min, int max) const override {
     const double kOpenFraction =
         static_cast<double>(kOpenTimeMS) / kAnimationDurationMS;
-    double fraction = value_ / (double)kNumberOfSteps;
+    double fraction = static_cast<double>(value_) / kNumberOfSteps;
     switch (state()) {
       case GROWING:
-        return fraction / kOpenFraction;
+        return min + (max - min) * (fraction / kOpenFraction);
       case STEADY:
-        return 1.0;
+        return max;
       case SHRINKING:
-        return (1.0 - fraction) / kOpenFraction;
+        return min + (max - min) * ((1.0 - fraction) / kOpenFraction);
     }
     NOTREACHED();
     return 1.0;
@@ -114,46 +111,62 @@ class TestIconLabelBubbleView : public IconLabelBubbleView {
   bool IsShrinking() const override { return state() == SHRINKING; }
 
   bool ShowBubble(const ui::Event& event) override {
-    AnimateInkDrop(views::InkDropState::ACTIVATED, nullptr /* event */);
+    views::InkDrop::Get(this)->AnimateToState(views::InkDropState::ACTIVATED,
+                                              nullptr /* event */);
     is_bubble_showing_ = true;
     return true;
   }
 
  private:
-  int value_;
-  bool is_bubble_showing_;
-  DISALLOW_COPY_AND_ASSIGN(TestIconLabelBubbleView);
+  std::unique_ptr<ui::ScopedAnimationDurationScaleMode> zero_duration_mode_ =
+      std::make_unique<ui::ScopedAnimationDurationScaleMode>(
+          ui::ScopedAnimationDurationScaleMode::ZERO_DURATION);
+  int value_ = 0;
+  bool is_bubble_showing_ = false;
 };
 
 }  // namespace
 
-class IconLabelBubbleViewTest : public ChromeViewsTestBase {
+class IconLabelBubbleViewTestBase : public ChromeViewsTestBase,
+                                    public IconLabelBubbleView::Delegate {
+ public:
+  // IconLabelBubbleView::Delegate:
+  SkColor GetIconLabelBubbleSurroundingForegroundColor() const override {
+    return gfx::kPlaceholderColor;
+  }
+  SkColor GetIconLabelBubbleBackgroundColor() const override {
+    return gfx::kPlaceholderColor;
+  }
+};
+
+class IconLabelBubbleViewTest : public IconLabelBubbleViewTestBase {
  protected:
-  // ChromeViewsTestBase:
+  // IconLabelBubbleViewTestBase:
   void SetUp() override {
     ChromeViewsTestBase::SetUp();
     gfx::FontList font_list;
 
-    CreateWidget();
-    generator_ =
-        std::make_unique<ui::test::EventGenerator>(GetRootWindow(widget_));
-    view_ = new TestIconLabelBubbleView(font_list);
+    widget_ = CreateTestWidget();
+    generator_ = std::make_unique<ui::test::EventGenerator>(
+        GetRootWindow(widget_.get()));
+    view_ = widget_->SetContentsView(
+        std::make_unique<TestIconLabelBubbleView>(font_list, this));
     view_->SetBoundsRect(gfx::Rect(0, 0, 24, 24));
-    widget_->SetContentsView(view_);
 
     widget_->Show();
+
+    generator_->MoveMouseTo(view_->GetBoundsInScreen().CenterPoint());
   }
 
   void TearDown() override {
     generator_.reset();
-    if (widget_ && !widget_->IsClosed())
-      widget_->Close();
+    widget_.reset();
 
     ChromeViewsTestBase::TearDown();
   }
 
-  void VerifyWithAnimationStep(int step) {
-    Reset();
+  void VerifyWithAnimationStep(int step, bool icon_visible) {
+    Reset(icon_visible);
     for (int value = 0; value < kNumberOfSteps; value += step) {
       SetValue(value);
       VerifyAnimationStep();
@@ -169,30 +182,23 @@ class IconLabelBubbleViewTest : public ChromeViewsTestBase {
 
   void AttachInkDrop() {
     ink_drop_ = new TestInkDrop();
-    InkDropHostViewTestApi(view_).SetInkDrop(base::WrapUnique(ink_drop_));
+    InkDropHostTestApi(views::InkDrop::Get(view_))
+        .SetInkDrop(base::WrapUnique(ink_drop_.get()));
   }
 
  private:
-  void CreateWidget() {
-    DCHECK(!widget_);
-
-    widget_ = new views::Widget;
-    views::Widget::InitParams params =
-        CreateParams(views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
-    params.bounds = gfx::Rect(0, 0, 200, 200);
-    widget_->Init(params);
-  }
-
-  void Reset() {
+  void Reset(bool icon_visible) {
     view_->SetLabelVisible(true);
     SetValue(0);
     steady_reached_ = false;
     shrinking_reached_ = false;
     minimum_size_reached_ = false;
-    previous_width_ = 0;
     initial_image_x_ = GetImageBounds().x();
     EXPECT_EQ(GetLayoutInsets(LOCATION_BAR_ICON_INTERIOR_PADDING).left(),
               initial_image_x_);
+
+    previous_width_ = icon_visible ? initial_image_x_ : 0;
+    view_->set_grow_animation_starting_width_for_testing(previous_width_);
   }
 
   void VerifyAnimationStep() {
@@ -262,9 +268,9 @@ class IconLabelBubbleViewTest : public ChromeViewsTestBase {
     return view_->GetImageView()->bounds();
   }
 
-  views::Widget* widget_ = nullptr;
-  TestIconLabelBubbleView* view_ = nullptr;
-  TestInkDrop* ink_drop_ = nullptr;
+  std::unique_ptr<views::Widget> widget_;
+  raw_ptr<TestIconLabelBubbleView> view_ = nullptr;
+  raw_ptr<TestInkDrop> ink_drop_ = nullptr;
   std::unique_ptr<ui::test::EventGenerator> generator_;
 
   bool steady_reached_ = false;
@@ -280,10 +286,21 @@ class IconLabelBubbleViewTest : public ChromeViewsTestBase {
 // size.
 // Various step sizes during animation simulate different possible timing.
 TEST_F(IconLabelBubbleViewTest, AnimateLayout) {
-  VerifyWithAnimationStep(1);
-  VerifyWithAnimationStep(5);
-  VerifyWithAnimationStep(10);
-  VerifyWithAnimationStep(25);
+  VerifyWithAnimationStep(1, false);
+  VerifyWithAnimationStep(5, false);
+  VerifyWithAnimationStep(10, false);
+  VerifyWithAnimationStep(25, false);
+}
+
+// Like AnimateLayout, tests layout rules while simulating animation, except
+// with the icon initially visible.
+// The animation is first growing the bubble from the image size, then keeping
+// its size constant and finally shrinking it down to the initial size.
+TEST_F(IconLabelBubbleViewTest, AnimateLayoutWithVisibleIcon) {
+  VerifyWithAnimationStep(1, true);
+  VerifyWithAnimationStep(5, true);
+  VerifyWithAnimationStep(10, true);
+  VerifyWithAnimationStep(25, true);
 }
 
 // Verify that clicking the view a second time hides its bubble.
@@ -330,7 +347,7 @@ TEST_F(IconLabelBubbleViewTest, MouseInkDropState) {
 TEST_F(IconLabelBubbleViewTest, SeparatorOpacity) {
   views::View* separator_view = view()->separator_view();
   separator_view->SetPaintToLayer();
-  view()->SetLabel(base::ASCIIToUTF16("x"));
+  view()->SetLabel(u"x");
   EXPECT_EQ(1.0f, separator_view->layer()->opacity());
 
   AttachInkDrop();
@@ -351,7 +368,7 @@ TEST_F(IconLabelBubbleViewTest, SeparatorOpacity) {
   EXPECT_EQ(1.0f, separator_view->layer()->opacity());
 }
 
-#if !defined(OS_MACOSX)
+#if !BUILDFLAG(IS_MAC)
 TEST_F(IconLabelBubbleViewTest, GestureInkDropState) {
   AttachInkDrop();
   generator()->GestureTapAt(gfx::Point());
@@ -372,12 +389,12 @@ TEST_F(IconLabelBubbleViewTest, GestureInkDropState) {
 #endif
 
 TEST_F(IconLabelBubbleViewTest, LabelVisibilityAfterAnimation) {
-  view()->AnimateIn(base::nullopt);
+  view()->AnimateIn(absl::nullopt);
   EXPECT_TRUE(view()->IsLabelVisible());
   view()->AnimateOut();
   EXPECT_FALSE(view()->IsLabelVisible());
   // Label should reappear if animated in after being animated out.
-  view()->AnimateIn(base::nullopt);
+  view()->AnimateIn(absl::nullopt);
   EXPECT_TRUE(view()->IsLabelVisible());
 }
 
@@ -387,7 +404,7 @@ TEST_F(IconLabelBubbleViewTest, LabelVisibilityAfterAnimationReset) {
   view()->ResetSlideAnimation(false);
   EXPECT_FALSE(view()->IsLabelVisible());
   // Label should reappear if animated in after being reset out.
-  view()->AnimateIn(base::nullopt);
+  view()->AnimateIn(absl::nullopt);
   EXPECT_TRUE(view()->IsLabelVisible());
 }
 
@@ -402,24 +419,51 @@ TEST_F(IconLabelBubbleViewTest,
   EXPECT_TRUE(view()->IsLabelVisible());
 }
 
-#if defined(OS_CHROMEOS)
+TEST_F(IconLabelBubbleViewTest, LabelPaintsOverSolidBackgroundWhenNecessary) {
+  view()->ResetSlideAnimation(false);
+
+  // Initially no background should be present.
+  EXPECT_FALSE(view()->IsLabelVisible());
+  EXPECT_EQ(nullptr, view()->GetBackground());
+
+  // Set the view to paint its label over a solid background. There should still
+  // be no background present as the label will not be visible.
+  view()->SetPaintLabelOverSolidBackground(true);
+  EXPECT_FALSE(view()->IsLabelVisible());
+  EXPECT_EQ(nullptr, view()->GetBackground());
+
+  // Animate the label in, the background should be present.
+  view()->AnimateIn(IDS_AUTOFILL_CARD_SAVED);
+  EXPECT_TRUE(view()->IsLabelVisible());
+  EXPECT_NE(nullptr, view()->GetBackground());
+
+  // After returning to the collapsed state the background should no longer be
+  // present.
+  view()->ResetSlideAnimation(false);
+  EXPECT_FALSE(view()->IsLabelVisible());
+  EXPECT_EQ(nullptr, view()->GetBackground());
+
+  // Disable painting over a background. The background should no longer be
+  // present when it animates in.
+  view()->SetPaintLabelOverSolidBackground(false);
+  view()->AnimateIn(IDS_AUTOFILL_CARD_SAVED);
+  EXPECT_TRUE(view()->IsLabelVisible());
+  EXPECT_EQ(nullptr, view()->GetBackground());
+}
+
+#if defined(USE_AURA)
 // Verifies IconLabelBubbleView::CalculatePreferredSize() doesn't crash when
 // there is a widget but no compositor.
-using IconLabelBubbleViewCrashTest = ChromeViewsTestBase;
+using IconLabelBubbleViewCrashTest = IconLabelBubbleViewTestBase;
 
 TEST_F(IconLabelBubbleViewCrashTest,
        GetPreferredSizeDoesntCrashWhenNoCompositor) {
   gfx::FontList font_list;
-  views::Widget::InitParams params =
-      CreateParams(views::Widget::InitParams::TYPE_WINDOW);
-  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  views::Widget widget;
-  widget.Init(params);
-  IconLabelBubbleView* icon_label_bubble_view =
-      new TestIconLabelBubbleView(font_list);
-  icon_label_bubble_view->SetLabel(base::ASCIIToUTF16("x"));
-  widget.GetContentsView()->AddChildView(icon_label_bubble_view);
-  aura::Window* widget_native_view = widget.GetNativeView();
+  std::unique_ptr<views::Widget> widget = CreateTestWidget();
+  IconLabelBubbleView* icon_label_bubble_view = widget->SetContentsView(
+      std::make_unique<TestIconLabelBubbleView>(font_list, this));
+  icon_label_bubble_view->SetLabel(u"x");
+  aura::Window* widget_native_view = widget->GetNativeView();
   // Remove the window from its parent. This means GetWidget() in
   // IconLabelBubbleView will return non-null, but GetWidget()->GetCompositor()
   // will return null.

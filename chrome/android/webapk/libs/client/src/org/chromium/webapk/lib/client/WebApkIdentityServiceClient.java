@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@ import android.text.TextUtils;
 import android.util.Log;
 
 import org.chromium.base.task.TaskTraits;
-import org.chromium.webapk.lib.common.WebApkMetaDataKeys;
+import org.chromium.components.webapk.lib.common.WebApkMetaDataKeys;
 import org.chromium.webapk.lib.common.identity_service.IIdentityService;
 
 /**
@@ -45,7 +45,7 @@ public class WebApkIdentityServiceClient {
     public static final int SHELL_APK_VERSION_SUPPORTING_SWITCH_RUNTIME_HOST = 6;
 
     public static final String ACTION_WEBAPK_IDENTITY_SERVICE = "org.webapk.IDENTITY_SERVICE_API";
-    private static final String TAG = "cr_WebApkIdentityService";
+    private static final String TAG = "WebApkIdentityService";
 
     private static WebApkIdentityServiceClient sInstance;
 

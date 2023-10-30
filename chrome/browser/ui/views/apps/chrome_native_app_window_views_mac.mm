@@ -1,14 +1,16 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "base/memory/raw_ptr.h"
 
 #import "chrome/browser/ui/views/apps/chrome_native_app_window_views_mac.h"
 
 #import <Cocoa/Cocoa.h>
 
 #import "base/mac/scoped_nsobject.h"
-#import "base/mac/sdk_forward_declarations.h"
-#include "chrome/browser/apps/app_shim/extension_app_shim_handler_mac.h"
+#include "chrome/browser/apps/app_shim/app_shim_manager_mac.h"
+#include "chrome/browser/profiles/profile.h"
 #import "chrome/browser/ui/views/apps/app_window_native_widget_mac.h"
 #import "chrome/browser/ui/views/apps/native_app_window_frame_view_mac.h"
 #import "ui/gfx/mac/coordinate_conversion.h"
@@ -18,9 +20,10 @@
 @interface ResizeNotificationObserver : NSObject {
  @private
   // Weak. Owns us.
-  ChromeNativeAppWindowViewsMac* nativeAppWindow_;
+  raw_ptr<ChromeNativeAppWindowViewsMac> _nativeAppWindow;
 }
-- (id)initForNativeAppWindow:(ChromeNativeAppWindowViewsMac*)nativeAppWindow;
+- (instancetype)initForNativeAppWindow:
+    (ChromeNativeAppWindowViewsMac*)nativeAppWindow;
 - (void)onWindowWillStartLiveResize:(NSNotification*)notification;
 - (void)onWindowWillExitFullScreen:(NSNotification*)notification;
 - (void)onWindowDidExitFullScreen:(NSNotification*)notification;
@@ -29,9 +32,10 @@
 
 @implementation ResizeNotificationObserver
 
-- (id)initForNativeAppWindow:(ChromeNativeAppWindowViewsMac*)nativeAppWindow {
+- (instancetype)initForNativeAppWindow:
+    (ChromeNativeAppWindowViewsMac*)nativeAppWindow {
   if ((self = [super init])) {
-    nativeAppWindow_ = nativeAppWindow;
+    _nativeAppWindow = nativeAppWindow;
     [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(onWindowWillStartLiveResize:)
@@ -57,21 +61,26 @@
   return self;
 }
 
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [super dealloc];
+}
+
 - (void)onWindowWillStartLiveResize:(NSNotification*)notification {
-  nativeAppWindow_->OnWindowWillStartLiveResize();
+  _nativeAppWindow->OnWindowWillStartLiveResize();
 }
 
 - (void)onWindowWillExitFullScreen:(NSNotification*)notification {
-  nativeAppWindow_->OnWindowWillExitFullScreen();
+  _nativeAppWindow->OnWindowWillExitFullScreen();
 }
 
 - (void)onWindowDidExitFullScreen:(NSNotification*)notification {
-  nativeAppWindow_->OnWindowDidExitFullScreen();
+  _nativeAppWindow->OnWindowDidExitFullScreen();
 }
 
 - (void)stopObserving {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  nativeAppWindow_ = nullptr;
+  _nativeAppWindow = nullptr;
 }
 
 @end
@@ -123,14 +132,14 @@ void ChromeNativeAppWindowViewsMac::OnBeforeWidgetInit(
                                                  widget);
 }
 
-views::NonClientFrameView*
+std::unique_ptr<views::NonClientFrameView>
 ChromeNativeAppWindowViewsMac::CreateStandardDesktopAppFrame() {
-  return new NativeAppWindowFrameViewMac(widget(), this);
+  return std::make_unique<NativeAppWindowFrameViewMac>(widget(), this);
 }
 
-views::NonClientFrameView*
+std::unique_ptr<views::NonClientFrameView>
 ChromeNativeAppWindowViewsMac::CreateNonStandardAppFrame() {
-  return new NativeAppWindowFrameViewMac(widget(), this);
+  return std::make_unique<NativeAppWindowFrameViewMac>(widget(), this);
 }
 
 bool ChromeNativeAppWindowViewsMac::IsMaximized() const {
@@ -143,23 +152,6 @@ gfx::Rect ChromeNativeAppWindowViewsMac::GetRestoredBounds() const {
     return gfx::ScreenRectFromNSRect(bounds_before_maximize_);
 
   return ChromeNativeAppWindowViews::GetRestoredBounds();
-}
-
-void ChromeNativeAppWindowViewsMac::Show() {
-  UnhideWithoutActivation();
-  ChromeNativeAppWindowViews::Show();
-}
-
-void ChromeNativeAppWindowViewsMac::ShowInactive() {
-  if (is_hidden_with_app_)
-    return;
-
-  ChromeNativeAppWindowViews::ShowInactive();
-}
-
-void ChromeNativeAppWindowViewsMac::Activate() {
-  UnhideWithoutActivation();
-  ChromeNativeAppWindowViews::Activate();
 }
 
 void ChromeNativeAppWindowViewsMac::Maximize() {
@@ -183,31 +175,18 @@ void ChromeNativeAppWindowViewsMac::Restore() {
 }
 
 void ChromeNativeAppWindowViewsMac::FlashFrame(bool flash) {
-  apps::ExtensionAppShimHandler::Get()->RequestUserAttentionForWindow(
-      app_window(), flash ? apps::APP_SHIM_ATTENTION_CRITICAL
-                          : apps::APP_SHIM_ATTENTION_CANCEL);
+  Profile* profile =
+      Profile::FromBrowserContext(app_window()->browser_context());
+  AppShimHost* shim_host = apps::AppShimManager::Get()->FindHost(
+      profile, app_window()->extension_id());
+  if (!shim_host)
+    return;
+  shim_host->GetAppShim()->SetUserAttention(
+      flash ? chrome::mojom::AppShimAttentionType::kCritical
+            : chrome::mojom::AppShimAttentionType::kCancel);
 }
 
 void ChromeNativeAppWindowViewsMac::OnWidgetCreated(views::Widget* widget) {
   nswindow_observer_.reset(
       [[ResizeNotificationObserver alloc] initForNativeAppWindow:this]);
-}
-
-void ChromeNativeAppWindowViewsMac::ShowWithApp() {
-  is_hidden_with_app_ = false;
-  if (!app_window()->is_hidden())
-    ShowInactive();
-}
-
-void ChromeNativeAppWindowViewsMac::HideWithApp() {
-  is_hidden_with_app_ = true;
-  ChromeNativeAppWindowViews::Hide();
-}
-
-void ChromeNativeAppWindowViewsMac::UnhideWithoutActivation() {
-  if (is_hidden_with_app_) {
-    apps::ExtensionAppShimHandler::Get()->UnhideWithoutActivationForWindow(
-        app_window());
-    is_hidden_with_app_ = false;
-  }
 }

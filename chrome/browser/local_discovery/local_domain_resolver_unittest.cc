@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/local_discovery/service_discovery_client_impl.h"
 #include "net/base/net_errors.h"
@@ -89,7 +89,7 @@ class LocalDomainResolverTest : public testing::Test {
 
   void RunFor(base::TimeDelta time_period) {
     base::RunLoop run_loop;
-    base::CancelableCallback<void()> callback(run_loop.QuitWhenIdleClosure());
+    base::CancelableOnceClosure callback(run_loop.QuitWhenIdleClosure());
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, callback.callback(), time_period);
     run_loop.Run();
@@ -103,7 +103,7 @@ class LocalDomainResolverTest : public testing::Test {
 
   net::MockMDnsSocketFactory socket_factory_;
   net::MDnsClientImpl mdns_client_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 TEST_F(LocalDomainResolverTest, ResolveDomainA) {
@@ -153,7 +153,7 @@ TEST_F(LocalDomainResolverTest, ResolveDomainAnyOneAvailable) {
 
   EXPECT_CALL(*this, AddressCallbackInternal(true, "", "a::1:2:3:4"));
 
-  RunFor(base::TimeDelta::FromMilliseconds(150));
+  RunFor(base::Milliseconds(150));
 }
 
 
@@ -188,7 +188,7 @@ TEST_F(LocalDomainResolverTest, ResolveDomainNone) {
 
   EXPECT_CALL(*this, AddressCallbackInternal(false, "", ""));
 
-  RunFor(base::TimeDelta::FromSeconds(4));
+  RunFor(base::Seconds(4));
 }
 
 }  // namespace

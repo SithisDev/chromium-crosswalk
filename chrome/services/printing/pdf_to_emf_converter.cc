@@ -1,76 +1,26 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/services/printing/pdf_to_emf_converter.h"
 
-#include <algorithm>
 #include <limits>
 #include <utility>
 
-#include "base/bind.h"
 #include "base/containers/span.h"
-#include "base/lazy_instance.h"
-#include "base/stl_util.h"
-#include "mojo/public/cpp/base/shared_memory_utils.h"
+#include "base/strings/utf_string_conversions.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "pdf/pdf.h"
 #include "printing/emf_win.h"
+#include "printing/mojom/print.mojom.h"
 #include "ui/gfx/gdi_util.h"
 
 namespace printing {
 
-namespace {
-
-base::LazyInstance<std::vector<mojom::PdfToEmfConverterClientPtr>>::Leaky
-    g_converter_clients = LAZY_INSTANCE_INITIALIZER;
-
-void PreCacheFontCharacters(const LOGFONT* logfont,
-                            const wchar_t* text,
-                            size_t text_length) {
-  if (g_converter_clients.Get().empty()) {
-    NOTREACHED()
-        << "PreCacheFontCharacters when no converter client is registered.";
-    return;
-  }
-
-  // We pass the LOGFONT as an array of bytes for simplicity (no typemaps
-  // required).
-  std::vector<uint8_t> logfont_mojo(sizeof(LOGFONT));
-  memcpy(logfont_mojo.data(), logfont, sizeof(LOGFONT));
-
-  g_converter_clients.Get().front()->PreCacheFontCharacters(
-      logfont_mojo, base::string16(text, text_length));
-}
-
-void OnConvertedClientDisconnected() {
-  // We have no direct way of tracking which PdfToEmfConverterClientPtr got
-  // disconnected as it is a movable type, short of using a wrapper.
-  // Just traverse the list of clients and remove the ones that are not bound.
-  base::EraseIf(g_converter_clients.Get(),
-                [](const mojom::PdfToEmfConverterClientPtr& client) {
-                  return !client.is_bound();
-                });
-}
-
-void RegisterConverterClient(mojom::PdfToEmfConverterClientPtr client) {
-  if (!g_converter_clients.IsCreated()) {
-    // First time this method is called.
-    chrome_pdf::SetPDFEnsureTypefaceCharactersAccessible(
-        PreCacheFontCharacters);
-  }
-  client.set_connection_error_handler(
-      base::BindOnce(&OnConvertedClientDisconnected));
-  g_converter_clients.Get().push_back(std::move(client));
-}
-
-}  // namespace
-
 PdfToEmfConverter::PdfToEmfConverter(
     base::ReadOnlySharedMemoryRegion pdf_region,
-    const PdfRenderSettings& pdf_render_settings,
-    mojom::PdfToEmfConverterClientPtr client)
+    const PdfRenderSettings& pdf_render_settings)
     : pdf_render_settings_(pdf_render_settings) {
-  RegisterConverterClient(std::move(client));
   SetPrintMode();
   LoadPdf(std::move(pdf_region));
 }
@@ -78,8 +28,6 @@ PdfToEmfConverter::PdfToEmfConverter(
 PdfToEmfConverter::~PdfToEmfConverter() = default;
 
 void PdfToEmfConverter::SetPrintMode() {
-  chrome_pdf::SetPDFUseGDIPrinting(pdf_render_settings_.mode ==
-                                   PdfRenderSettings::Mode::GDI_TEXT);
   int printing_mode;
   switch (pdf_render_settings_.mode) {
     case PdfRenderSettings::Mode::TEXTONLY:
@@ -91,8 +39,13 @@ void PdfToEmfConverter::SetPrintMode() {
     case PdfRenderSettings::Mode::POSTSCRIPT_LEVEL3:
       printing_mode = chrome_pdf::PrintingMode::kPostScript3;
       break;
+    case PdfRenderSettings::Mode::POSTSCRIPT_LEVEL3_WITH_TYPE42_FONTS:
+      printing_mode = chrome_pdf::PrintingMode::kPostScript3WithType42Fonts;
+      break;
+    case PdfRenderSettings::Mode::EMF_WITH_REDUCED_RASTERIZATION:
+      printing_mode = chrome_pdf::PrintingMode::kEmfWithReducedRasterization;
+      break;
     default:
-      // Not using postscript or text only.
       printing_mode = chrome_pdf::PrintingMode::kEmf;
   }
   chrome_pdf::SetPDFUsePrintMode(printing_mode);
@@ -147,7 +100,8 @@ base::ReadOnlySharedMemoryRegion PdfToEmfConverter::RenderPdfPageToMetafile(
 
   // The underlying metafile is of type Emf and ignores the arguments passed
   // to StartPage().
-  metafile.StartPage(gfx::Size(), gfx::Rect(), 1);
+  metafile.StartPage(gfx::Size(), gfx::Rect(), 1,
+                     mojom::PageOrientation::kUpright);
   int offset_x = postscript ? pdf_render_settings_.offsets.x() : 0;
   int offset_y = postscript ? pdf_render_settings_.offsets.y() : 0;
 
@@ -168,7 +122,7 @@ base::ReadOnlySharedMemoryRegion PdfToEmfConverter::RenderPdfPageToMetafile(
 
   const uint32_t size = metafile.GetDataSize();
   base::MappedReadOnlyRegion region_mapping =
-      mojo::CreateReadOnlySharedMemoryRegion(size);
+      base::ReadOnlySharedMemoryRegion::Create(size);
   if (!region_mapping.IsValid())
     return invalid_emf_region;
 
@@ -190,7 +144,9 @@ void PdfToEmfConverter::ConvertPage(uint32_t page_number,
   float scale_factor = 1.0f;
   bool postscript =
       pdf_render_settings_.mode == PdfRenderSettings::Mode::POSTSCRIPT_LEVEL2 ||
-      pdf_render_settings_.mode == PdfRenderSettings::Mode::POSTSCRIPT_LEVEL3;
+      pdf_render_settings_.mode == PdfRenderSettings::Mode::POSTSCRIPT_LEVEL3 ||
+      pdf_render_settings_.mode ==
+          PdfRenderSettings::Mode::POSTSCRIPT_LEVEL3_WITH_TYPE42_FONTS;
   base::ReadOnlySharedMemoryRegion emf_region =
       RenderPdfPageToMetafile(page_number, postscript, &scale_factor);
   std::move(callback).Run(std::move(emf_region), scale_factor);

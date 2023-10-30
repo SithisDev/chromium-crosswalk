@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ TEST_F(ActivityLogPolicyUtilTest, StripPrivacySensitive) {
                  base::Time::Now(),
                  Action::ACTION_API_CALL,
                  "tabs.executeScript");
-  action->mutable_args()->AppendString("woof");
+  action->mutable_args().Append("woof");
   action->set_page_url(GURL("http://www.google.com/"));
   action->set_page_incognito(true);
   action->set_page_title("private");
@@ -43,14 +43,13 @@ TEST_F(ActivityLogPolicyUtilTest, StripPrivacySensitive) {
 TEST_F(ActivityLogPolicyUtilTest, StripPrivacySensitiveWebRequest) {
   scoped_refptr<Action> action = new Action(
       "punky", base::Time::Now(), Action::ACTION_WEB_REQUEST, "webRequest");
-  action->mutable_other()->Set(
-      activity_log_constants::kActionWebRequest,
-      DictionaryBuilder()
-          .Set(activity_log_web_request_constants::kNewUrlKey,
-               "http://www.youtube.com/")
-          .Set(activity_log_web_request_constants::kAddedRequestHeadersKey,
-               ListBuilder().Append("arg").Build())
-          .Build());
+  base::Value::Dict root;
+  root.Set(activity_log_web_request_constants::kNewUrlKey,
+           "http://www.youtube.com/");
+  root.Set(activity_log_web_request_constants::kAddedRequestHeadersKey,
+           base::Value::List());
+  action->mutable_other().Set(activity_log_constants::kActionWebRequest,
+                              std::move(root));
 
   ActivityLogPolicy::Util::StripPrivacySensitiveFields(action);
 
@@ -61,25 +60,25 @@ TEST_F(ActivityLogPolicyUtilTest, StripPrivacySensitiveWebRequest) {
 
 // Test that argument values are stripped as appropriate.
 TEST_F(ActivityLogPolicyUtilTest, StripArguments) {
-  ActivityLogPolicy::Util::ApiSet whitelist;
-  whitelist.insert(
+  ActivityLogPolicy::Util::ApiSet allowlist;
+  allowlist.insert(
       std::make_pair(Action::ACTION_API_CALL, "tabs.executeScript"));
 
-  // API is in whitelist; not stripped.
+  // API is in allowlist; not stripped.
   scoped_refptr<Action> action =
       new Action("punky",
                  base::Time::Now(),
                  Action::ACTION_API_CALL,
                  "tabs.executeScript");
-  action->mutable_args()->AppendString("woof");
-  ActivityLogPolicy::Util::StripArguments(whitelist, action);
+  action->mutable_args().Append("woof");
+  ActivityLogPolicy::Util::StripArguments(allowlist, action);
   ASSERT_EQ("[\"woof\"]", ActivityLogPolicy::Util::Serialize(action->args()));
 
-  // Not in whitelist: stripped.
+  // Not in allowlist: stripped.
   action = new Action(
       "punky", base::Time::Now(), Action::ACTION_API_CALL, "tabs.create");
-  action->mutable_args()->AppendString("woof");
-  ActivityLogPolicy::Util::StripArguments(whitelist, action);
+  action->mutable_args().Append("woof");
+  ActivityLogPolicy::Util::StripArguments(allowlist, action);
   ASSERT_EQ("", ActivityLogPolicy::Util::Serialize(action->args()));
 }
 

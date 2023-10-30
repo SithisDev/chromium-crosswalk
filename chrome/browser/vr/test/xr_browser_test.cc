@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,6 @@
 #include "base/path_service.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser.h"
@@ -25,6 +24,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "url/gurl.h"
 
@@ -35,12 +35,8 @@ constexpr base::TimeDelta XrBrowserTestBase::kPollCheckIntervalLong;
 constexpr base::TimeDelta XrBrowserTestBase::kPollTimeoutShort;
 constexpr base::TimeDelta XrBrowserTestBase::kPollTimeoutMedium;
 constexpr base::TimeDelta XrBrowserTestBase::kPollTimeoutLong;
-constexpr char XrBrowserTestBase::kVrOverrideEnvVar[];
-constexpr char XrBrowserTestBase::kVrOverrideVal[];
-constexpr char XrBrowserTestBase::kVrConfigPathEnvVar[];
-constexpr char XrBrowserTestBase::kVrConfigPathVal[];
-constexpr char XrBrowserTestBase::kVrLogPathEnvVar[];
-constexpr char XrBrowserTestBase::kVrLogPathVal[];
+constexpr char XrBrowserTestBase::kOpenXrConfigPathEnvVar[];
+constexpr char XrBrowserTestBase::kOpenXrConfigPathVal[];
 constexpr char XrBrowserTestBase::kTestFileDir[];
 constexpr char XrBrowserTestBase::kSwitchIgnoreRuntimeRequirements[];
 const std::vector<std::string> XrBrowserTestBase::kRequiredTestSwitches{
@@ -57,19 +53,19 @@ XrBrowserTestBase::XrBrowserTestBase() : env_(base::Environment::Create()) {
 XrBrowserTestBase::~XrBrowserTestBase() = default;
 
 base::FilePath::StringType UTF8ToWideIfNecessary(std::string input) {
-#ifdef OS_WIN
+#if BUILDFLAG(IS_WIN)
   return base::UTF8ToWide(input);
 #else
   return input;
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
 }
 
 std::string WideToUTF8IfNecessary(base::FilePath::StringType input) {
-#ifdef OS_WIN
+#if BUILDFLAG(IS_WIN)
   return base::WideToUTF8(input);
 #else
   return input;
-#endif  // OS_Win
+#endif  // BUILDFLAG(IS_WIN)
 }
 
 // Returns an std::string consisting of the given path relative to the test
@@ -124,22 +120,26 @@ void XrBrowserTestBase::SetUp() {
   XR_CONDITIONAL_SKIP_PRETEST(runtime_requirements_, ignored_requirements_,
                               &test_skipped_at_startup_)
 
-  // Set the environment variable to use the mock OpenVR client.
-  ASSERT_TRUE(
-      env_->SetVar(kVrOverrideEnvVar, MakeExecutableRelative(kVrOverrideVal)))
-      << "Failed to set OpenVR mock client location environment variable";
-  ASSERT_TRUE(env_->SetVar(kVrConfigPathEnvVar,
-                           MakeExecutableRelative(kVrConfigPathVal)))
-      << "Failed to set OpenVR config location environment variable";
-  ASSERT_TRUE(
-      env_->SetVar(kVrLogPathEnvVar, MakeExecutableRelative(kVrLogPathVal)))
-      << "Failed to set OpenVR log location environment variable";
+  // Set the environment variable to use the mock OpenXR client.
+  // If the kOpenXrConfigPathEnvVar environment variable is set, the OpenXR
+  // loader will look for the OpenXR runtime specified in that json file. The
+  // json file contains the path to the runtime, relative to the json file
+  // itself. Otherwise, the OpenXR loader loads the active OpenXR runtime
+  // installed on the system, which is specified by a registry key.
+  ASSERT_TRUE(env_->SetVar(kOpenXrConfigPathEnvVar,
+                           MakeExecutableRelative(kOpenXrConfigPathVal)))
+      << "Failed to set OpenXR JSON location environment variable";
 
-  // Set any command line flags that subclasses have set, e.g. enabling WebVR
-  // and OpenVR support.
+  // Set any command line flags that subclasses have set, e.g. enabling features
+  // or specific runtimes.
   for (const auto& switch_string : append_switches_) {
     cmd_line->AppendSwitch(switch_string);
   }
+
+  for (const auto& blink_feature : enable_blink_features_) {
+    cmd_line->AppendSwitchASCII(switches::kEnableBlinkFeatures, blink_feature);
+  }
+
   scoped_feature_list_.InitWithFeatures(enable_features_, disable_features_);
 
   InProcessBrowserTest::SetUp();
@@ -158,41 +158,7 @@ XrBrowserTestBase::RuntimeType XrBrowserTestBase::GetRuntimeType() const {
   return XrBrowserTestBase::RuntimeType::RUNTIME_NONE;
 }
 
-device::XrAxisType XrBrowserTestBase::GetPrimaryAxisType() const {
-  auto runtime = GetRuntimeType();
-  switch (runtime) {
-    case XrBrowserTestBase::RuntimeType::RUNTIME_OPENVR:
-      return device::XrAxisType::kTrackpad;
-    case XrBrowserTestBase::RuntimeType::RUNTIME_WMR:
-      return device::XrAxisType::kJoystick;
-    case XrBrowserTestBase::RuntimeType::RUNTIME_NONE:
-      return device::XrAxisType::kNone;
-  }
-  NOTREACHED();
-}
-
-device::XrAxisType XrBrowserTestBase::GetSecondaryAxisType() const {
-  auto runtime = GetRuntimeType();
-  switch (runtime) {
-    case XrBrowserTestBase::RuntimeType::RUNTIME_OPENVR:
-      return device::XrAxisType::kJoystick;
-    case XrBrowserTestBase::RuntimeType::RUNTIME_WMR:
-      return device::XrAxisType::kTrackpad;
-    case XrBrowserTestBase::RuntimeType::RUNTIME_NONE:
-      return device::XrAxisType::kNone;
-  }
-  NOTREACHED();
-}
-
-GURL XrBrowserTestBase::GetFileUrlForHtmlTestFile(
-    const std::string& test_name) {
-  return ui_test_utils::GetTestUrl(
-      base::FilePath(FILE_PATH_LITERAL("xr/e2e_test_files/html")),
-      base::FilePath(UTF8ToWideIfNecessary(test_name + ".html")));
-}
-
-GURL XrBrowserTestBase::GetEmbeddedServerUrlForHtmlTestFile(
-    const std::string& test_name) {
+GURL XrBrowserTestBase::GetUrlForFile(const std::string& test_name) {
   // GetURL requires that the path start with /.
   return GetEmbeddedServer()->GetURL(std::string("/") + kTestFileDir +
                                      test_name + ".html");
@@ -214,17 +180,19 @@ content::WebContents* XrBrowserTestBase::GetCurrentWebContents() {
   return browser()->tab_strip_model()->GetActiveWebContents();
 }
 
-void XrBrowserTestBase::LoadUrlAndAwaitInitialization(const GURL& url) {
-  ui_test_utils::NavigateToURL(browser(), url);
+void XrBrowserTestBase::LoadFileAndAwaitInitialization(
+    const std::string& test_name) {
+  GURL url = GetUrlForFile(test_name);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   ASSERT_TRUE(PollJavaScriptBoolean("isInitializationComplete()",
                                     kPollTimeoutMedium,
                                     GetCurrentWebContents()))
       << "Timed out waiting for JavaScript test initialization.";
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Now that the browser is opened and has focus, keep track of this window so
   // that we can restore the proper focus after entering each session. This is
-  // required for WMR tests that create multiple sessions to work properly.
+  // required for tests that create multiple sessions to work properly.
   hwnd_ = GetForegroundWindow();
 #endif
 }
@@ -249,7 +217,7 @@ bool XrBrowserTestBase::RunJavaScriptAndExtractBoolOrFail(
     return false;
   }
 
-  bool result;
+  bool result = false;
   DLOG(INFO) << "Run JavaScript: " << js_expression;
   EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
       web_contents,
@@ -432,10 +400,8 @@ void XrBrowserTestBase::EndTest(content::WebContents* web_contents) {
       FAIL() << "JavaScript testharness failed with reason: "
              << RunJavaScriptAndExtractStringOrFail("resultString",
                                                     web_contents);
-      break;
     case XrBrowserTestBase::TestStatus::STATUS_RUNNING:
       FAIL() << "Attempted to end test in C++ without finishing in JavaScript.";
-      break;
     default:
       FAIL() << "Received unknown test status.";
   }

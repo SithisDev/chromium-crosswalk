@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/grit/chromium_strings.h"
@@ -18,6 +18,7 @@
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/models/image_model.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/point.h"
@@ -26,6 +27,7 @@
 #include "ui/gfx/text_constants.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/layout_provider.h"
 #include "ui/views/style/typography.h"
 #include "ui/views/view.h"
@@ -56,72 +58,40 @@ void RelaunchRequiredDialogView::SetDeadline(base::Time deadline) {
   relaunch_required_timer_.SetDeadline(deadline);
 }
 
-bool RelaunchRequiredDialogView::Cancel() {
-  base::RecordAction(base::UserMetricsAction("RelaunchRequired_Close"));
+std::u16string RelaunchRequiredDialogView::GetWindowTitle() const {
+  // Round the time-to-relaunch to the nearest "boundary", which may be a day,
+  // hour, minute, or second. For example, two days and eighteen hours will be
+  // rounded up to three days, while two days and one hour will be rounded down
+  // to two days. This rounding is significant for only the initial showing of
+  // the dialog. Each refresh of the title thereafter will take place at the
+  // moment when the boundary value changes. For example, the title will be
+  // refreshed from three days to two days when there are exactly two days
+  // remaining. This scales nicely to the final seconds, when one would expect a
+  // "3..2..1.." countdown to change precisely on the per-second boundaries.
+  const base::TimeDelta rounded_offset =
+      relaunch_required_timer_.GetRoundedDeadlineDelta();
 
-  return true;
+  int amount = rounded_offset.InSeconds();
+  int message_id = IDS_RELAUNCH_REQUIRED_TITLE_SECONDS;
+  if (rounded_offset.InDays() >= 2) {
+    amount = rounded_offset.InDays();
+    message_id = IDS_RELAUNCH_REQUIRED_TITLE_DAYS;
+  } else if (rounded_offset.InHours() >= 1) {
+    amount = rounded_offset.InHours();
+    message_id = IDS_RELAUNCH_REQUIRED_TITLE_HOURS;
+  } else if (rounded_offset.InMinutes() >= 1) {
+    amount = rounded_offset.InMinutes();
+    message_id = IDS_RELAUNCH_REQUIRED_TITLE_MINUTES;
+  }
+
+  return l10n_util::GetPluralStringFUTF16(message_id, amount);
 }
 
-bool RelaunchRequiredDialogView::Accept() {
-  base::RecordAction(base::UserMetricsAction("RelaunchRequired_Accept"));
-
-  on_accept_.Run();
-
-  // Keep the dialog open in case shutdown is prevented for some reason so that
-  // the user can try again if needed.
-  return false;
-}
-
-int RelaunchRequiredDialogView::GetDefaultDialogButton() const {
-  // Do not focus either button so that the user doesn't relaunch or dismiss by
-  // accident if typing when the dialog appears.
-  return ui::DIALOG_BUTTON_NONE;
-}
-
-base::string16 RelaunchRequiredDialogView::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return l10n_util::GetStringUTF16(button == ui::DIALOG_BUTTON_OK
-                                       ? IDS_RELAUNCH_ACCEPT_BUTTON
-                                       : IDS_RELAUNCH_REQUIRED_CANCEL_BUTTON);
-}
-
-ui::ModalType RelaunchRequiredDialogView::GetModalType() const {
-  return ui::MODAL_TYPE_WINDOW;
-}
-
-base::string16 RelaunchRequiredDialogView::GetWindowTitle() const {
-  return relaunch_required_timer_.GetWindowTitle();
-}
-
-bool RelaunchRequiredDialogView::ShouldShowCloseButton() const {
-  return false;
-}
-
-gfx::ImageSkia RelaunchRequiredDialogView::GetWindowIcon() {
-  return gfx::CreateVectorIcon(gfx::IconDescription(
-      vector_icons::kBusinessIcon, kTitleIconSize, gfx::kChromeIconGrey,
-      base::TimeDelta(), gfx::kNoneIcon));
-}
-
-bool RelaunchRequiredDialogView::ShouldShowWindowIcon() const {
-  return true;
-}
-
-int RelaunchRequiredDialogView::GetHeightForWidth(int width) const {
-  const gfx::Insets insets = GetInsets();
-  return body_label_->GetHeightForWidth(width - insets.width()) +
-         insets.height();
-}
-
-void RelaunchRequiredDialogView::Layout() {
-  body_label_->SetBoundsRect(GetContentsBounds());
-}
-
-gfx::Size RelaunchRequiredDialogView::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                        DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH) -
-                    margins().width();
-  return gfx::Size(width, GetHeightForWidth(width));
+ui::ImageModel RelaunchRequiredDialogView::GetWindowIcon() {
+  return ui::ImageModel::FromVectorIcon(
+      vector_icons::kBusinessIcon, ui::kColorIcon,
+      ChromeLayoutProvider::Get()->GetDistanceMetric(
+          DISTANCE_BUBBLE_HEADER_VECTOR_ICON_SIZE));
 }
 
 // |relaunch_required_timer_| automatically starts for the next time the title
@@ -129,32 +99,52 @@ gfx::Size RelaunchRequiredDialogView::CalculatePreferredSize() const {
 RelaunchRequiredDialogView::RelaunchRequiredDialogView(
     base::Time deadline,
     base::RepeatingClosure on_accept)
-    : on_accept_(on_accept),
-      body_label_(nullptr),
-      relaunch_required_timer_(
+    : relaunch_required_timer_(
           deadline,
           base::BindRepeating(&RelaunchRequiredDialogView::UpdateWindowTitle,
                               base::Unretained(this))) {
-  chrome::RecordDialogCreation(chrome::DialogIdentifier::RELAUNCH_REQUIRED);
-  set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
-      views::TEXT, views::TEXT));
+  SetDefaultButton(ui::DIALOG_BUTTON_NONE);
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringUTF16(IDS_RELAUNCH_ACCEPT_BUTTON));
+  SetButtonLabel(
+      ui::DIALOG_BUTTON_CANCEL,
+      l10n_util::GetStringUTF16(IDS_RELAUNCH_REQUIRED_CANCEL_BUTTON));
+  SetShowIcon(true);
+  SetAcceptCallback(base::BindOnce(
+      [](base::RepeatingClosure callback) {
+        base::RecordAction(base::UserMetricsAction("RelaunchRequired_Accept"));
+        callback.Run();
+      },
+      on_accept));
+  SetCancelCallback(base::BindOnce(
+      base::RecordAction, base::UserMetricsAction("RelaunchRequired_Close")));
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 
-  body_label_ =
-      new views::Label(l10n_util::GetStringUTF16(IDS_RELAUNCH_REQUIRED_BODY),
-                       views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT);
-  body_label_->SetMultiLine(true);
-  body_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  SetModalType(ui::MODAL_TYPE_WINDOW);
+  SetShowCloseButton(false);
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH));
+
+  const ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
+  set_margins(provider->GetDialogInsetsForContentType(
+      views::DialogContentType::kText, views::DialogContentType::kText));
+
+  auto label = std::make_unique<views::Label>(
+      l10n_util::GetPluralStringFUTF16(IDS_RELAUNCH_REQUIRED_BODY,
+                                       BrowserList::GetIncognitoBrowserCount()),
+      views::style::CONTEXT_DIALOG_BODY_TEXT);
+  label->SetMultiLine(true);
+  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
   // Align the body label with the left edge of the dialog's title.
   // TODO(bsep): Remove this when fixing https://crbug.com/810970.
-  int title_offset = 2 * views::LayoutProvider::Get()
-                             ->GetInsetsMetric(views::INSETS_DIALOG_TITLE)
-                             .left() +
-                     kTitleIconSize;
-  body_label_->SetBorder(views::CreateEmptyBorder(
-      gfx::Insets(0, title_offset - margins().left(), 0, 0)));
+  const int title_offset =
+      2 * provider->GetInsetsMetric(views::INSETS_DIALOG_TITLE).left() +
+      provider->GetDistanceMetric(DISTANCE_BUBBLE_HEADER_VECTOR_ICON_SIZE);
+  label->SetBorder(views::CreateEmptyBorder(
+      gfx::Insets::TLBR(0, title_offset - margins().left(), 0, 0)));
 
-  AddChildView(body_label_);
+  AddChildView(std::move(label));
 
   base::RecordAction(base::UserMetricsAction("RelaunchRequiredShown"));
 }

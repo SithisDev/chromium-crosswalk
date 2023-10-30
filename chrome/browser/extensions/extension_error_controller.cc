@@ -1,9 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/extension_error_controller.h"
 
+#include "chrome/browser/extensions/extension_error_ui_default.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "extensions/browser/extension_prefs.h"
@@ -15,10 +16,14 @@ namespace extensions {
 
 namespace {
 
-ExtensionErrorController::UICreateMethod g_create_ui =
-    ExtensionErrorUI::Create;
-
+ExtensionErrorUI* CreateDefaultExtensionErrorUI(
+    ExtensionErrorUI::Delegate* delegate) {
+  return new ExtensionErrorUIDefault(delegate);
 }
+
+ExtensionErrorController::UICreateMethod g_create_ui =
+    CreateDefaultExtensionErrorUI;
+}  // namespace
 
 ExtensionErrorController::ExtensionErrorController(
     content::BrowserContext* context,
@@ -33,7 +38,7 @@ void ExtensionErrorController::ShowErrorIfNeeded() {
 
   // Make sure there's something to show, and that there isn't currently a
   // bubble displaying.
-  if (!blacklisted_extensions_.is_empty() && !error_ui_.get()) {
+  if (!blocklisted_extensions_.is_empty() && !error_ui_.get()) {
     if (!is_first_run_) {
       error_ui_.reset(g_create_ui(this));
       if (!error_ui_->ShowErrorInBubbleView())  // Couldn't find a browser.
@@ -57,12 +62,8 @@ content::BrowserContext* ExtensionErrorController::GetContext() {
   return browser_context_;
 }
 
-const ExtensionSet& ExtensionErrorController::GetExternalExtensions() {
-  return external_extensions_;
-}
-
-const ExtensionSet& ExtensionErrorController::GetBlacklistedExtensions() {
-  return blacklisted_extensions_;
+const ExtensionSet& ExtensionErrorController::GetBlocklistedExtensions() {
+  return blocklisted_extensions_;
 }
 
 void ExtensionErrorController::OnAlertAccept() {
@@ -80,13 +81,12 @@ void ExtensionErrorController::OnAlertDetails() {
 
 void ExtensionErrorController::OnAlertClosed() {
   ExtensionPrefs* prefs = ExtensionPrefs::Get(browser_context_);
-  for (ExtensionSet::const_iterator iter = blacklisted_extensions_.begin();
-       iter != blacklisted_extensions_.end();
-       ++iter) {
-    prefs->AcknowledgeBlacklistedExtension((*iter)->id());
+  for (ExtensionSet::const_iterator iter = blocklisted_extensions_.begin();
+       iter != blocklisted_extensions_.end(); ++iter) {
+    prefs->AcknowledgeBlocklistedExtension((*iter)->id());
   }
 
-  blacklisted_extensions_.Clear();
+  blocklisted_extensions_.Clear();
   error_ui_.reset();
 }
 
@@ -96,18 +96,17 @@ void ExtensionErrorController::IdentifyAlertableExtensions() {
 
   // This should be clear, but in case a bubble crashed somewhere along the
   // line, let's make sure we start fresh.
-  blacklisted_extensions_.Clear();
+  blocklisted_extensions_.Clear();
 
   // Build up the lists of extensions that require acknowledgment. If this is
   // the first time, grandfather extensions that would have caused
   // notification.
 
-  const ExtensionSet& blacklisted_set = registry->blacklisted_extensions();
-  for (ExtensionSet::const_iterator iter = blacklisted_set.begin();
-       iter != blacklisted_set.end();
-       ++iter) {
-    if (!prefs->IsBlacklistedExtensionAcknowledged((*iter)->id()))
-      blacklisted_extensions_.Insert(*iter);
+  const ExtensionSet& blocklisted_set = registry->blocklisted_extensions();
+  for (ExtensionSet::const_iterator iter = blocklisted_set.begin();
+       iter != blocklisted_set.end(); ++iter) {
+    if (!prefs->IsBlocklistedExtensionAcknowledged((*iter)->id()))
+      blocklisted_extensions_.Insert(*iter);
   }
 
   ExtensionSystem* system = ExtensionSystem::Get(browser_context_);
@@ -126,11 +125,13 @@ void ExtensionErrorController::IdentifyAlertableExtensions() {
     if (pending_extension_manager->IsIdPending(extension->id()))
       continue;
 
-    // Extensions disabled by policy. Note: this no longer includes blacklisted
-    // extensions, though we still show the same UI.
-    if (!management_policy->UserMayLoad(extension, NULL /* ignore error */)) {
-      if (!prefs->IsBlacklistedExtensionAcknowledged(extension->id()))
-        blacklisted_extensions_.Insert(extension);
+    // Extensions disabled by policy. Note: this no longer includes blocklisted
+    // extensions. We use similar triggering logic for the dialog, but the
+    // strings will be different.
+    if (!management_policy->UserMayLoad(extension,
+                                        nullptr /*=ignore error */)) {
+      if (!prefs->IsBlocklistedExtensionAcknowledged(extension->id()))
+        blocklisted_extensions_.Insert(extension);
     }
   }
 }

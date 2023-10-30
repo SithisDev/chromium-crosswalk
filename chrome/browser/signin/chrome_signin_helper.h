@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,13 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "base/supports_user_data.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "components/signin/core/browser/signin_header_helper.h"
-#include "content/public/browser/resource_request_info.h"
+#include "content/public/browser/web_contents.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 
 namespace content_settings {
 class CookieSettings;
@@ -20,7 +22,6 @@ class CookieSettings;
 
 namespace net {
 class HttpResponseHeaders;
-class URLRequest;
 }
 
 class GURL;
@@ -32,48 +33,61 @@ class GURL;
 // handle signin accordingly.
 namespace signin {
 
+enum class Tribool;
+
 // Key for ManageAccountsHeaderReceivedUserData. Exposed for testing.
 extern const void* const kManageAccountsHeaderReceivedUserDataKey;
 
+// The source to use when constructing the Mirror header.
+extern const char kChromeMirrorHeaderSource[];
+
 class ChromeRequestAdapter : public RequestAdapter {
  public:
-  explicit ChromeRequestAdapter(net::URLRequest* request);
+  ChromeRequestAdapter(const GURL& url,
+                       const net::HttpRequestHeaders& original_headers,
+                       net::HttpRequestHeaders* modified_headers,
+                       std::vector<std::string>* headers_to_remove);
+
+  ChromeRequestAdapter(const ChromeRequestAdapter&) = delete;
+  ChromeRequestAdapter& operator=(const ChromeRequestAdapter&) = delete;
+
   ~ChromeRequestAdapter() override;
 
-  virtual content::ResourceRequestInfo::WebContentsGetter GetWebContentsGetter()
-      const;
-  virtual content::ResourceType GetResourceType() const;
-  virtual GURL GetReferrerOrigin() const;
+  virtual content::WebContents::Getter GetWebContentsGetter() const = 0;
+
+  virtual network::mojom::RequestDestination GetRequestDestination() const = 0;
+
+  virtual bool IsOutermostMainFrame() const = 0;
+
+  virtual bool IsFetchLikeAPI() const = 0;
+
+  virtual GURL GetReferrer() const = 0;
 
   // Associate a callback with this request which will be executed when the
   // request is complete (including any redirects). If a callback was already
   // registered this function does nothing.
-  virtual void SetDestructionCallback(base::OnceClosure closure);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ChromeRequestAdapter);
+  virtual void SetDestructionCallback(base::OnceClosure closure) = 0;
 };
 
 class ResponseAdapter {
  public:
-  explicit ResponseAdapter(net::URLRequest* request);
+  ResponseAdapter();
+
+  ResponseAdapter(const ResponseAdapter&) = delete;
+  ResponseAdapter& operator=(const ResponseAdapter&) = delete;
+
   virtual ~ResponseAdapter();
 
-  virtual content::ResourceRequestInfo::WebContentsGetter GetWebContentsGetter()
-      const;
-  virtual bool IsMainFrame() const;
-  virtual GURL GetOrigin() const;
-  virtual const net::HttpResponseHeaders* GetHeaders() const;
-  virtual void RemoveHeader(const std::string& name);
+  virtual content::WebContents::Getter GetWebContentsGetter() const = 0;
+  virtual bool IsOutermostMainFrame() const = 0;
+  virtual GURL GetURL() const = 0;
+  virtual const net::HttpResponseHeaders* GetHeaders() const = 0;
+  virtual void RemoveHeader(const std::string& name) = 0;
 
-  virtual base::SupportsUserData::Data* GetUserData(const void* key) const;
-  virtual void SetUserData(const void* key,
-                           std::unique_ptr<base::SupportsUserData::Data> data);
-
- private:
-  net::URLRequest* const request_;
-
-  DISALLOW_COPY_AND_ASSIGN(ResponseAdapter);
+  virtual base::SupportsUserData::Data* GetUserData(const void* key) const = 0;
+  virtual void SetUserData(
+      const void* key,
+      std::unique_ptr<base::SupportsUserData::Data> data) = 0;
 };
 
 // When Dice is enabled, the AccountReconcilor is blocked for a short delay
@@ -82,7 +96,6 @@ void SetDiceAccountReconcilorBlockDelayForTesting(int delay_ms);
 
 // Adds an account consistency header to Gaia requests from a connected profile,
 // with the exception of requests from gaia webview.
-// Returns true if the account consistency header was added to the request.
 // Removes the header if it is already in the headers but should not be there.
 void FixAccountConsistencyRequestHeader(
     ChromeRequestAdapter* request,
@@ -90,13 +103,14 @@ void FixAccountConsistencyRequestHeader(
     bool is_off_the_record,
     int incognito_availibility,
     AccountConsistencyMethod account_consistency,
-    std::string primary_account_id,
-#if defined(OS_CHROMEOS)
-    bool account_consistency_mirror_required,
+    const std::string& gaia_id,
+    signin::Tribool is_child_account,
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    bool is_secondary_account_addition_allowed,
 #endif
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
     bool is_sync_enabled,
-    std::string signin_scoped_device_id,
+    const std::string& signin_scoped_device_id,
 #endif
     content_settings::CookieSettings* cookie_settings);
 
@@ -105,6 +119,12 @@ void FixAccountConsistencyRequestHeader(
 void ProcessAccountConsistencyResponseHeaders(ResponseAdapter* response,
                                               const GURL& redirect_url,
                                               bool is_off_the_record);
+
+// Parses and returns an account ID (Gaia ID) from HTTP response header
+// Google-Accounts-RemoveLocalAccount. Returns an empty string if parsing
+// failed. Exposed for testing purposes.
+std::string ParseGaiaIdFromRemoveLocalAccountResponseHeaderForTesting(
+    const net::HttpResponseHeaders* response_headers);
 
 }  // namespace signin
 

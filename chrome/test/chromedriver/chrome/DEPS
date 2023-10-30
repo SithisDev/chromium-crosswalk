@@ -3,7 +3,7 @@ include_rules = [
   "-chrome/test/chromedriver",
 
   "+chrome/test/chromedriver/chrome",
-  "+chrome/test/chromedriver/extension",
+  "+chrome/test/chromedriver/constants",
   "+chrome/test/chromedriver/js",
   "+chrome/test/chromedriver/net",
 ]

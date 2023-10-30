@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,33 +7,29 @@
 #include <memory>
 
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_feature_list.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/fake_service_worker_context.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_storage_partition.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
-
-#if defined(OS_CHROMEOS)
-#include "chromeos/constants/chromeos_features.h"
-#endif
 
 namespace {
 
 class TestSchemeClassifier : public AutocompleteSchemeClassifier {
  public:
   TestSchemeClassifier() = default;
+
+  TestSchemeClassifier(const TestSchemeClassifier&) = delete;
+  TestSchemeClassifier& operator=(const TestSchemeClassifier&) = delete;
+
   ~TestSchemeClassifier() override = default;
 
   // Overridden from AutocompleteInputSchemeClassifier:
   metrics::OmniboxInputType GetInputTypeForScheme(
       const std::string& scheme) const override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestSchemeClassifier);
 };
 
 metrics::OmniboxInputType TestSchemeClassifier::GetInputTypeForScheme(
@@ -59,11 +55,11 @@ class ChromeAutocompleteProviderClientTest : public testing::Test {
   // |client_| will be off the record.
   void GoOffTheRecord() {
     client_ = std::make_unique<ChromeAutocompleteProviderClient>(
-        profile_->GetOffTheRecordProfile());
+        profile_->GetPrimaryOTRProfile(/*create_if_needed=*/true));
   }
 
  protected:
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   std::unique_ptr<TestingProfile> profile_;
   std::unique_ptr<ChromeAutocompleteProviderClient> client_;
@@ -151,24 +147,3 @@ TEST_F(ChromeAutocompleteProviderClientTest, TestStrippedURLsAreEqual) {
                                             GURL(test_case.url2), &input));
   }
 }
-
-// TODO(crbug/950007): Remove this test when the split settings work is complete
-#if defined(OS_CHROMEOS)
-TEST_F(ChromeAutocompleteProviderClientTest, OSSettingsDoNotShowUp) {
-  size_t builtin_urls_with_os_settings;
-  size_t builtin_urls_without_os_settings;
-
-  {
-    base::test::ScopedFeatureList feature_list;
-    feature_list.InitAndDisableFeature(chromeos::features::kSplitSettings);
-    builtin_urls_with_os_settings = client_->GetBuiltinURLs().size();
-  }
-  {
-    base::test::ScopedFeatureList feature_list;
-    feature_list.InitAndEnableFeature(chromeos::features::kSplitSettings);
-    builtin_urls_without_os_settings = client_->GetBuiltinURLs().size();
-  }
-
-  EXPECT_GT(builtin_urls_with_os_settings, builtin_urls_without_os_settings);
-}
-#endif

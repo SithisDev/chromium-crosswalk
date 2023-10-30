@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,26 +14,30 @@
 #include "base/callback_forward.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/common/buildflags.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class Profile;
 
 namespace extensions {
 
 class Extension;
-class ExtensionServiceInterface;
+class ExtensionSystem;
 
 // For registering, loading, and unloading component extensions.
 class ComponentLoader {
  public:
-  ComponentLoader(ExtensionServiceInterface* extension_service,
-                  Profile* browser_context);
+  ComponentLoader(ExtensionSystem* extension_system, Profile* browser_context);
+
+  ComponentLoader(const ComponentLoader&) = delete;
+  ComponentLoader& operator=(const ComponentLoader&) = delete;
+
   virtual ~ComponentLoader();
 
   size_t registered_extensions_count() const {
@@ -89,15 +93,26 @@ class ComponentLoader {
   // Reloads a registered component extension.
   void Reload(const std::string& extension_id);
 
-#if defined(OS_CHROMEOS)
+  // Return ids of all registered extensions.
+  std::vector<std::string> GetRegisteredComponentExtensionsIds() const;
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Add a component extension from a specific directory. Assumes that the
   // extension uses a different manifest file when this is a guest session
   // and that the manifest file lives in |root_directory|. Calls |done_cb|
   // on success, unless the component loader is shut down during loading.
-  void AddComponentFromDir(
+  void AddComponentFromDir(const base::FilePath& root_directory,
+                           const char* extension_id,
+                           base::OnceClosure done_cb);
+
+  // Identical to above except allows for the caller to supply the name of the
+  // manifest file.
+  void AddComponentFromDirWithManifestFilename(
       const base::FilePath& root_directory,
       const char* extension_id,
-      const base::Closure& done_cb);
+      const base::FilePath::CharType* manifest_file_name,
+      const base::FilePath::CharType* guest_manifest_file_name,
+      base::OnceClosure done_cb);
 
   // Add a component extension from a specific directory. Assumes that the
   // extension's manifest file lives in |root_directory| and its name is
@@ -109,14 +124,10 @@ class ComponentLoader {
                                         const std::string& description_string);
 
   void AddChromeOsSpeechSynthesisExtensions();
-
-  // Loads the Kiosk Next extension or adds it to the load list. If this device
-  // doesn't support Kiosk Next, this method is a no-op.
-  void AddKioskNextExtension();
 #endif
 
-  void set_ignore_whitelist_for_testing(bool value) {
-    ignore_whitelist_for_testing_ = value;
+  void set_ignore_allowlist_for_testing(bool value) {
+    ignore_allowlist_for_testing_ = value;
   }
 
  private:
@@ -127,6 +138,10 @@ class ComponentLoader {
     ComponentExtensionInfo(
         std::unique_ptr<base::DictionaryValue> manifest_param,
         const base::FilePath& root_directory);
+
+    ComponentExtensionInfo(const ComponentExtensionInfo&) = delete;
+    ComponentExtensionInfo& operator=(const ComponentExtensionInfo&) = delete;
+
     ~ComponentExtensionInfo();
 
     ComponentExtensionInfo(ComponentExtensionInfo&& other);
@@ -140,9 +155,6 @@ class ComponentLoader {
 
     // The component extension's ID.
     std::string extension_id;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(ComponentExtensionInfo);
   };
 
   // Parses the given JSON manifest. Returns nullptr if it cannot be parsed or
@@ -152,10 +164,10 @@ class ComponentLoader {
 
   std::string Add(const base::StringPiece& manifest_contents,
                   const base::FilePath& root_directory,
-                  bool skip_whitelist);
+                  bool skip_allowlist);
   std::string Add(std::unique_ptr<base::DictionaryValue> parsed_manifest,
                   const base::FilePath& root_directory,
-                  bool skip_whitelist);
+                  bool skip_allowlist);
 
   // Loads a registered component extension.
   void Load(const ComponentExtensionInfo& info);
@@ -174,22 +186,16 @@ class ComponentLoader {
                                  const base::FilePath& root_directory,
                                  const std::string& name_string,
                                  const std::string& description_string);
-#if BUILDFLAG(ENABLE_APP_LIST)
-  void AddChromeApp();
-#endif  // BUILDFLAG(ENABLE_APP_LIST)
-
   void AddWebStoreApp();
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  void AddChromeApp();
   void AddFileManagerExtension();
-  void AddVideoPlayerExtension();
-  void AddAudioPlayerExtension();
   void AddGalleryExtension();
   void AddImageLoaderExtension();
+  void AddGuestModeTestExtension(const base::FilePath& path);
   void AddKeyboardApp();
-  void AddChromeCameraApp();
-  void AddZipArchiverExtension();
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   scoped_refptr<const Extension> CreateExtension(
       const ComponentExtensionInfo& info, std::string* utf8_error);
@@ -197,40 +203,35 @@ class ComponentLoader {
   // Unloads |component| from the memory.
   void UnloadComponent(ComponentExtensionInfo* component);
 
-#if defined(OS_CHROMEOS)
-  // Enable HTML5 FileSystem for given component extension in Guest mode.
-  void EnableFileSystemInGuestMode(const std::string& id);
-
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Used as a reply callback by |AddComponentFromDir|.
   // Called with a |root_directory| and parsed |manifest| and invokes
   // |done_cb| after adding the extension.
   void FinishAddComponentFromDir(
       const base::FilePath& root_directory,
       const char* extension_id,
-      const base::Optional<std::string>& name_string,
-      const base::Optional<std::string>& description_string,
-      const base::Closure& done_cb,
+      const absl::optional<std::string>& name_string,
+      const absl::optional<std::string>& description_string,
+      base::OnceClosure done_cb,
       std::unique_ptr<base::DictionaryValue> manifest);
 
   // Finishes loading an extension tts engine.
   void FinishLoadSpeechSynthesisExtension(const char* extension_id);
 #endif
 
-  Profile* profile_;
+  raw_ptr<Profile> profile_;
 
-  ExtensionServiceInterface* extension_service_;
+  raw_ptr<ExtensionSystem> extension_system_;
 
-  // List of registered component extensions (see Manifest::Location).
+  // List of registered component extensions (see mojom::ManifestLocation).
   typedef std::vector<ComponentExtensionInfo> RegisteredComponentExtensions;
   RegisteredComponentExtensions component_extensions_;
 
-  bool ignore_whitelist_for_testing_;
+  bool ignore_allowlist_for_testing_;
 
   base::WeakPtrFactory<ComponentLoader> weak_factory_{this};
 
   friend class TtsApiTest;
-
-  DISALLOW_COPY_AND_ASSIGN(ComponentLoader);
 };
 
 }  // namespace extensions

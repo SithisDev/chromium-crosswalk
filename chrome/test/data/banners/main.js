@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -123,11 +123,11 @@ function addPromptListener(action) {
   });
 }
 
-function addManifestLinkTag() {
+function addManifestLinkTag(optionalCustomUrl) {
   const url = new URL(window.location.href);
   let manifestUrl = url.searchParams.get('manifest');
   if (!manifestUrl) {
-    manifestUrl = 'manifest.json';
+    manifestUrl = optionalCustomUrl || 'manifest.json';
   }
 
   var linkTag = document.createElement("link");
@@ -135,6 +135,14 @@ function addManifestLinkTag() {
   linkTag.rel = "manifest";
   linkTag.href = manifestUrl;
   document.head.append(linkTag);
+}
+
+function removeAllManifestTags() {
+  for (let i = 0; i < document.head.children.length; ++i) {
+    let child = document.head.children[i];
+    if (child.rel == "manifest")
+      child.parentElement.removeChild(child);
+  }
 }
 
 function initialize() {

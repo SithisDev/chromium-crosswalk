@@ -1,12 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/tabs/tab_ukm_test_helper.h"
 
-#include <algorithm>
 #include <sstream>
 
+#include "base/ranges/algorithm.h"
 #include "services/metrics/public/cpp/ukm_source.h"
 #include "services/metrics/public/mojom/ukm_interface.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -18,7 +18,7 @@ namespace {
 void ExpectEntryMetrics(const ukm::mojom::UkmEntry& entry,
                         const UkmMetricMap& expected_metrics) {
   // Each expected metric should match a named value in the UKM entry.
-  for (const UkmMetricMap::value_type pair : expected_metrics) {
+  for (const UkmMetricMap::value_type& pair : expected_metrics) {
     if (pair.second.has_value()) {
       ukm::TestUkmRecorder::ExpectEntryMetric(&entry, pair.first,
                                               pair.second.value());
@@ -55,10 +55,9 @@ bool EntryContainsMetrics(const ukm::mojom::UkmEntry* entry,
 std::vector<const ukm::mojom::UkmEntry*>::const_iterator FindMatchingEntry(
     const std::vector<const ukm::mojom::UkmEntry*>& entries,
     const UkmMetricMap& expected_metrics) {
-  return std::find_if(entries.begin(), entries.end(),
-                      [&expected_metrics](const auto* entry) {
-                        return EntryContainsMetrics(entry, expected_metrics);
-                      });
+  return base::ranges::find_if(entries, [&expected_metrics](const auto* entry) {
+    return EntryContainsMetrics(entry, expected_metrics);
+  });
 }
 
 }  // namespace

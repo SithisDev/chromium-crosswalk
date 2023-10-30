@@ -1,14 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_PROFILES_PROFILE_INDICATOR_ICON_H_
 #define CHROME_BROWSER_UI_VIEWS_PROFILES_PROFILE_INDICATOR_ICON_H_
 
-#include <string>
-
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/view.h"
 
@@ -23,7 +20,10 @@ class Canvas;
 // to fit in the frame.
 class ProfileIndicatorIcon : public views::View {
  public:
+  METADATA_HEADER(ProfileIndicatorIcon);
   ProfileIndicatorIcon();
+  ProfileIndicatorIcon(const ProfileIndicatorIcon&) = delete;
+  ProfileIndicatorIcon& operator=(const ProfileIndicatorIcon&) = delete;
   ~ProfileIndicatorIcon() override;
 
   // views::View:
@@ -37,7 +37,6 @@ class ProfileIndicatorIcon : public views::View {
   gfx::Image base_icon_;
   gfx::ImageSkia modified_icon_;
   int old_height_ = 0;
-  DISALLOW_COPY_AND_ASSIGN(ProfileIndicatorIcon);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_PROFILES_PROFILE_INDICATOR_ICON_H_

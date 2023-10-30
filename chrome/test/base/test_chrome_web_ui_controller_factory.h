@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,12 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_data_source.h"
 
-// This class replaces the ChromeWebUIFactory when the switches::kTestType flag
-// is passed. It provides a registry to override CreateWebUIControllerForURL()
-// by host.
+// A test implementation of ChromeWebUIControllerFactory that provides a
+// registry to override CreateWebUIControllerForURL() by host.
 class TestChromeWebUIControllerFactory : public ChromeWebUIControllerFactory {
  public:
   // Interface to create a new WebUI object.
@@ -27,6 +26,10 @@ class TestChromeWebUIControllerFactory : public ChromeWebUIControllerFactory {
         content::WebUI* web_ui,
         const GURL& url) = 0;
 
+    // Override this method to customize `source` for the newly created WebUI
+    // controller.
+    virtual void DataSourceOverrides(content::WebUIDataSource* source) {}
+
    protected:
     virtual ~WebUIProvider();
   };
@@ -34,6 +37,10 @@ class TestChromeWebUIControllerFactory : public ChromeWebUIControllerFactory {
   using FactoryOverridesMap = std::map<std::string, WebUIProvider*>;
 
   TestChromeWebUIControllerFactory();
+  TestChromeWebUIControllerFactory(const TestChromeWebUIControllerFactory&) =
+      delete;
+  TestChromeWebUIControllerFactory& operator=(
+      const TestChromeWebUIControllerFactory&) = delete;
   ~TestChromeWebUIControllerFactory() override;
 
   // Sets the Web UI host.
@@ -68,8 +75,6 @@ class TestChromeWebUIControllerFactory : public ChromeWebUIControllerFactory {
   // Stores the Web UI host to create the correct Web UI controller for
   // chrome://test URL requests.
   std::string webui_host_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestChromeWebUIControllerFactory);
 };
 
 #endif  // CHROME_TEST_BASE_TEST_CHROME_WEB_UI_CONTROLLER_FACTORY_H_

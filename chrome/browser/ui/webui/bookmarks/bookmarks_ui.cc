@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,18 +9,18 @@
 #include <string>
 #include <utility>
 
-#include "base/stl_util.h"
-#include "base/strings/string16.h"
+#include "base/containers/cxx20_erase.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/webui/bookmarks/bookmarks_message_handler.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
-#include "chrome/browser/ui/webui/localized_string.h"
 #include "chrome/browser/ui/webui/managed_ui_handler.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/plural_string_handler.h"
-#include "chrome/common/chrome_features.h"
+#include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/browser_resources.h"
+#include "chrome/grit/bookmarks_resources.h"
+#include "chrome/grit/bookmarks_resources_map.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/favicon_base/favicon_url_parser.h"
@@ -31,13 +31,14 @@
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/webui/web_ui_util.h"
 
 namespace {
 
 void AddLocalizedString(content::WebUIDataSource* source,
                         const std::string& message,
                         int id) {
-  base::string16 str = l10n_util::GetStringUTF16(id);
+  std::u16string str = l10n_util::GetStringUTF16(id);
   base::Erase(str, '&');
   source->AddString(message, str);
 }
@@ -45,18 +46,21 @@ void AddLocalizedString(content::WebUIDataSource* source,
 content::WebUIDataSource* CreateBookmarksUIHTMLSource(Profile* profile) {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIBookmarksHost);
+  webui::SetupWebUIDataSource(
+      source, base::make_span(kBookmarksResources, kBookmarksResourcesSize),
+      IDR_BOOKMARKS_BOOKMARKS_HTML);
 
   // Build an Accelerator to describe undo shortcut
   // NOTE: the undo shortcut is also defined in bookmarks/command_manager.js
   // TODO(crbug/893033): de-duplicate shortcut by moving all shortcut
   // definitions from JS to C++.
-  ui::Accelerator undoAccelerator(ui::VKEY_Z, ui::EF_PLATFORM_ACCELERATOR);
+  ui::Accelerator undo_accelerator(ui::VKEY_Z, ui::EF_PLATFORM_ACCELERATOR);
   source->AddString("undoDescription", l10n_util::GetStringFUTF16(
-                                           IDS_BOOKMARK_BAR_UNDO_DESCRIPTION,
-                                           undoAccelerator.GetShortcutText()));
+                                           IDS_UNDO_DESCRIPTION,
+                                           undo_accelerator.GetShortcutText()));
 
   // Localized strings (alphabetical order).
-  static constexpr LocalizedString kStrings[] = {
+  static constexpr webui::LocalizedString kStrings[] = {
       {"addBookmarkTitle", IDS_BOOKMARK_MANAGER_ADD_BOOKMARK_TITLE},
       {"addFolderTitle", IDS_BOOKMARK_MANAGER_ADD_FOLDER_TITLE},
       {"cancel", IDS_CANCEL},
@@ -69,19 +73,31 @@ content::WebUIDataSource* CreateBookmarksUIHTMLSource(Profile* profile) {
       {"emptyList", IDS_BOOKMARK_MANAGER_EMPTY_LIST},
       {"emptyUnmodifiableList", IDS_BOOKMARK_MANAGER_EMPTY_UNMODIFIABLE_LIST},
       {"folderLabel", IDS_BOOKMARK_MANAGER_FOLDER_LABEL},
+      {"importBegan", IDS_BOOKMARK_MANAGER_MENU_IMPORT_BEGAN},
+      {"importEnded", IDS_BOOKMARK_MANAGER_MENU_IMPORT_ENDED},
       {"itemsSelected", IDS_BOOKMARK_MANAGER_ITEMS_SELECTED},
+      {"itemsUnselected", IDS_BOOKMARK_MANAGER_ITEMS_UNSELECTED},
       {"listAxLabel", IDS_BOOKMARK_MANAGER_LIST_AX_LABEL},
+      {"menu", IDS_MENU},
       {"menuAddBookmark", IDS_BOOKMARK_MANAGER_MENU_ADD_BOOKMARK},
       {"menuAddFolder", IDS_BOOKMARK_MANAGER_MENU_ADD_FOLDER},
-      {"menuCopyURL", IDS_BOOKMARK_MANAGER_MENU_COPY_URL},
+      {"menuCut", IDS_BOOKMARK_MANAGER_MENU_CUT},
+      {"menuCopy", IDS_BOOKMARK_MANAGER_MENU_COPY},
+      {"menuPaste", IDS_BOOKMARK_MANAGER_MENU_PASTE},
       {"menuDelete", IDS_DELETE},
       {"menuEdit", IDS_EDIT},
       {"menuExport", IDS_BOOKMARK_MANAGER_MENU_EXPORT},
       {"menuHelpCenter", IDS_BOOKMARK_MANAGER_MENU_HELP_CENTER},
       {"menuImport", IDS_BOOKMARK_MANAGER_MENU_IMPORT},
       {"menuOpenAllNewTab", IDS_BOOKMARK_MANAGER_MENU_OPEN_ALL},
+      {"menuOpenAllNewTabWithCount",
+       IDS_BOOKMARK_MANAGER_MENU_OPEN_ALL_WITH_COUNT},
       {"menuOpenAllNewWindow", IDS_BOOKMARK_MANAGER_MENU_OPEN_ALL_NEW_WINDOW},
+      {"menuOpenAllNewWindowWithCount",
+       IDS_BOOKMARK_MANAGER_MENU_OPEN_ALL_NEW_WINDOW_WITH_COUNT},
       {"menuOpenAllIncognito", IDS_BOOKMARK_MANAGER_MENU_OPEN_ALL_INCOGNITO},
+      {"menuOpenAllIncognitoWithCount",
+       IDS_BOOKMARK_MANAGER_MENU_OPEN_ALL_INCOGNITO_WITH_COUNT},
       {"menuOpenNewTab", IDS_BOOKMARK_MANAGER_MENU_OPEN_IN_NEW_TAB},
       {"menuOpenNewWindow", IDS_BOOKMARK_MANAGER_MENU_OPEN_IN_NEW_WINDOW},
       {"menuOpenIncognito", IDS_BOOKMARK_MANAGER_MENU_OPEN_INCOGNITO},
@@ -90,6 +106,8 @@ content::WebUIDataSource* CreateBookmarksUIHTMLSource(Profile* profile) {
       {"menuSort", IDS_BOOKMARK_MANAGER_MENU_SORT},
       {"moreActionsButtonTitle", IDS_BOOKMARK_MANAGER_MORE_ACTIONS},
       {"moreActionsButtonAxLabel", IDS_BOOKMARK_MANAGER_MORE_ACTIONS_AX_LABEL},
+      {"moreActionsMultiButtonAxLabel",
+       IDS_BOOKMARK_MANAGER_MORE_ACTIONS_MULTI_AX_LABEL},
       {"noSearchResults", IDS_SEARCH_NO_RESULTS},
       {"openDialogBody", IDS_BOOKMARK_BAR_SHOULD_OPEN_ALL},
       {"openDialogConfirm", IDS_BOOKMARK_MANAGER_OPEN_DIALOG_CONFIRM},
@@ -105,69 +123,10 @@ content::WebUIDataSource* CreateBookmarksUIHTMLSource(Profile* profile) {
       {"toastFolderSorted", IDS_BOOKMARK_MANAGER_TOAST_FOLDER_SORTED},
       {"toastItemCopied", IDS_BOOKMARK_MANAGER_TOAST_ITEM_COPIED},
       {"toastItemDeleted", IDS_BOOKMARK_MANAGER_TOAST_ITEM_DELETED},
-      {"toastUrlCopied", IDS_BOOKMARK_MANAGER_TOAST_URL_COPIED},
       {"undo", IDS_BOOKMARK_BAR_UNDO},
   };
   for (const auto& str : kStrings)
     AddLocalizedString(source, str.name, str.id);
-
-  // Resources.
-#if BUILDFLAG(OPTIMIZE_WEBUI)
-  source->AddResourcePath("crisper.js", IDR_BOOKMARKS_CRISPER_JS);
-  source->SetDefaultResource(IDR_BOOKMARKS_VULCANIZED_HTML);
-#else
-  source->AddResourcePath("actions.html", IDR_BOOKMARKS_ACTIONS_HTML);
-  source->AddResourcePath("actions.js", IDR_BOOKMARKS_ACTIONS_JS);
-  source->AddResourcePath("api_listener.html", IDR_BOOKMARKS_API_LISTENER_HTML);
-  source->AddResourcePath("api_listener.js", IDR_BOOKMARKS_API_LISTENER_JS);
-  source->AddResourcePath("app.html", IDR_BOOKMARKS_APP_HTML);
-  source->AddResourcePath("app.js", IDR_BOOKMARKS_APP_JS);
-  source->AddResourcePath("command_manager.html",
-                          IDR_BOOKMARKS_COMMAND_MANAGER_HTML);
-  source->AddResourcePath("command_manager.js",
-                          IDR_BOOKMARKS_COMMAND_MANAGER_JS);
-  source->AddResourcePath("constants.html", IDR_BOOKMARKS_CONSTANTS_HTML);
-  source->AddResourcePath("constants.js", IDR_BOOKMARKS_CONSTANTS_JS);
-  source->AddResourcePath("debouncer.html", IDR_BOOKMARKS_DEBOUNCER_HTML);
-  source->AddResourcePath("debouncer.js", IDR_BOOKMARKS_DEBOUNCER_JS);
-  source->AddResourcePath("dialog_focus_manager.html",
-                          IDR_BOOKMARKS_DIALOG_FOCUS_MANAGER_HTML);
-  source->AddResourcePath("dialog_focus_manager.js",
-                          IDR_BOOKMARKS_DIALOG_FOCUS_MANAGER_JS);
-  source->AddResourcePath("dnd_manager.html", IDR_BOOKMARKS_DND_MANAGER_HTML);
-  source->AddResourcePath("dnd_manager.js", IDR_BOOKMARKS_DND_MANAGER_JS);
-  source->AddResourcePath("edit_dialog.html", IDR_BOOKMARKS_EDIT_DIALOG_HTML);
-  source->AddResourcePath("edit_dialog.js", IDR_BOOKMARKS_EDIT_DIALOG_JS);
-  source->AddResourcePath("folder_node.html", IDR_BOOKMARKS_FOLDER_NODE_HTML);
-  source->AddResourcePath("folder_node.js", IDR_BOOKMARKS_FOLDER_NODE_JS);
-  source->AddResourcePath("item.html", IDR_BOOKMARKS_ITEM_HTML);
-  source->AddResourcePath("item.js", IDR_BOOKMARKS_ITEM_JS);
-  source->AddResourcePath("list.html", IDR_BOOKMARKS_LIST_HTML);
-  source->AddResourcePath("list.js", IDR_BOOKMARKS_LIST_JS);
-  source->AddResourcePath("mouse_focus_behavior.html",
-                          IDR_BOOKMARKS_MOUSE_FOCUS_BEHAVIOR_HTML);
-  source->AddResourcePath("mouse_focus_behavior.js",
-                          IDR_BOOKMARKS_MOUSE_FOCUS_BEHAVIOR_JS);
-  source->AddResourcePath("reducers.html", IDR_BOOKMARKS_REDUCERS_HTML);
-  source->AddResourcePath("reducers.js", IDR_BOOKMARKS_REDUCERS_JS);
-  source->AddResourcePath("router.html", IDR_BOOKMARKS_ROUTER_HTML);
-  source->AddResourcePath("router.js", IDR_BOOKMARKS_ROUTER_JS);
-  source->AddResourcePath("shared_style.html", IDR_BOOKMARKS_SHARED_STYLE_HTML);
-  source->AddResourcePath("shared_vars.html", IDR_BOOKMARKS_SHARED_VARS_HTML);
-  source->AddResourcePath("store.html", IDR_BOOKMARKS_STORE_HTML);
-  source->AddResourcePath("store.js", IDR_BOOKMARKS_STORE_JS);
-  source->AddResourcePath("store_client.html", IDR_BOOKMARKS_STORE_CLIENT_HTML);
-  source->AddResourcePath("store_client.js", IDR_BOOKMARKS_STORE_CLIENT_JS);
-  source->AddResourcePath("strings.html", IDR_BOOKMARKS_STRINGS_HTML);
-  source->AddResourcePath("toolbar.html", IDR_BOOKMARKS_TOOLBAR_HTML);
-  source->AddResourcePath("toolbar.js", IDR_BOOKMARKS_TOOLBAR_JS);
-  source->AddResourcePath("util.html", IDR_BOOKMARKS_UTIL_HTML);
-  source->AddResourcePath("util.js", IDR_BOOKMARKS_UTIL_JS);
-
-  source->SetDefaultResource(IDR_BOOKMARKS_BOOKMARKS_HTML);
-#endif
-
-  source->SetJsonPath("strings.js");
 
   return source;
 }
@@ -200,7 +159,7 @@ BookmarksUI::BookmarksUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
 // static
 base::RefCountedMemory* BookmarksUI::GetFaviconResourceBytes(
-    ui::ScaleFactor scale_factor) {
+    ui::ResourceScaleFactor scale_factor) {
   return ui::ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
       IDR_BOOKMARKS_FAVICON, scale_factor);
 }

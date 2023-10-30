@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,20 @@ package org.chromium.chrome.browser.tracing;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
-import android.support.annotation.IntDef;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ContentUriUtils;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ObserverList;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
-import org.chromium.chrome.browser.preferences.developer.TracingPreferences;
+import org.chromium.chrome.browser.tracing.settings.TracingSettings;
 import org.chromium.content_public.browser.TracingControllerAndroid;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.ui.widget.Toast;
@@ -70,7 +71,7 @@ public class TracingController {
     private static final String TAG = "TracingController";
     private static final String TEMP_FILE_DIR = "/traces";
     private static final String TEMP_FILE_PREFIX = "chrome-trace-";
-    private static final String TEMP_FILE_EXT = ".json.gz";
+    private static final String TEMP_FILE_EXT = ".pftrace.gz";
     private static final String TRACE_MIMETYPE = "application/gzip";
 
     private static final long DELETE_AFTER_SHARE_TIMEOUT_MILLIS = DateUtils.HOUR_IN_MILLIS;
@@ -238,11 +239,11 @@ public class TracingController {
         assert mState == State.STARTING;
 
         // TODO(eseckler): TracingControllerAndroid currently doesn't support a json trace config.
-        String categories = TextUtils.join(",", TracingPreferences.getEnabledCategories());
-        String options = TracingPreferences.getSelectedTracingMode();
+        String categories = TextUtils.join(",", TracingSettings.getEnabledCategories());
+        String options = TracingSettings.getSelectedTracingMode();
 
-        if (!mNativeController.startTracing(
-                    mTracingTempFile.getPath(), false, categories, options, true)) {
+        if (!mNativeController.startTracing(mTracingTempFile.getPath(), false, categories, options,
+                    /*compressFile=*/true, /*useProtobuf=*/true)) {
             Log.e(TAG, "Native error while trying to start tracing");
             showErrorToast();
             setState(State.IDLE);

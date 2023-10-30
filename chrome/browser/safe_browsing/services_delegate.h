@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,10 @@
 #define CHROME_BROWSER_SAFE_BROWSING_SERVICES_DELEGATE_H_
 
 #include <memory>
-#include <string>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "build/build_config.h"
 #include "chrome/browser/safe_browsing/incident_reporting/delayed_analysis_callback.h"
 
 class Profile;
@@ -29,16 +30,12 @@ class TrackedPreferenceValidationDelegate;
 
 namespace safe_browsing {
 
-class VerdictCacheManager;
-class ClientSideDetectionService;
+#if !BUILDFLAG(IS_ANDROID)
 class DownloadProtectionService;
+#endif
 class IncidentReportingService;
-class PasswordProtectionService;
-class ResourceRequestDetector;
-struct ResourceRequestInfo;
 class SafeBrowsingService;
 class SafeBrowsingDatabaseManager;
-class TelemetryService;
 struct V4ProtocolConfig;
 
 // Abstraction to help organize code for mobile vs full safe browsing modes.
@@ -55,16 +52,18 @@ class ServicesDelegate {
   class ServicesCreator {
    public:
     virtual bool CanCreateDatabaseManager() = 0;
+#if !BUILDFLAG(IS_ANDROID)
     virtual bool CanCreateDownloadProtectionService() = 0;
+#endif
     virtual bool CanCreateIncidentReportingService() = 0;
-    virtual bool CanCreateResourceRequestDetector() = 0;
 
     // Caller takes ownership of the returned object. Cannot use std::unique_ptr
     // because services may not be implemented for some build configs.
     virtual SafeBrowsingDatabaseManager* CreateDatabaseManager() = 0;
+#if !BUILDFLAG(IS_ANDROID)
     virtual DownloadProtectionService* CreateDownloadProtectionService() = 0;
+#endif
     virtual IncidentReportingService* CreateIncidentReportingService() = 0;
-    virtual ResourceRequestDetector* CreateResourceRequestDetector() = 0;
   };
 
   // Creates the ServicesDelegate using its's default ServicesCreator.
@@ -77,7 +76,9 @@ class ServicesDelegate {
       SafeBrowsingService* safe_browsing_service,
       ServicesDelegate::ServicesCreator* services_creator);
 
-  virtual ~ServicesDelegate() {}
+  ServicesDelegate(SafeBrowsingService* safe_browsing_service,
+                   ServicesCreator* services_creator);
+  virtual ~ServicesDelegate();
 
   virtual const scoped_refptr<SafeBrowsingDatabaseManager>& database_manager()
       const = 0;
@@ -85,52 +86,46 @@ class ServicesDelegate {
   // Initializes internal state using the ServicesCreator.
   virtual void Initialize() = 0;
 
-  // Creates the CSD service for the given |url_loader_factory|.
-  virtual void InitializeCsdService(
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) = 0;
-
   virtual void SetDatabaseManagerForTest(
       SafeBrowsingDatabaseManager* database_manager) = 0;
 
   // Shuts down the download service.
-  virtual void ShutdownServices() = 0;
+  virtual void ShutdownServices();
 
   // Handles SafeBrowsingService::RefreshState() for the provided services.
   virtual void RefreshState(bool enable) = 0;
 
   // See the SafeBrowsingService methods of the same name.
-  virtual void ProcessResourceRequest(const ResourceRequestInfo* request) = 0;
   virtual std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>
   CreatePreferenceValidationDelegate(Profile* profile) = 0;
   virtual void RegisterDelayedAnalysisCallback(
-      const DelayedAnalysisCallback& callback) = 0;
+      DelayedAnalysisCallback callback) = 0;
   virtual void AddDownloadManager(
       content::DownloadManager* download_manager) = 0;
 
   // Returns nullptr for any service that is not available.
-  virtual ClientSideDetectionService* GetCsdService() = 0;
+#if !BUILDFLAG(IS_ANDROID)
   virtual DownloadProtectionService* GetDownloadService() = 0;
+#endif
 
+  // Takes a SharedURLLoaderFactory from the BrowserProcess, for use in the
+  // database manager.
   virtual void StartOnIOThread(
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      scoped_refptr<network::SharedURLLoaderFactory> browser_url_loader_factory,
       const V4ProtocolConfig& v4_config) = 0;
   virtual void StopOnIOThread(bool shutdown) = 0;
 
-  virtual void CreatePasswordProtectionService(Profile* profile) = 0;
-  virtual void RemovePasswordProtectionService(Profile* profile) = 0;
-  virtual PasswordProtectionService* GetPasswordProtectionService(
-      Profile* profile) const = 0;
+  virtual void CreateTelemetryService(Profile* profile) {}
+  virtual void RemoveTelemetryService(Profile* profile) {}
 
-  virtual void CreateTelemetryService(Profile* profile) = 0;
-  virtual void RemoveTelemetryService() = 0;
-  virtual TelemetryService* GetTelemetryService() const = 0;
+  virtual void OnProfileWillBeDestroyed(Profile* profile) {}
 
-  virtual void CreateVerdictCacheManager(Profile* profile) = 0;
-  virtual void RemoveVerdictCacheManager(Profile* profile) = 0;
-  virtual VerdictCacheManager* GetVerdictCacheManager(
-      Profile* profile) const = 0;
+ protected:
+  // Unowned pointer
+  const raw_ptr<SafeBrowsingService> safe_browsing_service_;
 
-  virtual std::string GetSafetyNetId() const = 0;
+  // Unowned pointer
+  const raw_ptr<ServicesCreator> services_creator_;
 };
 
 }  // namespace safe_browsing

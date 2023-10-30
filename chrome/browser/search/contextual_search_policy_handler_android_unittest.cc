@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,8 +25,8 @@ TEST(ContextualSearchPolicyHandlerAndroidTest, Default) {
 TEST(ContextualSearchPolicyHandlerAndroidTest, Enabled) {
   PolicyMap policy;
   policy.Set(key::kContextualSearchEnabled, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, POLICY_SOURCE_PLATFORM,
-             std::make_unique<base::Value>(true), nullptr);
+             POLICY_SCOPE_USER, POLICY_SOURCE_PLATFORM, base::Value(true),
+             nullptr);
   PrefValueMap prefs;
   ContextualSearchPolicyHandlerAndroid handler;
   handler.ApplyPolicySettings(policy, &prefs);
@@ -40,8 +40,8 @@ TEST(ContextualSearchPolicyHandlerAndroidTest, Enabled) {
 TEST(ContextualSearchPolicyHandlerAndroidTest, Disabled) {
   PolicyMap policy;
   policy.Set(key::kContextualSearchEnabled, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, POLICY_SOURCE_PLATFORM,
-             std::make_unique<base::Value>(false), nullptr);
+             POLICY_SCOPE_USER, POLICY_SOURCE_PLATFORM, base::Value(false),
+             nullptr);
   PrefValueMap prefs;
   ContextualSearchPolicyHandlerAndroid handler;
   handler.ApplyPolicySettings(policy, &prefs);

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/task/task_traits.h"
 #include "chrome/chrome_cleaner/engines/broker/scanner_sandbox_interface.h"
 #include "chrome/chrome_cleaner/os/registry.h"
@@ -64,18 +64,17 @@ EngineRequestsImpl::EngineRequestsImpl(
     scoped_refptr<MojoTaskRunner> mojo_task_runner,
     InterfaceMetadataObserver* metadata_observer)
     : mojo_task_runner_(mojo_task_runner),
-      metadata_observer_(metadata_observer),
-      binding_(this) {}
+      metadata_observer_(metadata_observer) {}
 
 EngineRequestsImpl::~EngineRequestsImpl() = default;
 
 void EngineRequestsImpl::Bind(
-    mojom::EngineRequestsAssociatedPtrInfo* ptr_info) {
-  if (binding_.is_bound())
-    binding_.Unbind();
+    mojo::PendingAssociatedRemote<mojom::EngineRequests>* remote) {
+  if (receiver_.is_bound())
+    receiver_.reset();
 
-  binding_.Bind(mojo::MakeRequest(ptr_info));
-  // There's no need to call set_connection_error_handler on this since it's an
+  receiver_.Bind(remote->InitWithNewEndpointAndPassReceiver());
+  // There's no need to call set_disconnect_handler on this since it's an
   // associated interface. Any errors will be handled on the main EngineCommands
   // interface.
 }
@@ -83,7 +82,7 @@ void EngineRequestsImpl::Bind(
 void EngineRequestsImpl::SandboxGetFileAttributes(
     const base::FilePath& file_name,
     SandboxGetFileAttributesCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetFileAttributes,
                      base::Unretained(this), file_name,
@@ -106,7 +105,7 @@ void EngineRequestsImpl::GetFileAttributes(
 void EngineRequestsImpl::SandboxGetKnownFolderPath(
     mojom::KnownFolder folder_id,
     SandboxGetKnownFolderPathCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetKnownFolderPath,
                      base::Unretained(this), folder_id,
@@ -128,7 +127,7 @@ void EngineRequestsImpl::GetKnownFolderPath(
 
 void EngineRequestsImpl::SandboxGetProcesses(
     SandboxGetProcessesCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetProcesses, base::Unretained(this),
                      std::move(result_callback)));
@@ -147,7 +146,7 @@ void EngineRequestsImpl::GetProcesses(
 
 void EngineRequestsImpl::SandboxGetTasks(
     SandboxGetTasksCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetTasks, base::Unretained(this),
                      std::move(result_callback)));
@@ -183,7 +182,7 @@ void EngineRequestsImpl::GetTasks(SandboxGetTasksCallback result_callback) {
 void EngineRequestsImpl::SandboxGetProcessImagePath(
     base::ProcessId pid,
     SandboxGetProcessImagePathCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetProcessImagePath,
                      base::Unretained(this), pid, std::move(result_callback)));
@@ -206,7 +205,7 @@ void EngineRequestsImpl::GetProcessImagePath(
 void EngineRequestsImpl::SandboxGetLoadedModules(
     base::ProcessId pid,
     SandboxGetLoadedModulesCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetLoadedModules,
                      base::Unretained(this), pid, std::move(result_callback)));
@@ -217,10 +216,10 @@ void EngineRequestsImpl::GetLoadedModules(
     SandboxGetLoadedModulesCallback result_callback) {
   if (metadata_observer_)
     metadata_observer_->ObserveCall(CURRENT_FILE_AND_METHOD);
-  std::set<base::string16> modules;
+  std::set<std::wstring> modules;
   bool result = chrome_cleaner_sandbox::SandboxGetLoadedModules(pid, &modules);
 
-  std::vector<base::string16> modules_list(modules.begin(), modules.end());
+  std::vector<std::wstring> modules_list(modules.begin(), modules.end());
   mojo_task_runner_->PostTask(FROM_HERE,
                               base::BindOnce(std::move(result_callback), result,
                                              std::move(modules_list)));
@@ -229,7 +228,7 @@ void EngineRequestsImpl::GetLoadedModules(
 void EngineRequestsImpl::SandboxGetProcessCommandLine(
     base::ProcessId pid,
     SandboxGetProcessCommandLineCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetProcessCommandLine,
                      base::Unretained(this), pid, std::move(result_callback)));
@@ -241,7 +240,7 @@ void EngineRequestsImpl::GetProcessCommandLine(
   if (metadata_observer_)
     metadata_observer_->ObserveCall(CURRENT_FILE_AND_METHOD);
 
-  base::string16 command_line;
+  std::wstring command_line;
   bool result =
       chrome_cleaner_sandbox::SandboxGetProcessCommandLine(pid, &command_line);
 
@@ -253,7 +252,7 @@ void EngineRequestsImpl::GetProcessCommandLine(
 void EngineRequestsImpl::SandboxGetUserInfoFromSID(
     mojom::StringSidPtr string_sid,
     SandboxGetUserInfoFromSIDCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::GetUserInfoFromSID,
                      base::Unretained(this), std::move(string_sid),
@@ -282,10 +281,10 @@ void EngineRequestsImpl::GetUserInfoFromSID(
 
 void EngineRequestsImpl::SandboxOpenReadOnlyRegistry(
     HANDLE root_key_handle,
-    const base::string16& sub_key,
+    const std::wstring& sub_key,
     uint32_t dw_access,
     SandboxOpenReadOnlyRegistryCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::OpenReadOnlyRegistry,
                      base::Unretained(this), root_key_handle, sub_key,
@@ -294,7 +293,7 @@ void EngineRequestsImpl::SandboxOpenReadOnlyRegistry(
 
 void EngineRequestsImpl::OpenReadOnlyRegistry(
     HANDLE root_key_handle,
-    const base::string16& sub_key,
+    const std::wstring& sub_key,
     uint32_t dw_access,
     SandboxOpenReadOnlyRegistryCallback result_callback) {
   if (metadata_observer_)
@@ -316,10 +315,10 @@ void EngineRequestsImpl::OpenReadOnlyRegistry(
 
 void EngineRequestsImpl::SandboxNtOpenReadOnlyRegistry(
     HANDLE root_key_handle,
-    const String16EmbeddedNulls& sub_key,
+    const WStringEmbeddedNulls& sub_key,
     uint32_t dw_access,
     SandboxNtOpenReadOnlyRegistryCallback result_callback) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&EngineRequestsImpl::NtOpenReadOnlyRegistry,
                      base::Unretained(this), root_key_handle, sub_key,
@@ -328,7 +327,7 @@ void EngineRequestsImpl::SandboxNtOpenReadOnlyRegistry(
 
 void EngineRequestsImpl::NtOpenReadOnlyRegistry(
     HANDLE root_key_handle,
-    const String16EmbeddedNulls& sub_key,
+    const WStringEmbeddedNulls& sub_key,
     uint32_t dw_access,
     SandboxNtOpenReadOnlyRegistryCallback result_callback) {
   if (metadata_observer_)

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@ package org.chromium.chrome.browser.partnerbookmarks;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 
-import org.chromium.chrome.browser.ChromeVersionInfo;
+import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
+import org.chromium.components.version_info.VersionInfo;
 
 /**
  * The Java counterpart for the C++ partner bookmarks shim.
@@ -30,11 +31,12 @@ public class PartnerBookmarksShim {
         if (sIsReadingAttempted) return;
         sIsReadingAttempted = true;
 
-        PartnerBookmarksReader reader = new PartnerBookmarksReader(context);
+        PartnerBookmarksReader reader =
+                new PartnerBookmarksReader(context, PartnerBrowserCustomizations.getInstance());
 
         boolean systemOrPreStable =
                 (context.getApplicationInfo().flags & ApplicationInfo.FLAG_SYSTEM) == 1
-                || !ChromeVersionInfo.isStableBuild();
+                || !VersionInfo.isStableBuild();
         if (!systemOrPreStable) {
             reader.onBookmarksRead();
             return;

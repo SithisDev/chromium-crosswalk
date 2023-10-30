@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,29 +14,34 @@ import org.chromium.chrome.test.pagecontroller.utils.Ui2Locators;
  */
 public class TabSwitcherMenuController extends PageController {
     private static final IUi2Locator LOCATOR_MENU_BOX =
-            Ui2Locators.withResEntries(R.id.app_menu_list);
+            Ui2Locators.withAnyResEntry(R.id.app_menu_list);
 
     // TODO(aluo): Add resource ids for menus, using text will break when switching languages
     private static final IUi2Locator LOCATOR_MENU =
             Ui2Locators.withPath(LOCATOR_MENU_BOX, Ui2Locators.withText("Close all tabs"));
 
     private static final IUi2Locator LOCATOR_NEW_TAB =
-            Ui2Locators.withResEntriesByIndex(0, R.id.menu_item_text);
+            Ui2Locators.withPath(Ui2Locators.withAnyResEntry(R.id.menu_item_text),
+                    Ui2Locators.withTextString(R.string.button_new_tab));
     private static final IUi2Locator LOCATOR_NEW_INCOGNITO_TAB =
-            Ui2Locators.withResEntriesByIndex(1, R.id.menu_item_text);
+            Ui2Locators.withPath(Ui2Locators.withAnyResEntry(R.id.menu_item_text),
+                    Ui2Locators.withTextString(R.string.button_new_incognito_tab));
     private static final IUi2Locator LOCATOR_CLOSE_ALL_TABS =
-            Ui2Locators.withResEntriesByIndex(2, R.id.menu_item_text);
+            Ui2Locators.withPath(Ui2Locators.withAnyResEntry(R.id.menu_item_text),
+                    Ui2Locators.withTextString(R.string.menu_close_all_tabs));
     private static final IUi2Locator LOCATOR_SETTINGS =
-            Ui2Locators.withResEntriesByIndex(3, R.id.menu_item_text);
+            Ui2Locators.withPath(Ui2Locators.withAnyResEntry(R.id.menu_item_text),
+                    Ui2Locators.withTextString(R.string.menu_settings));
 
-    static private final TabSwitcherMenuController sInstance = new TabSwitcherMenuController();
-    static public TabSwitcherMenuController getInstance() {
+    private static final TabSwitcherMenuController sInstance = new TabSwitcherMenuController();
+    public static TabSwitcherMenuController getInstance() {
         return sInstance;
     }
 
     @Override
-    public boolean isCurrentPageThis() {
-        return mLocatorHelper.isOnScreen(LOCATOR_MENU);
+    public TabSwitcherMenuController verifyActive() {
+        mLocatorHelper.verifyOnScreen(LOCATOR_MENU);
+        return this;
     }
 
     public void clickNewTab() {
@@ -57,8 +62,6 @@ public class TabSwitcherMenuController extends PageController {
 
     public TabSwitcherController dismiss() {
         mUtils.clickOutsideOf(LOCATOR_MENU_BOX);
-        TabSwitcherController inst = TabSwitcherController.getInstance();
-        inst.verify();
-        return inst;
+        return TabSwitcherController.getInstance().verifyActive();
     }
 }

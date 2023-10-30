@@ -1,6 +1,2 @@
-cjgrant@chromium.org
+file://components/webxr/OWNERS
 mthiesse@chromium.org
-
-# TEAM: xr-dev@chromium.org
-# COMPONENT: Internals>XR>VR
-# OS: Android

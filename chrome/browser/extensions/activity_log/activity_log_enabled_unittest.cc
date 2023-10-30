@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "base/test/scoped_command_line.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/activity_log/activity_log_task_runner.h"
-#include "chrome/browser/extensions/api/activity_log_private/activity_log_private_api.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/common/chrome_switches.h"
@@ -37,8 +36,7 @@ class ActivityLogEnabledTest : public ChromeRenderViewHostTestHarness {
 };
 
 TEST_F(ActivityLogEnabledTest, NoSwitch) {
-  std::unique_ptr<TestingProfile> profile(
-      static_cast<TestingProfile*>(CreateBrowserContext()));
+  std::unique_ptr<TestingProfile> profile(CreateTestingProfile());
   EXPECT_FALSE(
       profile->GetPrefs()->GetInteger(prefs::kWatchdogExtensionActive));
 
@@ -51,10 +49,8 @@ TEST_F(ActivityLogEnabledTest, NoSwitch) {
 }
 
 TEST_F(ActivityLogEnabledTest, CommandLineSwitch) {
-  std::unique_ptr<TestingProfile> profile1(
-      static_cast<TestingProfile*>(CreateBrowserContext()));
-  std::unique_ptr<TestingProfile> profile2(
-      static_cast<TestingProfile*>(CreateBrowserContext()));
+  std::unique_ptr<TestingProfile> profile1(CreateTestingProfile());
+  std::unique_ptr<TestingProfile> profile2(CreateTestingProfile());
 
   ActivityLog* activity_log1;
   {
@@ -76,12 +72,9 @@ TEST_F(ActivityLogEnabledTest, CommandLineSwitch) {
 }
 
 TEST_F(ActivityLogEnabledTest, PrefSwitch) {
-  std::unique_ptr<TestingProfile> profile1(
-      static_cast<TestingProfile*>(CreateBrowserContext()));
-  std::unique_ptr<TestingProfile> profile2(
-      static_cast<TestingProfile*>(CreateBrowserContext()));
-  std::unique_ptr<TestingProfile> profile3(
-      static_cast<TestingProfile*>(CreateBrowserContext()));
+  std::unique_ptr<TestingProfile> profile1(CreateTestingProfile());
+  std::unique_ptr<TestingProfile> profile2(CreateTestingProfile());
+  std::unique_ptr<TestingProfile> profile3(CreateTestingProfile());
 
   EXPECT_EQ(0,
       profile1->GetPrefs()->GetInteger(prefs::kWatchdogExtensionActive));
@@ -112,10 +105,8 @@ TEST_F(ActivityLogEnabledTest, PrefSwitch) {
 
 TEST_F(ActivityLogEnabledTest, WatchdogSwitch) {
   base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
-  std::unique_ptr<TestingProfile> profile1(
-      static_cast<TestingProfile*>(CreateBrowserContext()));
-  std::unique_ptr<TestingProfile> profile2(
-      static_cast<TestingProfile*>(CreateBrowserContext()));
+  std::unique_ptr<TestingProfile> profile1(CreateTestingProfile());
+  std::unique_ptr<TestingProfile> profile2(CreateTestingProfile());
   // Extension service is destroyed by the profile.
   ExtensionService* extension_service1 =
     static_cast<TestExtensionSystem*>(
@@ -178,10 +169,13 @@ TEST_F(ActivityLogEnabledTest, WatchdogSwitch) {
   EXPECT_TRUE(activity_log1->IsDatabaseEnabled());
   EXPECT_FALSE(activity_log2->IsDatabaseEnabled());
 
+  // Wait for UninstallExtension to complete to avoid race condition with data
+  // cleanup at TearDown.
+  base::RunLoop loop;
   extension_service1->UninstallExtension(
-      kExtensionID,
-      extensions::UNINSTALL_REASON_FOR_TESTING,
-      NULL);
+      kExtensionID, extensions::UNINSTALL_REASON_FOR_TESTING, nullptr,
+      loop.QuitClosure());
+  loop.Run();
 
   EXPECT_EQ(0,
       profile1->GetPrefs()->GetInteger(prefs::kWatchdogExtensionActive));
@@ -219,8 +213,7 @@ TEST_F(ActivityLogEnabledTest, AppAndCommandLine) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExtensionActivityLogging);
 
-  std::unique_ptr<TestingProfile> profile(
-      static_cast<TestingProfile*>(CreateBrowserContext()));
+  std::unique_ptr<TestingProfile> profile(CreateTestingProfile());
   // Extension service is destroyed by the profile.
   base::CommandLine no_program_command_line(base::CommandLine::NO_PROGRAM);
   ExtensionService* extension_service =
@@ -256,10 +249,13 @@ TEST_F(ActivityLogEnabledTest, AppAndCommandLine) {
       profile->GetPrefs()->GetInteger(prefs::kWatchdogExtensionActive));
   EXPECT_TRUE(activity_log->IsWatchdogAppActive());
 
+  // Wait for UninstallExtension to complete to avoid race condition with data
+  // cleanup at TearDown.
+  base::RunLoop loop;
   extension_service->UninstallExtension(
-      kExtensionID,
-      extensions::UNINSTALL_REASON_FOR_TESTING,
-      NULL);
+      kExtensionID, extensions::UNINSTALL_REASON_FOR_TESTING, nullptr,
+      loop.QuitClosure());
+  loop.Run();
 
   EXPECT_TRUE(activity_log->IsDatabaseEnabled());
   EXPECT_EQ(0,
@@ -270,8 +266,7 @@ TEST_F(ActivityLogEnabledTest, AppAndCommandLine) {
 // Tests that if the cached count in the profile preferences is incorrect, the
 // activity log will correct itself.
 TEST_F(ActivityLogEnabledTest, IncorrectPrefsRecovery) {
-  std::unique_ptr<TestingProfile> profile(
-      static_cast<TestingProfile*>(CreateBrowserContext()));
+  std::unique_ptr<TestingProfile> profile(CreateTestingProfile());
   base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
   ExtensionService* extension_service =
     static_cast<TestExtensionSystem*>(

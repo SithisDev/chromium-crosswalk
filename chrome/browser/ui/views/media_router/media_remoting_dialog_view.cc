@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,123 +10,90 @@
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/media_router/cast_toolbar_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/media_router/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/style/typography.h"
 
 namespace media_router {
 
-// static
-void MediaRemotingDialogView::GetPermission(content::WebContents* web_contents,
-                                            PermissionCallback callback) {
-  HideDialog();  // Close the previous dialog if it is still showing.
-
+MediaRemotingDialogCoordinatorViews::MediaRemotingDialogCoordinatorViews(
+    content::WebContents* web_contents)
+    : web_contents_(web_contents) {
   DCHECK(web_contents);
-  DCHECK(callback);
+}
 
-  // Check whether user has set the permission.
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  PrefService* const pref_service = profile->GetPrefs();
-  DCHECK(pref_service);
-  const PrefService::Preference* pref =
-      pref_service->FindPreference(::prefs::kMediaRouterMediaRemotingEnabled);
-  if (pref && !pref->IsDefaultValue()) {
-    std::move(callback).Run(pref->GetValue()->GetBool());
-    return;
-  }
+MediaRemotingDialogCoordinatorViews::~MediaRemotingDialogCoordinatorViews() =
+    default;
 
-  // Show dialog.
-  Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
+bool MediaRemotingDialogCoordinatorViews::Show(
+    PermissionCallback permission_callback) {
+  DCHECK(permission_callback);
+
+  Hide();  // Close the previous dialog if it is still showing.
+
+  Browser* const browser = chrome::FindBrowserWithWebContents(web_contents_);
   if (!browser) {
-    std::move(callback).Run(false);
-    return;
+    std::move(permission_callback).Run(false);
+    return false;
   }
-  views::View* icon_view =
+  views::View* const icon_view =
       BrowserView::GetBrowserViewForBrowser(browser)->toolbar()->cast_button();
-  MediaRouterActionController* action_controller =
+  Profile* const profile =
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
+  PrefService* const pref_service = profile->GetPrefs();
+  MediaRouterActionController* const action_controller =
       MediaRouterUIService::Get(profile)->action_controller();
 
-  instance_ = new MediaRemotingDialogView(
-      icon_view, pref_service, action_controller, std::move(callback));
-  views::Widget* widget =
-      views::BubbleDialogDelegateView::CreateBubble(instance_);
-  widget->Show();
+  auto remoting_dialog = std::make_unique<MediaRemotingDialogView>(
+      icon_view, pref_service, action_controller,
+      std::move(permission_callback));
+  tracker_.SetView(remoting_dialog.get());
+  views::BubbleDialogDelegateView::CreateBubble(std::move(remoting_dialog))
+      ->Show();
+  return true;
 }
 
-// static
-void MediaRemotingDialogView::HideDialog() {
+void MediaRemotingDialogCoordinatorViews::Hide() {
   if (IsShowing())
-    instance_->GetWidget()->Close();
-  // We also set |instance_| to nullptr in WindowClosing() which is called
-  // asynchronously, because not all paths to close the dialog go through
-  // HideDialog(). We set it here because IsShowing() should be false after
-  // HideDialog() is called.
-  instance_ = nullptr;
+    tracker_.view()->GetWidget()->Close();
 }
 
-// static
-bool MediaRemotingDialogView::IsShowing() {
-  return instance_ != nullptr;
-}
-
-bool MediaRemotingDialogView::ShouldShowCloseButton() const {
-  return true;
-}
-
-base::string16 MediaRemotingDialogView::GetWindowTitle() const {
-  return dialog_title_;
-}
-
-base::string16 MediaRemotingDialogView::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return l10n_util::GetStringUTF16(
-      button == ui::DIALOG_BUTTON_OK
-          ? IDS_MEDIA_ROUTER_REMOTING_DIALOG_OPTIMIZE_BUTTON
-          : IDS_MEDIA_ROUTER_REMOTING_DIALOG_CANCEL_BUTTON);
-}
-
-int MediaRemotingDialogView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
-}
-
-bool MediaRemotingDialogView::Accept() {
-  ReportPermission(true);
-  return true;
-}
-
-bool MediaRemotingDialogView::Cancel() {
-  ReportPermission(false);
-  return true;
-}
-
-bool MediaRemotingDialogView::Close() {
-  return true;
-}
-
-gfx::Size MediaRemotingDialogView::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                        DISTANCE_BUBBLE_PREFERRED_WIDTH) -
-                    margins().width();
-  return gfx::Size(width, GetHeightForWidth(width));
+bool MediaRemotingDialogCoordinatorViews::IsShowing() const {
+  return !!tracker_.view();
 }
 
 MediaRemotingDialogView::MediaRemotingDialogView(
     views::View* anchor_view,
     PrefService* pref_service,
     MediaRouterActionController* action_controller,
-    PermissionCallback callback)
+    MediaRemotingDialogCoordinator::PermissionCallback callback)
     : BubbleDialogDelegateView(anchor_view, views::BubbleBorder::TOP_RIGHT),
-      permission_callback_(std::move(callback)),
       pref_service_(pref_service),
       action_controller_(action_controller),
-      dialog_title_(
-          l10n_util::GetStringUTF16(IDS_MEDIA_ROUTER_REMOTING_DIALOG_TITLE)) {
+      permission_callback_(std::move(callback)) {
   DCHECK(pref_service_);
+  SetShowCloseButton(true);
+  SetTitle(IDS_MEDIA_ROUTER_REMOTING_DIALOG_TITLE);
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringUTF16(
+                     IDS_MEDIA_ROUTER_REMOTING_DIALOG_OPTIMIZE_BUTTON));
+  SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
+                 l10n_util::GetStringUTF16(
+                     IDS_MEDIA_ROUTER_REMOTING_DIALOG_CANCEL_BUTTON));
+
+  SetAcceptCallback(base::BindOnce(&MediaRemotingDialogView::ReportPermission,
+                                   base::Unretained(this), true));
+  SetCancelCallback(base::BindOnce(&MediaRemotingDialogView::ReportPermission,
+                                   base::Unretained(this), false));
+
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_BUBBLE_PREFERRED_WIDTH));
+
   SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical));
   // Depress the Cast toolbar icon.
@@ -140,32 +107,26 @@ MediaRemotingDialogView::~MediaRemotingDialogView() {
 void MediaRemotingDialogView::Init() {
   views::Label* body_text = new views::Label(
       l10n_util::GetStringUTF16(IDS_MEDIA_ROUTER_REMOTING_DIALOG_BODY_TEXT),
-      views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT, views::style::STYLE_PRIMARY);
+      views::style::CONTEXT_DIALOG_BODY_TEXT, views::style::STYLE_PRIMARY);
   body_text->SetMultiLine(true);
   body_text->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   AddChildView(body_text);
 
   remember_choice_checkbox_ = new views::Checkbox(
       l10n_util::GetStringUTF16(IDS_MEDIA_ROUTER_REMOTING_DIALOG_CHECKBOX));
-  AddChildView(remember_choice_checkbox_);
-}
-
-void MediaRemotingDialogView::WindowClosing() {
-  if (instance_ == this)
-    instance_ = nullptr;
+  AddChildView(remember_choice_checkbox_.get());
 }
 
 void MediaRemotingDialogView::ReportPermission(bool allowed) {
   DCHECK(remember_choice_checkbox_);
   DCHECK(permission_callback_);
   if (remember_choice_checkbox_->GetChecked()) {
-    pref_service_->SetBoolean(::prefs::kMediaRouterMediaRemotingEnabled,
-                              allowed);
+    pref_service_->SetBoolean(prefs::kMediaRouterMediaRemotingEnabled, allowed);
   }
   std::move(permission_callback_).Run(allowed);
 }
 
-// static
-MediaRemotingDialogView* MediaRemotingDialogView::instance_ = nullptr;
+BEGIN_METADATA(MediaRemotingDialogView, views::BubbleDialogDelegateView)
+END_METADATA
 
 }  // namespace media_router

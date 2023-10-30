@@ -1,13 +1,13 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
+#include <tuple>
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
-#include "base/macros.h"
 #include "base/strings/string_split.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_restrictions.h"
@@ -23,13 +23,13 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/public/common/buildflags.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/feature_h264_with_openh264_ffmpeg.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "media/base/media_switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/perf/perf_test.h"
+#include "third_party/blink/public/common/features.h"
 
 static const char kMainWebrtcTestHtmlPage[] =
     "/webrtc/webrtc_jsep01_test.html";
@@ -61,57 +61,55 @@ class WebRtcInternalsPerfBrowserTest : public WebRtcTestBase {
         .AddExtension(test::kY4mFileExtension);
     command_line->AppendSwitchPath(switches::kUseFileForFakeVideoCapture,
                                    input_video);
-    command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
   }
 
   // Tries to extract data from peerConnectionDataStore in the webrtc-internals
-  // tab. The caller owns the parsed data. Returns NULL on failure.
-  base::DictionaryValue* GetWebrtcInternalsData(
+  // tab. The caller owns the parsed data. Returns nullopt on failure.
+  absl::optional<base::Value::Dict> GetWebrtcInternalsData(
       content::WebContents* webrtc_internals_tab) {
     std::string all_stats_json = ExecuteJavascript(
         "window.domAutomationController.send("
         "    JSON.stringify(peerConnectionDataStore));",
         webrtc_internals_tab);
 
-    std::unique_ptr<base::Value> parsed_json =
-        base::JSONReader::ReadDeprecated(all_stats_json);
-    base::DictionaryValue* result;
-    if (parsed_json.get() && parsed_json->GetAsDictionary(&result)) {
-      ignore_result(parsed_json.release());
-      return result;
+    absl::optional<base::Value> parsed_json =
+        base::JSONReader::Read(all_stats_json);
+    if (parsed_json.has_value() && parsed_json->is_dict()) {
+      return absl::make_optional(std::move(parsed_json->GetDict()));
     }
 
-    return NULL;
+    return absl::nullopt;
   }
 
-  const base::DictionaryValue* GetDataOnPeerConnection(
-      const base::DictionaryValue* all_data,
+  const base::Value::Dict* GetDataOnPeerConnection(
+      const base::Value::Dict& all_data,
       int peer_connection_index) {
-    base::DictionaryValue::Iterator iterator(*all_data);
-
-    for (int i = 0; i < peer_connection_index && !iterator.IsAtEnd();
-        --peer_connection_index) {
-      iterator.Advance();
+    for (auto kv : all_data) {
+      if (peer_connection_index == 0) {
+        if (kv.second.is_dict())
+          return &kv.second.GetDict();
+        break;
+      }
+      --peer_connection_index;
     }
 
-    const base::DictionaryValue* result;
-    if (!iterator.IsAtEnd() && iterator.value().GetAsDictionary(&result))
-      return result;
-
-    return NULL;
+    return nullptr;
   }
 
-  std::unique_ptr<base::DictionaryValue> MeasureWebRtcInternalsData(
+  absl::optional<base::Value::Dict> MeasureWebRtcInternalsData(
       int duration_msec) {
-    chrome::AddTabAt(browser(), GURL(), -1, true);
-    ui_test_utils::NavigateToURL(browser(), GURL("chrome://webrtc-internals"));
+    chrome::AddTabAt(browser(), GURL(url::kAboutBlankURL), -1, true);
+    EXPECT_TRUE(ui_test_utils::NavigateToURL(
+        browser(), GURL("chrome://webrtc-internals")));
     content::WebContents* webrtc_internals_tab =
         browser()->tab_strip_model()->GetActiveWebContents();
 
+    // TODO(https://crbug.com/1004239): Stop relying on the legacy getStats()
+    // API.
+    ChangeToLegacyGetStats(webrtc_internals_tab);
     test::SleepInJavascript(webrtc_internals_tab, duration_msec);
 
-    return std::unique_ptr<base::DictionaryValue>(
-        GetWebrtcInternalsData(webrtc_internals_tab));
+    return GetWebrtcInternalsData(webrtc_internals_tab);
   }
 
   void RunsAudioVideoCall60SecsAndLogsInternalMetrics(
@@ -122,9 +120,16 @@ class WebRtcInternalsPerfBrowserTest : public WebRtcTestBase {
     ASSERT_TRUE(test::HasReferenceFilesInCheckout());
     ASSERT_TRUE(embedded_test_server()->Start());
 
+    ASSERT_GE(TestTimeouts::test_launcher_timeout().InSeconds(), 100)
+        << "This is a long-running test; you must specify "
+           "--test-launcher-timeout to have a value of at least 100000.";
     ASSERT_GE(TestTimeouts::action_max_timeout().InSeconds(), 100)
         << "This is a long-running test; you must specify "
            "--ui-test-action-max-timeout to have a value of at least 100000.";
+    ASSERT_LT(TestTimeouts::action_max_timeout(),
+              TestTimeouts::test_launcher_timeout())
+        << "action_max_timeout needs to be strictly-less-than "
+           "test_launcher_timeout";
 
     content::WebContents* left_tab =
         OpenTestPageAndGetUserMediaInNewTab(kMainWebrtcTestHtmlPage);
@@ -152,13 +157,13 @@ class WebRtcInternalsPerfBrowserTest : public WebRtcTestBase {
     test::SleepInJavascript(left_tab, 60000);
 
     // Start measurements.
-    std::unique_ptr<base::DictionaryValue> all_data =
+    absl::optional<base::Value::Dict> all_data =
         MeasureWebRtcInternalsData(10000);
-    ASSERT_TRUE(all_data.get() != NULL);
+    ASSERT_TRUE(all_data);
 
-    const base::DictionaryValue* first_pc_dict =
-        GetDataOnPeerConnection(all_data.get(), 0);
-    ASSERT_TRUE(first_pc_dict != NULL);
+    const base::Value::Dict* first_pc_dict =
+        GetDataOnPeerConnection(all_data.value(), 0);
+    ASSERT_TRUE(first_pc_dict != nullptr);
     const std::string print_modifier = video_codec_print_modifier.empty()
                                            ? video_codec
                                            : video_codec_print_modifier;
@@ -175,9 +180,16 @@ class WebRtcInternalsPerfBrowserTest : public WebRtcTestBase {
     ASSERT_TRUE(test::HasReferenceFilesInCheckout());
     ASSERT_TRUE(embedded_test_server()->Start());
 
+    ASSERT_GE(TestTimeouts::test_launcher_timeout().InSeconds(), 100)
+        << "This is a long-running test; you must specify "
+           "--test-launcher-timeout to have a value of at least 100000.";
     ASSERT_GE(TestTimeouts::action_max_timeout().InSeconds(), 100)
         << "This is a long-running test; you must specify "
            "--ui-test-action-max-timeout to have a value of at least 100000.";
+    ASSERT_LT(TestTimeouts::action_max_timeout(),
+              TestTimeouts::test_launcher_timeout())
+        << "action_max_timeout needs to be strictly-less-than "
+           "test_launcher_timeout";
 
     content::WebContents* left_tab =
         OpenTestPageAndGetUserMediaInNewTab(kMainWebrtcTestHtmlPage);
@@ -204,23 +216,23 @@ class WebRtcInternalsPerfBrowserTest : public WebRtcTestBase {
     // Let values stabilize, bandwidth ramp up, etc.
     test::SleepInJavascript(left_tab, 60000);
 
-    std::unique_ptr<base::DictionaryValue> all_data =
+    absl::optional<base::Value::Dict> all_data =
         MeasureWebRtcInternalsData(10000);
-    ASSERT_TRUE(all_data.get() != NULL);
+    ASSERT_TRUE(all_data);
 
     // This assumes the sending peer connection is always listed first in the
     // data store, and the receiving second.
-    const base::DictionaryValue* first_pc_dict =
-        GetDataOnPeerConnection(all_data.get(), 0);
-    ASSERT_TRUE(first_pc_dict != NULL);
+    const base::Value::Dict* first_pc_dict =
+        GetDataOnPeerConnection(all_data.value(), 0);
+    ASSERT_TRUE(first_pc_dict != nullptr);
     test::PrintBweForVideoMetrics(
         *first_pc_dict, MakePerfTestLabel("_sendonly", opus_dtx), video_codec);
     test::PrintMetricsForSendStreams(
         *first_pc_dict, MakePerfTestLabel("_sendonly", opus_dtx), video_codec);
 
-    const base::DictionaryValue* second_pc_dict =
-        GetDataOnPeerConnection(all_data.get(), 1);
-    ASSERT_TRUE(second_pc_dict != NULL);
+    const base::Value::Dict* second_pc_dict =
+        GetDataOnPeerConnection(all_data.value(), 1);
+    ASSERT_TRUE(second_pc_dict != nullptr);
     test::PrintBweForVideoMetrics(
         *second_pc_dict, MakePerfTestLabel("_recvonly", opus_dtx), video_codec);
     test::PrintMetricsForRecvStreams(
@@ -263,7 +275,8 @@ IN_PROC_BROWSER_TEST_F(
     MANUAL_RunsAudioVideoCall60SecsAndLogsInternalMetricsH264) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   // Only run test if run-time feature corresponding to |rtc_use_h264| is on.
-  if (!base::FeatureList::IsEnabled(content::kWebRtcH264WithOpenH264FFmpeg)) {
+  if (!base::FeatureList::IsEnabled(
+          blink::features::kWebRtcH264WithOpenH264FFmpeg)) {
     LOG(WARNING)
         << "Run-time feature WebRTC-H264WithOpenH264FFmpeg disabled. "
            "Skipping WebRtcInternalsPerfBrowserTest."

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,13 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string>
 
-#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/common/importer/profile_import.mojom.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
-#include "services/service_manager/public/cpp/service_context_ref.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 
 class ExternalProcessImporterBridge;
 class Importer;
@@ -29,7 +30,11 @@ struct SourceProfile;
 class ProfileImportImpl : public chrome::mojom::ProfileImport {
  public:
   explicit ProfileImportImpl(
-      std::unique_ptr<service_manager::ServiceContextRef> service_ref);
+      mojo::PendingReceiver<chrome::mojom::ProfileImport> receiver);
+
+  ProfileImportImpl(const ProfileImportImpl&) = delete;
+  ProfileImportImpl& operator=(const ProfileImportImpl&) = delete;
+
   ~ProfileImportImpl() override;
 
  private:
@@ -38,12 +43,15 @@ class ProfileImportImpl : public chrome::mojom::ProfileImport {
       const importer::SourceProfile& source_profile,
       uint16_t items,
       const base::flat_map<uint32_t, std::string>& localized_strings,
-      chrome::mojom::ProfileImportObserverPtr observer) override;
+      mojo::PendingRemote<chrome::mojom::ProfileImportObserver> observer)
+      override;
   void CancelImport() override;
   void ReportImportItemFinished(importer::ImportItem item) override;
 
   // The following are used with out of process profile import:
   void ImporterCleanup();
+
+  mojo::Receiver<chrome::mojom::ProfileImport> receiver_;
 
   // Thread that importer runs on, while ProfileImportThread handles messages
   // from the browser process.
@@ -58,10 +66,6 @@ class ProfileImportImpl : public chrome::mojom::ProfileImport {
 
   // Importer of the appropriate type (Firefox, Safari, IE, etc.)
   scoped_refptr<Importer> importer_;
-
-  const std::unique_ptr<service_manager::ServiceContextRef> service_ref_;
-
-  DISALLOW_COPY_AND_ASSIGN(ProfileImportImpl);
 };
 
 #endif  // CHROME_UTILITY_IMPORTER_PROFILE_IMPORT_IMPL_H_

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/ui/views/native_widget_factory.h"
 #include "chrome/browser/win/app_icon.h"
@@ -20,8 +20,9 @@
 namespace {
 
 bool MonitorHasAutohideTaskbarForEdge(UINT edge, HMONITOR monitor) {
-  APPBARDATA taskbar_data = {sizeof(APPBARDATA), NULL, 0, edge};
-  taskbar_data.hWnd = ::GetForegroundWindow();
+  APPBARDATA taskbar_data_for_getautohidebar = {sizeof(APPBARDATA), NULL, 0,
+                                                edge};
+  taskbar_data_for_getautohidebar.hWnd = ::GetForegroundWindow();
 
   // MSDN documents an ABM_GETAUTOHIDEBAREX, which supposedly takes a monitor
   // rect and returns autohide bars on that monitor.  This sounds like a good
@@ -37,7 +38,7 @@ bool MonitorHasAutohideTaskbarForEdge(UINT edge, HMONITOR monitor) {
   //    are looking for, we are done.
   // NOTE: This call spins a nested run loop.
   HWND taskbar = reinterpret_cast<HWND>(
-      SHAppBarMessage(ABM_GETAUTOHIDEBAR, &taskbar_data));
+      SHAppBarMessage(ABM_GETAUTOHIDEBAR, &taskbar_data_for_getautohidebar));
   if (!::IsWindow(taskbar)) {
     APPBARDATA taskbar_data = {sizeof(APPBARDATA), 0, 0, 0};
     unsigned int taskbar_state = SHAppBarMessage(ABM_GETSTATE, &taskbar_data);
@@ -124,7 +125,7 @@ views::NativeWidget* ChromeViewsDelegate::CreateNativeWidget(
           ? NativeWidgetType::NATIVE_WIDGET_AURA
           : NativeWidgetType::DESKTOP_NATIVE_WIDGET_AURA;
 
-  if (params->shadow_type == views::Widget::InitParams::SHADOW_TYPE_DROP &&
+  if (params->shadow_type == views::Widget::InitParams::ShadowType::kDrop &&
       params->shadow_elevation.has_value()) {
     // If the window defines an elevation based shadow in the Widget
     // initialization parameters, force the use of a non toplevel window,
@@ -137,7 +138,8 @@ views::NativeWidget* ChromeViewsDelegate::CreateNativeWidget(
     // because it was disabled at the command line), anything that requires
     // transparency will be broken with a toplevel window, so force the use of
     // a non toplevel window.
-    if (params->opacity == views::Widget::InitParams::TRANSLUCENT_WINDOW &&
+    if (params->opacity ==
+            views::Widget::InitParams::WindowOpacity::kTranslucent &&
         !params->force_software_compositing)
       native_widget_type = NativeWidgetType::NATIVE_WIDGET_AURA;
   } else {
@@ -171,7 +173,7 @@ int ChromeViewsDelegate::GetAppbarAutohideEdges(HMONITOR monitor,
   if (monitor && !in_autohide_edges_callback_) {
     // TODO(robliao): Annotate this task with .WithCOM() once supported.
     // https://crbug.com/662122
-    base::PostTaskWithTraitsAndReplyWithResult(
+    base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
         base::BindOnce(&GetAppbarAutohideEdgesOnWorkerThread, monitor),
         base::BindOnce(&ChromeViewsDelegate::OnGotAppbarAutohideEdges,

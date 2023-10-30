@@ -1,10 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/feature_list.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/scoped_observer.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -13,6 +13,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/no_renderer_crashes_assertion.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -37,9 +38,14 @@ namespace {
 class TestTabStripModelObserver : public TabStripModelObserver {
  public:
   explicit TestTabStripModelObserver(TabStripModel* model)
-      : model_(model), desired_count_(0), scoped_observer_(this) {
-    scoped_observer_.Add(model);
+      : model_(model), desired_count_(0) {
+    model->AddObserver(this);
   }
+
+  TestTabStripModelObserver(const TestTabStripModelObserver&) = delete;
+  TestTabStripModelObserver& operator=(const TestTabStripModelObserver&) =
+      delete;
+
   ~TestTabStripModelObserver() override = default;
 
   void WaitForTabCount(int count) {
@@ -59,12 +65,9 @@ class TestTabStripModelObserver : public TabStripModelObserver {
       run_loop_.Quit();
   }
 
-  TabStripModel* model_;
+  raw_ptr<TabStripModel> model_;
   int desired_count_;
   base::RunLoop run_loop_;
-  ScopedObserver<TabStripModel, TabStripModelObserver> scoped_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestTabStripModelObserver);
 };
 
 }  // namespace
@@ -89,7 +92,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, TestUnload) {
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), extension->GetResourceURL("page.html"),
       WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
   DisableExtension(id);
   // There should only be one remaining web contents - the initial one.
@@ -111,10 +114,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, UnloadWithContentScripts) {
   std::string id = extension->id();
   ASSERT_EQ(1, browser()->tab_strip_model()->count());
   GURL test_url = embedded_test_server()->GetURL("/title1.html");
-  ui_test_utils::NavigateToURL(browser(), test_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), test_url));
 
-  // Sending an XHR with the extension's Origin header should succeed when the
-  // extension is installed.
+  // The content script sends an XHR with the webpage's (rather than
+  // extension's) Origin header - this should succeed (given that
+  // xhr.txt.mock-http-headers says `Access-Control-Allow-Origin: *`).
   const char kSendXhrScript[] = "document.getElementById('xhrButton').click();";
   bool xhr_result = false;
   EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
@@ -130,18 +134,19 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, UnloadWithContentScripts) {
       test_url,
       browser()->tab_strip_model()->GetWebContentsAt(0)->GetLastCommittedURL());
 
-  // Sending an XHR with the extension's Origin header should fail but not kill
-  // the tab.
+  // The content script sends an XHR with the webpage's (rather than
+  // extension's) Origin header - this should succeed (given that
+  // xhr.txt.mock-http-headers says `Access-Control-Allow-Origin: *`).
   EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
       browser()->tab_strip_model()->GetActiveWebContents(), kSendXhrScript,
       &xhr_result));
-  EXPECT_FALSE(xhr_result);
+  EXPECT_TRUE(xhr_result);
 
   // Ensure the process has not been killed.
   EXPECT_TRUE(browser()
                   ->tab_strip_model()
                   ->GetActiveWebContents()
-                  ->GetMainFrame()
+                  ->GetPrimaryMainFrame()
                   ->IsRenderFrameLive());
 }
 
@@ -174,7 +179,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, OpenedOpaqueWindows) {
       browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_EQ(about_blank, web_contents->GetLastCommittedURL());
   url::Origin frame_origin =
-      web_contents->GetMainFrame()->GetLastCommittedOrigin();
+      web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin();
   url::SchemeHostPort precursor_tuple =
       frame_origin.GetTupleOrPrecursorTupleIfOpaque();
   EXPECT_EQ(kExtensionScheme, precursor_tuple.scheme());
@@ -189,13 +194,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, OpenedOpaqueWindows) {
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
 }
 
-// Flaky timeouts on Win7 Tests (dbg)(1); see https://crbug.com/985255.
-#if defined(OS_WIN) && !defined(NDEBUG)
-#define MAYBE_CrashedTabs DISABLED_CrashedTabs
-#else
-#define MAYBE_CrashedTabs CrashedTabs
-#endif
-IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, MAYBE_CrashedTabs) {
+IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, CrashedTabs) {
   TestExtensionDir test_dir;
   test_dir.WriteManifest(
       R"({
@@ -211,7 +210,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, MAYBE_CrashedTabs) {
   const GURL page_url = extension->GetResourceURL("page.html");
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), page_url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
 
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
 
@@ -221,10 +220,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, MAYBE_CrashedTabs) {
 
   {
     content::ScopedAllowRendererCrashes allow_renderer_crashes(
-        active_tab->GetMainFrame()->GetProcess());
+        active_tab->GetPrimaryMainFrame()->GetProcess());
     ui_test_utils::NavigateToURLWithDisposition(
         browser(), GURL("chrome://crash"), WindowOpenDisposition::CURRENT_TAB,
-        ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+        ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
   }
 
   // There should still be two open tabs, but the active one is crashed.
@@ -244,11 +243,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, MAYBE_CrashedTabs) {
   test_tab_strip_model_observer.WaitForTabCount(1);
 
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
-  EXPECT_NE(extension->url().GetOrigin(), browser()
-                                              ->tab_strip_model()
-                                              ->GetActiveWebContents()
-                                              ->GetLastCommittedURL()
-                                              .GetOrigin());
+  EXPECT_NE(extension->url().DeprecatedGetOriginAsURL(),
+            browser()
+                ->tab_strip_model()
+                ->GetActiveWebContents()
+                ->GetLastCommittedURL()
+                .DeprecatedGetOriginAsURL());
 }
 
 // TODO(devlin): Investigate what to do for embedded iframes.

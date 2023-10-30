@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,11 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/logging.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/task/post_task.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -195,7 +194,7 @@ class WebRtcLogUploaderTest : public testing::Test {
     run_loop.Run();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   base::FilePath test_list_path_;
 };
 
@@ -203,7 +202,7 @@ TEST_F(WebRtcLogUploaderTest, AddLocallyStoredLogInfoToUploadListFile) {
   // Get a temporary filename. We don't want the file to exist to begin with
   // since that's the normal use case, hence the delete.
   ASSERT_TRUE(base::CreateTemporaryFile(&test_list_path_));
-  EXPECT_TRUE(base::DeleteFile(test_list_path_, false));
+  EXPECT_TRUE(base::DeleteFile(test_list_path_));
   std::unique_ptr<WebRtcLogUploader> webrtc_log_uploader(
       new WebRtcLogUploader());
 
@@ -241,7 +240,7 @@ TEST_F(WebRtcLogUploaderTest, AddUploadedLogInfoToUploadListFile) {
   // Get a temporary filename. We don't want the file to exist to begin with
   // since that's the normal use case, hence the delete.
   ASSERT_TRUE(base::CreateTemporaryFile(&test_list_path_));
-  EXPECT_TRUE(base::DeleteFile(test_list_path_, false));
+  EXPECT_TRUE(base::DeleteFile(test_list_path_));
   std::unique_ptr<WebRtcLogUploader> webrtc_log_uploader(
       new WebRtcLogUploader());
 
@@ -288,11 +287,11 @@ TEST_F(WebRtcLogUploaderTest, AddRtpDumpsToPostedData) {
                   &outgoing_dump_content[0],
                   outgoing_dump_content.size());
 
-  WebRtcLogUploadDoneData upload_done_data;
-  upload_done_data.log_path = temp_dir.GetPath().AppendASCII("log");
+  WebRtcLogUploader::UploadDoneData upload_done_data;
+  upload_done_data.paths.directory = temp_dir.GetPath().AppendASCII("log");
 
-  upload_done_data.incoming_rtp_dump = incoming_dump;
-  upload_done_data.outgoing_rtp_dump = outgoing_dump;
+  upload_done_data.paths.incoming_rtp_dump = incoming_dump;
+  upload_done_data.paths.outgoing_rtp_dump = outgoing_dump;
 
   std::unique_ptr<WebRtcLogBuffer> log(new WebRtcLogBuffer());
   log->SetComplete();
@@ -302,8 +301,8 @@ TEST_F(WebRtcLogUploaderTest, AddRtpDumpsToPostedData) {
       FROM_HERE,
       base::BindOnce(&WebRtcLogUploader::LoggingStoppedDoUpload,
                      base::Unretained(webrtc_log_uploader.get()),
-                     std::move(log), std::make_unique<MetaDataMap>(),
-                     upload_done_data),
+                     std::move(log), std::make_unique<WebRtcLogMetaDataMap>(),
+                     std::move(upload_done_data)),
       run_loop.QuitClosure());
   run_loop.Run();
 

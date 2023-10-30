@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,6 +67,25 @@ function installAndCleanUp(installOptions, whileInstalled) {
               chrome.test.runWithUserGesture(callbackPass(function() {
                 chrome.management.uninstall(extensionId, {}, callbackPass());
               }));
+            }));
+      }));
+}
+
+// Installs the extension with the given `installOptions`.
+function install(installOptions) {
+  // Begin installing.
+  chrome.webstorePrivate.beginInstallWithManifest3(
+      installOptions,
+      callbackPass(function(result) {
+        assertNoLastError();
+        assertEq("", result);
+
+        // Now complete the installation.
+        chrome.webstorePrivate.completeInstall(
+            extensionId,
+            callbackPass(function(result) {
+              assertNoLastError();
+              assertEq(undefined, result);
             }));
       }));
 }

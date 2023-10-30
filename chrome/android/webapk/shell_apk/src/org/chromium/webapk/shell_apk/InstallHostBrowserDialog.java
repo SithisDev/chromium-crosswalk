@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,7 +49,7 @@ public class InstallHostBrowserDialog {
 
         TextView name = (TextView) view.findViewById(R.id.browser_name);
         name.setText(hostBrowserApplicationName);
-        WebApkUtils.setPaddingInPixel(name,
+        name.setPaddingRelative(
                 context.getResources().getDimensionPixelSize(R.dimen.list_column_padding), 0, 0, 0);
 
         OnDismissListenerCanceler onDismissCanceler = new OnDismissListenerCanceler();

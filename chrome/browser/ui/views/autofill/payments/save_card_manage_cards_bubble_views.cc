@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/autofill/payments/dialog_view_ids.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
@@ -17,67 +18,24 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 
-#if !defined(OS_CHROMEOS)
-#include "chrome/browser/ui/views/sync/bubble_sync_promo_view_util.h"
-#endif
-
 namespace autofill {
 
 SaveCardManageCardsBubbleViews::SaveCardManageCardsBubbleViews(
     views::View* anchor_view,
-    const gfx::Point& anchor_point,
     content::WebContents* web_contents,
     SaveCardBubbleController* controller)
-    : SaveCardBubbleViews(anchor_view, anchor_point, web_contents, controller) {
+    : SaveCardBubbleViews(anchor_view, web_contents, controller) {
+  SetButtons(ui::DIALOG_BUTTON_OK);
+  SetExtraView(std::make_unique<views::MdTextButton>(
+                   base::BindRepeating(
+                       [](SaveCardManageCardsBubbleViews* bubble) {
+                         bubble->controller()->OnManageCardsClicked();
+                         bubble->CloseBubble();
+                       },
+                       base::Unretained(this)),
+                   l10n_util::GetStringUTF16(IDS_AUTOFILL_MANAGE_CARDS)))
+      ->SetID(autofill::DialogViewId::MANAGE_CARDS_BUTTON);
 }
-
-std::unique_ptr<views::View>
-SaveCardManageCardsBubbleViews::CreateFootnoteView() {
-#if defined(OS_CHROMEOS)
-  // ChromeOS does not show the signin promo.
-  return nullptr;
-#else
-  if (!controller()->ShouldShowSignInPromo())
-    return nullptr;
-
-  sync_promo_delegate_ =
-      std::make_unique<SaveCardManageCardsBubbleViews::SyncPromoDelegate>(
-          controller(),
-          signin_metrics::AccessPoint::ACCESS_POINT_MANAGE_CARDS_BUBBLE);
-
-  BubbleSyncPromoViewParams params;
-  params.link_text_resource_id = IDS_AUTOFILL_SIGNIN_PROMO_LINK_DICE_DISABLED;
-  params.message_text_resource_id =
-      IDS_AUTOFILL_SIGNIN_PROMO_MESSAGE_DICE_DISABLED;
-  params.dice_no_accounts_promo_message_resource_id =
-      IDS_AUTOFILL_SIGNIN_PROMO_MESSAGE;
-  params.dice_accounts_promo_message_resource_id =
-      IDS_AUTOFILL_SYNC_PROMO_MESSAGE;
-  params.dice_signin_button_prominent = false;
-  params.dice_text_style = ChromeTextStyle::STYLE_SECONDARY;
-
-  auto promo_view = CreateBubbleSyncPromoView(
-      controller()->GetProfile(), sync_promo_delegate_.get(),
-      signin_metrics::AccessPoint::ACCESS_POINT_MANAGE_CARDS_BUBBLE, params);
-
-  DCHECK(promo_view);
-  InitFootnoteView(promo_view.get());
-  return promo_view;
-#endif
-}
-
-std::unique_ptr<views::View> SaveCardManageCardsBubbleViews::CreateExtraView() {
-  auto manage_cards_button = views::MdTextButton::CreateSecondaryUiButton(
-      this, l10n_util::GetStringUTF16(IDS_AUTOFILL_MANAGE_CARDS));
-  manage_cards_button->SetID(DialogViewId::MANAGE_CARDS_BUTTON);
-  return manage_cards_button;
-}
-
-int SaveCardManageCardsBubbleViews::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_OK;
-}
-
-SaveCardManageCardsBubbleViews::~SaveCardManageCardsBubbleViews() {}
 
 std::unique_ptr<views::View>
 SaveCardManageCardsBubbleViews::CreateMainContentView() {
@@ -87,12 +45,6 @@ SaveCardManageCardsBubbleViews::CreateMainContentView() {
   return view;
 }
 
-void SaveCardManageCardsBubbleViews::ButtonPressed(views::Button* sender,
-                                                   const ui::Event& event) {
-  if (sender->GetViewByID(DialogViewId::MANAGE_CARDS_BUTTON)) {
-    controller()->OnManageCardsClicked();
-    CloseBubble();
-  }
-}
+SaveCardManageCardsBubbleViews::~SaveCardManageCardsBubbleViews() = default;
 
 }  // namespace autofill

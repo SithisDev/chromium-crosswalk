@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,9 @@
 #include "chrome/browser/vr/ui.h"
 
 #include "base/bind.h"
+#include "base/cxx17_backports.h"
+#include "base/logging.h"
 #include "base/numerics/math_constants.h"
-#include "base/numerics/ranges.h"
-#include "base/strings/string16.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/vr/content_input_delegate.h"
@@ -276,10 +276,9 @@ void Ui::SetSpeechRecognitionEnabled(bool enabled) {
       OnSpeechRecognitionEnded();
     } else {
       auto sequence = std::make_unique<Sequence>();
-      sequence->Add(
-          base::BindOnce(&Ui::OnSpeechRecognitionEnded,
-                         weak_ptr_factory_.GetWeakPtr()),
-          base::TimeDelta::FromMilliseconds(kSpeechRecognitionResultTimeoutMs));
+      sequence->Add(base::BindOnce(&Ui::OnSpeechRecognitionEnded,
+                                   weak_ptr_factory_.GetWeakPtr()),
+                    base::Milliseconds(kSpeechRecognitionResultTimeoutMs));
       scene_->AddSequence(std::move(sequence));
     }
   }
@@ -293,7 +292,7 @@ void Ui::OnSpeechRecognitionEnded() {
   }
 }
 
-void Ui::SetRecognitionResult(const base::string16& result) {
+void Ui::SetRecognitionResult(const std::u16string& result) {
   model_->speech.recognition_result = result;
 }
 
@@ -326,10 +325,12 @@ void Ui::UpdateWebInputIndices(int selection_start,
   content_input_delegate_->OnWebInputIndicesChanged(
       selection_start, selection_end, composition_start, composition_end,
       base::BindOnce(
-          [](TextInputInfo* model, const TextInputInfo& new_state) {
-            *model = new_state;
+          [](Model* model, const TextInputInfo& new_state) {
+            EditedText web_input_text = model->web_input_text_field_info;
+            web_input_text.current = new_state;
+            model->set_web_input_text_field_info(std::move(web_input_text));
           },
-          base::Unretained(&model_->web_input_text_field_info.current)));
+          base::Unretained(model_.get())));
 }
 
 void Ui::SetAlertDialogEnabled(bool enabled,
@@ -376,7 +377,7 @@ void Ui::SetDialogFloating(bool floating) {
   model_->hosted_platform_ui.floating = floating;
 }
 
-void Ui::ShowPlatformToast(const base::string16& text) {
+void Ui::ShowPlatformToast(const std::u16string& text) {
   model_->platform_toast = std::make_unique<PlatformToast>(text);
 }
 
@@ -425,9 +426,9 @@ void Ui::OnPause() {
 }
 
 void Ui::OnMenuButtonClicked() {
-  // Menu button clicks should be a no-op when browsing mode is disabled.
-  if (model_->browsing_disabled)
+  if (!model_->gvr_input_support) {
     return;
+  }
 
   if (model_->reposition_window_enabled()) {
     model_->pop_mode(kModeRepositionWindow);
@@ -607,12 +608,12 @@ void Ui::InitializeModel(const UiInitialState& ui_initial_state) {
     model_->push_mode(mode);
   }
 
-  model_->browsing_disabled = ui_initial_state.browsing_disabled;
   model_->waiting_for_background = ui_initial_state.assets_supported;
   model_->supports_selection = ui_initial_state.supports_selection;
   model_->needs_keyboard_update = ui_initial_state.needs_keyboard_update;
   model_->standalone_vr_device = ui_initial_state.is_standalone_vr_device;
   model_->controllers.push_back(ControllerModel());
+  model_->gvr_input_support = ui_initial_state.gvr_input_support;
 }
 
 void Ui::AcceptDoffPromptForTesting() {
@@ -711,6 +712,7 @@ gfx::Transform Ui::GetContentWorldSpaceTransform() {
 
 bool Ui::OnBeginFrame(base::TimeTicks current_time,
                       const gfx::Transform& head_pose) {
+  model_->current_time = current_time;
   return scene_->OnBeginFrame(current_time, head_pose);
 }
 
@@ -865,11 +867,10 @@ FovRectangle Ui::GetMinimalFov(const gfx::Transform& view_matrix,
     }
 
     // Clamp to Z near plane's boundary.
-    bounds_left = base::ClampToRange(bounds_left, z_near_left, z_near_right);
-    bounds_right = base::ClampToRange(bounds_right, z_near_left, z_near_right);
-    bounds_bottom =
-        base::ClampToRange(bounds_bottom, z_near_bottom, z_near_top);
-    bounds_top = base::ClampToRange(bounds_top, z_near_bottom, z_near_top);
+    bounds_left = base::clamp(bounds_left, z_near_left, z_near_right);
+    bounds_right = base::clamp(bounds_right, z_near_left, z_near_right);
+    bounds_bottom = base::clamp(bounds_bottom, z_near_bottom, z_near_top);
+    bounds_top = base::clamp(bounds_top, z_near_bottom, z_near_top);
 
     left = std::min(bounds_left, left);
     right = std::max(bounds_right, right);
@@ -896,7 +897,7 @@ FovRectangle Ui::GetMinimalFov(const gfx::Transform& view_matrix,
   return FovRectangle{left_degrees, right_degrees, bottom_degrees, top_degrees};
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 extern "C" {
 // This symbol is retrieved from the VR feature module library via dlsym(),
 // where it's bare address is type-cast to a CreateUiFunction pointer and
@@ -914,6 +915,6 @@ __attribute__((visibility("default"))) UiInterface* CreateUi(
                 ui_initial_state);
 }
 }  // extern "C"
-#endif  // defined(OS_ANDROID
+#endif  // BUILDFLAG(IS_ANDROID)
 
 }  // namespace vr

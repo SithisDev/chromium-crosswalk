@@ -1,28 +1,28 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/chrome_cleaner/parsers/target/parser_impl.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/values.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/shortcut.h"
-#include "chrome/chrome_cleaner/mojom/parser_interface.mojom.h"
 #include "chrome/chrome_cleaner/ipc/mojo_task_runner.h"
+#include "chrome/chrome_cleaner/mojom/parser_interface.mojom.h"
 #include "chrome/chrome_cleaner/os/disk_util.h"
 #include "chrome/chrome_cleaner/parsers/json_parser/sandboxed_json_parser.h"
 #include "chrome/chrome_cleaner/parsers/shortcut_parser/broker/sandboxed_shortcut_parser.h"
 #include "chrome/chrome_cleaner/parsers/shortcut_parser/sandboxed_lnk_parser_test_util.h"
 #include "chrome/chrome_cleaner/parsers/shortcut_parser/target/lnk_parser.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -41,11 +41,11 @@ class ParserImplTest : public testing::Test {
  public:
   ParserImplTest()
       : task_runner_(MojoTaskRunner::Create()),
-        parser_ptr_(new mojom::ParserPtr(),
-                    base::OnTaskRunnerDeleter(task_runner_)),
+        parser_(new mojo::Remote<mojom::Parser>(),
+                base::OnTaskRunnerDeleter(task_runner_)),
         parser_impl_(nullptr, base::OnTaskRunnerDeleter(task_runner_)),
-        sandboxed_json_parser_(task_runner_.get(), parser_ptr_.get()),
-        shortcut_parser_(task_runner_.get(), parser_ptr_.get()) {}
+        sandboxed_json_parser_(task_runner_.get(), parser_.get()),
+        shortcut_parser_(task_runner_.get(), parser_.get()) {}
 
   void SetUp() override {
     BindParser();
@@ -59,24 +59,25 @@ class ParserImplTest : public testing::Test {
     task_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(
-            [](mojom::ParserPtr* parser,
+            [](mojo::Remote<mojom::Parser>* parser,
                std::unique_ptr<ParserImpl, base::OnTaskRunnerDeleter>*
                    parser_impl) {
-              parser_impl->reset(
-                  new ParserImpl(mojo::MakeRequest(parser), base::DoNothing()));
+              parser_impl->reset(new ParserImpl(
+                  parser->BindNewPipeAndPassReceiver(), base::DoNothing()));
             },
-            parser_ptr_.get(), &parser_impl_));
+            parser_.get(), &parser_impl_));
   }
 
   scoped_refptr<MojoTaskRunner> task_runner_;
-  std::unique_ptr<mojom::ParserPtr, base::OnTaskRunnerDeleter> parser_ptr_;
+  std::unique_ptr<mojo::Remote<mojom::Parser>, base::OnTaskRunnerDeleter>
+      parser_;
   std::unique_ptr<ParserImpl, base::OnTaskRunnerDeleter> parser_impl_;
   SandboxedJsonParser sandboxed_json_parser_;
 
   base::FilePath not_lnk_file_path_;
   base::ScopedTempDir temp_dir_;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
   SandboxedShortcutParser shortcut_parser_;
   ParsedLnkFile test_parsed_shortcut_;
@@ -91,8 +92,8 @@ TEST_F(ParserImplTest, ParseJson) {
   sandboxed_json_parser_.Parse(
       kTestJsonText,
       base::BindOnce(
-          [](WaitableEvent* done, base::Optional<base::Value> value,
-             const base::Optional<std::string>& error) {
+          [](WaitableEvent* done, absl::optional<base::Value> value,
+             const absl::optional<std::string>& error) {
             ASSERT_FALSE(error.has_value());
             ASSERT_TRUE(value.has_value());
             ASSERT_TRUE(value->is_dict());
@@ -114,8 +115,8 @@ TEST_F(ParserImplTest, ParseJsonError) {
   sandboxed_json_parser_.Parse(
       kInvalidJsonText,
       base::BindOnce(
-          [](WaitableEvent* done, base::Optional<base::Value> value,
-             const base::Optional<std::string>& error) {
+          [](WaitableEvent* done, absl::optional<base::Value> value,
+             const absl::optional<std::string>& error) {
             ASSERT_TRUE(error.has_value());
             EXPECT_FALSE(error->empty());
             done->Signal();
@@ -125,10 +126,12 @@ TEST_F(ParserImplTest, ParseJsonError) {
 }
 
 TEST_F(ParserImplTest, ParseCorrectShortcutTest) {
+  const int32_t icon_index = 1;
   base::win::ShortcutProperties shortcut_properties;
   shortcut_properties.set_target(not_lnk_file_path_);
-  shortcut_properties.set_icon(not_lnk_file_path_, /*icon_index=*/0);
-  const base::string16 lnk_arguments = L"argument1 -f -t -a -o";
+  shortcut_properties.set_working_dir(temp_dir_.GetPath());
+  shortcut_properties.set_icon(not_lnk_file_path_, icon_index);
+  const std::wstring lnk_arguments = L"argument1 -f -t -a -o";
   shortcut_properties.set_arguments(lnk_arguments);
 
   base::win::ScopedHandle lnk_file_handle = CreateAndOpenShortcutInTempDir(
@@ -144,7 +147,8 @@ TEST_F(ParserImplTest, ParseCorrectShortcutTest) {
 
   ASSERT_EQ(test_result_code_, mojom::LnkParsingResult::SUCCESS);
   EXPECT_TRUE(CheckParsedShortcut(test_parsed_shortcut_, not_lnk_file_path_,
-                                  lnk_arguments, not_lnk_file_path_));
+                                  temp_dir_.GetPath(), lnk_arguments,
+                                  not_lnk_file_path_, icon_index));
 }
 
 TEST_F(ParserImplTest, ParseIncorrectShortcutTest) {
@@ -165,6 +169,7 @@ TEST_F(ParserImplTest, ParseIncorrectShortcutTest) {
 
   ASSERT_NE(test_result_code_, mojom::LnkParsingResult::SUCCESS);
   EXPECT_TRUE(CheckParsedShortcut(test_parsed_shortcut_, base::FilePath(L""),
-                                  L"", base::FilePath(L"")));
+                                  base::FilePath(L""), L"", base::FilePath(L""),
+                                  /*icon_index=*/-1));
 }
 }  // namespace chrome_cleaner

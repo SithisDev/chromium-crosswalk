@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,16 +11,15 @@ class Timeout;
 class Status;
 
 class NonBlockingNavigationTracker : public PageLoadStrategy {
-public:
+ public:
   NonBlockingNavigationTracker() {}
 
   ~NonBlockingNavigationTracker() override;
 
-  // Overriden from PageLoadStrategy:
-  Status IsPendingNavigation(const std::string& frame_id,
-                             const Timeout* timeout,
-                             bool* is_pending) override;
+  // Overridden from PageLoadStrategy:
+  Status IsPendingNavigation(const Timeout* timeout, bool* is_pending) override;
   void set_timed_out(bool timed_out) override;
+  void SetFrame(const std::string& new_frame_id) override;
   bool IsNonBlocking() const override;
 };
 

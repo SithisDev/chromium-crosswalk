@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 
 #include <stdint.h>
 
-#include "chrome/chrome_cleaner/mojom/pup.mojom.h"
+#include "chrome/chrome_cleaner/mojom/pup.mojom-shared.h"
 #include "chrome/chrome_cleaner/os/file_path_set.h"
+#include "chrome/chrome_cleaner/pup_data/pup_data.h"
 #include "mojo/public/cpp/bindings/array_traits_stl.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
 

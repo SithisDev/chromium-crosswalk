@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,16 +12,18 @@ import android.view.inputmethod.CursorAnchorInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.content_public.browser.InputMethodManagerWrapper;
+import org.chromium.ui.base.WindowAndroid;
 
 /**
  * A fake wrapper around Android's InputMethodManager that doesn't really talk to the
  * InputMethodManager and instead talks to the Daydream keyboard.
  */
 public class VrInputMethodManagerWrapper implements InputMethodManagerWrapper {
-    private static final String TAG = "cr_VrIme";
+    private static final String TAG = "VrIme";
     private static final boolean DEBUG_LOGS = false;
 
     private final Context mContext;
@@ -114,4 +116,10 @@ public class VrInputMethodManagerWrapper implements InputMethodManagerWrapper {
 
     @Override
     public void notifyUserAction() {}
+
+    @Override
+    public void onWindowAndroidChanged(WindowAndroid newWindowAndroid) {}
+
+    @Override
+    public void onInputConnectionCreated() {}
 }

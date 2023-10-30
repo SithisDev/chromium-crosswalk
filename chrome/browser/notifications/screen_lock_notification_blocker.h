@@ -1,12 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_SCREEN_LOCK_NOTIFICATION_BLOCKER_H_
 #define CHROME_BROWSER_NOTIFICATIONS_SCREEN_LOCK_NOTIFICATION_BLOCKER_H_
 
-#include "base/macros.h"
-#include "base/observer_list.h"
 #include "base/timer/timer.h"
 #include "ui/message_center/notification_blocker.h"
 
@@ -18,6 +16,9 @@ class ScreenLockNotificationBlocker
  public:
   explicit ScreenLockNotificationBlocker(
       message_center::MessageCenter* message_center);
+  ScreenLockNotificationBlocker(const ScreenLockNotificationBlocker&) = delete;
+  ScreenLockNotificationBlocker& operator=(
+      const ScreenLockNotificationBlocker&) = delete;
   ~ScreenLockNotificationBlocker() override;
 
   bool is_locked() const { return is_locked_; }
@@ -31,8 +32,6 @@ class ScreenLockNotificationBlocker
   bool is_locked_;
 
   base::OneShotTimer timer_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScreenLockNotificationBlocker);
 };
 
 #endif  // CHROME_BROWSER_NOTIFICATIONS_SCREEN_LOCK_NOTIFICATION_BLOCKER_H_

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,14 +12,15 @@ namespace performance_monitor {
 class MetricEvaluatorsHelperPosix : public MetricEvaluatorsHelper {
  public:
   MetricEvaluatorsHelperPosix();
+
+  MetricEvaluatorsHelperPosix(const MetricEvaluatorsHelperPosix&) = delete;
+  MetricEvaluatorsHelperPosix& operator=(const MetricEvaluatorsHelperPosix&) =
+      delete;
+
   ~MetricEvaluatorsHelperPosix() override;
 
   // MetricEvaluatorsHelper:
-  base::Optional<int> GetFreePhysicalMemoryMb() override;
-  base::Optional<float> GetDiskIdleTimePercent() override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MetricEvaluatorsHelperPosix);
+  absl::optional<int> GetFreePhysicalMemoryMb() override;
 };
 
 }  // namespace performance_monitor

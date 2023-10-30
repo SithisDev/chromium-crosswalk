@@ -1,14 +1,16 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/signin/chrome_signin_url_loader_throttle.h"
 
 #include "base/bind.h"
-#include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/test/mock_callback.h"
 #include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/signin/header_modification_delegate.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -24,22 +26,22 @@ namespace {
 class MockDelegate : public HeaderModificationDelegate {
  public:
   MockDelegate() = default;
+
+  MockDelegate(const MockDelegate&) = delete;
+  MockDelegate& operator=(const MockDelegate&) = delete;
+
   ~MockDelegate() override = default;
 
-  MOCK_METHOD1(ShouldInterceptNavigation,
-               bool(content::NavigationUIData* navigation_ui_data));
+  MOCK_METHOD1(ShouldInterceptNavigation, bool(content::WebContents* contents));
   MOCK_METHOD2(ProcessRequest,
                void(ChromeRequestAdapter* request_adapter,
                     const GURL& redirect_url));
   MOCK_METHOD2(ProcessResponse,
                void(ResponseAdapter* response_adapter,
                     const GURL& redirect_url));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockDelegate);
 };
 
-content::ResourceRequestInfo::WebContentsGetter NullWebContentsGetter() {
+content::WebContents::Getter NullWebContentsGetter() {
   return base::BindRepeating([]() -> content::WebContents* { return nullptr; });
 }
 
@@ -50,15 +52,14 @@ TEST(ChromeSigninURLLoaderThrottleTest, NoIntercept) {
 
   EXPECT_CALL(*delegate, ShouldInterceptNavigation(_)).WillOnce(Return(false));
   EXPECT_FALSE(URLLoaderThrottle::MaybeCreate(base::WrapUnique(delegate),
-                                              nullptr /* navigation_ui_data */,
                                               NullWebContentsGetter()));
 }
 
 TEST(ChromeSigninURLLoaderThrottleTest, Intercept) {
   auto* delegate = new MockDelegate();
   EXPECT_CALL(*delegate, ShouldInterceptNavigation(_)).WillOnce(Return(true));
-  auto throttle = URLLoaderThrottle::MaybeCreate(
-      base::WrapUnique(delegate), nullptr, NullWebContentsGetter());
+  auto throttle = URLLoaderThrottle::MaybeCreate(base::WrapUnique(delegate),
+                                                 NullWebContentsGetter());
   ASSERT_TRUE(throttle);
 
   // Phase 1: Start the request.
@@ -70,9 +71,10 @@ TEST(ChromeSigninURLLoaderThrottleTest, Intercept) {
       .WillOnce(
           Invoke([&](ChromeRequestAdapter* adapter, const GURL& redirect_url) {
             EXPECT_EQ(kTestURL, adapter->GetUrl());
-            EXPECT_EQ(content::ResourceType::kMainFrame,
-                      adapter->GetResourceType());
-            EXPECT_EQ(GURL("https://chrome.com"), adapter->GetReferrerOrigin());
+            EXPECT_EQ(network::mojom::RequestDestination::kDocument,
+                      adapter->GetRequestDestination());
+            EXPECT_TRUE(adapter->IsOutermostMainFrame());
+            EXPECT_EQ(kTestReferrer, adapter->GetReferrer());
 
             EXPECT_TRUE(adapter->HasHeader("X-Request-1"));
             adapter->RemoveRequestHeaderByName("X-Request-1");
@@ -89,7 +91,8 @@ TEST(ChromeSigninURLLoaderThrottleTest, Intercept) {
   network::ResourceRequest request;
   request.url = kTestURL;
   request.referrer = kTestReferrer;
-  request.resource_type = static_cast<int>(content::ResourceType::kMainFrame);
+  request.destination = network::mojom::RequestDestination::kDocument;
+  request.is_outermost_main_frame = true;
   request.headers.SetHeader("X-Request-1", "Foo");
   bool defer = false;
   throttle->WillStartRequest(&request, &defer);
@@ -114,8 +117,8 @@ TEST(ChromeSigninURLLoaderThrottleTest, Intercept) {
 
   EXPECT_CALL(*delegate, ProcessResponse(_, _))
       .WillOnce(Invoke([&](ResponseAdapter* adapter, const GURL& redirect_url) {
-        EXPECT_EQ(GURL("https://google.com"), adapter->GetOrigin());
-        EXPECT_TRUE(adapter->IsMainFrame());
+        EXPECT_EQ(kTestURL, adapter->GetURL());
+        EXPECT_TRUE(adapter->IsOutermostMainFrame());
 
         adapter->SetUserData(kResponseUserDataKey,
                              std::move(response_user_data));
@@ -134,13 +137,14 @@ TEST(ChromeSigninURLLoaderThrottleTest, Intercept) {
   EXPECT_CALL(*delegate, ProcessRequest(_, _))
       .WillOnce(
           Invoke([&](ChromeRequestAdapter* adapter, const GURL& redirect_url) {
-            EXPECT_EQ(content::ResourceType::kMainFrame,
-                      adapter->GetResourceType());
+            EXPECT_EQ(network::mojom::RequestDestination::kDocument,
+                      adapter->GetRequestDestination());
+            EXPECT_TRUE(adapter->IsOutermostMainFrame());
 
             // Changes to the URL and referrer take effect after the redirect
             // is followed.
             EXPECT_EQ(kTestURL, adapter->GetUrl());
-            EXPECT_EQ(GURL("https://chrome.com"), adapter->GetReferrerOrigin());
+            EXPECT_EQ(kTestReferrer, adapter->GetReferrer());
 
             // X-Request-1 and X-Request-2 were modified in the previous call to
             // ProcessRequest(). These changes should still be present.
@@ -164,16 +168,17 @@ TEST(ChromeSigninURLLoaderThrottleTest, Intercept) {
   // referrer but we do for testing purposes.
   redirect_info.new_referrer = kTestURL.spec();
 
-  auto response_head = std::make_unique<network::ResourceResponseHead>();
+  auto response_head = network::mojom::URLResponseHead::New();
   response_head->headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
-  response_head->headers->AddHeader("X-Response-1: Foo");
-  response_head->headers->AddHeader("X-Response-2: Bar");
+  response_head->headers->SetHeader("X-Response-1", "Foo");
+  response_head->headers->SetHeader("X-Response-2", "Bar");
 
   std::vector<std::string> request_headers_to_remove;
   net::HttpRequestHeaders modified_request_headers;
-  throttle->WillRedirectRequest(&redirect_info, *response_head, &defer,
-                                &request_headers_to_remove,
-                                &modified_request_headers);
+  net::HttpRequestHeaders modified_cors_exempt_request_headers;
+  throttle->WillRedirectRequest(
+      &redirect_info, *response_head, &defer, &request_headers_to_remove,
+      &modified_request_headers, &modified_cors_exempt_request_headers);
 
   EXPECT_FALSE(defer);
 
@@ -184,14 +189,16 @@ TEST(ChromeSigninURLLoaderThrottleTest, Intercept) {
   EXPECT_TRUE(modified_request_headers.GetHeader("X-Request-3", &value));
   EXPECT_EQ("Baz", value);
 
+  EXPECT_TRUE(modified_cors_exempt_request_headers.IsEmpty());
+
   testing::Mock::VerifyAndClearExpectations(delegate);
 
   // Phase 3: Complete the request.
 
   EXPECT_CALL(*delegate, ProcessResponse(_, _))
       .WillOnce(Invoke([&](ResponseAdapter* adapter, const GURL& redirect_url) {
-        EXPECT_EQ(GURL("https://youtube.com"), adapter->GetOrigin());
-        EXPECT_TRUE(adapter->IsMainFrame());
+        EXPECT_EQ(kTestRedirectURL, adapter->GetURL());
+        EXPECT_TRUE(adapter->IsOutermostMainFrame());
 
         EXPECT_EQ(response_user_data_ptr,
                   adapter->GetUserData(kResponseUserDataKey));
@@ -208,10 +215,10 @@ TEST(ChromeSigninURLLoaderThrottleTest, Intercept) {
         EXPECT_EQ(GURL(), redirect_url);
       }));
 
-  response_head = std::make_unique<network::ResourceResponseHead>();
+  response_head = network::mojom::URLResponseHead::New();
   response_head->headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
-  response_head->headers->AddHeader("X-Response-3: Foo");
-  response_head->headers->AddHeader("X-Response-4: Bar");
+  response_head->headers->SetHeader("X-Response-3", "Foo");
+  response_head->headers->SetHeader("X-Response-4", "Bar");
 
   throttle->WillProcessResponse(kTestRedirectURL, response_head.get(), &defer);
 
@@ -228,20 +235,23 @@ TEST(ChromeSigninURLLoaderThrottleTest, Intercept) {
 TEST(ChromeSigninURLLoaderThrottleTest, InterceptSubFrame) {
   auto* delegate = new MockDelegate();
   EXPECT_CALL(*delegate, ShouldInterceptNavigation(_)).WillOnce(Return(true));
-  auto throttle = URLLoaderThrottle::MaybeCreate(
-      base::WrapUnique(delegate), nullptr, NullWebContentsGetter());
+  auto throttle = URLLoaderThrottle::MaybeCreate(base::WrapUnique(delegate),
+                                                 NullWebContentsGetter());
   ASSERT_TRUE(throttle);
 
   EXPECT_CALL(*delegate, ProcessRequest(_, _))
       .Times(2)
-      .WillRepeatedly([](ChromeRequestAdapter* adapter,
-                         const GURL& redirect_url) {
-        EXPECT_EQ(content::ResourceType::kSubFrame, adapter->GetResourceType());
-      });
+      .WillRepeatedly(
+          [](ChromeRequestAdapter* adapter, const GURL& redirect_url) {
+            EXPECT_EQ(network::mojom::RequestDestination::kIframe,
+                      adapter->GetRequestDestination());
+            EXPECT_FALSE(adapter->IsOutermostMainFrame());
+          });
 
   network::ResourceRequest request;
   request.url = GURL("https://google.com");
-  request.resource_type = static_cast<int>(content::ResourceType::kSubFrame);
+  request.destination = network::mojom::RequestDestination::kIframe;
+  request.is_outermost_main_frame = false;
 
   bool defer = false;
   throttle->WillStartRequest(&request, &defer);
@@ -250,24 +260,26 @@ TEST(ChromeSigninURLLoaderThrottleTest, InterceptSubFrame) {
   EXPECT_CALL(*delegate, ProcessResponse(_, _))
       .Times(2)
       .WillRepeatedly(([](ResponseAdapter* adapter, const GURL& redirect_url) {
-        EXPECT_FALSE(adapter->IsMainFrame());
+        EXPECT_FALSE(adapter->IsOutermostMainFrame());
       }));
 
   net::RedirectInfo redirect_info;
   redirect_info.new_url = GURL("https://youtube.com");
-  network::ResourceResponseHead response_head;
+  auto response_head = network::mojom::URLResponseHead::New();
 
   std::vector<std::string> request_headers_to_remove;
   net::HttpRequestHeaders modified_request_headers;
-  throttle->WillRedirectRequest(&redirect_info, response_head, &defer,
-                                &request_headers_to_remove,
-                                &modified_request_headers);
+  net::HttpRequestHeaders modified_cors_exempt_request_headers;
+  throttle->WillRedirectRequest(
+      &redirect_info, *response_head, &defer, &request_headers_to_remove,
+      &modified_request_headers, &modified_cors_exempt_request_headers);
   EXPECT_FALSE(defer);
   EXPECT_TRUE(request_headers_to_remove.empty());
   EXPECT_TRUE(modified_request_headers.IsEmpty());
+  EXPECT_TRUE(modified_cors_exempt_request_headers.IsEmpty());
 
-  throttle->WillProcessResponse(GURL("https://youtube.com"), &response_head,
-                                &defer);
+  throttle->WillProcessResponse(GURL("https://youtube.com"),
+                                response_head.get(), &defer);
   EXPECT_FALSE(defer);
 }
 

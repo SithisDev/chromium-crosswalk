@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,11 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/files/important_file_writer.h"
 #include "base/hash/md5.h"
 #include "base/pickle.h"
+#include "base/strings/string_piece.h"
+#include "base/strings/string_util.h"
 
 namespace {
 
@@ -75,6 +78,7 @@ bool DeserializeInspectionResult(uint32_t min_time_stamp,
   ModuleInspectionResult& inspection_result = value.second.first;
   uint32_t& time_stamp = value.second.second;
 
+  std::u16string location, basename;
   if (!pickle_iterator->ReadString16(&inspection_result.location) ||
       !pickle_iterator->ReadString16(&inspection_result.basename) ||
       !pickle_iterator->ReadString16(&inspection_result.product_name) ||
@@ -186,10 +190,10 @@ void AddInspectionResultToCache(
   DCHECK(insert_result.second);
 }
 
-base::Optional<ModuleInspectionResult> GetInspectionResultFromCache(
+absl::optional<ModuleInspectionResult> GetInspectionResultFromCache(
     const ModuleInfoKey& module_key,
     InspectionResultsCache* inspection_results_cache) {
-  base::Optional<ModuleInspectionResult> inspection_result;
+  absl::optional<ModuleInspectionResult> inspection_result;
 
   auto it = inspection_results_cache->find(module_key);
   if (it != inspection_results_cache->end()) {
@@ -232,6 +236,10 @@ bool WriteInspectionResultsCache(
 
   base::Pickle pickle =
       SerializeInspectionResultsCache(inspection_results_cache);
-  return base::WriteFile(file_path, static_cast<const char*>(pickle.data()),
-                         pickle.size()) == static_cast<int>(pickle.size());
+
+  // TODO(1022041): Investigate if using WriteFileAtomically() in a
+  // CONTINUE_ON_SHUTDOWN sequence can cause too many corrupted caches.
+  return base::ImportantFileWriter::WriteFileAtomically(
+      file_path, base::StringPiece(static_cast<const char*>(pickle.data()),
+                                   pickle.size()));
 }

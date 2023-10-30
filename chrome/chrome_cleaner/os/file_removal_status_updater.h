@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,7 +69,7 @@ class FileRemovalStatusUpdater {
     QuarantineStatus quarantine_status = QUARANTINE_STATUS_UNSPECIFIED;
   };
 
-  typedef std::unordered_map<base::string16, FileRemovalStatus>
+  typedef std::unordered_map<std::wstring, FileRemovalStatus>
       SanitizedPathToRemovalStatusMap;
 
   static FileRemovalStatusUpdater* GetInstance();
@@ -92,7 +92,7 @@ class FileRemovalStatusUpdater {
   // REMOVAL_STATUS_UNSPECIFIED if the removal status have never
   // been updated for an unsanitized form of that path.
   RemovalStatus GetRemovalStatusOfSanitizedPath(
-      const base::string16& sanitized_path) const;
+      const std::wstring& sanitized_path) const;
 
   // Updates quarantine status for a file given by |path|.
   // Note: UpdateRemovalStatus should be called for |path| at some point as

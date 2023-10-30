@@ -1,11 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_CROSTINI_CROSTINI_UNINSTALLER_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_CROSTINI_CROSTINI_UNINSTALLER_VIEW_H_
 
-#include "ui/views/window/dialog_delegate.h"
+#include "base/callback_helpers.h"
+#include "ui/base/metadata/metadata_header_macros.h"
+#include "ui/views/bubble/bubble_dialog_delegate_view.h"
 
 namespace views {
 class Label;
@@ -20,8 +22,10 @@ class Profile;
 
 // The Crostini uninstaller. Provides a warning to the user and
 // uninstalls Crostinin if the user chooses to do so.
-class CrostiniUninstallerView : public views::DialogDelegateView {
+class CrostiniUninstallerView : public views::BubbleDialogDelegateView {
  public:
+  METADATA_HEADER(CrostiniUninstallerView);
+
   // These values are persisted to logs. Entries should not be renumbered and
   // numeric values should never be reused.
   enum class UninstallResult {
@@ -31,18 +35,19 @@ class CrostiniUninstallerView : public views::DialogDelegateView {
     kCount
   };
 
+  CrostiniUninstallerView(const CrostiniUninstallerView&) = delete;
+  CrostiniUninstallerView& operator=(const CrostiniUninstallerView&) = delete;
+
   static void Show(Profile* profile);
 
   // views::DialogDelegateView:
-  int GetDialogButtons() const override;
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
-  base::string16 GetWindowTitle() const override;
-  bool ShouldShowCloseButton() const override;
   bool Accept() override;
   bool Cancel() override;
-  gfx::Size CalculatePreferredSize() const override;
 
   static CrostiniUninstallerView* GetActiveViewForTesting();
+  void set_destructor_callback_for_testing(base::OnceClosure callback) {
+    destructor_callback_for_testing_.ReplaceClosure(std::move(callback));
+  }
 
  private:
   enum class State {
@@ -54,7 +59,7 @@ class CrostiniUninstallerView : public views::DialogDelegateView {
   explicit CrostiniUninstallerView(Profile* profile);
   ~CrostiniUninstallerView() override;
 
-  void HandleError(const base::string16& error_message);
+  void HandleError(const std::u16string& error_message);
   void UninstallCrostiniFinished(crostini::CrostiniResult result);
   void RecordUninstallResultHistogram(UninstallResult result);
 
@@ -65,9 +70,9 @@ class CrostiniUninstallerView : public views::DialogDelegateView {
   bool has_logged_result_ = false;
   Profile* profile_;
 
-  base::WeakPtrFactory<CrostiniUninstallerView> weak_ptr_factory_;
+  base::ScopedClosureRunner destructor_callback_for_testing_;
 
-  DISALLOW_COPY_AND_ASSIGN(CrostiniUninstallerView);
+  base::WeakPtrFactory<CrostiniUninstallerView> weak_ptr_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_CROSTINI_CROSTINI_UNINSTALLER_VIEW_H_

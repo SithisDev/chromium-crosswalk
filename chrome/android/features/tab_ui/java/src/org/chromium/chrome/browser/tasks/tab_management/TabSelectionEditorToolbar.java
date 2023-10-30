@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,17 @@ package org.chromium.chrome.browser.tasks.tab_management;
 
 import android.content.Context;
 import android.content.res.ColorStateList;
-import android.support.v7.content.res.AppCompatResources;
 import android.util.AttributeSet;
 import android.widget.Button;
 
-import org.chromium.chrome.browser.widget.TintedDrawable;
-import org.chromium.chrome.browser.widget.selection.SelectableListToolbar;
+import androidx.annotation.ColorInt;
+import androidx.annotation.PluralsRes;
+
 import org.chromium.chrome.tab_ui.R;
+import org.chromium.components.browser_ui.styles.SemanticColorUtils;
+import org.chromium.components.browser_ui.widget.NumberRollView;
+import org.chromium.components.browser_ui.widget.TintedDrawable;
+import org.chromium.components.browser_ui.widget.selectable_list.SelectableListToolbar;
 
 import java.util.Collections;
 import java.util.List;
@@ -22,7 +26,20 @@ import java.util.List;
  */
 class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
     private static final List<Integer> sEmptyIntegerList = Collections.emptyList();
-    private Button mGroupButton;
+    private Button mActionButton;
+    private Integer mActionButtonDescriptionResourceId;
+    @ColorInt
+    private int mBackgroundColor;
+    private int mActionButtonEnablingThreshold = 2;
+    private RelatedTabCountProvider mRelatedTabCountProvider;
+
+    public interface RelatedTabCountProvider {
+        /**
+         * @param tabIds the selected items.
+         * @returns the count of tabs including related tabs.
+         */
+        int getRelatedTabCount(List<Integer> tabIds);
+    }
 
     public TabSelectionEditorToolbar(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -33,25 +50,42 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
         super.onFinishInflate();
 
         showNavigationButton();
-        mGroupButton = (Button) findViewById(org.chromium.chrome.R.id.action_button);
+        mActionButton = (Button) findViewById(R.id.action_button);
         mNumberRollView.setStringForZero(R.string.tab_selection_editor_toolbar_select_tabs);
     }
 
     private void showNavigationButton() {
         TintedDrawable navigationIconDrawable = TintedDrawable.constructTintedDrawable(
                 getContext(), org.chromium.chrome.R.drawable.ic_arrow_back_white_24dp);
-        ColorStateList lightIconColorList = AppCompatResources.getColorStateList(
-                getContext(), org.chromium.chrome.R.color.default_icon_color_inverse);
-        navigationIconDrawable.setTint(lightIconColorList);
+        final @ColorInt int lightIconColor =
+                SemanticColorUtils.getDefaultIconColorInverse(getContext());
+        navigationIconDrawable.setTint(lightIconColor);
 
         setNavigationIcon(navigationIconDrawable);
-        setNavigationContentDescription(R.string.close);
+        setNavigationContentDescription(TabUiFeatureUtilities.isLaunchPolishEnabled()
+                        ? R.string.accessibility_tab_selection_editor_back_button
+                        : R.string.close);
     }
 
     @Override
     public void onSelectionStateChange(List<Integer> selectedItems) {
         super.onSelectionStateChange(selectedItems);
-        mGroupButton.setEnabled(selectedItems.size() > 1);
+        int selectedItemsSize = selectedItems.size();
+        boolean enabled = selectedItemsSize >= mActionButtonEnablingThreshold;
+        mActionButton.setEnabled(enabled);
+
+        String contentDescription = null;
+        if (enabled && mActionButtonDescriptionResourceId != null) {
+            contentDescription = getContext().getResources().getQuantityString(
+                    mActionButtonDescriptionResourceId, selectedItemsSize, selectedItemsSize);
+        }
+
+        mActionButton.setContentDescription(contentDescription);
+
+        if (mRelatedTabCountProvider == null) return;
+
+        int selectedCount = mRelatedTabCountProvider.getRelatedTabCount(selectedItems);
+        mNumberRollView.setNumber(selectedCount, /*animate=*/true);
     }
 
     @Override
@@ -64,12 +98,91 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
         showSelectionView(sEmptyIntegerList, true);
     }
 
+    @Override
+    protected void showSelectionView(List<Integer> selectedItems, boolean wasSelectionEnabled) {
+        super.showSelectionView(selectedItems, wasSelectionEnabled);
+        if (mBackgroundColor != 0) {
+            setBackgroundColor(mBackgroundColor);
+        }
+    }
+
     /**
-     * Sets a {@link android.view.View.OnClickListener} to respond to {@code mGroupButton} clicking
+     * Sets a {@link android.view.View.OnClickListener} to respond to {@code mActionButton} clicking
      * event.
      * @param listener The listener to set.
      */
     public void setActionButtonOnClickListener(OnClickListener listener) {
-        mGroupButton.setOnClickListener(listener);
+        mActionButton.setOnClickListener(listener);
+    }
+
+    /**
+     * Update the tint for buttons, the navigation button and the action button, in the toolbar.
+     * @param tint New {@link ColorStateList} to use.
+     */
+    public void setButtonTint(ColorStateList tint) {
+        mActionButton.setTextColor(tint);
+        TintedDrawable navigation = (TintedDrawable) getNavigationIcon();
+        navigation.setTint(tint);
+    }
+
+    /**
+     * Update the toolbar background color.
+     * @param backgroundColor The new color to use.
+     */
+    public void setToolbarBackgroundColor(@ColorInt int backgroundColor) {
+        mBackgroundColor = backgroundColor;
+    }
+
+    /**
+     * Update the {@link ColorStateList} used for text in {@link NumberRollView}.
+     * @param colorStateList The new {@link ColorStateList} to use.
+     */
+    public void setTextColorStateList(ColorStateList colorStateList) {
+        mNumberRollView.setTextColorStateList(colorStateList);
+    }
+
+    /**
+     * Set action button text.
+     * @param text The text to display.
+     */
+    public void setActionButtonText(String text) {
+        mActionButton.setText(text);
+    }
+
+    /**
+     * Set the action button enabling threshold.
+     * @param threshold New threshold.
+     */
+    public void setActionButtonEnablingThreshold(int threshold) {
+        mActionButtonEnablingThreshold = threshold;
+    }
+
+    /**
+     * Set ContentDescription template for action button.
+     * @param template The template to use.
+     */
+    public void setActionButtonDescriptionResourceId(@PluralsRes int template) {
+        String expectedResourceTypeName = "plurals";
+        assert expectedResourceTypeName.equals(
+                getContext().getResources().getResourceTypeName(template))
+            : "Quantity strings (plurals) with one integer format argument is needed";
+
+        mActionButtonDescriptionResourceId = template;
+    }
+
+    /**
+     * Set visibility of the action button.
+     * @param visibility The visibility state.
+     */
+    public void setActionButtonVisibility(int visibility) {
+        mActionButton.setVisibility(visibility);
+    }
+
+    /**
+     * Set provider for related tab count.
+     * @param relatedTabCountProvider The provider to call to get the related tab count.
+     */
+    public void setRelatedTabCountProvider(RelatedTabCountProvider relatedTabCountProvider) {
+        mRelatedTabCountProvider = relatedTabCountProvider;
     }
 }

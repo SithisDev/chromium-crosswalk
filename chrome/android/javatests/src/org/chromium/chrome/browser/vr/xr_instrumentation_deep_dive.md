@@ -19,16 +19,12 @@ self-explanatory) naming convention:
   feature.
 * `AR`/`Ar` - A subset of `XR`. Used for things that are applicable to any AR
   feature.
-* `VR Browser`/`VrBrowser` - A subset of `VR`. Used for things that are only
-  applicable to the VR Browser feature of Chrome.
 * `WebXR`/`WebXr` - A subset of `XR`. Used for things that are applicable to any
   XR-related web APIs.
 * `WebXR for AR`/`WebXrAr` - A subset of `WebXR` and `AR`. Used for things that
   are applicable to the `WebXR Devices API` in its AR usecase.
 * `WebXR for VR`/`WebXrVr` - A subset of `WebXR` and `VR`. Used for things that
   are applicable to the `WebXR Devices API` in its VR usecase.
-* `WebVR`/`WebVr` - A subset of `WebXrVr`. Used for things that are only
-  applicable to the older `WebVR` API.
 
 ## Test Framework Structure
 
@@ -38,11 +34,9 @@ Based on the above naming scheme, the various `TestFramework` classes are
 structured in the following hierarchy:
 
 * `XrTestFramework`
-  * `VrBrowserTestFramework`
   * `WebXrTestFramework`
     * `WebXrArTestFramework`
     * `WebXrVrTestFramework`
-      * `WebVrTestFramework`
 
 ### Static vs. Non-Static Methods
 
@@ -183,8 +177,8 @@ Additionally, it allows interaction with specific UI elements by name, which is
 both easier and less prone to breaking than specifying a position in space.
 
 
-[readme]: https://chromium.googlesource.com/chromium/src/+/master/chrome/android/javatests/src/org/chromium/chrome/browser/vr/README.md
-[adding_new_tests]: https://chromium.googlesource.com/chromium/src/+/master/chrome/android/javatests/src/org/chromium/chrome/browser/vr/adding_new_tests.md
+[readme]: https://chromium.googlesource.com/chromium/src/+/main/chrome/android/javatests/src/org/chromium/chrome/browser/vr/README.md
+[adding_new_tests]: https://chromium.googlesource.com/chromium/src/+/main/chrome/android/javatests/src/org/chromium/chrome/browser/vr/adding_new_tests.md
 [junit4_wiki_parameterization]: https://github.com/junit-team/junit4/wiki/parameterized-tests
-[parameter_set_source]: https://chromium.googlesource.com/chromium/src/+/master/base/test/android/javatests/src/org/chromium/base/test/params/ParameterSet.java
+[parameter_set_source]: https://chromium.googlesource.com/chromium/src/+/main/base/test/android/javatests/src/org/chromium/base/test/params/ParameterSet.java
 [junit4_wiki_rules]: https://github.com/junit-team/junit4/wiki/rules

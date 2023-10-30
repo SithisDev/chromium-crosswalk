@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,18 +7,18 @@
 #include <memory>
 #include <vector>
 
-#include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/system/sys_info.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
-#include "chrome/browser/custom_handlers/protocol_handler_registry.h"
+#include "build/chromeos_buildflags.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/search.h"
@@ -32,29 +32,28 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/custom_handlers/protocol_handler.h"
+#include "components/custom_handlers/protocol_handler_registry.h"
 #include "components/network_session_configurator/common/network_switches.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/child_process_security_policy.h"
+#include "components/site_isolation/site_isolation_policy.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
-#include "google_apis/gaia/gaia_urls.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_status_code.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
-#include "testing/gmock/include/gmock/gmock.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/native_theme/test_native_theme.h"
 #include "url/gurl.h"
@@ -66,16 +65,11 @@
 #include "url/url_constants.h"
 #endif
 
-namespace content {
+#if BUILDFLAG(IS_MAC)
+#include "chrome/test/base/launchservices_utils_mac.h"
+#endif
 
 namespace {
-
-enum class NetworkServiceState {
-  kDisabled,
-  kEnabled,
-};
-
-}  // namespace
 
 // Use a test class with SetUpCommandLine to ensure the flag is sent to the
 // first renderer process.
@@ -83,12 +77,14 @@ class ChromeContentBrowserClientBrowserTest : public InProcessBrowserTest {
  public:
   ChromeContentBrowserClientBrowserTest() {}
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    IsolateAllSitesForTesting(command_line);
-  }
+  ChromeContentBrowserClientBrowserTest(
+      const ChromeContentBrowserClientBrowserTest&) = delete;
+  ChromeContentBrowserClientBrowserTest& operator=(
+      const ChromeContentBrowserClientBrowserTest&) = delete;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(ChromeContentBrowserClientBrowserTest);
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    content::IsolateAllSitesForTesting(command_line);
+  }
 };
 
 // Test that a basic navigation works in --site-per-process mode.  This prevents
@@ -99,65 +95,78 @@ IN_PROC_BROWSER_TEST_F(ChromeContentBrowserClientBrowserTest,
   ASSERT_TRUE(embedded_test_server()->Start());
   const GURL url(embedded_test_server()->GetURL("/title1.html"));
 
-  ui_test_utils::NavigateToURL(browser(), url);
-  NavigationEntry* entry = browser()
-                               ->tab_strip_model()
-                               ->GetWebContentsAt(0)
-                               ->GetController()
-                               .GetLastCommittedEntry();
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
+  content::NavigationEntry* entry = browser()
+                                        ->tab_strip_model()
+                                        ->GetWebContentsAt(0)
+                                        ->GetController()
+                                        .GetLastCommittedEntry();
 
-  ASSERT_TRUE(entry != NULL);
+  ASSERT_TRUE(entry != nullptr);
   EXPECT_EQ(url, entry->GetURL());
   EXPECT_EQ(url, entry->GetVirtualURL());
 }
 
-class ChromeContentBrowserClientPopupsTest : public InProcessBrowserTest {
+class TopChromeChromeContentBrowserClientTest
+    : public ChromeContentBrowserClientBrowserTest {
  public:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    // Required setup for kAllowPopupsDuringPageUnload switch
-    // as its being checked (whether its going to be enabled or not)
-    // only if the process type is renderer process.
-    command_line_.AppendSwitchASCII(switches::kProcessType,
-                                    switches::kRendererProcess);
+  TopChromeChromeContentBrowserClientTest() {
+    feature_list_.InitAndEnableFeature(
+        features::kTopChromeWebUIUsesSpareRenderer);
   }
+
+  // ChromeContentBrowserClientBrowserTest:
   void SetUpOnMainThread() override {
-    kChildProcessId = browser()
-                          ->tab_strip_model()
-                          ->GetActiveWebContents()
-                          ->GetMainFrame()
-                          ->GetProcess()
-                          ->GetID();
-  }
-  ChromeContentBrowserClientPopupsTest()
-      : command_line_(base::CommandLine::NO_PROGRAM) {}
-
-  void AppendContentBrowserClientSwitches() {
-    client_.AppendExtraCommandLineSwitches(&command_line_, kChildProcessId);
+    ChromeContentBrowserClientBrowserTest::SetUpOnMainThread();
+    client_ = static_cast<ChromeContentBrowserClient*>(
+        content::SetBrowserClientForTesting(nullptr));
+    content::SetBrowserClientForTesting(client_);
   }
 
-  const base::CommandLine& command_line() const { return command_line_; }
+  ChromeContentBrowserClient* client() { return client_; }
 
  private:
-  ChromeContentBrowserClient client_;
-  base::CommandLine command_line_;
-  int kChildProcessId;
+  raw_ptr<ChromeContentBrowserClient> client_ = nullptr;
+  base::test::ScopedFeatureList feature_list_;
 };
 
-IN_PROC_BROWSER_TEST_F(ChromeContentBrowserClientPopupsTest,
-                       AllowPopupsDuringPageUnload) {
-  // Verify that the switch is included only when the
-  // pref AllowPopupsDuringPageUnload value is true.
+IN_PROC_BROWSER_TEST_F(TopChromeChromeContentBrowserClientTest,
+                       ShouldUseSpareRendererWhenNoTopChromePagesPresent) {
+  const GURL top_chrome_url(chrome::kChromeUITabSearchURL);
+  const GURL non_top_chrome_url(chrome::kChromeUINewTabPageURL);
 
-  PrefService* pref_service = browser()->profile()->GetPrefs();
-  pref_service->SetBoolean(prefs::kAllowPopupsDuringPageUnload, false);
-  AppendContentBrowserClientSwitches();
-  EXPECT_FALSE(
-      command_line().HasSwitch(switches::kAllowPopupsDuringPageUnload));
-  // When the pref value is being set to true
-  // the switch should be included.
-  pref_service->SetBoolean(prefs::kAllowPopupsDuringPageUnload, true);
-  AppendContentBrowserClientSwitches();
-  EXPECT_TRUE(command_line().HasSwitch(switches::kAllowPopupsDuringPageUnload));
+  const auto navigate_browser = [&](const GURL& url) {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
+    content::NavigationEntry* entry = browser()
+                                          ->tab_strip_model()
+                                          ->GetWebContentsAt(0)
+                                          ->GetController()
+                                          .GetLastCommittedEntry();
+    ASSERT_NE(nullptr, entry);
+    EXPECT_EQ(url, entry->GetURL());
+    EXPECT_EQ(url, entry->GetVirtualURL());
+  };
+
+  // Initially there will be no top chrome pages and the client should return
+  // true for using the spare renderer.
+  EXPECT_TRUE(client()->ShouldUseSpareRenderProcessHost(browser()->profile(),
+                                                        top_chrome_url));
+
+  // Navigate to a top chrome URL.
+  navigate_browser(top_chrome_url);
+
+  // The browser now hosts a top chrome page and the client should return false
+  // for using the spare renderer.
+  EXPECT_FALSE(client()->ShouldUseSpareRenderProcessHost(browser()->profile(),
+                                                         top_chrome_url));
+
+  // Navigate away from the top chrome page.
+  navigate_browser(non_top_chrome_url);
+
+  // There will no longer be any top chrome pages hosted by the browser and the
+  // client should return true for using the spare renderer.
+  EXPECT_TRUE(client()->ShouldUseSpareRenderProcessHost(browser()->profile(),
+                                                        top_chrome_url));
 }
 
 // Helper class to mark "https://ntp.com/" as an isolated origin.
@@ -165,6 +174,10 @@ class IsolatedOriginNTPBrowserTest : public InProcessBrowserTest,
                                      public InstantTestBase {
  public:
   IsolatedOriginNTPBrowserTest() {}
+
+  IsolatedOriginNTPBrowserTest(const IsolatedOriginNTPBrowserTest&) = delete;
+  IsolatedOriginNTPBrowserTest& operator=(const IsolatedOriginNTPBrowserTest&) =
+      delete;
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ASSERT_TRUE(https_test_server().InitializeAndListen());
@@ -182,9 +195,6 @@ class IsolatedOriginNTPBrowserTest : public InProcessBrowserTest,
     host_resolver()->AddRule("*", "127.0.0.1");
     https_test_server().StartAcceptingConnections();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(IsolatedOriginNTPBrowserTest);
 };
 
 // Verifies that when the remote NTP URL has an origin which is also marked as
@@ -197,310 +207,45 @@ IN_PROC_BROWSER_TEST_F(IsolatedOriginNTPBrowserTest,
       https_test_server().GetURL("ntp.com", "/instant_extended.html");
   GURL ntp_url =
       https_test_server().GetURL("ntp.com", "/instant_extended_ntp.html");
-  InstantTestBase::Init(base_url, ntp_url, false);
-
-  SetupInstant(browser());
+  SetupInstant(browser()->profile(), base_url, ntp_url);
 
   // Sanity check that a SiteInstance for a generic ntp.com URL requires a
   // dedicated process.
   content::BrowserContext* context = browser()->profile();
   GURL isolated_url(https_test_server().GetURL("ntp.com", "/title1.html"));
-  scoped_refptr<SiteInstance> site_instance =
-      SiteInstance::CreateForURL(context, isolated_url);
+  scoped_refptr<content::SiteInstance> site_instance =
+      content::SiteInstance::CreateForURL(context, isolated_url);
   EXPECT_TRUE(site_instance->RequiresDedicatedProcess());
+  // Verify the isolated origin does not receive an NTP site URL scheme.
+  EXPECT_FALSE(
+      site_instance->GetSiteURL().SchemeIs(chrome::kChromeSearchScheme));
 
   // The site URL for the NTP URL should resolve to a chrome-search:// URL via
   // GetEffectiveURL(), even if the NTP URL matches an isolated origin.
-  GURL site_url(content::SiteInstance::GetSiteForURL(context, ntp_url));
-  EXPECT_TRUE(site_url.SchemeIs(chrome::kChromeSearchScheme));
+  scoped_refptr<content::SiteInstance> ntp_site_instance =
+      content::SiteInstance::CreateForURL(context, ntp_url);
+  EXPECT_TRUE(
+      ntp_site_instance->GetSiteURL().SchemeIs(chrome::kChromeSearchScheme));
 
   // Navigate to the NTP URL and verify that the resulting process is marked as
   // an Instant process.
-  ui_test_utils::NavigateToURL(browser(), ntp_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), ntp_url));
   content::WebContents* contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   InstantService* instant_service =
       InstantServiceFactory::GetForProfile(browser()->profile());
   EXPECT_TRUE(instant_service->IsInstantProcess(
-      contents->GetMainFrame()->GetProcess()->GetID()));
+      contents->GetPrimaryMainFrame()->GetProcess()->GetID()));
+  EXPECT_EQ(contents->GetPrimaryMainFrame()->GetSiteInstance()->GetSiteURL(),
+            ntp_site_instance->GetSiteURL());
 
   // Navigating to a non-NTP URL on ntp.com should not result in an Instant
   // process.
-  ui_test_utils::NavigateToURL(browser(), isolated_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), isolated_url));
   EXPECT_FALSE(instant_service->IsInstantProcess(
-      contents->GetMainFrame()->GetProcess()->GetID()));
-}
-
-// Helper class to run tests on a simulated 512MB low-end device.
-class SitePerProcessMemoryThresholdBrowserTest : public InProcessBrowserTest {
- public:
-  SitePerProcessMemoryThresholdBrowserTest() = default;
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
-
-    // This way the test always sees the same amount of physical memory
-    // (kLowMemoryDeviceThresholdMB = 512MB), regardless of how much memory is
-    // available in the testing environment.
-    command_line->AppendSwitch(switches::kEnableLowEndDeviceMode);
-    EXPECT_EQ(512, base::SysInfo::AmountOfPhysicalMemoryMB());
-  }
-
-  // Some command-line switches override field trials - the tests need to be
-  // skipped in this case.
-  bool ShouldSkipBecauseOfConflictingCommandLineSwitches() {
-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kSitePerProcess))
-      return true;
-
-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kDisableSiteIsolation))
-      return true;
-
-    return false;
-  }
-
-  void SetUpOnMainThread() override {
-    InProcessBrowserTest::SetUpOnMainThread();
-
-    // Initializing the expected embedder origins at runtime is required for
-    // GetWebstoreLaunchURL(), which needs to have a proper ExtensionsClient
-    // initialized.
-#if !defined(OS_ANDROID)
-    expected_embedder_origins_.push_back(
-        url::Origin::Create(GaiaUrls::GetInstance()->gaia_url()));
-#endif
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-    expected_embedder_origins_.push_back(
-        url::Origin::Create(extension_urls::GetWebstoreLaunchURL()));
-#endif
-  }
-
- protected:
-  // These are the origins we expect to be returned by
-  // content::ChildProcessSecurityPolicy::GetIsolatedOrigins() even if
-  // ContentBrowserClient::ShouldDisableSiteIsolation() returns true.
-  std::vector<url::Origin> expected_embedder_origins_;
-
-#if defined(OS_ANDROID)
-  // On Android we don't expect any trial origins because the 512MB
-  // physical memory used for testing is below the Android specific
-  // hardcoded 1024MB memory limit that disables site isolation.
-  const std::size_t kExpectedTrialOrigins = 0;
-#else
-  // All other platforms expect the single trial origin to be returned because
-  // they don't have the memory limit that disables site isolation.
-  const std::size_t kExpectedTrialOrigins = 1;
-#endif
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SitePerProcessMemoryThresholdBrowserTest);
-};
-
-IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
-                       SitePerProcessEnabled_HighThreshold) {
-  if (ShouldSkipBecauseOfConflictingCommandLineSwitches())
-    return;
-
-  // 512MB of physical memory that the test simulates is below the 768MB
-  // threshold.
-  base::test::ScopedFeatureList memory_feature;
-  memory_feature.InitAndEnableFeatureWithParameters(
-      features::kSitePerProcessOnlyForHighMemoryClients,
-      {{features::kSitePerProcessOnlyForHighMemoryClientsParamName, "768"}});
-
-  base::test::ScopedFeatureList site_per_process;
-  site_per_process.InitAndEnableFeature(features::kSitePerProcess);
-
-  // Despite enabled site-per-process trial, there should be no isolation
-  // because the device has too little memory.
-  EXPECT_FALSE(
-      content::SiteIsolationPolicy::UseDedicatedProcessesForAllSites());
-}
-
-IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
-                       SitePerProcessEnabled_LowThreshold) {
-  if (ShouldSkipBecauseOfConflictingCommandLineSwitches())
-    return;
-
-  // 512MB of physical memory that the test simulates is above the 128MB
-  // threshold.
-  base::test::ScopedFeatureList memory_feature;
-  memory_feature.InitAndEnableFeatureWithParameters(
-      features::kSitePerProcessOnlyForHighMemoryClients,
-      {{features::kSitePerProcessOnlyForHighMemoryClientsParamName, "128"}});
-
-  base::test::ScopedFeatureList site_per_process;
-  site_per_process.InitAndEnableFeature(features::kSitePerProcess);
-
-  // site-per-process trial is enabled, and the memory threshold is above the
-  // memory present on the device.
-  EXPECT_TRUE(content::SiteIsolationPolicy::UseDedicatedProcessesForAllSites());
-}
-
-IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
-                       SitePerProcessEnabled_NoThreshold) {
-  if (ShouldSkipBecauseOfConflictingCommandLineSwitches())
-    return;
-
-  base::test::ScopedFeatureList site_per_process;
-  site_per_process.InitAndEnableFeature(features::kSitePerProcess);
-
-#if defined(OS_ANDROID)
-  // Expect false on Android because 512MB physical memory triggered by
-  // kEnableLowEndDeviceMode in SetUpCommandLine() is below the 1024MB Android
-  // specific memory limit which disbles site isolation for all sites.
-  EXPECT_FALSE(
-      content::SiteIsolationPolicy::UseDedicatedProcessesForAllSites());
-#else
-  EXPECT_TRUE(content::SiteIsolationPolicy::UseDedicatedProcessesForAllSites());
-#endif
-}
-
-IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
-                       SitePerProcessDisabled_HighThreshold) {
-  if (ShouldSkipBecauseOfConflictingCommandLineSwitches())
-    return;
-
-  // 512MB of physical memory that the test simulates is below the 768MB
-  // threshold.
-  base::test::ScopedFeatureList memory_feature;
-  memory_feature.InitAndEnableFeatureWithParameters(
-      features::kSitePerProcessOnlyForHighMemoryClients,
-      {{features::kSitePerProcessOnlyForHighMemoryClientsParamName, "768"}});
-
-  base::test::ScopedFeatureList site_per_process;
-  site_per_process.InitAndDisableFeature(features::kSitePerProcess);
-
-  // site-per-process trial is disabled, so isolation should be disabled
-  // (i.e. the memory threshold should be ignored).
-  EXPECT_FALSE(
-      content::SiteIsolationPolicy::UseDedicatedProcessesForAllSites());
-}
-
-IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
-                       SitePerProcessDisabled_LowThreshold) {
-  if (ShouldSkipBecauseOfConflictingCommandLineSwitches())
-    return;
-
-  // 512MB of physical memory that the test simulates is above the 128MB
-  // threshold.
-  base::test::ScopedFeatureList memory_feature;
-  memory_feature.InitAndEnableFeatureWithParameters(
-      features::kSitePerProcessOnlyForHighMemoryClients,
-      {{features::kSitePerProcessOnlyForHighMemoryClientsParamName, "128"}});
-
-  base::test::ScopedFeatureList site_per_process;
-  site_per_process.InitAndDisableFeature(features::kSitePerProcess);
-
-  // site-per-process trial is disabled, so isolation should be disabled
-  // (i.e. the memory threshold should be ignored).
-  EXPECT_FALSE(
-      content::SiteIsolationPolicy::UseDedicatedProcessesForAllSites());
-}
-
-IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
-                       SitePerProcessDisabled_NoThreshold) {
-  if (ShouldSkipBecauseOfConflictingCommandLineSwitches())
-    return;
-
-  base::test::ScopedFeatureList site_per_process;
-  site_per_process.InitAndDisableFeature(features::kSitePerProcess);
-
-  // site-per-process trial is disabled, so isolation should be disabled
-  // (i.e. the memory threshold should be ignored).
-  EXPECT_FALSE(
-      content::SiteIsolationPolicy::UseDedicatedProcessesForAllSites());
-}
-
-IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
-                       TrialIsolatedOrigins_HighThreshold) {
-  if (ShouldSkipBecauseOfConflictingCommandLineSwitches())
-    return;
-
-  // 512MB of physical memory that the test simulates is below the 768MB
-  // threshold.
-  base::test::ScopedFeatureList memory_feature;
-  memory_feature.InitAndEnableFeatureWithParameters(
-      features::kSitePerProcessOnlyForHighMemoryClients,
-      {{features::kSitePerProcessOnlyForHighMemoryClientsParamName, "768"}});
-
-  const url::Origin trial_origin = url::Origin::Create(GURL("http://foo.com/"));
-  base::test::ScopedFeatureList isolated_origins_feature;
-  isolated_origins_feature.InitAndEnableFeatureWithParameters(
-      features::kIsolateOrigins, {{features::kIsolateOriginsFieldTrialParamName,
-                                   trial_origin.Serialize()}});
-  SiteIsolationPolicy::ApplyGlobalIsolatedOrigins();
-
-  auto* cpsp = content::ChildProcessSecurityPolicy::GetInstance();
-  std::vector<url::Origin> isolated_origins = cpsp->GetIsolatedOrigins();
-  EXPECT_EQ(expected_embedder_origins_.size(), isolated_origins.size());
-
-  // Verify that the expected embedder origins are present even though site
-  // isolation has been disabled and the trial origins should not be present.
-  EXPECT_THAT(expected_embedder_origins_,
-              ::testing::IsSubsetOf(isolated_origins));
-
-  // Verify that the trial origin is not present.
-  EXPECT_THAT(isolated_origins,
-              ::testing::Not(::testing::Contains(trial_origin)));
-}
-
-IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
-                       TrialIsolatedOrigins_LowThreshold) {
-  if (ShouldSkipBecauseOfConflictingCommandLineSwitches())
-    return;
-
-  // 512MB of physical memory that the test simulates is above the 128MB
-  // threshold.
-  base::test::ScopedFeatureList memory_feature;
-  memory_feature.InitAndEnableFeatureWithParameters(
-      features::kSitePerProcessOnlyForHighMemoryClients,
-      {{features::kSitePerProcessOnlyForHighMemoryClientsParamName, "128"}});
-
-  const url::Origin trial_origin = url::Origin::Create(GURL("http://foo.com/"));
-  base::test::ScopedFeatureList isolated_origins_feature;
-  isolated_origins_feature.InitAndEnableFeatureWithParameters(
-      features::kIsolateOrigins, {{features::kIsolateOriginsFieldTrialParamName,
-                                   trial_origin.Serialize()}});
-  SiteIsolationPolicy::ApplyGlobalIsolatedOrigins();
-
-  auto* cpsp = content::ChildProcessSecurityPolicy::GetInstance();
-  std::vector<url::Origin> isolated_origins = cpsp->GetIsolatedOrigins();
-  EXPECT_EQ(1u + expected_embedder_origins_.size(), isolated_origins.size());
-  EXPECT_THAT(expected_embedder_origins_,
-              ::testing::IsSubsetOf(isolated_origins));
-
-  // Verify that the trial origin is present.
-  EXPECT_THAT(isolated_origins, ::testing::Contains(trial_origin));
-}
-
-IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
-                       TrialIsolatedOrigins_NoThreshold) {
-  if (ShouldSkipBecauseOfConflictingCommandLineSwitches())
-    return;
-
-  const url::Origin trial_origin = url::Origin::Create(GURL("http://foo.com/"));
-  base::test::ScopedFeatureList isolated_origins_feature;
-  isolated_origins_feature.InitAndEnableFeatureWithParameters(
-      features::kIsolateOrigins, {{features::kIsolateOriginsFieldTrialParamName,
-                                   trial_origin.Serialize()}});
-  SiteIsolationPolicy::ApplyGlobalIsolatedOrigins();
-
-  auto* cpsp = content::ChildProcessSecurityPolicy::GetInstance();
-  std::vector<url::Origin> isolated_origins = cpsp->GetIsolatedOrigins();
-  EXPECT_EQ(kExpectedTrialOrigins + expected_embedder_origins_.size(),
-            isolated_origins.size());
-  EXPECT_THAT(expected_embedder_origins_,
-              ::testing::IsSubsetOf(isolated_origins));
-
-  if (kExpectedTrialOrigins > 0) {
-    // Verify that the trial origin is present.
-    EXPECT_THAT(isolated_origins, ::testing::Contains(trial_origin));
-  } else {
-    EXPECT_THAT(isolated_origins,
-                ::testing::Not(::testing::Contains(trial_origin)));
-  }
+      contents->GetPrimaryMainFrame()->GetProcess()->GetID()));
+  EXPECT_EQ(contents->GetPrimaryMainFrame()->GetSiteInstance()->GetSiteURL(),
+            site_instance->GetSiteURL());
 }
 
 // Helper class to test window creation from NTP.
@@ -508,6 +253,10 @@ class OpenWindowFromNTPBrowserTest : public InProcessBrowserTest,
                                      public InstantTestBase {
  public:
   OpenWindowFromNTPBrowserTest() {}
+
+  OpenWindowFromNTPBrowserTest(const OpenWindowFromNTPBrowserTest&) = delete;
+  OpenWindowFromNTPBrowserTest& operator=(const OpenWindowFromNTPBrowserTest&) =
+      delete;
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
@@ -519,9 +268,6 @@ class OpenWindowFromNTPBrowserTest : public InProcessBrowserTest,
     ASSERT_TRUE(https_test_server().InitializeAndListen());
     https_test_server().StartAcceptingConnections();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(OpenWindowFromNTPBrowserTest);
 };
 
 // Test checks that navigations from NTP tab to URLs with same host as NTP but
@@ -533,19 +279,17 @@ IN_PROC_BROWSER_TEST_F(OpenWindowFromNTPBrowserTest,
       https_test_server().GetURL("ntp.com", "/instant_extended.html");
   GURL ntp_url =
       https_test_server().GetURL("ntp.com", "/instant_extended_ntp.html");
-  InstantTestBase::Init(search_url, ntp_url, false);
-
-  SetupInstant(browser());
+  SetupInstant(browser()->profile(), search_url, ntp_url);
 
   // Navigate to the NTP URL and verify that the resulting process is marked as
   // an Instant process.
-  ui_test_utils::NavigateToURL(browser(), ntp_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), ntp_url));
   content::WebContents* ntp_tab =
       browser()->tab_strip_model()->GetActiveWebContents();
   InstantService* instant_service =
       InstantServiceFactory::GetForProfile(browser()->profile());
   EXPECT_TRUE(instant_service->IsInstantProcess(
-      ntp_tab->GetMainFrame()->GetProcess()->GetID()));
+      ntp_tab->GetPrimaryMainFrame()->GetProcess()->GetID()));
 
   // Execute script that creates new window from ntp tab with
   // ntp.com/title1.html as target url. Host is same as remote-ntp host, yet
@@ -568,26 +312,22 @@ IN_PROC_BROWSER_TEST_F(OpenWindowFromNTPBrowserTest,
   EXPECT_EQ(generic_url, opened_tab->GetLastCommittedURL());
   // New created tab should not reside in an Instant process.
   EXPECT_FALSE(instant_service->IsInstantProcess(
-      opened_tab->GetMainFrame()->GetProcess()->GetID()));
+      opened_tab->GetPrimaryMainFrame()->GetProcess()->GetID()));
 }
 
 class PrefersColorSchemeTest : public testing::WithParamInterface<bool>,
                                public InProcessBrowserTest {
  protected:
-  PrefersColorSchemeTest() : theme_client_(&test_theme_) {}
+  PrefersColorSchemeTest() : theme_client_(&test_theme_) {
+    feature_list_.InitWithFeatureState(features::kWebUIDarkMode, GetParam());
+  }
 
-  ~PrefersColorSchemeTest() {
+  ~PrefersColorSchemeTest() override {
     CHECK_EQ(&theme_client_, SetBrowserClientForTesting(original_client_));
   }
 
   const char* ExpectedColorScheme() const {
     return GetParam() ? "dark" : "light";
-  }
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
-                                    "MediaQueryPrefersColorScheme");
   }
 
   void SetUpOnMainThread() override {
@@ -599,7 +339,7 @@ class PrefersColorSchemeTest : public testing::WithParamInterface<bool>,
   ui::TestNativeTheme test_theme_;
 
  private:
-  content::ContentBrowserClient* original_client_ = nullptr;
+  raw_ptr<content::ContentBrowserClient> original_client_ = nullptr;
 
   class ChromeContentBrowserClientWithWebTheme
       : public ChromeContentBrowserClient {
@@ -612,9 +352,10 @@ class PrefersColorSchemeTest : public testing::WithParamInterface<bool>,
     const ui::NativeTheme* GetWebTheme() const override { return theme_; }
 
    private:
-    const ui::NativeTheme* const theme_;
+    const raw_ptr<const ui::NativeTheme> theme_;
   };
 
+  base::test::ScopedFeatureList feature_list_;
   ChromeContentBrowserClientWithWebTheme theme_client_;
 };
 
@@ -623,25 +364,26 @@ IN_PROC_BROWSER_TEST_P(PrefersColorSchemeTest, PrefersColorScheme) {
   browser()
       ->tab_strip_model()
       ->GetActiveWebContents()
-      ->GetRenderViewHost()
-      ->OnWebkitPreferencesChanged();
-  ui_test_utils::NavigateToURL(
+      ->OnWebPreferencesChanged();
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(),
       ui_test_utils::GetTestUrl(
           base::FilePath(base::FilePath::kCurrentDirectory),
-          base::FilePath(FILE_PATH_LITERAL("prefers-color-scheme.html"))));
-  base::string16 tab_title;
+          base::FilePath(FILE_PATH_LITERAL("prefers-color-scheme.html")))));
+  std::u16string tab_title;
   ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(), &tab_title));
   EXPECT_EQ(base::ASCIIToUTF16(ExpectedColorScheme()), tab_title);
 }
 
 IN_PROC_BROWSER_TEST_P(PrefersColorSchemeTest, FeatureOverridesChromeSchemes) {
   test_theme_.SetDarkMode(true);
+  browser()
+      ->tab_strip_model()
+      ->GetActiveWebContents()
+      ->OnWebPreferencesChanged();
 
-  base::test::ScopedFeatureList features;
-  features.InitWithFeatureState(features::kWebUIDarkMode, GetParam());
-
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIDownloadsURL));
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), GURL(chrome::kChromeUIDownloadsURL)));
 
   bool matches;
   ASSERT_TRUE(ExecuteScriptAndExtractBool(
@@ -656,15 +398,16 @@ IN_PROC_BROWSER_TEST_P(PrefersColorSchemeTest, FeatureOverridesChromeSchemes) {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 IN_PROC_BROWSER_TEST_P(PrefersColorSchemeTest, FeatureOverridesPdfUI) {
   test_theme_.SetDarkMode(true);
-
-  base::test::ScopedFeatureList features;
-  features.InitWithFeatureState(features::kWebUIDarkMode, GetParam());
+  browser()
+      ->tab_strip_model()
+      ->GetActiveWebContents()
+      ->OnWebPreferencesChanged();
 
   std::string pdf_extension_url(extensions::kExtensionScheme);
   pdf_extension_url.append(url::kStandardSchemeSeparator);
   pdf_extension_url.append(extension_misc::kPdfExtensionId);
   GURL pdf_index = GURL(pdf_extension_url).Resolve("/index.html");
-  ui_test_utils::NavigateToURL(browser(), pdf_index);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), pdf_index));
 
   bool matches;
   ASSERT_TRUE(ExecuteScriptAndExtractBool(
@@ -679,22 +422,32 @@ IN_PROC_BROWSER_TEST_P(PrefersColorSchemeTest, FeatureOverridesPdfUI) {
 
 INSTANTIATE_TEST_SUITE_P(All, PrefersColorSchemeTest, testing::Bool());
 
-#if !defined(OS_MACOSX)
-class ForcedColorsTest : public testing::WithParamInterface<bool>,
-                         public InProcessBrowserTest {
+class PrefersContrastTest
+    : public testing::WithParamInterface<ui::NativeTheme::PreferredContrast>,
+      public InProcessBrowserTest {
  protected:
-  ForcedColorsTest() : theme_client_(&test_theme_) {}
+  PrefersContrastTest() : theme_client_(&test_theme_) {}
 
-  ~ForcedColorsTest() {
+  ~PrefersContrastTest() override {
     CHECK_EQ(&theme_client_, SetBrowserClientForTesting(original_client_));
   }
 
-  const char* ExpectedForcedColors() const {
-    return GetParam() ? "active" : "none";
+  const char* ExpectedPrefersContrast() const {
+    switch (GetParam()) {
+      case ui::NativeTheme::PreferredContrast::kNoPreference:
+        return "no-preference";
+      case ui::NativeTheme::PreferredContrast::kMore:
+        return "more";
+      case ui::NativeTheme::PreferredContrast::kLess:
+        return "less";
+      case ui::NativeTheme::PreferredContrast::kCustom:
+        return "custom";
+    }
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
+                                    "PrefersContrast");
     command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
                                     "ForcedColors");
   }
@@ -708,7 +461,7 @@ class ForcedColorsTest : public testing::WithParamInterface<bool>,
   ui::TestNativeTheme test_theme_;
 
  private:
-  content::ContentBrowserClient* original_client_ = nullptr;
+  raw_ptr<content::ContentBrowserClient> original_client_ = nullptr;
 
   class ChromeContentBrowserClientWithWebTheme
       : public ChromeContentBrowserClient {
@@ -721,34 +474,42 @@ class ForcedColorsTest : public testing::WithParamInterface<bool>,
     const ui::NativeTheme* GetWebTheme() const override { return theme_; }
 
    private:
-    const ui::NativeTheme* const theme_;
+    const raw_ptr<const ui::NativeTheme> theme_;
   };
 
   ChromeContentBrowserClientWithWebTheme theme_client_;
 };
 
-IN_PROC_BROWSER_TEST_P(ForcedColorsTest, ForcedColors) {
-  test_theme_.SetUsesHighContrastColors(GetParam());
+IN_PROC_BROWSER_TEST_P(PrefersContrastTest, PrefersContrast) {
+  test_theme_.SetPreferredContrast(GetParam());
   browser()
       ->tab_strip_model()
       ->GetActiveWebContents()
-      ->GetRenderViewHost()
-      ->OnWebkitPreferencesChanged();
-  ui_test_utils::NavigateToURL(
-      browser(), ui_test_utils::GetTestUrl(
-                     base::FilePath(base::FilePath::kCurrentDirectory),
-                     base::FilePath(FILE_PATH_LITERAL("forced-colors.html"))));
-  base::string16 tab_title;
+      ->OnWebPreferencesChanged();
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(),
+      ui_test_utils::GetTestUrl(
+          base::FilePath(base::FilePath::kCurrentDirectory),
+          base::FilePath(FILE_PATH_LITERAL("prefers-contrast.html")))));
+  std::u16string tab_title;
   ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(), &tab_title));
-  EXPECT_EQ(base::ASCIIToUTF16(ExpectedForcedColors()), tab_title);
+  EXPECT_EQ(base::ASCIIToUTF16(ExpectedPrefersContrast()), tab_title);
 }
 
-INSTANTIATE_TEST_SUITE_P(All, ForcedColorsTest, testing::Bool());
-#endif  // !defined(OS_MACOSX)
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    PrefersContrastTest,
+    testing::Values(ui::NativeTheme::PreferredContrast::kNoPreference,
+                    ui::NativeTheme::PreferredContrast::kMore,
+                    ui::NativeTheme::PreferredContrast::kLess,
+                    ui::NativeTheme::PreferredContrast::kCustom));
 
 class ProtocolHandlerTest : public InProcessBrowserTest {
  public:
   ProtocolHandlerTest() = default;
+
+  ProtocolHandlerTest(const ProtocolHandlerTest&) = delete;
+  ProtocolHandlerTest& operator=(const ProtocolHandlerTest&) = delete;
 
   void SetUpOnMainThread() override {
     InProcessBrowserTest::SetUpOnMainThread();
@@ -760,25 +521,25 @@ class ProtocolHandlerTest : public InProcessBrowserTest {
   void AddProtocolHandler(const std::string& scheme,
                           const std::string& redirect_template) {
     protocol_handler_registry()->OnAcceptRegisterProtocolHandler(
-        ProtocolHandler::CreateProtocolHandler(scheme,
-                                               GURL(redirect_template)));
+        custom_handlers::ProtocolHandler::CreateProtocolHandler(
+            scheme, GURL(redirect_template)));
   }
 
-  ProtocolHandlerRegistry* protocol_handler_registry() {
+  custom_handlers::ProtocolHandlerRegistry* protocol_handler_registry() {
     return ProtocolHandlerRegistryFactory::GetInstance()->GetForBrowserContext(
         browser()->profile());
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ProtocolHandlerTest);
 };
 
 IN_PROC_BROWSER_TEST_F(ProtocolHandlerTest, CustomHandler) {
-  AddProtocolHandler("abc", "https://abc.xyz/?url=%s");
+#if BUILDFLAG(IS_MAC)
+  ASSERT_TRUE(test::RegisterAppWithLaunchServices());
+#endif
+  AddProtocolHandler("news", "https://abc.xyz/?url=%s");
 
-  ui_test_utils::NavigateToURL(browser(), GURL("abc:something"));
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), GURL("news:something")));
 
-  base::string16 expected_title = base::ASCIIToUTF16("abc.xyz");
+  std::u16string expected_title = u"abc.xyz";
   content::TitleWatcher title_watcher(
       browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
@@ -786,33 +547,77 @@ IN_PROC_BROWSER_TEST_F(ProtocolHandlerTest, CustomHandler) {
 
 // This is a regression test for crbug.com/969177.
 IN_PROC_BROWSER_TEST_F(ProtocolHandlerTest, HandlersIgnoredWhenDisabled) {
-  AddProtocolHandler("abc", "https://abc.xyz/?url=%s");
+  AddProtocolHandler("bitcoin", "https://abc.xyz/?url=%s");
   protocol_handler_registry()->Disable();
 
-  ui_test_utils::NavigateToURL(browser(), GURL("abc:something"));
+  ASSERT_TRUE(
+      ui_test_utils::NavigateToURL(browser(), GURL("bitcoin:something")));
 
-  base::string16 tab_title;
+  std::u16string tab_title;
   ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(), &tab_title));
-  EXPECT_EQ(base::ASCIIToUTF16("about:blank"), tab_title);
+  EXPECT_EQ(u"about:blank", tab_title);
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // Tests that if a protocol handler is registered for a scheme, an external
 // program (another Chrome tab in this case) is not launched to handle the
 // navigation. This is a regression test for crbug.com/963133.
 IN_PROC_BROWSER_TEST_F(ProtocolHandlerTest, ExternalProgramNotLaunched) {
-  ui_test_utils::NavigateToURL(browser(), GURL("mailto:bob@example.com"));
+  ASSERT_TRUE(
+      ui_test_utils::NavigateToURL(browser(), GURL("mailto:bob@example.com")));
 
   // If an external program (Chrome) was launched, it will result in a second
   // tab being opened.
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
-
   // Make sure the protocol handler redirected the navigation.
-  base::string16 expected_title = base::ASCIIToUTF16("mail.google.com");
+  std::u16string expected_title = u"mail.google.com";
   content::TitleWatcher title_watcher(
       browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
 #endif
 
-}  // namespace content
+#if !BUILDFLAG(IS_ANDROID)
+class KeepaliveDurationOnShutdownTest : public InProcessBrowserTest,
+                                        public InstantTestBase {
+ public:
+  void SetUpOnMainThread() override {
+    InProcessBrowserTest::SetUpOnMainThread();
+    client_ = static_cast<ChromeContentBrowserClient*>(
+        content::SetBrowserClientForTesting(nullptr));
+    content::SetBrowserClientForTesting(client_);
+  }
+  void TearDownOnMainThread() override {
+    client_ = nullptr;
+    InProcessBrowserTest::TearDownOnMainThread();
+  }
+
+  raw_ptr<ChromeContentBrowserClient> client_ = nullptr;
+};
+
+IN_PROC_BROWSER_TEST_F(KeepaliveDurationOnShutdownTest, DefaultValue) {
+  Profile* profile = browser()->profile();
+  EXPECT_EQ(client_->GetKeepaliveTimerTimeout(profile), base::TimeDelta());
+}
+
+IN_PROC_BROWSER_TEST_F(KeepaliveDurationOnShutdownTest, PolicySettings) {
+  Profile* profile = browser()->profile();
+  profile->GetPrefs()->SetInteger(prefs::kFetchKeepaliveDurationOnShutdown, 2);
+
+  EXPECT_EQ(client_->GetKeepaliveTimerTimeout(profile), base::Seconds(2));
+}
+
+IN_PROC_BROWSER_TEST_F(KeepaliveDurationOnShutdownTest, DynamicUpdate) {
+  Profile* profile = browser()->profile();
+  profile->GetPrefs()->SetInteger(prefs::kFetchKeepaliveDurationOnShutdown, 2);
+
+  EXPECT_EQ(client_->GetKeepaliveTimerTimeout(profile), base::Seconds(2));
+
+  profile->GetPrefs()->SetInteger(prefs::kFetchKeepaliveDurationOnShutdown, 3);
+
+  EXPECT_EQ(client_->GetKeepaliveTimerTimeout(profile), base::Seconds(3));
+}
+
+#endif  // !BUILDFLAG(IS_ANDROID)
+
+}  // namespace

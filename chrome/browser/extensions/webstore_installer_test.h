@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "extensions/browser/extension_dialog_auto_confirm.h"
 #include "url/gurl.h"
@@ -34,6 +33,10 @@ class WebstoreInstallerTest : public extensions::ExtensionBrowserTest {
                         const std::string& crx_filename,
                         const std::string& verified_domain,
                         const std::string& unverified_domain);
+
+  WebstoreInstallerTest(const WebstoreInstallerTest&) = delete;
+  WebstoreInstallerTest& operator=(const WebstoreInstallerTest&) = delete;
+
   ~WebstoreInstallerTest() override;
 
   void SetUpCommandLine(base::CommandLine* command_line) override;
@@ -80,8 +83,6 @@ class WebstoreInstallerTest : public extensions::ExtensionBrowserTest {
 
   std::unique_ptr<extensions::ScopedTestDialogAutoConfirm>
       install_auto_confirm_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebstoreInstallerTest);
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_WEBSTORE_INSTALLER_TEST_H_

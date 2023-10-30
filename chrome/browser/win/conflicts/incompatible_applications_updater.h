@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
 #include "chrome/browser/win/conflicts/installed_applications.h"
@@ -31,7 +31,7 @@ class IncompatibleApplicationsUpdater : public ModuleDatabaseObserver {
   // incompatibility warning or not.
   //
   // Note that this enum is very similar to the ModuleBlockingDecision in
-  // ModuleBlacklistCacheUpdater. This is done so that it is easier to keep the
+  // ModuleBlocklistCacheUpdater. This is done so that it is easier to keep the
   // 2 features separate, as they can be independently enabled/disabled.
   enum ModuleWarningDecision {
     // No decision was taken yet for the module.
@@ -55,14 +55,14 @@ class IncompatibleApplicationsUpdater : public ModuleDatabaseObserver {
     // Allowed because it is signed by Microsoft. The certificate is not
     // validated.
     kAllowedMicrosoft,
-    // Explicitly whitelisted by the Module List component.
-    kAllowedWhitelisted,
+    // Explicitly allowlisted by the Module List component.
+    kAllowedAllowlisted,
     // Module analysis was interrupted using DisableModuleAnalysis(). No warning
     // will be emitted for that module.
     kNotAnalyzed,
     // This module is already going to be blocked on next browser launch, so
     // don't warn about it.
-    kAddedToBlacklist,
+    kAddedToBlocklist,
     // Unwanted, but can't tie back to an installed application.
     kNoTiedApplication,
     // An incompatibility warning will be shown because of this module.
@@ -72,7 +72,7 @@ class IncompatibleApplicationsUpdater : public ModuleDatabaseObserver {
   struct IncompatibleApplication {
     IncompatibleApplication(
         InstalledApplications::ApplicationInfo info,
-        std::unique_ptr<chrome::conflicts::BlacklistAction> blacklist_action);
+        std::unique_ptr<chrome::conflicts::BlocklistAction> blocklist_action);
     ~IncompatibleApplication();
 
     // Needed for std::remove_if().
@@ -81,7 +81,7 @@ class IncompatibleApplicationsUpdater : public ModuleDatabaseObserver {
         IncompatibleApplication&& incompatible_application);
 
     InstalledApplications::ApplicationInfo info;
-    std::unique_ptr<chrome::conflicts::BlacklistAction> blacklist_action;
+    std::unique_ptr<chrome::conflicts::BlocklistAction> blocklist_action;
   };
 
   // Creates an instance of the updater.
@@ -92,6 +92,12 @@ class IncompatibleApplicationsUpdater : public ModuleDatabaseObserver {
       scoped_refptr<ModuleListFilter> module_list_filter,
       const InstalledApplications& installed_applications,
       bool module_analysis_disabled);
+
+  IncompatibleApplicationsUpdater(const IncompatibleApplicationsUpdater&) =
+      delete;
+  IncompatibleApplicationsUpdater& operator=(
+      const IncompatibleApplicationsUpdater&) = delete;
+
   ~IncompatibleApplicationsUpdater() override;
 
   static void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
@@ -125,7 +131,7 @@ class IncompatibleApplicationsUpdater : public ModuleDatabaseObserver {
   void DisableModuleAnalysis();
 
  private:
-  ModuleDatabaseEventSource* const module_database_event_source_;
+  const raw_ptr<ModuleDatabaseEventSource> module_database_event_source_;
 
   const CertificateInfo& exe_certificate_info_;
   scoped_refptr<ModuleListFilter> module_list_filter_;
@@ -146,8 +152,6 @@ class IncompatibleApplicationsUpdater : public ModuleDatabaseObserver {
   bool module_analysis_disabled_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(IncompatibleApplicationsUpdater);
 };
 
 #endif  // CHROME_BROWSER_WIN_CONFLICTS_INCOMPATIBLE_APPLICATIONS_UPDATER_H_

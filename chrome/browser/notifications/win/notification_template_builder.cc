@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,14 +17,16 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "chrome/browser/notifications/win/notification_image_retainer.h"
 #include "chrome/browser/notifications/win/notification_launch_id.h"
+#include "chrome/common/chrome_features.h"
+#include "chrome/common/notifications/notification_image_retainer.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/url_formatter/elide_url.h"
-#include "third_party/libxml/chromium/libxml_utils.h"
+#include "third_party/libxml/chromium/xml_writer.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/message_center/public/cpp/notification.h"
+#include "ui/strings/grit/ui_strings.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -48,12 +50,15 @@ const char kBindingElement[] = "binding";
 const char kBindingElementTemplateAttribute[] = "template";
 const char kContent[] = "content";
 const char kContextMenu[] = "contextMenu";
+const char kDuration[] = "duration";
+const char kDurationLong[] = "long";
 const char kForeground[] = "foreground";
 const char kHero[] = "hero";
 const char kHintCrop[] = "hint-crop";
 const char kHintCropNone[] = "none";
 const char kImageElement[] = "image";
 const char kImageUri[] = "imageUri";
+const char kIndeterminate[] = "indeterminate";
 const char kInputElement[] = "input";
 const char kInputId[] = "id";
 const char kInputType[] = "type";
@@ -82,7 +87,7 @@ const char kXmlVersionHeader[] = "<?xml version=\"1.0\"?>\n";
 
 // Formats the |origin| for display in the notification template.
 std::string FormatOrigin(const GURL& origin) {
-  base::string16 origin_string = url_formatter::FormatOriginForSecurityDisplay(
+  std::u16string origin_string = url_formatter::FormatOriginForSecurityDisplay(
       url::Origin::Create(origin),
       url_formatter::SchemeDisplay::OMIT_HTTP_AND_HTTPS);
   DCHECK(origin_string.size());
@@ -98,10 +103,16 @@ void StartToastElement(XmlWriter* xml_writer,
   xml_writer->StartElement(kNotificationToastElement);
   xml_writer->AddAttribute(kNotificationLaunchAttribute, launch_id.Serialize());
 
-  // Note: If the notification doesn't include a button, then Windows will
-  // ignore the Reminder flag.
-  if (notification.never_timeout())
-    xml_writer->AddAttribute(kScenario, kReminder);
+  if (notification.never_timeout()) {
+    if (base::FeatureList::IsEnabled(
+            features::kNotificationDurationLongForRequireInteraction)) {
+      xml_writer->AddAttribute(kDuration, kDurationLong);
+    } else {
+      // Note: If the notification doesn't include a button, then Windows will
+      // ignore the Reminder flag. See EnsureReminderHasButton below.
+      xml_writer->AddAttribute(kScenario, kReminder);
+    }
+  }
 
   if (notification.timestamp().is_null())
     return;
@@ -182,7 +193,7 @@ void WriteImageElement(XmlWriter* xml_writer,
   if (!path.empty()) {
     xml_writer->StartElement(kImageElement);
     xml_writer->AddAttribute(kPlacement, placement);
-    xml_writer->AddAttribute(kSrc, base::UTF16ToUTF8(path.value()));
+    xml_writer->AddAttribute(kSrc, base::WideToUTF8(path.value()));
     if (!hint_crop.empty())
       xml_writer->AddAttribute(kHintCrop, hint_crop);
     xml_writer->EndElement();
@@ -193,7 +204,8 @@ void WriteImageElement(XmlWriter* xml_writer,
 void WriteIconElement(XmlWriter* xml_writer,
                       NotificationImageRetainer* image_retainer,
                       const message_center::Notification& notification) {
-  WriteImageElement(xml_writer, image_retainer, notification.icon(),
+  WriteImageElement(xml_writer, image_retainer,
+                    gfx::Image(notification.icon().Rasterize(nullptr)),
                     kPlacementAppLogoOverride, kHintCropNone);
 }
 
@@ -214,9 +226,17 @@ void WriteProgressElement(XmlWriter* xml_writer,
   // valueStringOverride: A string that replaces the percentage on the right.
   xml_writer->StartElement(kProgress);
   // Status is mandatory, without it the progress bar is not shown.
-  xml_writer->AddAttribute(kStatus, std::string());
-  xml_writer->AddAttribute(
-      kValue, base::StringPrintf("%3.2f", 1.0 * notification.progress() / 100));
+  xml_writer->AddAttribute(kStatus,
+                           base::UTF16ToUTF8(notification.progress_status()));
+
+  // Show indeterminate spinner for values outside the [0-100] range.
+  if (notification.progress() < 0 || notification.progress() > 100) {
+    xml_writer->AddAttribute(kValue, kIndeterminate);
+  } else {
+    double value = 1.0 * notification.progress() / 100;
+    xml_writer->AddAttribute(kValue, base::StringPrintf("%3.2f", value));
+  }
+
   xml_writer->EndElement();
 }
 
@@ -315,15 +335,15 @@ void AddContextMenu(XmlWriter* xml_writer,
 void EnsureReminderHasButton(XmlWriter* xml_writer,
                              const message_center::Notification& notification,
                              NotificationLaunchId copied_launch_id) {
-  if (!notification.never_timeout() || !notification.buttons().empty())
+  if (!notification.never_timeout() || !notification.buttons().empty() ||
+      base::FeatureList::IsEnabled(
+          features::kNotificationDurationLongForRequireInteraction)) {
     return;
+  }
 
   xml_writer->StartElement(kActionElement);
   xml_writer->AddAttribute(kActivationType, kBackground);
-  // TODO(finnur): Add our own string here (we're past string-freeze so we're
-  // re-using the already translated "Close" from elsewhere).
-  xml_writer->AddAttribute(
-      kContent, l10n_util::GetStringUTF8(IDS_HISTORY_CLOSE_MENU_PROMO));
+  xml_writer->AddAttribute(kContent, l10n_util::GetStringUTF8(IDS_APP_CLOSE));
   copied_launch_id.set_is_for_dismiss_button();
   xml_writer->AddAttribute(kArguments, copied_launch_id.Serialize());
   xml_writer->EndElement();
@@ -338,7 +358,7 @@ const char kNotificationLaunchAttribute[] = "launch";
 // to use) for building the XML template because it is used frequently in
 // Chrome, is nicer to use and has already been vetted.
 // https://docs.microsoft.com/en-us/windows/uwp/controls-and-patterns/tiles-and-notifications-adaptive-interactive-toasts
-base::string16 BuildNotificationTemplate(
+std::wstring BuildNotificationTemplate(
     NotificationImageRetainer* image_retainer,
     const NotificationLaunchId& launch_id,
     const message_center::Notification& notification) {
@@ -390,12 +410,17 @@ base::string16 BuildNotificationTemplate(
   if (!notification.buttons().empty())
     AddActions(&xml_writer, image_retainer, notification, launch_id);
   EnsureReminderHasButton(&xml_writer, notification, launch_id);
-  if (context_menu_label_override) {
-    AddContextMenu(&xml_writer, launch_id, context_menu_label_override);
+  if (notification.should_show_settings_button()) {
+    if (context_menu_label_override) {
+      AddContextMenu(&xml_writer, launch_id, context_menu_label_override);
+    } else {
+      AddContextMenu(&xml_writer, launch_id,
+                     l10n_util::GetStringUTF8(
+                         IDS_WIN_NOTIFICATION_SETTINGS_CONTEXT_MENU_ITEM_NAME));
+    }
   } else {
-    AddContextMenu(&xml_writer, launch_id,
-                   l10n_util::GetStringUTF8(
-                       IDS_WIN_NOTIFICATION_SETTINGS_CONTEXT_MENU_ITEM_NAME));
+    DCHECK(!context_menu_label_override)
+        << "Must show custom settings button label";
   }
   EndActionsElement(&xml_writer);
 
@@ -412,7 +437,7 @@ base::string16 BuildNotificationTemplate(
 
   // The |kXmlVersionHeader| is automatically appended by libxml, but the toast
   // system in the Windows Action Center expects it to be absent.
-  return base::UTF8ToUTF16(
+  return base::UTF8ToWide(
       base::StringPiece(template_xml).substr(sizeof(kXmlVersionHeader) - 1));
 }
 

@@ -1,59 +1,128 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.directactions;
 
-import android.annotation.TargetApi;
 import android.content.Context;
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
+import android.os.Bundle;
+import android.os.CancellationSignal;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
 
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.AppHooks;
-import org.chromium.chrome.browser.ChromeActivity.ActivityType;
-import org.chromium.chrome.browser.MenuOrKeyboardActionController;
+import org.chromium.chrome.browser.autofill_assistant.AssistantDependencyUtilsChrome;
 import org.chromium.chrome.browser.autofill_assistant.AutofillAssistantFacade;
+import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
+import org.chromium.chrome.browser.compositor.CompositorViewHolder;
+import org.chromium.chrome.browser.findinpage.FindToolbarManager;
+import org.chromium.chrome.browser.flags.ActivityType;
+import org.chromium.chrome.browser.lifecycle.DestroyObserver;
+import org.chromium.chrome.browser.lifecycle.NativeInitObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.widget.ScrimView;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetController;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
+import org.chromium.components.browser_ui.widget.MenuOrKeyboardActionController;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.function.Consumer;
 
 /**
- * A helper for initializing {@link DirectActionCoordinator} with standard direct actions from
+ * A wrapper for initializing {@link DirectActionCoordinator} with standard direct actions from
  * Chrome activities.
  *
  * <p>To extend the set of direct actions beyond what's provided by this class, register handlers to
- * the coordinator returned by {@link #getCoordinator}.
+ * the coordinator {@code mCoordinator}.
  */
-@TargetApi(29)
-public class DirectActionInitializer {
-    @NonNull
-    private DirectActionCoordinator mCoordinator;
+@RequiresApi(29)
+public class DirectActionInitializer implements NativeInitObserver, DestroyObserver {
+    private final Context mContext;
+    private final BottomSheetController mBottomSheetController;
+    private final BrowserControlsStateProvider mBrowserControls;
+    private final CompositorViewHolder mCompositorViewHolder;
+    private final ActivityTabProvider mActivityTabProvider;
+    private final TabModelSelector mTabModelSelector;
 
+    @ActivityType
+    private int mActivityType;
+    private MenuOrKeyboardActionController mMenuOrKeyboardActionController;
+    private Runnable mGoBackAction;
+    @Nullable
+    private FindToolbarManager mFindToolbarManager;
+    private boolean mDirectActionsRegistered;
+    @Nullable
+    private DirectActionCoordinator mCoordinator;
     @Nullable
     private MenuDirectActionHandler mMenuHandler;
 
     /**
-     * Creates and initializes a {@link DirectActionHandler}, if possible, for a specific activity.
-     *
-     * @param tabModelSelector The activity's {@link TabModelSelector}.
+     * @param context The current context, often the activity instance.
+     * @param activityType The type of the current activity
+     * @param actionController Controller to use to execute menu actions
+     * @param goBackAction Implementation of the "go_back" action, usually {@link
+     *         android.app.Activity#onBackPressed}.
+     * @param tabModelSelector The activity's {@link TabModelSelector}
+     * @param findToolbarManager Manager to use for the "find_in_page" action, if it exists
+     * @param bottomSheetController Controller for the activity's bottom sheet, if it exists
+     * @param browserControls Provider of browser controls of the activity
+     * @param compositorViewHolder Compositor view holder of the activity
+     * @param activityTabProvider Activity tab provider
      */
-    @Nullable
-    public static DirectActionInitializer create(TabModelSelector tabModelSelector) {
-        DirectActionCoordinator coordinator = AppHooks.get().createDirectActionCoordinator();
-        if (coordinator == null) return null;
+    public DirectActionInitializer(Context context, @ActivityType int activityType,
+            MenuOrKeyboardActionController actionController, Runnable goBackAction,
+            TabModelSelector tabModelSelector, @Nullable FindToolbarManager findToolbarManager,
+            @Nullable BottomSheetController bottomSheetController,
+            BrowserControlsStateProvider browserControls, CompositorViewHolder compositorViewHolder,
+            ActivityTabProvider activityTabProvider) {
+        mContext = context;
+        mActivityType = activityType;
+        mMenuOrKeyboardActionController = actionController;
+        mGoBackAction = goBackAction;
+        mTabModelSelector = tabModelSelector;
+        mFindToolbarManager = findToolbarManager;
+        mBottomSheetController = bottomSheetController;
+        mBrowserControls = browserControls;
+        mCompositorViewHolder = compositorViewHolder;
+        mActivityTabProvider = activityTabProvider;
 
-        coordinator.init(/* isEnabled= */ () -> !tabModelSelector.isIncognitoSelected());
-        return new DirectActionInitializer(coordinator);
+        mDirectActionsRegistered = false;
     }
 
-    /** Returns the coordinator. */
-    public DirectActionCoordinator getCoordinator() {
-        return mCoordinator;
+    /**
+     * Performs a direct action.
+     *
+     * @param actionId Name of the direct action to perform.
+     * @param arguments Arguments for this action.
+     * @param cancellationSignal Signal used to cancel a direct action from the caller.
+     * @param callback Callback to run when the action is done.
+     */
+    public void onPerformDirectAction(String actionId, Bundle arguments,
+            CancellationSignal cancellationSignal, Consumer<Bundle> callback) {
+        if (mCoordinator == null || !mDirectActionsRegistered) {
+            callback.accept(Bundle.EMPTY);
+            return;
+        }
+        mCoordinator.onPerformDirectAction(actionId, arguments, callback);
     }
 
-    private DirectActionInitializer(DirectActionCoordinator coordinator) {
-        mCoordinator = coordinator;
+    /**
+     * Lists direct actions supported.
+     *
+     * Returns a list of direct actions supported by the Activity associated with this
+     * RootUiCoordinator.
+     *
+     * @param cancellationSignal Signal used to cancel a direct action from the caller.
+     * @param callback Callback to run when the action is done.
+     */
+    public void onGetDirectActions(CancellationSignal cancellationSignal, Consumer<List> callback) {
+        if (mCoordinator == null || !mDirectActionsRegistered) {
+            callback.accept(Collections.emptyList());
+            return;
+        }
+        mCoordinator.onGetDirectActions(callback);
     }
 
     /**
@@ -65,21 +134,29 @@ public class DirectActionInitializer {
      * @param goBackAction Implementation of the "go_back" action, usually {@link
      *         android.app.Activity#onBackPressed}.
      * @param tabModelSelector The activity's {@link TabModelSelector}
+     * @param findToolbarManager Manager to use for the "find_in_page" action, if it exists
      * @param bottomSheetController Controller for the activity's bottom sheet, if it exists
-     * @param scrim The activity's scrim view, if it exists
+     * @param browserControls Browser controls manager of the activity
+     * @param compositorViewHolder Compositor view holder of the activity
+     * @param activityTabProvider Activity tab provider
      */
-    public void registerCommonChromeActions(Context context, @ActivityType int activityType,
+    private void registerCommonChromeActions(Context context, @ActivityType int activityType,
             MenuOrKeyboardActionController actionController, Runnable goBackAction,
-            TabModelSelector tabModelSelector,
-            @Nullable BottomSheetController bottomSheetController, ScrimView scrim) {
+            TabModelSelector tabModelSelector, @Nullable FindToolbarManager findToolbarManager,
+            @Nullable BottomSheetController bottomSheetController,
+            BrowserControlsStateProvider browserControls, CompositorViewHolder compositorViewHolder,
+            ActivityTabProvider activityTabProvider) {
         mCoordinator.register(new GoBackDirectActionHandler(goBackAction));
+        mCoordinator.register(
+                new FindInPageDirectActionHandler(tabModelSelector, findToolbarManager));
 
         registerMenuHandlerIfNecessary(actionController, tabModelSelector)
-                .whitelistActions(R.id.forward_menu_id, R.id.reload_menu_id);
+                .allowlistActions(R.id.forward_menu_id, R.id.reload_menu_id);
 
-        if (AutofillAssistantFacade.areDirectActionsAvailable(activityType)) {
-            DirectActionHandler handler = AutofillAssistantFacade.createDirectActionHandler(
-                    context, bottomSheetController, scrim, tabModelSelector);
+        if (AssistantDependencyUtilsChrome.areDirectActionsAvailable(activityType)) {
+            DirectActionHandler handler = AutofillAssistantFacade.createDirectActionHandler(context,
+                    bottomSheetController, browserControls, compositorViewHolder,
+                    activityTabProvider);
             if (handler != null) mCoordinator.register(handler);
         }
     }
@@ -90,7 +167,7 @@ public class DirectActionInitializer {
      * @param actionController Controller to use to execute menu action
      * @param tabModelSelector The activity's {@link TabModelSelector}
      */
-    public void registerTabManipulationActions(
+    void registerTabManipulationActions(
             MenuOrKeyboardActionController actionController, TabModelSelector tabModelSelector) {
         registerMenuHandlerIfNecessary(actionController, tabModelSelector).allowAllActions();
         mCoordinator.register(new CloseTabDirectActionHandler(tabModelSelector));
@@ -102,10 +179,48 @@ public class DirectActionInitializer {
      * @param actionController Controller to use to execute menu action
      * @param tabModelSelector The activity's {@link TabModelSelector}
      */
-    public void allowMenuActions(MenuOrKeyboardActionController actionController,
+    void allowMenuActions(MenuOrKeyboardActionController actionController,
             TabModelSelector tabModelSelector, Integer... itemIds) {
         registerMenuHandlerIfNecessary(actionController, tabModelSelector)
-                .whitelistActions(itemIds);
+                .allowlistActions(itemIds);
+    }
+
+    // Implements DestroyObserver
+    @Override
+    public void onDestroy() {
+        mCoordinator = null;
+        mDirectActionsRegistered = false;
+    }
+
+    // Implements NativeInitObserver
+    @Override
+    public void onFinishNativeInitialization() {
+        mCoordinator = AppHooks.get().createDirectActionCoordinator();
+        if (mCoordinator != null) {
+            mCoordinator.init(/* isEnabled= */ () -> !mTabModelSelector.isIncognitoSelected());
+            registerDirectActions();
+        }
+    }
+
+    /**
+     * Registers the set of direct actions available to assist apps.
+     */
+    void registerDirectActions() {
+        registerCommonChromeActions(mContext, mActivityType, mMenuOrKeyboardActionController,
+                mGoBackAction, mTabModelSelector, mFindToolbarManager,
+                AssistantDependencyUtilsChrome.areDirectActionsAvailable(mActivityType)
+                        ? mBottomSheetController
+                        : null,
+                mBrowserControls, mCompositorViewHolder, mActivityTabProvider);
+
+        if (mActivityType == ActivityType.TABBED) {
+            registerTabManipulationActions(mMenuOrKeyboardActionController, mTabModelSelector);
+        } else if (mActivityType == ActivityType.CUSTOM_TAB) {
+            allowMenuActions(mMenuOrKeyboardActionController, mTabModelSelector,
+                    R.id.bookmark_this_page_id, R.id.preferences_id);
+        }
+
+        mDirectActionsRegistered = true;
     }
 
     private MenuDirectActionHandler registerMenuHandlerIfNecessary(

@@ -1,17 +1,18 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/chrome_cleaner/ui/chrome_proxy_main_dialog.h"
 
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/check.h"
+#include "base/files/file_path.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chrome/chrome_cleaner/os/file_path_set.h"
-#include "chrome/chrome_cleaner/pup_data/pup_data.h"
 #include "chrome/chrome_cleaner/settings/settings.h"
 
 namespace chrome_cleaner {
@@ -31,8 +32,8 @@ bool ChromeProxyMainDialog::Create() {
 
 void ChromeProxyMainDialog::NoPUPsFound() {
   chrome_prompt_ipc_->PostPromptUserTask(
-      std::vector<base::FilePath>(), std::vector<base::string16>(),
-      std::vector<base::string16>(),
+      std::vector<base::FilePath>(), std::vector<std::wstring>(),
+      std::vector<std::wstring>(),
       base::BindOnce(
           &ChromeProxyMainDialog::PostCloseAfterReceivingResponseTask,
           base::Unretained(this), base::SequencedTaskRunnerHandle::Get()));
@@ -41,24 +42,13 @@ void ChromeProxyMainDialog::NoPUPsFound() {
 void ChromeProxyMainDialog::ConfirmCleanup(
     const std::vector<UwSId>& found_pups,
     const FilePathSet& files,
-    const std::vector<base::string16>& registry_keys) {
+    const std::vector<std::wstring>& registry_keys) {
   std::vector<base::FilePath> files_out = files.ToVector();
-  std::vector<base::string16> registry_keys_out = registry_keys;
-  std::vector<base::string16> extension_ids;
-  for (const UwSId& pup_id : found_pups) {
-    if (!PUPData::IsKnownPUP(pup_id)) {
-      continue;
-    }
-    PUPData::PUP* pup = PUPData::GetPUP(pup_id);
-    for (const ForceInstalledExtension& matched_extension :
-         pup->matched_extensions) {
-      extension_ids.push_back(
-          base::UTF8ToUTF16(matched_extension.id.AsString()));
-    }
-  }
+  std::vector<std::wstring> registry_keys_out = registry_keys;
+  // TODO(crbug.com/981388): Remove the extension_ids field from the IPC.
   chrome_prompt_ipc_->PostPromptUserTask(
       std::move(files_out), std::move(registry_keys_out),
-      std::move(extension_ids),
+      /*extension_ids=*/{},
       base::BindOnce(&ChromeProxyMainDialog::PostPromptResultReceivedTask,
                      base::Unretained(this),
                      base::SequencedTaskRunnerHandle::Get()));
@@ -72,33 +62,26 @@ void ChromeProxyMainDialog::Close() {
   delegate()->OnClose();
 }
 
-void ChromeProxyMainDialog::DisableExtensions(
-    const std::vector<base::string16>& extensions,
-    base::OnceCallback<void(bool)> on_disable) {
-  chrome_prompt_ipc_->PostDisableExtensionsTask(extensions,
-                                                std::move(on_disable));
-}
-
 void ChromeProxyMainDialog::PostPromptResultReceivedTask(
     scoped_refptr<base::SequencedTaskRunner> task_runner,
-    mojom::PromptAcceptance prompt_acceptance) {
+    PromptUserResponse::PromptAcceptance prompt_acceptance) {
   task_runner->PostTask(
       FROM_HERE, base::BindOnce(&ChromeProxyMainDialog::PromptResultReceived,
                                 base::Unretained(this), prompt_acceptance));
 }
 
 void ChromeProxyMainDialog::PromptResultReceived(
-    mojom::PromptAcceptance prompt_acceptance) {
+    PromptUserResponse::PromptAcceptance prompt_acceptance) {
   Settings::GetInstance()->set_logs_allowed_in_cleanup_mode(
-      prompt_acceptance == mojom::PromptAcceptance::ACCEPTED_WITH_LOGS);
+      prompt_acceptance == PromptUserResponse::ACCEPTED_WITH_LOGS);
   delegate()->AcceptedCleanup(
-      prompt_acceptance == mojom::PromptAcceptance::ACCEPTED_WITH_LOGS ||
-      prompt_acceptance == mojom::PromptAcceptance::ACCEPTED_WITHOUT_LOGS);
+      prompt_acceptance == PromptUserResponse::ACCEPTED_WITH_LOGS ||
+      prompt_acceptance == PromptUserResponse::ACCEPTED_WITHOUT_LOGS);
 }
 
 void ChromeProxyMainDialog::PostCloseAfterReceivingResponseTask(
     scoped_refptr<base::SequencedTaskRunner> task_runner,
-    mojom::PromptAcceptance prompt_acceptance) {
+    PromptUserResponse::PromptAcceptance prompt_acceptance) {
   task_runner->PostTask(
       FROM_HERE,
       base::BindOnce(&ChromeProxyMainDialog::CloseAfterReceivingResponse,
@@ -106,7 +89,7 @@ void ChromeProxyMainDialog::PostCloseAfterReceivingResponseTask(
 }
 
 void ChromeProxyMainDialog::CloseAfterReceivingResponse(
-    mojom::PromptAcceptance /*prompt_acceptance*/) {
+    PromptUserResponse::PromptAcceptance /*prompt_acceptance*/) {
   delegate()->OnClose();
 }
 

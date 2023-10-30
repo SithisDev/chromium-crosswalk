@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include <utility>
 
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
@@ -123,7 +123,7 @@ bool SettingsResetPromptModel::ShouldPromptForReset() const {
 
 void SettingsResetPromptModel::PerformReset(
     std::unique_ptr<BrandcodedDefaultSettings> default_settings,
-    const base::Closure& done_callback) {
+    base::OnceClosure done_callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(default_settings);
 
@@ -147,7 +147,7 @@ void SettingsResetPromptModel::PerformReset(
   }
 
   profile_resetter_->Reset(reset_flags, std::move(default_settings),
-                           done_callback);
+                           std::move(done_callback));
 }
 
 void SettingsResetPromptModel::DialogShown() {
@@ -232,9 +232,8 @@ void SettingsResetPromptModel::InitStartupUrlsData() {
 
   settings_types_initialized_ |= SETTINGS_TYPE_STARTUP_URLS;
 
-  // Only the SessionStartupPref::URLS startup type is a candidate for
-  // resetting.
-  if (settings_snapshot_->startup_type() != SessionStartupPref::URLS)
+  // Only the url restoring startup types are candidates for resetting.
+  if (!SessionStartupPref(settings_snapshot_->startup_type()).ShouldOpenUrls())
     return;
 
   for (const GURL& startup_url : settings_snapshot_->startup_urls()) {

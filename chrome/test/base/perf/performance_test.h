@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,10 +17,19 @@
 class PerformanceTest : public InProcessBrowserTest {
  public:
   PerformanceTest();
+
+  PerformanceTest(const PerformanceTest&) = delete;
+  PerformanceTest& operator=(const PerformanceTest&) = delete;
+
   ~PerformanceTest() override;
 
   virtual std::vector<std::string> GetUMAHistogramNames() const;
   virtual const std::string GetTracingCategories() const;
+  // Returns the names of timeline based metrics (TBM) to be extracted from
+  // the generated trace. The metrics must be defined in telemetry
+  //   third_party/catapult/tracing/tracing/metrics/
+  // so that third_party/catapult/tracing/bin/run_metric could handle them.
+  virtual std::vector<std::string> GetTimelineBasedMetrics() const;
 
   // InProcessBrowserTest:
   void SetUpOnMainThread() override;
@@ -37,8 +46,6 @@ class PerformanceTest : public InProcessBrowserTest {
   // Tracks whether SetUpOnMainThread was called. Ensures subclasses remember to
   // call the base classes SetupOnMainThread.
   bool setup_called_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(PerformanceTest);
 };
 
 // UIPerformanceTest is specifically to be used for measuring ui-related
@@ -46,15 +53,18 @@ class PerformanceTest : public InProcessBrowserTest {
 class UIPerformanceTest : public PerformanceTest {
  public:
   UIPerformanceTest() = default;
+
+  UIPerformanceTest(const UIPerformanceTest&) = delete;
+  UIPerformanceTest& operator=(const UIPerformanceTest&) = delete;
+
   ~UIPerformanceTest() override = default;
 
   // PerformanceTest:
   void SetUpOnMainThread() override;
 
   const std::string GetTracingCategories() const override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(UIPerformanceTest);
+  // Default is "renderingMetric", "umaMetric".
+  std::vector<std::string> GetTimelineBasedMetrics() const override;
 };
 
 #endif  // CHROME_TEST_BASE_PERF_PERFORMANCE_TEST_H_

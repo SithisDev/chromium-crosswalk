@@ -1,10 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.test.pagecontroller.tests;
 
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -57,10 +57,11 @@ public class ExampleTest {
     public void testPageFound() {
         PageController controller = new PageController() {
             @Override
-            public boolean isCurrentPageThis() {
+            public PageController verifyActive() {
                 IUi2Locator packageLocator =
                         Ui2Locators.withPackageName(mChromeUiRule.getApplicationPackage());
-                return mLocatorHelper.isOnScreen(packageLocator);
+                mLocatorHelper.getOne(packageLocator);
+                return this;
             }
         };
         Assert.assertTrue("Application should have loaded", controller.isCurrentPageThis());
@@ -70,9 +71,10 @@ public class ExampleTest {
     public void testPageNotFound() {
         PageController controller = new PageController() {
             @Override
-            public boolean isCurrentPageThis() {
+            public PageController verifyActive() {
                 IUi2Locator packageLocator = Ui2Locators.withPackageName("wrong.package.name");
-                return mLocatorHelper.isOnScreen(packageLocator);
+                mLocatorHelper.getOne(packageLocator);
+                return this;
             }
         };
         Assert.assertFalse(

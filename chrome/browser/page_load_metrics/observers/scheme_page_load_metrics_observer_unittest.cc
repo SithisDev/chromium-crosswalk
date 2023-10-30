@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,12 @@
 
 #include <memory>
 
-#include "base/stl_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/page_load_metrics/observers/page_load_metrics_observer_test_harness.h"
-#include "chrome/browser/page_load_metrics/page_load_tracker.h"
-#include "chrome/common/page_load_metrics/test/page_load_metrics_test_util.h"
+#include "components/page_load_metrics/browser/page_load_tracker.h"
+#include "components/page_load_metrics/common/test/page_load_metrics_test_util.h"
+#include "content/public/common/url_constants.h"
 
 class SchemePageLoadMetricsObserverTest
     : public page_load_metrics::PageLoadMetricsObserverTestHarness {
@@ -26,18 +27,13 @@ class SchemePageLoadMetricsObserverTest
       page_load_metrics::mojom::PageLoadTiming* timing) {
     page_load_metrics::InitPageLoadTimingForTest(timing);
     timing->navigation_start = base::Time::FromDoubleT(1);
-    timing->parse_timing->parse_start = base::TimeDelta::FromMilliseconds(100);
-    timing->paint_timing->first_paint = base::TimeDelta::FromMilliseconds(200);
-    timing->paint_timing->first_contentful_paint =
-        base::TimeDelta::FromMilliseconds(300);
-    timing->paint_timing->first_meaningful_paint =
-        base::TimeDelta::FromMilliseconds(400);
+    timing->parse_timing->parse_start = base::Milliseconds(100);
+    timing->paint_timing->first_paint = base::Milliseconds(200);
+    timing->paint_timing->first_contentful_paint = base::Milliseconds(300);
+    timing->paint_timing->first_meaningful_paint = base::Milliseconds(400);
     timing->document_timing->dom_content_loaded_event_start =
-        base::TimeDelta::FromMilliseconds(600);
-    timing->document_timing->load_event_start =
-        base::TimeDelta::FromMilliseconds(1000);
-    timing->interactive_timing->interactive =
-        base::TimeDelta::FromMilliseconds(1200);
+        base::Milliseconds(600);
+    timing->document_timing->load_event_start = base::Milliseconds(1000);
     PopulateRequiredTimingFields(timing);
   }
 
@@ -48,7 +44,7 @@ class SchemePageLoadMetricsObserverTest
 
     page_load_metrics::mojom::PageLoadTiming timing;
     InitializeTestPageLoadTiming(&timing);
-    SimulateTimingUpdate(timing);
+    tester()->SimulateTimingUpdate(timing);
 
     // Navigate again to force OnComplete, which happens when a new navigation
     // occurs.
@@ -59,13 +55,14 @@ class SchemePageLoadMetricsObserverTest
   int CountTotalProtocolMetricsRecorded(const std::string& protocol) {
     int count = 0;
     base::HistogramTester::CountsMap counts_map =
-        histogram_tester().GetTotalCountsForPrefix("PageLoad.Clients.Scheme.");
+        tester()->histogram_tester().GetTotalCountsForPrefix(
+            "PageLoad.Clients.Scheme.");
     for (const auto& entry : counts_map)
       count += entry.second;
 
     int understat_count = 0;
     base::HistogramTester::CountsMap understat_counts_map =
-        histogram_tester().GetTotalCountsForPrefix(
+        tester()->histogram_tester().GetTotalCountsForPrefix(
             "PageLoad.Clients.Scheme." + base::ToUpperASCII(protocol) +
             ".PaintTiming.UnderStat");
     for (const auto& entry : understat_counts_map)
@@ -77,10 +74,10 @@ class SchemePageLoadMetricsObserverTest
   // Returns the value of the sample present in |histogram_name|. Should be
   // called only if |histogram_name| contains exactly 1 sample.
   int32_t GetRecordedMetricValue(const std::string& histogram_name) const {
-    histogram_tester().ExpectTotalCount(histogram_name, 1);
+    tester()->histogram_tester().ExpectTotalCount(histogram_name, 1);
 
     std::vector<base::Bucket> buckets =
-        histogram_tester().GetAllSamples(histogram_name);
+        tester()->histogram_tester().GetAllSamples(histogram_name);
     for (const auto& bucket : buckets) {
       if (bucket.count == 1) {
         return bucket.min;
@@ -106,25 +103,26 @@ class SchemePageLoadMetricsObserverTest
     std::string fcp_understat_new_nav_histogram_name(
         fcp_understat_histogram_name + ".UserInitiated.NewNavigation");
 
-    histogram_tester().ExpectTotalCount(
+    tester()->histogram_tester().ExpectTotalCount(
         prefix + ".ParseTiming.NavigationToParseStart", 1);
-    histogram_tester().ExpectTotalCount(fcp_histogram_name, 1);
-    histogram_tester().ExpectTotalCount(
+    tester()->histogram_tester().ExpectTotalCount(fcp_histogram_name, 1);
+    tester()->histogram_tester().ExpectTotalCount(
         prefix + ".PaintTiming.ParseStartToFirstContentfulPaint", 1);
-    histogram_tester().ExpectUniqueSample(
+    tester()->histogram_tester().ExpectUniqueSample(
         prefix + ".PaintTiming.ParseStartToFirstContentfulPaint",
         static_cast<base::HistogramBase::Sample>(200), 1);
-    histogram_tester().ExpectTotalCount(
+    tester()->histogram_tester().ExpectTotalCount(
         prefix + ".Experimental.PaintTiming.NavigationToFirstMeaningfulPaint",
         1);
 
-    histogram_tester().ExpectBucketCount(fcp_understat_histogram_name, 0, 1);
+    tester()->histogram_tester().ExpectBucketCount(fcp_understat_histogram_name,
+                                                   0, 1);
     if (new_navigation) {
-      histogram_tester().ExpectBucketCount(fcp_understat_new_nav_histogram_name,
-                                           0, 1);
+      tester()->histogram_tester().ExpectBucketCount(
+          fcp_understat_new_nav_histogram_name, 0, 1);
     } else {
-      histogram_tester().ExpectTotalCount(fcp_understat_new_nav_histogram_name,
-                                          0);
+      tester()->histogram_tester().ExpectTotalCount(
+          fcp_understat_new_nav_histogram_name, 0);
     }
 
     // Must remain synchronized with the array of the same name in
@@ -132,18 +130,18 @@ class SchemePageLoadMetricsObserverTest
     static constexpr const int kUnderStatRecordingIntervalsSeconds[] = {1, 2, 5,
                                                                         8, 10};
 
-    base::TimeDelta recorded_fcp_value = base::TimeDelta::FromMilliseconds(
-        GetRecordedMetricValue(fcp_histogram_name));
+    base::TimeDelta recorded_fcp_value =
+        base::Milliseconds(GetRecordedMetricValue(fcp_histogram_name));
 
     for (size_t index = 0;
-         index < base::size(kUnderStatRecordingIntervalsSeconds); ++index) {
-      base::TimeDelta threshold(base::TimeDelta::FromSeconds(
-          kUnderStatRecordingIntervalsSeconds[index]));
+         index < std::size(kUnderStatRecordingIntervalsSeconds); ++index) {
+      base::TimeDelta threshold(
+          base::Seconds(kUnderStatRecordingIntervalsSeconds[index]));
       if (recorded_fcp_value <= threshold) {
-        histogram_tester().ExpectBucketCount(fcp_understat_histogram_name,
-                                             index + 1, 1);
+        tester()->histogram_tester().ExpectBucketCount(
+            fcp_understat_histogram_name, index + 1, 1);
         if (new_navigation) {
-          histogram_tester().ExpectBucketCount(
+          tester()->histogram_tester().ExpectBucketCount(
               fcp_understat_new_nav_histogram_name, index + 1, 1);
         }
       }
@@ -152,36 +150,36 @@ class SchemePageLoadMetricsObserverTest
     // Overflow bucket should be empty. This also ensures that
     // kUnderStatRecordingIntervalsSeconds above is synchronized with the array
     // of the same name in scheme_page_load_metrics_observer.cc.
-    histogram_tester().ExpectBucketCount(
+    tester()->histogram_tester().ExpectBucketCount(
         fcp_understat_histogram_name,
-        base::size(kUnderStatRecordingIntervalsSeconds) + 1, 0);
+        std::size(kUnderStatRecordingIntervalsSeconds) + 1, 0);
   }
 
-  SchemePageLoadMetricsObserver* observer_;
+  raw_ptr<SchemePageLoadMetricsObserver> observer_;
 };
 
 TEST_F(SchemePageLoadMetricsObserverTest, HTTPNavigation) {
   SimulateNavigation(url::kHttpScheme);
-  CheckHistograms(6, url::kHttpScheme);
+  CheckHistograms(5, url::kHttpScheme);
 }
 
 TEST_F(SchemePageLoadMetricsObserverTest, HTTPSNavigation) {
   SimulateNavigation(url::kHttpsScheme);
-  CheckHistograms(6, url::kHttpsScheme);
+  CheckHistograms(5, url::kHttpsScheme);
 }
 
 // Make sure no metrics are recorded for an unobserved scheme.
-TEST_F(SchemePageLoadMetricsObserverTest, AboutNavigation) {
-  SimulateNavigation(url::kAboutScheme);
+TEST_F(SchemePageLoadMetricsObserverTest, WebUINavigation) {
+  SimulateNavigation(content::kChromeUIScheme);
   CheckHistograms(0, "");
 }
 
 TEST_F(SchemePageLoadMetricsObserverTest, HTTPForwardBackNavigation) {
   SimulateNavigation(url::kHttpScheme, ui::PAGE_TRANSITION_FORWARD_BACK);
-  CheckHistograms(6, url::kHttpScheme, false /* new_navigation */);
+  CheckHistograms(5, url::kHttpScheme, false /* new_navigation */);
 }
 
 TEST_F(SchemePageLoadMetricsObserverTest, HTTPSReloadNavigation) {
   SimulateNavigation(url::kHttpsScheme, ui::PAGE_TRANSITION_RELOAD);
-  CheckHistograms(6, url::kHttpsScheme, false /* new_navigation */);
+  CheckHistograms(5, url::kHttpsScheme, false /* new_navigation */);
 }

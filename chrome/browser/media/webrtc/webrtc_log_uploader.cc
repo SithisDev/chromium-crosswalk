@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,12 +17,12 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/media/webrtc/webrtc_logging_handler_host.h"
 #include "components/version_info/version_info.h"
 #include "components/webrtc_logging/browser/log_cleanup.h"
 #include "components/webrtc_logging/browser/text_log_list.h"
@@ -36,6 +36,7 @@
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/zlib/zlib.h"
 
 namespace {
@@ -87,16 +88,14 @@ void ResizeForNextOutput(std::string* compressed_log, z_stream* stream) {
 
 }  // namespace
 
-WebRtcLogUploadDoneData::WebRtcLogUploadDoneData() {}
-
-WebRtcLogUploadDoneData::WebRtcLogUploadDoneData(
-    const WebRtcLogUploadDoneData& other) = default;
-
-WebRtcLogUploadDoneData::~WebRtcLogUploadDoneData() {}
+WebRtcLogUploader::UploadDoneData::UploadDoneData() = default;
+WebRtcLogUploader::UploadDoneData::UploadDoneData(
+    WebRtcLogUploader::UploadDoneData&& other) = default;
+WebRtcLogUploader::UploadDoneData::~UploadDoneData() = default;
 
 WebRtcLogUploader::WebRtcLogUploader()
     : main_task_runner_(base::SequencedTaskRunnerHandle::Get()),
-      background_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+      background_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT})) {}
 
 WebRtcLogUploader::~WebRtcLogUploader() {
@@ -120,50 +119,49 @@ void WebRtcLogUploader::LoggingStoppedDontUpload() {
 
 void WebRtcLogUploader::LoggingStoppedDoUpload(
     std::unique_ptr<WebRtcLogBuffer> log_buffer,
-    std::unique_ptr<MetaDataMap> meta_data,
-    const WebRtcLogUploadDoneData& upload_done_data) {
+    std::unique_ptr<WebRtcLogMetaDataMap> meta_data,
+    WebRtcLogUploader::UploadDoneData upload_done_data) {
   DCHECK(background_task_runner_->RunsTasksInCurrentSequence());
   DCHECK(log_buffer.get());
   DCHECK(meta_data.get());
-  DCHECK(!upload_done_data.log_path.empty());
+  DCHECK(!upload_done_data.paths.directory.empty());
 
   std::string compressed_log = CompressLog(log_buffer.get());
 
   std::string local_log_id;
 
-  if (base::PathExists(upload_done_data.log_path)) {
-    webrtc_logging::DeleteOldWebRtcLogFiles(upload_done_data.log_path);
+  if (base::PathExists(upload_done_data.paths.directory)) {
+    webrtc_logging::DeleteOldWebRtcLogFiles(upload_done_data.paths.directory);
 
     local_log_id = base::NumberToString(base::Time::Now().ToDoubleT());
     base::FilePath log_file_path =
-        upload_done_data.log_path.AppendASCII(local_log_id)
+        upload_done_data.paths.directory.AppendASCII(local_log_id)
             .AddExtension(FILE_PATH_LITERAL(".gz"));
     WriteCompressedLogToFile(compressed_log, log_file_path);
 
     base::FilePath log_list_path =
         webrtc_logging::TextLogList::GetWebRtcLogListFileForDirectory(
-            upload_done_data.log_path);
+            upload_done_data.paths.directory);
     AddLocallyStoredLogInfoToUploadListFile(log_list_path, local_log_id);
   }
 
-  WebRtcLogUploadDoneData upload_done_data_with_log_id = upload_done_data;
-  upload_done_data_with_log_id.local_log_id = local_log_id;
+  upload_done_data.local_log_id = local_log_id;
   PrepareMultipartPostData(compressed_log, std::move(meta_data),
-                           upload_done_data_with_log_id);
+                           std::move(upload_done_data));
 }
 
 void WebRtcLogUploader::PrepareMultipartPostData(
     const std::string& compressed_log,
-    std::unique_ptr<MetaDataMap> meta_data,
-    const WebRtcLogUploadDoneData& upload_done_data) {
+    std::unique_ptr<WebRtcLogMetaDataMap> meta_data,
+    WebRtcLogUploader::UploadDoneData upload_done_data) {
   DCHECK(background_task_runner_->RunsTasksInCurrentSequence());
   DCHECK(!compressed_log.empty());
   DCHECK(meta_data.get());
 
   std::unique_ptr<std::string> post_data(new std::string());
   SetupMultipart(post_data.get(), compressed_log,
-                 upload_done_data.incoming_rtp_dump,
-                 upload_done_data.outgoing_rtp_dump, *meta_data.get());
+                 upload_done_data.paths.incoming_rtp_dump,
+                 upload_done_data.paths.outgoing_rtp_dump, *meta_data.get());
 
   // If a test has set the test string pointer, write to it and skip uploading.
   // Still fire the upload callback so that we can run an extension API test
@@ -172,24 +170,26 @@ void WebRtcLogUploader::PrepareMultipartPostData(
   // implemented according to the test plan. http://crbug.com/257329.
   if (post_data_) {
     *post_data_ = *post_data;
-    NotifyUploadDoneAndLogStats(net::HTTP_OK, net::OK, "", upload_done_data);
+    NotifyUploadDoneAndLogStats(net::HTTP_OK, net::OK, "",
+                                std::move(upload_done_data));
     return;
   }
 
   main_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(&WebRtcLogUploader::UploadCompressedLog,
-                                base::Unretained(this), upload_done_data,
-                                std::move(post_data)));
+      FROM_HERE,
+      base::BindOnce(&WebRtcLogUploader::UploadCompressedLog,
+                     base::Unretained(this), std::move(upload_done_data),
+                     std::move(post_data)));
 }
 
 void WebRtcLogUploader::UploadStoredLog(
-    const WebRtcLogUploadDoneData& upload_data) {
+    WebRtcLogUploader::UploadDoneData upload_data) {
   DCHECK(background_task_runner_->RunsTasksInCurrentSequence());
   DCHECK(!upload_data.local_log_id.empty());
-  DCHECK(!upload_data.log_path.empty());
+  DCHECK(!upload_data.paths.directory.empty());
 
   base::FilePath native_log_path =
-      upload_data.log_path.AppendASCII(upload_data.local_log_id)
+      upload_data.paths.directory.AppendASCII(upload_data.local_log_id)
           .AddExtension(FILE_PATH_LITERAL(".gz"));
 
   std::string compressed_log;
@@ -197,31 +197,28 @@ void WebRtcLogUploader::UploadStoredLog(
     DPLOG(WARNING) << "Could not read WebRTC log file.";
     base::UmaHistogramSparse("WebRtcTextLogging.UploadFailed",
                              upload_data.web_app_id);
-    base::UmaHistogramSparse(
-        "WebRtcTextLogging.UploadFailureReason",
-        WebRtcLoggingHandlerHost::UploadFailureReason::kStoredLogNotFound);
+    base::UmaHistogramSparse("WebRtcTextLogging.UploadFailureReason",
+                             WebRtcLogUploadFailureReason::kStoredLogNotFound);
     main_task_runner_->PostTask(
-        FROM_HERE,
-        base::BindOnce(upload_data.callback, false, "", "Log doesn't exist."));
+        FROM_HERE, base::BindOnce(std::move(upload_data).callback, false, "",
+                                  "Log doesn't exist."));
     return;
   }
 
-  WebRtcLogUploadDoneData upload_data_with_rtp = upload_data;
-
   // Optimistically set the rtp paths to what they should be if they exist.
-  upload_data_with_rtp.incoming_rtp_dump =
-      upload_data.log_path.AppendASCII(upload_data.local_log_id)
+  upload_data.paths.incoming_rtp_dump =
+      upload_data.paths.directory.AppendASCII(upload_data.local_log_id)
           .AddExtension(FILE_PATH_LITERAL(".rtp_in"));
 
-  upload_data_with_rtp.outgoing_rtp_dump =
-      upload_data.log_path.AppendASCII(upload_data.local_log_id)
+  upload_data.paths.outgoing_rtp_dump =
+      upload_data.paths.directory.AppendASCII(upload_data.local_log_id)
           .AddExtension(FILE_PATH_LITERAL(".rtp_out"));
 
-  std::unique_ptr<MetaDataMap> meta_data(new MetaDataMap());
+  std::unique_ptr<WebRtcLogMetaDataMap> meta_data(new WebRtcLogMetaDataMap());
   {
     std::string meta_data_contents;
     base::FilePath meta_path =
-        upload_data.log_path.AppendASCII(upload_data.local_log_id)
+        upload_data.paths.directory.AppendASCII(upload_data.local_log_id)
             .AddExtension(FILE_PATH_LITERAL(".meta"));
     if (base::ReadFileToString(meta_path, &meta_data_contents) &&
         !meta_data_contents.empty()) {
@@ -234,30 +231,30 @@ void WebRtcLogUploader::UploadStoredLog(
   }
 
   PrepareMultipartPostData(compressed_log, std::move(meta_data),
-                           upload_data_with_rtp);
+                           std::move(upload_data));
 }
 
 void WebRtcLogUploader::LoggingStoppedDoStore(
     const WebRtcLogPaths& log_paths,
     const std::string& log_id,
     std::unique_ptr<WebRtcLogBuffer> log_buffer,
-    std::unique_ptr<MetaDataMap> meta_data,
-    const WebRtcLoggingHandlerHost::GenericDoneCallback& done_callback) {
+    std::unique_ptr<WebRtcLogMetaDataMap> meta_data,
+    GenericDoneCallback done_callback) {
   DCHECK(background_task_runner_->RunsTasksInCurrentSequence());
   DCHECK(!log_id.empty());
   DCHECK(log_buffer.get());
-  DCHECK(!log_paths.log_path.empty());
+  DCHECK(!log_paths.directory.empty());
 
-  webrtc_logging::DeleteOldWebRtcLogFiles(log_paths.log_path);
+  webrtc_logging::DeleteOldWebRtcLogFiles(log_paths.directory);
 
   base::FilePath log_list_path =
       webrtc_logging::TextLogList::GetWebRtcLogListFileForDirectory(
-          log_paths.log_path);
+          log_paths.directory);
 
   // Store the native log with a ".gz" extension.
   std::string compressed_log = CompressLog(log_buffer.get());
   base::FilePath native_log_path =
-      log_paths.log_path.AppendASCII(log_id).AddExtension(
+      log_paths.directory.AppendASCII(log_id).AddExtension(
           FILE_PATH_LITERAL(".gz"));
   WriteCompressedLogToFile(compressed_log, native_log_path);
   AddLocallyStoredLogInfoToUploadListFile(log_list_path, log_id);
@@ -266,14 +263,14 @@ void WebRtcLogUploader::LoggingStoppedDoStore(
   // <log id>.rtp_[in|out].
   if (!log_paths.incoming_rtp_dump.empty()) {
     base::FilePath rtp_path =
-        log_paths.log_path.AppendASCII(log_id).AddExtension(
+        log_paths.directory.AppendASCII(log_id).AddExtension(
             FILE_PATH_LITERAL(".rtp_in"));
     base::Move(log_paths.incoming_rtp_dump, rtp_path);
   }
 
   if (!log_paths.outgoing_rtp_dump.empty()) {
     base::FilePath rtp_path =
-        log_paths.log_path.AppendASCII(log_id).AddExtension(
+        log_paths.directory.AppendASCII(log_id).AddExtension(
             FILE_PATH_LITERAL(".rtp_out"));
     base::Move(log_paths.outgoing_rtp_dump, rtp_path);
   }
@@ -285,14 +282,14 @@ void WebRtcLogUploader::LoggingStoppedDoStore(
       pickle.WriteString(it.second);
     }
     base::FilePath meta_path =
-        log_paths.log_path.AppendASCII(log_id).AddExtension(
+        log_paths.directory.AppendASCII(log_id).AddExtension(
             FILE_PATH_LITERAL(".meta"));
     base::WriteFile(meta_path, static_cast<const char*>(pickle.data()),
                     pickle.size());
   }
 
-  main_task_runner_->PostTask(FROM_HERE,
-                              base::BindOnce(done_callback, true, ""));
+  main_task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(std::move(done_callback), true, ""));
 
   main_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&WebRtcLogUploader::DecreaseLogCount,
@@ -310,12 +307,12 @@ void WebRtcLogUploader::Shutdown() {
 
 void WebRtcLogUploader::OnSimpleLoaderComplete(
     SimpleURLLoaderList::iterator it,
-    const WebRtcLogUploadDoneData& upload_done_data,
+    WebRtcLogUploader::UploadDoneData upload_done_data,
     std::unique_ptr<std::string> response_body) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(main_sequence_checker_);
   DCHECK(!shutdown_);
   network::SimpleURLLoader* loader = it->get();
-  base::Optional<int> response_code;
+  absl::optional<int> response_code;
   if (loader->ResponseInfo() && loader->ResponseInfo()->headers) {
     response_code = loader->ResponseInfo()->headers->response_code();
   }
@@ -326,11 +323,11 @@ void WebRtcLogUploader::OnSimpleLoaderComplete(
     report_id = std::move(*response_body);
   // The log path can be empty here if we failed getting it before. We still
   // upload the log if that's the case.
-  if (!upload_done_data.log_path.empty()) {
+  if (!upload_done_data.paths.directory.empty()) {
     // TODO(jiayl): Add the RTP dump records to chrome://webrtc-logs.
     base::FilePath log_list_path =
         webrtc_logging::TextLogList::GetWebRtcLogListFileForDirectory(
-            upload_done_data.log_path);
+            upload_done_data.paths.directory);
     background_task_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(&WebRtcLogUploader::AddUploadedLogInfoToUploadListFile,
@@ -338,7 +335,7 @@ void WebRtcLogUploader::OnSimpleLoaderComplete(
                        report_id));
   }
   NotifyUploadDoneAndLogStats(response_code, network_error_code, report_id,
-                              upload_done_data);
+                              std::move(upload_done_data));
 }
 
 void WebRtcLogUploader::SetupMultipart(
@@ -347,20 +344,24 @@ void WebRtcLogUploader::SetupMultipart(
     const base::FilePath& incoming_rtp_dump,
     const base::FilePath& outgoing_rtp_dump,
     const std::map<std::string, std::string>& meta_data) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   const char product[] = "Chrome";
-#elif defined(OS_MACOSX)
+#elif BUILDFLAG(IS_MAC)
   const char product[] = "Chrome_Mac";
-#elif defined(OS_LINUX)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
 #if !defined(ADDRESS_SANITIZER)
   const char product[] = "Chrome_Linux";
 #else
   const char product[] = "Chrome_Linux_ASan";
 #endif
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
   const char product[] = "Chrome_Android";
-#elif defined(OS_CHROMEOS)
+#elif BUILDFLAG(IS_CHROMEOS_ASH)
   const char product[] = "Chrome_ChromeOS";
+#elif BUILDFLAG(IS_FUCHSIA)
+  const char product[] = "Chrome_Fuchsia";
 #else
 #error Platform not supported.
 #endif
@@ -443,7 +444,7 @@ std::string WebRtcLogUploader::CompressLog(WebRtcLogBuffer* buffer) {
 }
 
 void WebRtcLogUploader::UploadCompressedLog(
-    const WebRtcLogUploadDoneData& upload_done_data,
+    WebRtcLogUploader::UploadDoneData upload_done_data,
     std::unique_ptr<std::string> post_data) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(main_sequence_checker_);
 
@@ -488,8 +489,7 @@ void WebRtcLogUploader::UploadCompressedLog(
   resource_request->url = !upload_url_for_testing_.is_empty()
                               ? upload_url_for_testing_
                               : GURL(kUploadURL);
-  resource_request->load_flags =
-      net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   resource_request->method = "POST";
   std::unique_ptr<network::SimpleURLLoader> simple_url_loader =
       network::SimpleURLLoader::Create(std::move(resource_request),
@@ -501,7 +501,8 @@ void WebRtcLogUploader::UploadCompressedLog(
   raw_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
       g_browser_process->shared_url_loader_factory().get(),
       base::BindOnce(&WebRtcLogUploader::OnSimpleLoaderComplete,
-                     base::Unretained(this), std::move(it), upload_done_data));
+                     base::Unretained(this), std::move(it),
+                     std::move(upload_done_data)));
 }
 
 void WebRtcLogUploader::DecreaseLogCount() {
@@ -548,7 +549,7 @@ void WebRtcLogUploader::AddLocallyStoredLogInfoToUploadListFile(
     }
   }
 
-  // Write the capture time and log ID to the log list file. Leave the upload
+  // Write the log ID and capture time to the log list file. Leave the upload
   // time and report ID empty.
   contents += ",," + local_log_id + "," +
               base::NumberToString(base::Time::Now().ToDoubleT()) + '\n';
@@ -601,10 +602,10 @@ void WebRtcLogUploader::AddUploadedLogInfoToUploadListFile(
 }
 
 void WebRtcLogUploader::NotifyUploadDoneAndLogStats(
-    base::Optional<int> response_code,
+    absl::optional<int> response_code,
     int network_error_code,
     const std::string& report_id,
-    const WebRtcLogUploadDoneData& upload_done_data) {
+    WebRtcLogUploader::UploadDoneData upload_done_data) {
   if (upload_done_data.callback.is_null())
     return;
 
@@ -621,9 +622,8 @@ void WebRtcLogUploader::NotifyUploadDoneAndLogStats(
                                response_code.value());
     } else {
       DCHECK_NE(network_error_code, net::OK);
-      base::UmaHistogramSparse(
-          "WebRtcTextLogging.UploadFailureReason",
-          WebRtcLoggingHandlerHost::UploadFailureReason::kNetworkError);
+      base::UmaHistogramSparse("WebRtcTextLogging.UploadFailureReason",
+                               WebRtcLogUploadFailureReason::kNetworkError);
       base::UmaHistogramSparse("WebRtcTextLogging.UploadFailureNetErrorCode",
                                std::abs(network_error_code));
     }
@@ -633,6 +633,6 @@ void WebRtcLogUploader::NotifyUploadDoneAndLogStats(
                                    : "<no value>"});
   }
   main_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(upload_done_data.callback, success, report_id,
-                                error_message));
+      FROM_HERE, base::BindOnce(std::move(upload_done_data).callback, success,
+                                report_id, error_message));
 }

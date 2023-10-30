@@ -1,21 +1,20 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_RESOURCE_COORDINATOR_TAB_LIFECYCLE_UNIT_H_
 #define CHROME_BROWSER_RESOURCE_COORDINATOR_TAB_LIFECYCLE_UNIT_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
-#include "base/timer/timer.h"
 #include "chrome/browser/resource_coordinator/lifecycle_unit_base.h"
 #include "chrome/browser/resource_coordinator/tab_lifecycle_unit_external.h"
 #include "chrome/browser/resource_coordinator/tab_lifecycle_unit_source.h"
 #include "chrome/browser/resource_coordinator/time.h"
+#include "components/performance_manager/public/mojom/coordination_unit.mojom-forward.h"
 #include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/page_importance_signals.h"
 
 class TabStripModel;
 
@@ -32,16 +31,10 @@ class TabLifecycleObserver;
 // Time during which backgrounded tabs are protected from urgent discarding
 // (not on ChromeOS).
 static constexpr base::TimeDelta kBackgroundUrgentProtectionTime =
-    base::TimeDelta::FromMinutes(10);
+    base::Minutes(10);
 
 // Time during which a tab cannot be discarded after having played audio.
-static constexpr base::TimeDelta kTabAudioProtectionTime =
-    base::TimeDelta::FromMinutes(1);
-
-// Timeout after which a tab is proactively discarded if the freeze callback
-// hasn't been received.
-static constexpr base::TimeDelta kProactiveDiscardFreezeTimeout =
-    base::TimeDelta::FromMilliseconds(500);
+static constexpr base::TimeDelta kTabAudioProtectionTime = base::Minutes(1);
 
 class TabLifecycleUnitExternalImpl;
 
@@ -63,6 +56,10 @@ class TabLifecycleUnitSource::TabLifecycleUnit
       UsageClock* usage_clock,
       content::WebContents* web_contents,
       TabStripModel* tab_strip_model);
+
+  TabLifecycleUnit(const TabLifecycleUnit&) = delete;
+  TabLifecycleUnit& operator=(const TabLifecycleUnit&) = delete;
+
   ~TabLifecycleUnit() override;
 
   // Sets the TabStripModel associated with this tab. The source that created
@@ -85,13 +82,13 @@ class TabLifecycleUnitSource::TabLifecycleUnit
   // "recently audible" state of the tab changes.
   void SetRecentlyAudible(bool recently_audible);
 
-  // Updates the tab's lifecycle state when changed outside the tab lifecycle
-  // unit.
-  void UpdateLifecycleState(mojom::LifecycleState state);
+  // Updates the tab's lifecycle state when changed outside the tab
+  // lifecycle unit.
+  void UpdateLifecycleState(performance_manager::mojom::LifecycleState state);
 
   // LifecycleUnit:
   TabLifecycleUnitExternal* AsTabLifecycleUnitExternal() override;
-  base::string16 GetTitle() const override;
+  std::u16string GetTitle() const override;
   base::TimeTicks GetLastFocusedTime() const override;
   base::ProcessHandle GetProcessHandle() const override;
   SortKey GetSortKey() const override;
@@ -99,18 +96,14 @@ class TabLifecycleUnitSource::TabLifecycleUnit
   LifecycleUnitLoadingState GetLoadingState() const override;
   bool Load() override;
   int GetEstimatedMemoryFreedOnDiscardKB() const override;
-  bool CanFreeze(DecisionDetails* decision_details) const override;
   bool CanDiscard(LifecycleUnitDiscardReason reason,
                   DecisionDetails* decision_details) const override;
   LifecycleUnitDiscardReason GetDiscardReason() const override;
-  bool Freeze() override;
-  bool Unfreeze() override;
   bool Discard(LifecycleUnitDiscardReason discard_reason) override;
   ukm::SourceId GetUkmSourceId() const override;
 
   // Implementations of some functions from TabLifecycleUnitExternal. These are
   // actually called by an instance of TabLifecycleUnitExternalImpl.
-  bool IsMediaTab() const;
   bool IsAutoDiscardable() const;
   void SetAutoDiscardable(bool auto_discardable);
 
@@ -122,36 +115,17 @@ class TabLifecycleUnitSource::TabLifecycleUnit
   friend class TabLifecycleUnitSource;
 
  private:
-  // Indicates if an intervention (freezing or discarding) is proactive or not.
-  enum class InterventionType {
-    kProactive,
-    kExternalOrUrgent,
-  };
-
   // Same as GetSource, but cast to the most derived type.
   TabLifecycleUnitSource* GetTabSource() const;
 
-  // Determines if the tab is a media tab, and populates an optional
-  // |decision_details| with full details.
-  bool IsMediaTabImpl(DecisionDetails* decision_details) const;
+  // Updates |decision_details| based on media usage by the tab.
+  void CheckMediaUsage(DecisionDetails* decision_details) const;
 
-  // For non-urgent discarding, sends a request for freezing to occur prior to
-  // discarding the tab.
-  void RequestFreezeForDiscard(LifecycleUnitDiscardReason reason);
-
-  // Finishes a tab discard. For an urgent discard, this is invoked by
-  // Discard(). For a proactive or external discard, where the tab is frozen
-  // prior to being discarded, this is called by UpdateLifecycleState() once the
-  // callback has been received, or by |freeze_timeout_timer_| if the
-  // kProactiveDiscardFreezeTimeout timeout has passed without receiving the
-  // callback.
+  // Finishes a tab discard, invoked by Discard().
   void FinishDiscard(LifecycleUnitDiscardReason discard_reason);
 
   // Returns the RenderProcessHost associated with this tab.
   content::RenderProcessHost* GetRenderProcessHost() const;
-
-  // Initializes |freeze_timeout_timer_| if not already initialized.
-  void EnsureFreezeTimeoutTimerInitialized();
 
   // LifecycleUnitBase:
   void OnLifecycleUnitStateChanged(
@@ -162,32 +136,16 @@ class TabLifecycleUnitSource::TabLifecycleUnit
   void DidStartLoading() override;
   void OnVisibilityChanged(content::Visibility visibility) override;
 
-  // Indicates if freezing or discarding this tab would be noticeable by the
-  // user even if it isn't brought back to the foreground. Populates
-  // |decision_details| with full details. If |intervention_type| indicates that
-  // this is a proactive intervention then more heuristics will be
-  // applied.
-  void CheckIfTabIsUsedInBackground(DecisionDetails* decision_details,
-                                    InterventionType intervention_type) const;
-
-  // Runs the freezing heuristics checks on this tab and store the decision
-  // details in |decision_details|. This doesn't check for potential background
-  // feature usage.
-  void CanFreezeHeuristicsChecks(DecisionDetails* decision_details) const;
-
-  // Runs the discarding heuristics checks on this tab and store the decision
-  // details in |decision_details|. If |intervention_type| indicates that
-  // this is a proactive intervention then more heuristics will be
-  // applied. This doesn't check for potential background feature usage.
-  void CanDiscardHeuristicsChecks(DecisionDetails* decision_details,
-                                  LifecycleUnitDiscardReason reason) const;
+  // Updates |decision_details| based on device usage by the tab (USB or
+  // Bluetooth).
+  void CheckDeviceUsage(DecisionDetails* decision_details) const;
 
   // List of observers to notify when the discarded state or the auto-
   // discardable state of this tab changes.
-  base::ObserverList<TabLifecycleObserver>::Unchecked* observers_;
+  raw_ptr<base::ObserverList<TabLifecycleObserver>::Unchecked> observers_;
 
   // TabStripModel to which this tab belongs.
-  TabStripModel* tab_strip_model_;
+  raw_ptr<TabStripModel> tab_strip_model_;
 
   // Last time at which this tab was focused, or TimeTicks::Max() if it is
   // currently focused. For tabs that aren't currently focused this is
@@ -207,18 +165,12 @@ class TabLifecycleUnitSource::TabLifecycleUnit
   LifecycleUnitDiscardReason discard_reason_ =
       LifecycleUnitDiscardReason::EXTERNAL;
 
-  // Timer that ensures that this tab does not wait forever for the callback
-  // when it is being frozen.
-  std::unique_ptr<base::OneShotTimer> freeze_timeout_timer_;
-
   // TimeTicks::Max() if the tab is currently "recently audible", null
   // TimeTicks() if the tab was never "recently audible", last time at which the
   // tab was "recently audible" otherwise.
   base::TimeTicks recently_audible_time_;
 
   std::unique_ptr<TabLifecycleUnitExternalImpl> external_impl_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabLifecycleUnit);
 };
 
 }  // namespace resource_coordinator

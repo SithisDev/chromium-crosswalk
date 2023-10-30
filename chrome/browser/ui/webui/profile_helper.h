@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,10 @@
 
 namespace webui {
 
+// Opens a new window for |profile|, or:
+// - if the profile is locked, opens the user manager instead
+// - if the profile picker is already open, focuses it instead
+// Exposed for testing.
 void OpenNewWindowForProfile(Profile* profile);
 
 // Deletes the profile at the given |file_path|.

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,7 @@ import org.mockito.Mockito;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
+import org.robolectric.annotation.LooperMode;
 import org.robolectric.shadows.ShadowApplication;
 
 import org.chromium.base.task.PostTask;
@@ -37,6 +38,7 @@ import java.util.concurrent.Executor;
  */
 @RunWith(LocalRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
+@LooperMode(LooperMode.Mode.LEGACY)
 public class WebApkServiceConnectionManagerTest {
     private static class TestExecutor implements Executor {
         private LinkedList<Runnable> mPendingTasks = new LinkedList<>();
@@ -94,7 +96,7 @@ public class WebApkServiceConnectionManagerTest {
      * already exists.
      */
     @Test
-    public void testAfterConnectionEstablished() throws Exception {
+    public void testAfterConnectionEstablished() {
         TestCallback callback1 = new TestCallback();
         TestCallback callback2 = new TestCallback();
 
@@ -117,7 +119,7 @@ public class WebApkServiceConnectionManagerTest {
      * WebAPK but has not established a connection yet.
      */
     @Test
-    public void testConnectWhileConnectionBeingEstablished() throws Exception {
+    public void testConnectWhileConnectionBeingEstablished() {
         // Context for testing {@link Context#bindService()} occurring asynchronously.
         class AsyncBindContext extends ContextWrapper {
             private ServiceConnection mConnection;
@@ -224,7 +226,7 @@ public class WebApkServiceConnectionManagerTest {
      * Test reconnecting to a WebAPK's service.
      */
     @Test
-    public void testConnectDisconnectConnect() throws Exception {
+    public void testConnectDisconnectConnect() {
         final int flagRunBackgroundTasksAfterConnect = 0x1;
         final int flagRunBackgroundTasksAfterDisconnect = 0x2;
 

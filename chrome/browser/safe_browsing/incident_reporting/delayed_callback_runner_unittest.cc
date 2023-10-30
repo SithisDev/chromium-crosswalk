@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,10 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -23,14 +22,16 @@ namespace {
 // an owned argument on callbacks given to a DelayedCallbackRunner under test.
 class CallbackArgument {
  public:
-  explicit CallbackArgument(const base::Closure& on_delete)
-      : on_delete_(on_delete) {}
-  ~CallbackArgument() { on_delete_.Run(); }
+  explicit CallbackArgument(base::OnceClosure on_delete)
+      : on_delete_(std::move(on_delete)) {}
+
+  CallbackArgument(const CallbackArgument&) = delete;
+  CallbackArgument& operator=(const CallbackArgument&) = delete;
+
+  ~CallbackArgument() { std::move(on_delete_).Run(); }
 
  private:
-  base::Closure on_delete_;
-
-  DISALLOW_COPY_AND_ASSIGN(CallbackArgument);
+  base::OnceClosure on_delete_;
 };
 
 }  // namespace
@@ -50,8 +51,8 @@ class DelayedCallbackRunnerTest : public testing::Test {
   DelayedCallbackRunnerTest() {}
 
   void SetUp() override {
-    instance_.reset(new safe_browsing::DelayedCallbackRunner(
-        base::TimeDelta(), base::ThreadTaskRunnerHandle::Get()));
+    instance_ = std::make_unique<safe_browsing::DelayedCallbackRunner>(
+        base::TimeDelta(), base::ThreadTaskRunnerHandle::Get());
   }
 
   void TearDown() override { instance_.reset(); }
@@ -70,17 +71,16 @@ class DelayedCallbackRunnerTest : public testing::Test {
   // on behalf of the given callback name.
   std::unique_ptr<CallbackArgument> MakeCallbackArgument(
       const std::string& name) {
-    return std::make_unique<CallbackArgument>(base::Bind(
+    return std::make_unique<CallbackArgument>(base::BindOnce(
         &DelayedCallbackRunnerTest::OnDelete, base::Unretained(this), name));
   }
 
   // Returns a closure that calls |OnRun| when run and |OnDelete| when deleted
   // on behalf of the given callback name.
-  base::Closure MakeCallback(const std::string& name) {
-    return base::Bind(&DelayedCallbackRunnerTest::OnRun,
-                      base::Unretained(this),
-                      name,
-                      base::Owned(MakeCallbackArgument(name).release()));
+  base::OnceClosure MakeCallback(const std::string& name) {
+    return base::BindOnce(&DelayedCallbackRunnerTest::OnRun,
+                          base::Unretained(this), name,
+                          base::Owned(MakeCallbackArgument(name).release()));
   }
 
   bool CallbackWasRun(const std::string& name) { return callbacks_[name].run; }
@@ -89,7 +89,7 @@ class DelayedCallbackRunnerTest : public testing::Test {
     return callbacks_[name].deleted;
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<safe_browsing::DelayedCallbackRunner> instance_;
 
  private:

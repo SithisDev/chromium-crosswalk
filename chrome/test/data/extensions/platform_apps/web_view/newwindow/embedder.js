@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -260,6 +260,34 @@ function testNewWindowAttachAfterOpenerDestroyed() {
   webview.addEventListener('newwindow', onNewWindow);
 
   // Load a new window with the given name.
+  embedder.setUpNewWindowRequest_(webview, 'guest.html', '', testName);
+}
+
+// Test that an embedder can attach a new window to a <webview> in a different
+// frame.
+async function testNewWindowAttachInSubFrame() {
+  let testName = 'testNewWindowAttachInSubFrame';
+  let webview = embedder.setUpGuest_('foobar');
+
+  let subframe = document.createElement('iframe');
+  subframe.src = '/subframe_with_webview.html';
+  await new Promise((resolve) => {
+    subframe.onload = resolve;
+    document.body.appendChild(subframe);
+  });
+
+  webview.addEventListener('newwindow', (e) => {
+    embedder.assertCorrectEvent_(e, '');
+
+    let newwebview = subframe.contentDocument.querySelector('webview');
+    newwebview.addEventListener('loadstop', embedder.test.succeed);
+    try {
+      e.window.attach(newwebview);
+    } catch (e) {
+      embedder.test.fail();
+    }
+  });
+
   embedder.setUpNewWindowRequest_(webview, 'guest.html', '', testName);
 }
 
@@ -570,9 +598,63 @@ function testNewWindowWebRequestRemoveElement() {
   embedder.setUpNewWindowRequest_(webview, 'guest.html', '', testName);
 }
 
+function testNewWindowAndUpdateOpener() {
+  var testName = 'testNewWindowAndUpdateOpener';
+  var webview = embedder.setUpGuest_('foobar');
+
+  // Convert window.open requests into new <webview> tags.
+  var onNewWindow = function(e) {
+    chrome.test.log('Embedder notified on newwindow');
+    embedder.assertCorrectEvent_(e, '');
+
+    var newwebview = document.createElement('webview');
+    document.querySelector('#webview-tag-container').appendChild(newwebview);
+    try {
+      e.window.attach(newwebview);
+    } catch (e) {
+      embedder.test.fail();
+    }
+
+    // Exit after the first opened window is attached.  The rest of the test is
+    // implemented on the C++ side.
+    embedder.test.succeed();
+  };
+  webview.addEventListener('newwindow', onNewWindow);
+
+  // Load a new window with the given name.
+  embedder.setUpNewWindowRequest_(webview, 'guest.html', '', testName);
+}
+
+// This is not a test in and of itself, but a means of creating a webview that
+// is left in an unattached state, so that the C++ side can test it in that
+// state.
+function testNewWindowDeferredAttachmentIndefinitely() {
+  let testName = 'testNewWindowDeferredAttachmentIndefinitely';
+  let webview = embedder.setUpGuest_('foobar');
+
+  webview.addEventListener('newwindow', (e) => {
+    embedder.assertCorrectEvent_(e, '');
+
+    let newwebview = document.createElement('webview');
+    try {
+      e.window.attach(newwebview);
+      embedder.test.succeed();
+    } catch (e) {
+      embedder.test.fail();
+    }
+
+    window.setTimeout(() => {
+      document.querySelector('#webview-tag-container').appendChild(newwebview);
+    }, 999999999);
+  });
+
+  embedder.setUpNewWindowRequest_(webview, 'guest.html', '', testName);
+}
+
 embedder.test.testList = {
   'testNewWindowAttachAfterOpenerDestroyed':
       testNewWindowAttachAfterOpenerDestroyed,
+  'testNewWindowAttachInSubFrame': testNewWindowAttachInSubFrame,
   'testNewWindowClose': testNewWindowClose,
   'testNewWindowDeclarativeWebRequest': testNewWindowDeclarativeWebRequest,
   'testNewWindowDeferredAttachment': testNewWindowDeferredAttachment,
@@ -589,7 +671,10 @@ embedder.test.testList = {
   'testNewWindowWebRequestCloseWindow': testNewWindowWebRequestCloseWindow,
   'testNewWindowWebRequestRemoveElement': testNewWindowWebRequestRemoveElement,
   'testNewWindowWebViewNameTakesPrecedence':
-      testNewWindowWebViewNameTakesPrecedence
+      testNewWindowWebViewNameTakesPrecedence,
+  'testNewWindowAndUpdateOpener': testNewWindowAndUpdateOpener,
+  'testNewWindowDeferredAttachmentIndefinitely':
+      testNewWindowDeferredAttachmentIndefinitely
 };
 
 onload = function() {

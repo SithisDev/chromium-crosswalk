@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,11 @@
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller.h"
-#include "chrome/browser/ui/autofill/autofill_popup_layout_model.h"
+#include "chrome/browser/ui/autofill/autofill_popup_controller_utils.h"
 #include "components/autofill/core/browser/ui/popup_item_ids.h"
+#include "components/autofill/core/browser/ui/popup_types.h"
 #include "components/autofill/core/browser/ui/suggestion.h"
 #include "components/grit/components_scaled_resources.h"
-#import "ui/base/cocoa/touch_bar_forward_declarations.h"
 #import "ui/base/cocoa/touch_bar_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
@@ -57,18 +57,19 @@ NSImage* GetCreditCardTouchBarImage(int iconId) {
 - (instancetype)initWithController:
     (autofill::AutofillPopupController*)controller {
   if ((self = [super init])) {
-    controller_ = controller;
+    _controller = controller;
+    _is_credit_card_popup =
+        (_controller->GetPopupType() == autofill::PopupType::kCreditCards);
   }
   return self;
 }
 
 - (NSTouchBar*)makeTouchBar {
-  if (!controller_->GetLineCount() ||
-      !controller_->layout_model().is_credit_card_popup()) {
+  if (!_controller->GetLineCount() || !_is_credit_card_popup) {
     return nil;
   }
 
-  base::scoped_nsobject<NSTouchBar> touchBar([[ui::NSTouchBar() alloc] init]);
+  base::scoped_nsobject<NSTouchBar> touchBar([[NSTouchBar alloc] init]);
   [touchBar setCustomizationIdentifier:ui::GetTouchBarId(
                                            kCreditCardAutofillTouchBarId)];
   [touchBar setDelegate:self];
@@ -78,15 +79,14 @@ NSImage* GetCreditCardTouchBarImage(int iconId) {
 }
 
 - (NSTouchBarItem*)touchBar:(NSTouchBar*)touchBar
-      makeItemForIdentifier:(NSTouchBarItemIdentifier)identifier
-    API_AVAILABLE(macos(10.12.2)) {
+      makeItemForIdentifier:(NSTouchBarItemIdentifier)identifier {
   if (![identifier hasSuffix:kCreditCardItemsTouchId])
     return nil;
 
   NSMutableArray* creditCardItems = [NSMutableArray array];
-  for (int i = 0; i < controller_->GetLineCount() && i < maxTouchBarItems;
+  for (int i = 0; i < _controller->GetLineCount() && i < maxTouchBarItems;
        i++) {
-    const autofill::Suggestion& suggestion = controller_->GetSuggestionAt(i);
+    const autofill::Suggestion& suggestion = _controller->GetSuggestionAt(i);
     if (suggestion.frontend_id < autofill::POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY)
       continue;
 
@@ -96,13 +96,13 @@ NSImage* GetCreditCardTouchBarImage(int iconId) {
                                                kCreditCardTouchId),
                          i];
     base::scoped_nsobject<NSCustomTouchBarItem> item(
-        [[ui::NSCustomTouchBarItem() alloc] initWithIdentifier:cardIdentifier]);
+        [[NSCustomTouchBarItem alloc] initWithIdentifier:cardIdentifier]);
     [item setView:[self createCreditCardButtonAtRow:i]];
     [creditCardItems addObject:item.autorelease()];
   }
 
-  return [ui::NSGroupTouchBarItem() groupItemWithIdentifier:identifier
-                                                      items:creditCardItems];
+  return [NSGroupTouchBarItem groupItemWithIdentifier:identifier
+                                                items:creditCardItems];
 }
 
 - (NSColor*)touchBarSubtextColor {
@@ -114,9 +114,16 @@ NSImage* GetCreditCardTouchBarImage(int iconId) {
 
 - (NSButton*)createCreditCardButtonAtRow:(int)row {
   NSString* label =
-      base::SysUTF16ToNSString(controller_->GetElidedValueAt(row));
-  NSString* subtext =
-      base::SysUTF16ToNSString(controller_->GetElidedLabelAt(row));
+      base::SysUTF16ToNSString(_controller->GetSuggestionMainTextAt(row));
+  NSString* subtext = nil;
+  std::vector<std::vector<autofill::Suggestion::Text>> suggestion_labels =
+      _controller->GetSuggestionLabelsAt(row);
+  if (!suggestion_labels.empty()) {
+    DCHECK_EQ(suggestion_labels.size(), 1U);
+    DCHECK_EQ(suggestion_labels[0].size(), 1U);
+    subtext =
+        base::SysUTF16ToNSString(std::move(suggestion_labels[0][0].value));
+  }
 
   // Create the button title based on the text direction.
   NSString* buttonTitle =
@@ -124,9 +131,9 @@ NSImage* GetCreditCardTouchBarImage(int iconId) {
                        : label;
 
   // Create the button.
-  const autofill::Suggestion& suggestion = controller_->GetSuggestionAt(row);
-  NSImage* cardIconImage = GetCreditCardTouchBarImage(
-      controller_->layout_model().GetIconResourceID(suggestion.icon));
+  const autofill::Suggestion& suggestion = _controller->GetSuggestionAt(row);
+  NSImage* cardIconImage =
+      GetCreditCardTouchBarImage(autofill::GetIconResourceID(suggestion.icon));
   NSButton* button = nil;
   if (cardIconImage) {
     button = [NSButton buttonWithTitle:buttonTitle
@@ -134,7 +141,7 @@ NSImage* GetCreditCardTouchBarImage(int iconId) {
                                 target:self
                                 action:@selector(acceptCreditCard:)];
     button.imageHugsTitle = YES;
-    button.imagePosition = controller_->IsRTL() ? NSImageLeft : NSImageRight;
+    button.imagePosition = _controller->IsRTL() ? NSImageLeft : NSImageRight;
   } else {
     button = [NSButton buttonWithTitle:buttonTitle
                                 target:self
@@ -171,7 +178,11 @@ NSImage* GetCreditCardTouchBarImage(int iconId) {
 
 - (void)acceptCreditCard:(id)sender {
   ui::LogTouchBarUMA(ui::TouchBarAction::CREDIT_CARD_AUTOFILL);
-  controller_->AcceptSuggestion([sender tag]);
+  _controller->AcceptSuggestion([sender tag]);
+}
+
+- (void)setIsCreditCardPopup:(bool)is_credit_card_popup {
+  _is_credit_card_popup = is_credit_card_popup;
 }
 
 @end

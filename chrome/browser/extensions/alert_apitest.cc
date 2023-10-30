@@ -1,21 +1,22 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/app_modal/app_modal_dialog_queue.h"
-#include "components/app_modal/javascript_app_modal_dialog.h"
-#include "components/app_modal/native_app_modal_dialog.h"
+#include "components/javascript_dialogs/app_modal_dialog_controller.h"
+#include "components/javascript_dialogs/app_modal_dialog_queue.h"
+#include "components/javascript_dialogs/app_modal_dialog_view.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/process_manager.h"
@@ -25,29 +26,29 @@ namespace extensions {
 
 namespace {
 
-void GetNextDialog(app_modal::NativeAppModalDialog** native_dialog) {
-  DCHECK(native_dialog);
-  *native_dialog = nullptr;
-  app_modal::JavaScriptAppModalDialog* dialog =
+void GetNextDialog(javascript_dialogs::AppModalDialogView** view) {
+  DCHECK(view);
+  *view = nullptr;
+  javascript_dialogs::AppModalDialogController* dialog =
       ui_test_utils::WaitForAppModalDialog();
-  *native_dialog = dialog->native_dialog();
-  ASSERT_TRUE(*native_dialog);
+  *view = dialog->view();
+  ASSERT_TRUE(*view);
 }
 
 void CloseDialog() {
-  app_modal::NativeAppModalDialog* dialog = nullptr;
+  javascript_dialogs::AppModalDialogView* dialog = nullptr;
   ASSERT_NO_FATAL_FAILURE(GetNextDialog(&dialog));
   dialog->CloseAppModalDialog();
 }
 
 void AcceptDialog() {
-  app_modal::NativeAppModalDialog* dialog = nullptr;
+  javascript_dialogs::AppModalDialogView* dialog = nullptr;
   ASSERT_NO_FATAL_FAILURE(GetNextDialog(&dialog));
   dialog->AcceptAppModalDialog();
 }
 
 void CancelDialog() {
-  app_modal::NativeAppModalDialog* dialog = nullptr;
+  javascript_dialogs::AppModalDialogView* dialog = nullptr;
   ASSERT_NO_FATAL_FAILURE(GetNextDialog(&dialog));
   dialog->CancelAppModalDialog();
 }
@@ -77,9 +78,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, AlertBasic) {
   ExtensionHost* host = ProcessManager::Get(browser()->profile())
                             ->GetBackgroundHostForExtension(extension->id());
   ASSERT_TRUE(host);
-  host->host_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16("alert('This should not crash.');"),
-      base::NullCallback());
+  host->host_contents()->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
+      u"alert('This should not crash.');", base::NullCallback());
 
   ASSERT_NO_FATAL_FAILURE(CloseDialog());
 }
@@ -97,8 +97,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, AlertQueue) {
   size_t call_count = 0;
   for (size_t i = 0; i != num_dialogs; ++i) {
     const std::string dialog_name = "Dialog #" + base::NumberToString(i) + ".";
-    host->host_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
-        base::ASCIIToUTF16("alert('" + dialog_name + "');"),
+    host->host_contents()->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
+        u"alert('" + base::ASCIIToUTF16(dialog_name) + u"');",
         base::BindOnce(&CheckAlertResult, dialog_name,
                        base::Unretained(&call_count)));
   }
@@ -109,8 +109,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, AlertQueue) {
   }
 
   // All dialogs must be closed now.
-  app_modal::AppModalDialogQueue* queue =
-      app_modal::AppModalDialogQueue::GetInstance();
+  javascript_dialogs::AppModalDialogQueue* queue =
+      javascript_dialogs::AppModalDialogQueue::GetInstance();
   ASSERT_TRUE(queue);
   EXPECT_FALSE(queue->HasActiveDialog());
   EXPECT_EQ(0, queue->end() - queue->begin());
@@ -133,16 +133,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ConfirmQueue) {
   for (size_t i = 0; i != num_accepted_dialogs; ++i) {
     const std::string dialog_name =
         "Accepted dialog #" + base::NumberToString(i) + ".";
-    host->host_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
-        base::ASCIIToUTF16("confirm('" + dialog_name + "');"),
+    host->host_contents()->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
+        u"confirm('" + base::ASCIIToUTF16(dialog_name) + u"');",
         base::BindOnce(&CheckConfirmResult, dialog_name, true,
                        base::Unretained(&call_count)));
   }
   for (size_t i = 0; i != num_cancelled_dialogs; ++i) {
     const std::string dialog_name =
         "Cancelled dialog #" + base::NumberToString(i) + ".";
-    host->host_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
-        base::ASCIIToUTF16("confirm('" + dialog_name + "');"),
+    host->host_contents()->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
+        u"confirm('" + base::ASCIIToUTF16(dialog_name) + u"');",
         base::BindOnce(&CheckConfirmResult, dialog_name, false,
                        base::Unretained(&call_count)));
   }
@@ -154,8 +154,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ConfirmQueue) {
     ASSERT_NO_FATAL_FAILURE(CancelDialog());
 
   // All dialogs must be closed now.
-  app_modal::AppModalDialogQueue* queue =
-      app_modal::AppModalDialogQueue::GetInstance();
+  javascript_dialogs::AppModalDialogQueue* queue =
+      javascript_dialogs::AppModalDialogQueue::GetInstance();
   ASSERT_TRUE(queue);
   EXPECT_FALSE(queue->HasActiveDialog());
   EXPECT_EQ(0, queue->end() - queue->begin());

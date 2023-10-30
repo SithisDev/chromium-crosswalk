@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/bind.h"
-#include "chrome/android/chrome_jni_headers/PrefChangeRegistrar_jni.h"
-#include "chrome/browser/android/preferences/pref_service_bridge.h"
+#include "chrome/browser/preferences/jni_headers/PrefChangeRegistrar_jni.h"
 #include "chrome/browser/profiles/profile_manager.h"
 
 using base::android::AttachCurrentThread;
@@ -32,26 +31,31 @@ void PrefChangeRegistrarAndroid::Destroy(JNIEnv*,
   delete this;
 }
 
-void PrefChangeRegistrarAndroid::Add(JNIEnv* env,
-                                     const JavaParamRef<jobject>& obj,
-                                     const jint j_pref_index) {
+void PrefChangeRegistrarAndroid::Add(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& j_preference) {
+  std::string preference =
+      base::android::ConvertJavaStringToUTF8(env, j_preference);
   pref_change_registrar_.Add(
-      PrefServiceBridge::GetPrefNameExposedToJava(j_pref_index),
-      base::Bind(&PrefChangeRegistrarAndroid::OnPreferenceChange,
-                 base::Unretained(this), j_pref_index));
+      preference,
+      base::BindRepeating(&PrefChangeRegistrarAndroid::OnPreferenceChange,
+                          base::Unretained(this), preference));
 }
 
-void PrefChangeRegistrarAndroid::Remove(JNIEnv* env,
-                                        const JavaParamRef<jobject>& obj,
-                                        const jint j_pref_index) {
+void PrefChangeRegistrarAndroid::Remove(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& j_preference) {
   pref_change_registrar_.Remove(
-      PrefServiceBridge::GetPrefNameExposedToJava(j_pref_index));
+      base::android::ConvertJavaStringToUTF8(env, j_preference));
 }
 
-void PrefChangeRegistrarAndroid::OnPreferenceChange(const int pref_index) {
+void PrefChangeRegistrarAndroid::OnPreferenceChange(std::string preference) {
   JNIEnv* env = AttachCurrentThread();
   Java_PrefChangeRegistrar_onPreferenceChange(
-      env, pref_change_registrar_jobject_, pref_index);
+      env, pref_change_registrar_jobject_,
+      base::android::ConvertUTF8ToJavaString(env, preference));
 }
 
 jlong JNI_PrefChangeRegistrar_Init(JNIEnv* env,

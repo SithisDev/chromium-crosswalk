@@ -1,12 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/vr/elements/shadow.h"
 
-#include "base/numerics/ranges.h"
+#include "base/cxx17_backports.h"
 #include "chrome/browser/vr/ui_element_renderer.h"
-#include "chrome/browser/vr/vr_gl_util.h"
+#include "device/vr/vr_gl_util.h"
 #include "ui/gfx/animation/tween.h"
 
 namespace vr {
@@ -140,11 +140,11 @@ void Shadow::Render(UiElementRenderer* renderer,
 void Shadow::LayOutContributingChildren() {
   DCHECK(shadow_caster_ || !children().empty());
   UiElement* shadow_caster =
-      shadow_caster_ ? shadow_caster_ : children().back().get();
+      shadow_caster_ ? shadow_caster_.get() : children().back().get();
   gfx::Point3F p;
   shadow_caster->LocalTransform().TransformPoint(&p);
   DCHECK_GE(kMaximumChildDepth, p.z());
-  depth_ = base::ClampToRange(p.z() / kMaximumChildDepth, 0.0f, 1.0f);
+  depth_ = base::clamp(p.z() / kMaximumChildDepth, 0.0f, 1.0f);
   // This is an arbitrary function that quickly accelerates from 0 toward 1.
   set_padding(gfx::Tween::FloatValueBetween(depth_, kXMinShadowGradientFactor,
                                             kXMaxShadowGradientFactor),

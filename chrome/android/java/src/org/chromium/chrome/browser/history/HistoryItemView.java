@@ -1,40 +1,42 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.history;
 
 import android.content.Context;
-import android.graphics.Bitmap;
-import android.graphics.drawable.BitmapDrawable;
-import android.support.annotation.VisibleForTesting;
-import android.support.graphics.drawable.VectorDrawableCompat;
-import android.support.v4.view.ViewCompat;
-import android.support.v7.content.res.AppCompatResources;
+import android.content.res.ColorStateList;
+import android.graphics.drawable.Drawable;
 import android.util.AttributeSet;
 import android.view.View;
 import android.widget.ImageButton;
+import android.widget.ImageView.ScaleType;
+
+import androidx.annotation.VisibleForTesting;
+import androidx.appcompat.content.res.AppCompatResources;
+import androidx.core.view.ViewCompat;
+import androidx.vectordrawable.graphics.drawable.VectorDrawableCompat;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.favicon.FaviconHelper.DefaultFaviconHelper;
-import org.chromium.chrome.browser.favicon.IconType;
-import org.chromium.chrome.browser.favicon.LargeIconBridge.LargeIconCallback;
 import org.chromium.chrome.browser.preferences.Pref;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
-import org.chromium.chrome.browser.util.ViewUtils;
-import org.chromium.chrome.browser.widget.RoundedIconGenerator;
-import org.chromium.chrome.browser.widget.selection.SelectableItemView;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.ui.favicon.FaviconHelper.DefaultFaviconHelper;
+import org.chromium.chrome.browser.ui.favicon.FaviconUtils;
+import org.chromium.components.browser_ui.styles.SemanticColorUtils;
+import org.chromium.components.browser_ui.widget.RoundedIconGenerator;
+import org.chromium.components.browser_ui.widget.selectable_list.SelectableItemView;
+import org.chromium.components.browser_ui.widget.selectable_list.SelectableListUtils;
+import org.chromium.components.prefs.PrefService;
+import org.chromium.components.user_prefs.UserPrefs;
 
 /**
  * The SelectableItemView for items displayed in the browsing history UI.
  */
-public class HistoryItemView extends SelectableItemView<HistoryItem> implements LargeIconCallback {
+public class HistoryItemView extends SelectableItemView<HistoryItem> {
     private ImageButton mRemoveButton;
     private VectorDrawableCompat mBlockedVisitDrawable;
-    private View mContentView;
 
-    private HistoryManager mHistoryManager;
     private final RoundedIconGenerator mIconGenerator;
     private DefaultFaviconHelper mFaviconHelper;
 
@@ -50,26 +52,34 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
 
         mMinIconSize = getResources().getDimensionPixelSize(R.dimen.default_favicon_min_size);
         mDisplayedIconSize = getResources().getDimensionPixelSize(R.dimen.default_favicon_size);
-        mIconGenerator = ViewUtils.createDefaultRoundedIconGenerator(getResources(), true);
-        mEndPadding = context.getResources().getDimensionPixelSize(
-                R.dimen.selectable_list_layout_row_padding);
+        mIconGenerator = FaviconUtils.createCircularIconGenerator(context);
+        mEndPadding =
+                context.getResources().getDimensionPixelSize(R.dimen.default_list_row_padding);
 
-        mIconColorList =
-                AppCompatResources.getColorStateList(context, R.color.default_icon_color_inverse);
+        mStartIconSelectedColorList =
+                ColorStateList.valueOf(SemanticColorUtils.getDefaultIconColorInverse(context));
     }
 
     @Override
     protected void onFinishInflate() {
         super.onFinishInflate();
-        mIconView.setImageResource(R.drawable.default_favicon);
-        mContentView = findViewById(R.id.content);
-        mRemoveButton = findViewById(R.id.remove);
-        mRemoveButton.setOnClickListener(new OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                remove();
-            }
-        });
+        mStartIconView.setImageResource(R.drawable.default_favicon);
+
+        mRemoveButton = mEndButtonView;
+        mRemoveButton.setImageResource(R.drawable.btn_delete_24dp);
+        mRemoveButton.setContentDescription(getContext().getString((R.string.remove)));
+        ApiCompatibilityUtils.setImageTintList(mRemoveButton,
+                AppCompatResources.getColorStateList(
+                        getContext(), R.color.default_icon_color_secondary_tint_list));
+        mRemoveButton.setOnClickListener(v -> remove());
+        mRemoveButton.setScaleType(ScaleType.CENTER_INSIDE);
+        mRemoveButton.setPaddingRelative(
+                getResources().getDimensionPixelSize(
+                        R.dimen.history_item_remove_button_lateral_padding),
+                getPaddingTop(),
+                getResources().getDimensionPixelSize(
+                        R.dimen.history_item_remove_button_lateral_padding),
+                getPaddingBottom());
 
         updateRemoveButtonVisibility();
     }
@@ -82,6 +92,8 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
 
         mTitleView.setText(item.getTitle());
         mDescriptionView.setText(item.getDomain());
+        SelectableListUtils.setContentDescriptionContext(getContext(), mRemoveButton,
+                item.getTitle(), SelectableListUtils.ContentDescriptionSource.REMOVE_BUTTON);
         mIsItemRemoved = false;
 
         if (item.wasBlockedVisit()) {
@@ -90,28 +102,16 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
                         getContext().getResources(), R.drawable.ic_block_red,
                         getContext().getTheme());
             }
-            setIconDrawable(mBlockedVisitDrawable);
-            mTitleView.setTextColor(
-                    ApiCompatibilityUtils.getColor(getResources(), R.color.default_red));
+            setStartIconDrawable(mBlockedVisitDrawable);
+            mTitleView.setTextColor(getContext().getColor(R.color.default_red));
         } else {
-            setIconDrawable(
-                    mFaviconHelper.getDefaultFaviconDrawable(getContext(), item.getUrl(), true));
-            if (mHistoryManager != null) requestIcon();
+            setStartIconDrawable(mFaviconHelper.getDefaultFaviconDrawable(
+                    getContext().getResources(), item.getUrl(), true));
+            requestIcon();
 
-            mTitleView.setTextColor(
-                    ApiCompatibilityUtils.getColor(getResources(), R.color.default_text_color));
+            mTitleView.setTextColor(AppCompatResources.getColorStateList(
+                    getContext(), R.color.default_text_color_list));
         }
-    }
-
-    /**
-     * @param manager The HistoryManager associated with this item.
-     */
-    public void setHistoryManager(HistoryManager manager) {
-        getItem().setHistoryManager(manager);
-        if (mHistoryManager == manager) return;
-
-        mHistoryManager = manager;
-        if (!getItem().wasBlockedVisit()) requestIcon();
     }
 
     /**
@@ -129,7 +129,7 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
         if (getItem() == null || mIsItemRemoved) return;
 
         mIsItemRemoved = true;
-        getItem().remove();
+        getItem().onItemRemoved();
     }
 
     /**
@@ -146,8 +146,7 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
      */
     public void setRemoveButtonVisible(boolean visible) {
         mRemoveButtonVisible = visible;
-        if (!PrefServiceBridge.getInstance().getBoolean(Pref.ALLOW_DELETING_BROWSER_HISTORY))
-            return;
+        if (!getPrefService().getBoolean(Pref.ALLOW_DELETING_BROWSER_HISTORY)) return;
 
         mRemoveButton.setVisibility(visible ? View.VISIBLE : View.INVISIBLE);
     }
@@ -155,34 +154,27 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
     @Override
     @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
     public void onClick() {
-        if (getItem() != null) getItem().open();
-    }
-
-    @Override
-    public void onLargeIconAvailable(Bitmap icon, int fallbackColor, boolean isFallbackColorDefault,
-            @IconType int iconType) {
-        // TODO(twellington): move this somewhere that can be shared with bookmarks.
-        if (icon == null) {
-            mIconGenerator.setBackgroundColor(fallbackColor);
-            icon = mIconGenerator.generateIconForUrl(getItem().getUrl());
-            setIconDrawable(new BitmapDrawable(getResources(), icon));
-        } else {
-            setIconDrawable(ViewUtils.createRoundedBitmapDrawable(
-                    Bitmap.createScaledBitmap(icon, mDisplayedIconSize, mDisplayedIconSize, false),
-                    ViewUtils.DEFAULT_FAVICON_CORNER_RADIUS));
-        }
+        if (getItem() != null) getItem().onItemClicked();
     }
 
     private void requestIcon() {
-        if (mHistoryManager == null || mHistoryManager.getLargeIconBridge() == null) return;
+        HistoryItem item = getItem();
+        if (item.wasBlockedVisit()) return;
+        item.getLargeIconForUrl(
+                mMinIconSize, (icon, fallbackColor, isFallbackColorDefault, iconType) -> {
+                    // Prevent stale icons from making it through to the UI.
+                    if (item != getItem()) return;
 
-        mHistoryManager.getLargeIconBridge().getLargeIconForUrl(
-                getItem().getUrl(), mMinIconSize, this);
+                    Drawable drawable = FaviconUtils.getIconDrawableWithoutFilter(icon,
+                            getItem().getUrl(), fallbackColor, mIconGenerator, getResources(),
+                            mDisplayedIconSize);
+                    setStartIconDrawable(drawable);
+                });
     }
 
     private void updateRemoveButtonVisibility() {
         int removeButtonVisibility =
-                !PrefServiceBridge.getInstance().getBoolean(Pref.ALLOW_DELETING_BROWSER_HISTORY)
+                !getPrefService().getBoolean(Pref.ALLOW_DELETING_BROWSER_HISTORY)
                 ? View.GONE
                 : mRemoveButtonVisible ? View.VISIBLE : View.INVISIBLE;
         mRemoveButton.setVisibility(removeButtonVisibility);
@@ -190,5 +182,14 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
         int endPadding = removeButtonVisibility == View.GONE ? mEndPadding : 0;
         ViewCompat.setPaddingRelative(mContentView, ViewCompat.getPaddingStart(mContentView),
                 mContentView.getPaddingTop(), endPadding, mContentView.getPaddingBottom());
+    }
+
+    @VisibleForTesting
+    View getRemoveButtonForTests() {
+        return mRemoveButton;
+    }
+
+    private PrefService getPrefService() {
+        return UserPrefs.get(Profile.getLastUsedRegularProfile());
     }
 }

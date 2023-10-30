@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,8 +30,9 @@ void DocumentWebContentsDelegate::AttachContents(
 void DocumentWebContentsDelegate::AddNewContents(
     content::WebContents* source,
     std::unique_ptr<content::WebContents> new_contents,
+    const GURL& target_url,
     WindowOpenDisposition disposition,
-    const gfx::Rect& initial_pos,
+    const blink::mojom::WindowFeatures& window_features,
     bool user_gesture,
     bool* was_blocked) {
   NOTREACHED();
@@ -41,21 +42,14 @@ void DocumentWebContentsDelegate::CloseContents(content::WebContents* source) {
   NOTREACHED();
 }
 
-bool DocumentWebContentsDelegate::ShouldCreateWebContents(
-    content::WebContents* web_contents,
-    content::RenderFrameHost* opener,
+bool DocumentWebContentsDelegate::IsWebContentsCreationOverridden(
     content::SiteInstance* source_site_instance,
-    int32_t route_id,
-    int32_t main_frame_route_id,
-    int32_t main_frame_widget_route_id,
     content::mojom::WindowContainerType window_container_type,
     const GURL& opener_url,
     const std::string& frame_name,
-    const GURL& target_url,
-    const std::string& partition_id,
-    content::SessionStorageNamespace* session_storage_namespace) {
+    const GURL& target_url) {
   NOTREACHED();
-  return false;
+  return true;
 }
 
 static jlong JNI_DocumentWebContentsDelegate_Initialize(

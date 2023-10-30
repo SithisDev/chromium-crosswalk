@@ -1,12 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/applescript/browsercrapplication+applescript.h"
 
-#include "base/logging.h"
 #import "base/mac/foundation_util.h"
 #import "base/mac/scoped_nsobject.h"
+#include "base/notreached.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -59,12 +59,11 @@ using bookmarks::BookmarkModel;
                property:AppleScript::kWindowsProperty];
   // Note: AppleScript is 1-based.
   index--;
-  [aWindow setOrderedIndex:[NSNumber numberWithInt:index]];
+  [aWindow setOrderedIndex:@(index)];
 }
 
 - (void)removeFromAppleScriptWindowsAtIndex:(int)index {
-  [[[self appleScriptWindows] objectAtIndex:index]
-      handlesCloseScriptCommand:nil];
+  [[self appleScriptWindows][index] handlesCloseScriptCommand:nil];
 }
 
 - (NSScriptObjectSpecifier*)objectSpecifier {
@@ -124,9 +123,7 @@ using bookmarks::BookmarkModel;
 - (NSArray*)bookmarkFolders {
   BookmarkFolderAppleScript* otherBookmarks = [self otherBookmarks];
   BookmarkFolderAppleScript* bookmarksBar = [self bookmarksBar];
-  NSArray* folderArray = [NSArray arrayWithObjects:otherBookmarks,
-                                                   bookmarksBar,
-                                                   nil];
+  NSArray* folderArray = @[ otherBookmarks, bookmarksBar ];
   return folderArray;
 }
 

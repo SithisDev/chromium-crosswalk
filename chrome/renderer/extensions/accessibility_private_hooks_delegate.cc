@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,14 @@
 #include "extensions/renderer/get_script_context.h"
 #include "extensions/renderer/script_context.h"
 #include "gin/converter.h"
-#include "third_party/icu/source/common/unicode/locid.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace extensions {
 
 namespace {
-constexpr char kGetDisplayLanguage[] =
-    "accessibilityPrivate.getDisplayLanguage";
-constexpr char kUndeterminedLanguage[] = "und";
+constexpr char kGetDisplayNameForLocale[] =
+    "accessibilityPrivate.getDisplayNameForLocale";
+constexpr char kUndeterminedLocale[] = "und";
 }  // namespace
 
 using RequestResult = APIBindingHooks::RequestResult;
@@ -35,8 +35,8 @@ RequestResult AccessibilityPrivateHooksDelegate::HandleRequest(
     std::vector<v8::Local<v8::Value>>* arguments,
     const APITypeReferenceMap& refs) {
   // Error checks.
-  // Ensure we would like to call the GetDisplayLanguage function.
-  if (method_name != kGetDisplayLanguage)
+  // Ensure we would like to call the GetDisplayNameForLocale function.
+  if (method_name != kGetDisplayNameForLocale)
     return RequestResult(RequestResult::NOT_HANDLED);
   // Ensure arguments are successfully parsed and converted.
   APISignature::V8ParseResult parse_result =
@@ -46,34 +46,45 @@ RequestResult AccessibilityPrivateHooksDelegate::HandleRequest(
     result.error = std::move(*parse_result.error);
     return result;
   }
-  return HandleGetDisplayLanguage(GetScriptContextFromV8ContextChecked(context),
-                                  *parse_result.arguments);
+  return HandleGetDisplayNameForLocale(
+      GetScriptContextFromV8ContextChecked(context), *parse_result.arguments);
 }
 
-// Called to translate a language code into human-readable string in the
-// language of the provided language code. Language codes can have optional
-// country code e.g. 'en' and 'en-us' both yield an output of 'English'.
-// As another example, the code 'fr' would produce 'francais' as output.
-RequestResult AccessibilityPrivateHooksDelegate::HandleGetDisplayLanguage(
+RequestResult AccessibilityPrivateHooksDelegate::HandleGetDisplayNameForLocale(
     ScriptContext* script_context,
     const std::vector<v8::Local<v8::Value>>& parsed_arguments) {
   DCHECK(script_context->extension());
-  DCHECK_EQ(1u, parsed_arguments.size());
+  DCHECK_EQ(2u, parsed_arguments.size());
   DCHECK(parsed_arguments[0]->IsString());
-  icu::Locale locale = icu::Locale(
-      gin::V8ToString(script_context->isolate(), parsed_arguments[0]).c_str());
-  icu::UnicodeString display_language;
-  locale.getDisplayLanguage(locale, display_language);
-  std::string language_result =
-      base::UTF16ToUTF8(base::i18n::UnicodeStringToString16(display_language));
-  // Instead of returning "und", which is what the ICU Locale class returns for
-  // undetermined languages, we would simply like to return an empty string
-  // to communicate that we could not determine the display language.
-  if (language_result == kUndeterminedLanguage)
-    language_result = "";
+  DCHECK(parsed_arguments[1]->IsString());
+
+  const std::string locale =
+      gin::V8ToString(script_context->isolate(), parsed_arguments[0]);
+  const std::string display_locale =
+      gin::V8ToString(script_context->isolate(), parsed_arguments[1]);
+
+  bool found_valid_result = false;
+  std::string locale_result;
+  if (l10n_util::IsValidLocaleSyntax(locale) &&
+      l10n_util::IsValidLocaleSyntax(display_locale)) {
+    locale_result = base::UTF16ToUTF8(l10n_util::GetDisplayNameForLocale(
+        locale, display_locale, true /* is_ui */));
+    // Check for valid locales before getting the display name.
+    // The ICU Locale class returns "und" for undetermined locales, and
+    // returns the locale string directly if it has no translation.
+    // Treat these cases as invalid results.
+    found_valid_result =
+        locale_result != kUndeterminedLocale && locale_result != locale;
+  }
+
+  // We return an empty string to communicate that we could not determine
+  // the display locale.
+  if (!found_valid_result)
+    locale_result = std::string();
+
   RequestResult result(RequestResult::HANDLED);
   result.return_value =
-      gin::StringToV8(script_context->isolate(), language_result);
+      gin::StringToV8(script_context->isolate(), locale_result);
   return result;
 }
 

@@ -1,14 +1,19 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Bookmark Manager API test for Chrome.
+import {simulateChromeExtensionAPITest} from './test_util.js';
 
 test('bookmarkManagerPrivate with edit disabled', async () => {
   const bookmarkManager = chrome.bookmarkManagerPrivate;
   const {pass, fail, runTests} = simulateChromeExtensionAPITest();
 
   const ERROR = 'Bookmark editing is disabled.';
+  let bar;
+  let folder;
+  let aaa;
+  let bbb;
 
   // Bookmark model within this test:
   //  <root>/
@@ -64,8 +69,21 @@ test('bookmarkManagerPrivate with edit disabled', async () => {
       bookmarkManager.cut([bbb.id], fail(ERROR));
     },
 
+    function canPasteDisabled() {
+      bookmarkManager.canPaste(
+          folder.id, pass(function(result) {
+            assertFalse(result, 'Should not be able to paste bookmarks');
+          }));
+    },
+
     function pasteDisabled() {
       bookmarkManager.paste(folder.id, [bbb.id], fail(ERROR));
+    },
+
+    function editDisabled() {
+      bookmarkManager.canEdit(pass(function(result) {
+        assertFalse(result, 'Should not be able to edit bookmarks');
+      }));
     },
   ];
 

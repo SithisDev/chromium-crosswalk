@@ -1,9 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.webapk.shell_apk;
 
+import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
@@ -32,21 +33,21 @@ public class HostBrowserLauncher {
      * Launches host browser in WebAPK mode if the browser is WebAPK-compatible.
      * Otherwise, launches the host browser in tabbed mode.
      */
-    public static void launch(Context context, HostBrowserLauncherParams params) {
-        Log.v(TAG, "WebAPK Launch URL: " + params.getStartUrl());
-
-        if (HostBrowserUtils.shouldLaunchInTab(params.getHostBrowserPackageName(),
-                    params.getHostBrowserMajorChromiumVersion())) {
-            launchInTab(context, params);
+    public static void launch(Activity activity, HostBrowserLauncherParams params) {
+        if (HostBrowserUtils.shouldLaunchInTab(params)) {
+            launchInTab(activity.getApplicationContext(), params);
             return;
         }
 
-        launchBrowserInWebApkMode(context, params, null, Intent.FLAG_ACTIVITY_NEW_TASK);
+        launchBrowserInWebApkMode(
+                activity, params, null, Intent.FLAG_ACTIVITY_NEW_TASK, false /* expectResult */);
     }
 
     /** Launches host browser in WebAPK mode. */
-    public static void launchBrowserInWebApkMode(
-            Context context, HostBrowserLauncherParams params, Bundle extraExtras, int flags) {
+    public static void launchBrowserInWebApkMode(Activity activity,
+            HostBrowserLauncherParams params, Bundle extraExtras, int flags, boolean expectResult) {
+        ManageDataLauncherActivity.updateSiteSettingsShortcut(
+                activity.getApplicationContext(), params);
         Intent intent = new Intent();
         intent.setAction(ACTION_START_WEBAPK);
         intent.setPackage(params.getHostBrowserPackageName());
@@ -64,7 +65,7 @@ public class HostBrowserLauncher {
 
         intent.putExtra(WebApkConstants.EXTRA_URL, params.getStartUrl())
                 .putExtra(WebApkConstants.EXTRA_SOURCE, params.getSource())
-                .putExtra(WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME, context.getPackageName())
+                .putExtra(WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME, activity.getPackageName())
                 .putExtra(WebApkConstants.EXTRA_WEBAPK_SELECTED_SHARE_TARGET_ACTIVITY_CLASS_NAME,
                         params.getSelectedShareTargetActivityClassName())
                 .putExtra(WebApkConstants.EXTRA_FORCE_NAVIGATION, params.getForceNavigation());
@@ -81,8 +82,18 @@ public class HostBrowserLauncher {
             intent.putExtra(WebApkConstants.EXTRA_WEBAPK_LAUNCH_TIME, params.getLaunchTimeMs());
         }
 
+        if (params.getSplashShownTimeMs() >= 0) {
+            intent.putExtra(WebApkConstants.EXTRA_NEW_STYLE_SPLASH_SHOWN_TIME,
+                    params.getSplashShownTimeMs());
+        }
+
         try {
-            context.startActivity(intent);
+            if (expectResult) {
+                // requestCode is arbitrary.
+                activity.startActivityForResult(intent, 0);
+            } else {
+                activity.startActivity(intent);
+            }
         } catch (ActivityNotFoundException e) {
             Log.w(TAG, "Unable to launch browser in WebAPK mode.");
             e.printStackTrace();
@@ -91,6 +102,7 @@ public class HostBrowserLauncher {
 
     /** Launches a WebAPK in its runtime host browser as a tab. */
     private static void launchInTab(Context context, HostBrowserLauncherParams params) {
+        ManageDataLauncherActivity.updateSiteSettingsShortcut(context, params);
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(params.getStartUrl()));
         intent.setPackage(params.getHostBrowserPackageName());
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

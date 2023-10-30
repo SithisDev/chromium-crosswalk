@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/compiler_specific.h"
 #include "extensions/browser/extension_function.h"
 
 namespace base {
@@ -16,37 +15,59 @@ class Value;
 
 namespace extensions {
 
-class ChromeosInfoPrivateGetFunction : public UIThreadExtensionFunction {
+class ChromeosInfoPrivateGetFunction : public ExtensionFunction {
  public:
   ChromeosInfoPrivateGetFunction();
 
  protected:
   ~ChromeosInfoPrivateGetFunction() override;
 
-  // UIThreadExtensionFunction:
+  // ExtensionFunction:
   ResponseAction Run() override;
 
  private:
+  void RespondWithResult(base::Value result);
+
   // Returns a newly allocate value, or null.
   std::unique_ptr<base::Value> GetValue(const std::string& property_name);
 
   DECLARE_EXTENSION_FUNCTION("chromeosInfoPrivate.get", CHROMEOSINFOPRIVATE_GET)
 };
 
-class ChromeosInfoPrivateSetFunction : public UIThreadExtensionFunction {
+class ChromeosInfoPrivateSetFunction : public ExtensionFunction {
  public:
   ChromeosInfoPrivateSetFunction();
 
  protected:
   ~ChromeosInfoPrivateSetFunction() override;
 
-  // UIThreadExtensionFunction:
+  // ExtensionFunction:
   ResponseAction Run() override;
 
  private:
+  void RespondWithResult(bool found);
+  std::string param_name_;
+
   DECLARE_EXTENSION_FUNCTION("chromeosInfoPrivate.set", CHROMEOSINFOPRIVATE_SET)
 };
 
+// API function that is called to get the tablet mode enabled status as a
+// boolean.
+class ChromeosInfoPrivateIsTabletModeEnabledFunction
+    : public ExtensionFunction {
+ public:
+  ChromeosInfoPrivateIsTabletModeEnabledFunction();
+
+ protected:
+  ~ChromeosInfoPrivateIsTabletModeEnabledFunction() override;
+  ResponseAction Run() override;
+
+ private:
+  void RespondWithResult(bool enabled);
+
+  DECLARE_EXTENSION_FUNCTION("chromeosInfoPrivate.isTabletModeEnabled",
+                             CHROMEOSINFOPRIVATE_ISTABLETMODEENABLED)
+};
 
 }  // namespace extensions
 

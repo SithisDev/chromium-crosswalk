@@ -1,13 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/fileapi/external_file_resolver.h"
 
+#include <utility>
 #include "base/bind.h"
-#include "base/task/post_task.h"
+#include "chrome/browser/ash/file_manager/fileapi_util.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/fileapi/external_file_url_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -17,9 +17,9 @@
 #include "extensions/browser/api/file_handlers/mime_util.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_util.h"
-#include "storage/browser/fileapi/file_stream_reader.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/isolated_context.h"
+#include "storage/browser/file_system/file_stream_reader.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/isolated_context.h"
 #include "url/gurl.h"
 
 namespace chromeos {
@@ -46,11 +46,14 @@ class URLHelper {
       : callback_(std::move(callback)) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
     Lifetime lifetime(this);
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::UI},
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&URLHelper::RunOnUIThread, base::Unretained(this),
                        std::move(lifetime), profile_id, url));
   }
+
+  URLHelper(const URLHelper&) = delete;
+  URLHelper& operator=(const URLHelper&) = delete;
 
  private:
   void RunOnUIThread(Lifetime lifetime, void* profile_id, const GURL& url) {
@@ -61,7 +64,7 @@ class URLHelper {
     }
     Profile* const profile = reinterpret_cast<Profile*>(profile_id);
     content::StoragePartition* const storage =
-        content::BrowserContext::GetStoragePartitionForSite(profile, url);
+        profile->GetDefaultStoragePartition();
     DCHECK(storage);
 
     scoped_refptr<storage::FileSystemContext> context =
@@ -90,8 +93,8 @@ class URLHelper {
     file_system_context_ = std::move(context);
     extensions::app_file_handler_util::GetMimeTypeForLocalPath(
         profile, isolated_file_system_.url.path(),
-        base::BindRepeating(&URLHelper::OnGotMimeTypeOnUIThread,
-                            base::Unretained(this), base::Passed(&lifetime)));
+        base::BindOnce(&URLHelper::OnGotMimeTypeOnUIThread,
+                       base::Unretained(this), std::move(lifetime)));
   }
 
   void OnGotMimeTypeOnUIThread(Lifetime lifetime,
@@ -108,8 +111,8 @@ class URLHelper {
   void ReplyResult(net::Error error) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::IO},
+    content::GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(std::move(callback_), error,
                        std::move(file_system_context_),
                        std::move(isolated_file_system_), mime_type_));
@@ -119,16 +122,12 @@ class URLHelper {
   scoped_refptr<storage::FileSystemContext> file_system_context_;
   file_manager::util::FileSystemURLAndHandle isolated_file_system_;
   std::string mime_type_;
-
-  DISALLOW_COPY_AND_ASSIGN(URLHelper);
 };
 
 }  // namespace
 
 ExternalFileResolver::ExternalFileResolver(void* profile_id)
-    : profile_id_(profile_id),
-      range_parse_result_(net::OK),
-      weak_ptr_factory_(this) {
+    : profile_id_(profile_id), range_parse_result_(net::OK) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 }
 
@@ -207,8 +206,8 @@ void ExternalFileResolver::OnHelperResultObtained(
   file_system_context_ = std::move(file_system_context);
   file_system_context_->external_backend()->GetRedirectURLForContents(
       isolated_file_system_.url,
-      base::BindRepeating(&ExternalFileResolver::OnRedirectURLObtained,
-                          weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&ExternalFileResolver::OnRedirectURLObtained,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ExternalFileResolver::OnRedirectURLObtained(const GURL& redirect_url) {

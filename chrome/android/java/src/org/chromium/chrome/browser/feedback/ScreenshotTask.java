@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,19 @@ import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Rect;
-import android.support.annotation.Nullable;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.task.PostTask;
-import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.tab.SadTab;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tasks.ReturnToChromeUtil;
+import org.chromium.chrome.browser.tasks.tab_management.TabUiFeatureUtilities;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetControllerProvider;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.WindowAndroid;
@@ -24,7 +29,7 @@ import org.chromium.ui.base.WindowAndroid;
  * A utility class to take a feedback-formatted screenshot of an {@link Activity}.
  */
 @JNINamespace("chrome::android")
-final class ScreenshotTask implements ScreenshotSource {
+public final class ScreenshotTask implements ScreenshotSource {
     /**
      * Maximum dimension for the screenshot to be sent to the feedback handler.  This size
      * ensures the size of bitmap < 1MB, which is a requirement of the handler.
@@ -36,13 +41,24 @@ final class ScreenshotTask implements ScreenshotSource {
     private boolean mDone;
     private Bitmap mBitmap;
     private Runnable mCallback;
+    private @ScreenshotMode int mScreenshotMode;
+
+    /**
+     * Creates a {@link ScreenshotTask} instance that, will grab a screenshot of {@code activity}.
+     * @param activity The {@link Activity} to grab a screenshot of.
+     * @param screenshotMode The kind of screenshot to take.
+     */
+    public ScreenshotTask(Activity activity, @ScreenshotMode int screenshotMode) {
+        mActivity = activity;
+        mScreenshotMode = screenshotMode;
+    }
 
     /**
      * Creates a {@link ScreenshotTask} instance that, will grab a screenshot of {@code activity}.
      * @param activity The {@link Activity} to grab a screenshot of.
      */
     public ScreenshotTask(Activity activity) {
-        mActivity = activity;
+        this(activity, ScreenshotMode.DEFAULT);
     }
 
     // ScreenshotSource implementation.
@@ -50,8 +66,21 @@ final class ScreenshotTask implements ScreenshotSource {
     public void capture(@Nullable Runnable callback) {
         mCallback = callback;
 
-        if (takeCompositorScreenshot(mActivity)) return;
-        if (takeAndroidViewScreenshot(mActivity)) return;
+        switch (mScreenshotMode) {
+            case ScreenshotMode.DEFAULT:
+                if (shouldTakeCompositorScreenshot(mActivity)
+                        && takeCompositorScreenshot(mActivity)) {
+                    return;
+                }
+                if (takeAndroidViewScreenshot(mActivity)) return;
+                break;
+            case ScreenshotMode.COMPOSITOR:
+                if (takeCompositorScreenshot(mActivity)) return;
+                break;
+            case ScreenshotMode.ANDROID_VIEW:
+                if (takeAndroidViewScreenshot(mActivity)) return;
+                break;
+        }
 
         // If neither the compositor nor the Android view screenshot tasks were kicked off, admit
         // defeat and return a {@code null} screenshot.
@@ -73,7 +102,8 @@ final class ScreenshotTask implements ScreenshotSource {
         return mBitmap;
     }
 
-    // This will be called on the UI thread in response to nativeGrabWindowSnapshotAsync.
+    // This will be called on the UI thread in response to
+    // ScreenshotTaskJni.get().grabWindowSnapshotAsync.
     @CalledByNative
     private void onBytesReceived(byte[] pngBytes) {
         Bitmap bitmap = null;
@@ -89,11 +119,11 @@ final class ScreenshotTask implements ScreenshotSource {
     }
 
     private boolean takeCompositorScreenshot(@Nullable Activity activity) {
-        if (!shouldTakeCompositorScreenshot((activity))) return false;
+        if (activity == null) return false;
 
         Rect rect = new Rect();
         activity.getWindow().getDecorView().getRootView().getWindowVisibleDisplayFrame(rect);
-        nativeGrabWindowSnapshotAsync(
+        ScreenshotTaskJni.get().grabWindowSnapshotAsync(
                 this, ((ChromeActivity) activity).getWindowAndroid(), rect.width(), rect.height());
 
         return true;
@@ -126,8 +156,15 @@ final class ScreenshotTask implements ScreenshotSource {
         // so that the Android View for the bottom sheet will be captured.
         // TODO(https://crbug.com/835862): When the sheet is partially opened both the compositor
         // and Android views should be captured in the screenshot.
-        if (chromeActivity.getBottomSheet() != null
-                && chromeActivity.getBottomSheet().isSheetOpen()) {
+        if (BottomSheetControllerProvider.from(chromeActivity.getWindowAndroid()).isSheetOpen()) {
+            return false;
+        }
+
+        // If the start surface or the grid tab switcher are in use, do not use the compositor, it
+        // will snapshot the last active tab instead of the current screen if we try to use it.
+        if (chromeActivity.isInOverviewMode()
+                && (ReturnToChromeUtil.isStartSurfaceEnabled(chromeActivity)
+                        || TabUiFeatureUtilities.isGridTabSwitcherEnabled(chromeActivity))) {
             return false;
         }
 
@@ -144,6 +181,9 @@ final class ScreenshotTask implements ScreenshotSource {
         return false;
     }
 
-    private static native void nativeGrabWindowSnapshotAsync(
-            ScreenshotTask callback, WindowAndroid window, int width, int height);
+    @NativeMethods
+    interface Natives {
+        void grabWindowSnapshotAsync(
+                ScreenshotTask callback, WindowAndroid window, int width, int height);
+    }
 }

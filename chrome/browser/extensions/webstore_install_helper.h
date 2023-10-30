@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,15 @@
 #include <memory>
 #include <string>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher_delegate.h"
+#include "services/data_decoder/public/cpp/data_decoder.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "url/gurl.h"
 
 namespace base {
 class DictionaryValue;
-class Value;
 }
 
 class BitmapFetcher;
@@ -25,10 +26,6 @@ namespace mojom {
 class URLLoaderFactory;
 }
 }  // namespace network
-
-namespace safe_json {
-class SafeJsonParser;
-}
 
 namespace extensions {
 
@@ -77,9 +74,8 @@ class WebstoreInstallHelper : public base::RefCounted<WebstoreInstallHelper>,
 
   ~WebstoreInstallHelper() override;
 
-  // Callbacks for the SafeJsonParser.
-  void OnJSONParseSucceeded(base::Value result);
-  void OnJSONParseFailed(const std::string& error_message);
+  // Callback for the DataDecoder.
+  void OnJSONParsed(data_decoder::DataDecoder::ValueOrError result);
 
   // Implementing the BitmapFetcherDelegate interface.
   void OnFetchComplete(const GURL& url, const SkBitmap* image) override;
@@ -87,7 +83,7 @@ class WebstoreInstallHelper : public base::RefCounted<WebstoreInstallHelper>,
   void ReportResultsIfComplete();
 
   // The client who we'll report results back to.
-  Delegate* delegate_;
+  raw_ptr<Delegate> delegate_;
 
   // The extension id of the manifest we're parsing.
   std::string id_;

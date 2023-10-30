@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -22,19 +22,20 @@ import urllib2
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
 SUPPORTED_DEBIAN_RELEASES = {
-    'Debian 8 (Jessie)': 'jessie',
     'Debian 9 (Stretch)': 'stretch',
     'Debian 10 (Buster)': 'buster',
+    # TODO: bullseye-updates does not have a .gz file.
+    # 'Debian 11 (Bullseye)': 'bullseye',
 }
 
 SUPPORTED_UBUNTU_RELEASES = {
     'Ubuntu 14.04 (Trusty)': 'trusty',
     'Ubuntu 16.04 (Xenial)': 'xenial',
-    'Ubuntu 17.10 (Artful)': 'artful',
+    'Ubuntu 18.04 (Bionic)': 'bionic',
+    'Ubuntu 20.04 (Focal)': 'focal',
 }
 
 PACKAGE_FILTER = set([
-    "libappindicator3-1",
     "libatspi2.0-0",
     "libasound2",
     "libatk1.0-0",
@@ -43,28 +44,32 @@ PACKAGE_FILTER = set([
     "libcairo2",
     "libcups2",
     "libdbus-1-3",
+    "libdrm2",
     "libexpat1",
+    "libgbm1",
     "libgcc1",
-    "libgdk-pixbuf2.0-0",
     "libglib2.0-0",
-    "libgtk-3-0",
     "libnspr4",
     "libnss3",
     "libpango-1.0-0",
     "libpangocairo-1.0-0",
     "libstdc++6",
     "libuuid1",
+    "libwayland-client0",
     "libx11-6",
     "libx11-xcb1",
     "libxcb1",
+    "libxcb-dri3-0",
     "libxcomposite1",
     "libxcursor1",
     "libxdamage1",
     "libxext6",
     "libxfixes3",
     "libxi6",
+    "libxkbcommon0",
     "libxrandr2",
     "libxrender1",
+    "libxshmfence1",
     "libxss1",
     "libxtst6",
 ])
@@ -147,6 +152,16 @@ for distro in deb_sources:
           if package in PACKAGE_FILTER:
             package_versions[package] = version
   distro_package_versions[distro] = package_versions
+
+missing_any_package = False
+for distro in distro_package_versions:
+  missing_packages = PACKAGE_FILTER.difference(distro_package_versions[distro])
+  if missing_packages:
+    missing_any_package = True
+    print >> sys.stderr, "Packages are not avilable on %s: %s" % (
+        distro, ', '.join(missing_packages))
+if missing_any_package:
+  sys.exit(1)
 
 with open(os.path.join(SCRIPT_DIR, 'dist_package_versions.json'), 'w') as f:
   f.write(json.dumps(distro_package_versions, sort_keys=True, indent=4,

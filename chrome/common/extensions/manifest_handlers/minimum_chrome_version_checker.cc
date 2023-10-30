@@ -1,9 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/extensions/manifest_handlers/minimum_chrome_version_checker.h"
 
+#include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/version.h"
 #include "chrome/grit/chromium_strings.h"
@@ -25,17 +26,17 @@ MinimumChromeVersionChecker::~MinimumChromeVersionChecker() {
 }
 
 bool MinimumChromeVersionChecker::Parse(Extension* extension,
-                                        base::string16* error) {
-  std::string minimum_version_string;
-  if (!extension->manifest()->GetString(keys::kMinimumChromeVersion,
-                                        &minimum_version_string)) {
-    *error = base::ASCIIToUTF16(errors::kInvalidMinimumChromeVersion);
+                                        std::u16string* error) {
+  const std::string* minimum_version_string =
+      extension->manifest()->FindStringPath(keys::kMinimumChromeVersion);
+  if (minimum_version_string == nullptr) {
+    *error = errors::kInvalidMinimumChromeVersion;
     return false;
   }
 
-  base::Version minimum_version(minimum_version_string);
+  base::Version minimum_version(*minimum_version_string);
   if (!minimum_version.IsValid()) {
-    *error = base::ASCIIToUTF16(errors::kInvalidMinimumChromeVersion);
+    *error = errors::kInvalidMinimumChromeVersion;
     return false;
   }
 
@@ -48,8 +49,7 @@ bool MinimumChromeVersionChecker::Parse(Extension* extension,
   if (current_version.CompareTo(minimum_version) < 0) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         errors::kChromeVersionTooLow,
-        l10n_util::GetStringUTF8(IDS_PRODUCT_NAME),
-        minimum_version_string);
+        l10n_util::GetStringUTF8(IDS_PRODUCT_NAME), *minimum_version_string);
     return false;
   }
   return true;

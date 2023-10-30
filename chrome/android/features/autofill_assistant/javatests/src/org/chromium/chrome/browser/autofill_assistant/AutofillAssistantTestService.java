@@ -1,16 +1,31 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.autofill_assistant;
 
+import androidx.annotation.Nullable;
+
 import com.google.protobuf.ByteString;
+import com.google.protobuf.InvalidProtocolBufferException;
+
+import org.hamcrest.Matchers;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.chrome.browser.autofill_assistant.proto.ActionProto;
 import org.chromium.chrome.browser.autofill_assistant.proto.ActionsResponseProto;
+import org.chromium.chrome.browser.autofill_assistant.proto.ClientSettingsProto;
+import org.chromium.chrome.browser.autofill_assistant.proto.GetUserDataResponseProto;
+import org.chromium.chrome.browser.autofill_assistant.proto.ProcessedActionProto;
 import org.chromium.chrome.browser.autofill_assistant.proto.SupportsScriptResponseProto;
+import org.chromium.components.autofill_assistant.AutofillAssistantDependencyInjector;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -19,11 +34,51 @@ import java.util.List;
 @JNINamespace("autofill_assistant")
 public class AutofillAssistantTestService
         implements AutofillAssistantService,
-                   AutofillAssistantServiceInjector.NativeServiceProvider {
-    private final List<AutofillAssistantTestScript> mScripts;
+                   AutofillAssistantDependencyInjector.NativeServiceProvider {
+    public enum ScriptsReturnMode {
+        ONE_BY_ONE,
+        ALL_AT_ONCE,
+    }
 
+    private final List<AutofillAssistantTestScript> mScripts;
+    private final ClientSettingsProto mClientSettings;
+    private final ScriptsReturnMode mScriptsReturnMode;
+    private List<ActionProto> mNextActions = Collections.emptyList();
+    /** The most recently received list of processed actions. */
+    private @Nullable List<ProcessedActionProto> mProcessedActions;
+    private int mNextActionsCounter;
+    private int mCurrentScriptIndex;
+    private GetUserDataResponseProto mUserData;
+
+    /** Default constructor which disables animations. */
     AutofillAssistantTestService(List<AutofillAssistantTestScript> scripts) {
+        this(scripts, ScriptsReturnMode.ONE_BY_ONE);
+    }
+
+    /** Default constructor which disables animations and allows specifying the ScriptReturnMode. */
+    AutofillAssistantTestService(
+            List<AutofillAssistantTestScript> scripts, ScriptsReturnMode scriptsReturnMode) {
+        this(scripts,
+                ClientSettingsProto.newBuilder()
+                        .setIntegrationTestSettings(
+                                ClientSettingsProto.IntegrationTestSettings.newBuilder()
+                                        .setDisableHeaderAnimations(true)
+                                        .setDisableCarouselChangeAnimations(true))
+                        .build(),
+                scriptsReturnMode);
+    }
+
+    /** Constructor which allows injecting custom client settings. */
+    AutofillAssistantTestService(
+            List<AutofillAssistantTestScript> scripts, ClientSettingsProto clientSettings) {
+        this(scripts, clientSettings, ScriptsReturnMode.ONE_BY_ONE);
+    }
+
+    AutofillAssistantTestService(List<AutofillAssistantTestScript> scripts,
+            ClientSettingsProto clientSettings, ScriptsReturnMode scriptsReturnMode) {
         mScripts = scripts;
+        mClientSettings = clientSettings;
+        mScriptsReturnMode = scriptsReturnMode;
     }
 
     /**
@@ -31,23 +86,49 @@ public class AutofillAssistantTestService
      * in order to take effect!
      */
     void scheduleForInjection() {
-        AutofillAssistantServiceInjector.setServiceToInject(this);
+        AutofillAssistantDependencyInjector.setServiceToInject(this);
+    }
+
+    /**
+     * Sets the actions that will be returned for the next (and only the next) call to {@code
+     * getNextActions}.
+     */
+    void setNextActions(List<ActionProto> nextActions) {
+        mNextActions = nextActions;
+    }
+
+    /**
+     * Sets the user data that will be returned with the next GetUserData request.
+     */
+    void setUserData(GetUserDataResponseProto userData) {
+        mUserData = userData;
     }
 
     @Override
-    public long createNativeService() {
+    public long createNativeService(long nativeClientAndroid) {
         // Ask native to create and return a wrapper around |this|. The wrapper will be injected
         // upon startup, at which point the native controller will take ownership of the wrapper.
-        return nativeJavaServiceCreate(this);
+        return AutofillAssistantTestServiceJni.get().javaServiceCreate(this);
     }
 
     /** @see AutofillAssistantService#getScriptsForUrl(String) */
     @Override
     public SupportsScriptResponseProto getScriptsForUrl(String url) {
         SupportsScriptResponseProto.Builder builder = SupportsScriptResponseProto.newBuilder();
-        for (AutofillAssistantTestScript script : mScripts) {
-            builder.addScripts(script.getSupportedScript());
+
+        switch (mScriptsReturnMode) {
+            case ONE_BY_ONE:
+                if (mCurrentScriptIndex < mScripts.size()) {
+                    builder.addScripts(mScripts.get(mCurrentScriptIndex++).getSupportedScript());
+                }
+                break;
+            case ALL_AT_ONCE:
+                while (mCurrentScriptIndex < mScripts.size()) {
+                    builder.addScripts(mScripts.get(mCurrentScriptIndex++).getSupportedScript());
+                }
+                break;
         }
+        builder.setClientSettings(mClientSettings);
         return builder.build();
     }
 
@@ -71,10 +152,53 @@ public class AutofillAssistantTestService
         return ActionsResponseProto.getDefaultInstance();
     }
 
-    /** @see AutofillAssistantService#getNextActions(byte[], byte[]) */
+    /** @see AutofillAssistantService#getNextActions(byte[], byte[], List)  */
     @Override
-    public ActionsResponseProto getNextActions(byte[] globalPayload, byte[] scriptPayload) {
-        return ActionsResponseProto.getDefaultInstance();
+    public ActionsResponseProto getNextActions(byte[] globalPayload, byte[] scriptPayload,
+            List<ProcessedActionProto> processedActions) {
+        mProcessedActions = processedActions;
+        mNextActionsCounter++;
+        ActionsResponseProto responseProto =
+                ActionsResponseProto.newBuilder()
+                        .addAllActions(mNextActions)
+                        .setGlobalPayload(ByteString.copyFrom(globalPayload))
+                        .setScriptPayload(ByteString.copyFrom(scriptPayload))
+                        .build();
+        mNextActions = Collections.emptyList();
+        return responseProto;
+    }
+
+    /** Returns how many times {@code getNextActions} has been called. */
+    public int getNextActionsCounter() {
+        return mNextActionsCounter;
+    }
+
+    /**
+     * Synchronously waits until {@code getNextActions} was called at least @{code
+     * targetNextActionsCount} times. After this method returns, the list of the most recently
+     * returned {@code ProcessedActionProto} can be queried via {@see
+     * AutofillAssistantTestService#getProcessedActions}.
+     */
+    public void waitUntilGetNextActions(int targetNextActionsCount) {
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            Criteria.checkThat("Timeout while waiting for getNextActions", mNextActionsCounter,
+                    Matchers.greaterThanOrEqualTo(targetNextActionsCount));
+        });
+    }
+
+    /** Access to the most recently received list of processed actions. Is initially null. */
+    public @Nullable List<ProcessedActionProto> getProcessedActions() {
+        return mProcessedActions;
+    }
+
+    @CalledByNative
+    private static List<byte[]> createProcessedActionsList() {
+        return new ArrayList<>();
+    }
+
+    @CalledByNative
+    private static void addProcessedAction(List<byte[]> list, byte[] serializedProto) {
+        list.add(serializedProto);
     }
 
     @CalledByNative
@@ -89,9 +213,35 @@ public class AutofillAssistantTestService
     }
 
     @CalledByNative
-    private byte[] getNextActionsNative(byte[] globalPayload, byte[] scriptPayload) {
-        return getNextActions(globalPayload, scriptPayload).toByteArray();
+    private byte[] getNextActionsNative(
+            byte[] globalPayload, byte[] scriptPayload, List<byte[]> processedActions) {
+        List<ProcessedActionProto> actions = new ArrayList<>();
+        try {
+            for (int i = 0; i < processedActions.size(); ++i) {
+                actions.add(ProcessedActionProto.parseFrom(processedActions.get(i)));
+            }
+        } catch (InvalidProtocolBufferException e) {
+            e.printStackTrace();
+        }
+        return getNextActions(globalPayload, scriptPayload, actions).toByteArray();
     }
 
-    private static native long nativeJavaServiceCreate(AutofillAssistantTestService service);
+    @CalledByNative
+    private byte[] getUserDataNative() {
+        byte[] returnValue = mUserData.toByteArray();
+        // Null the user data such that a next (unexpected) request fails to respond. If multiple
+        // requests are required, set new user data or consider adding code to allow for repeated
+        // calls.
+        mUserData = null;
+        return returnValue;
+    }
+
+    @CalledByNative
+    private byte[] reportProgressNative() {
+        return new byte[0];
+    }
+    @NativeMethods
+    interface Natives {
+        long javaServiceCreate(AutofillAssistantTestService service);
+    }
 }

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,10 @@ package org.chromium.chrome.browser.metrics;
 
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.LargeTest;
+
+import androidx.test.filters.LargeTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -18,23 +20,22 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.base.test.util.ScalableTimeout;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.DisableIf;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
-import org.chromium.chrome.browser.ShortcutHelper;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.webapps.WebApkActivity;
+import org.chromium.chrome.browser.webapps.WebApkActivityLifecycleUmaTracker;
+import org.chromium.chrome.browser.webapps.WebApkActivityTestRule;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
-import org.chromium.chrome.test.util.ApplicationTestUtils;
+import org.chromium.chrome.test.util.ChromeApplicationTestUtils;
 import org.chromium.chrome.test.util.ChromeTabUtils;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServer;
-import org.chromium.webapk.lib.common.WebApkConstants;
 
 /**
  * Tests for startup timing histograms.
@@ -42,6 +43,7 @@ import org.chromium.webapk.lib.common.WebApkConstants;
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add(ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE)
 public class StartupLoadingMetricsTest {
+    private static final String TAG = "StartupLoadingTest";
     private static final String TEST_PAGE = "/chrome/test/data/android/google.html";
     private static final String TEST_PAGE_2 = "/chrome/test/data/android/test.html";
     private static final String ERROR_PAGE = "/close-socket";
@@ -50,16 +52,22 @@ public class StartupLoadingMetricsTest {
             "Startup.Android.Cold.TimeToFirstNavigationCommit";
     private static final String FIRST_CONTENTFUL_PAINT_HISTOGRAM =
             "Startup.Android.Cold.TimeToFirstContentfulPaint";
+    private static final String FIRST_VISIBLE_CONTENT_HISTOGRAM =
+            "Startup.Android.Cold.TimeToFirstVisibleContent";
+    private static final String VISIBLE_CONTENT_HISTOGRAM =
+            "Startup.Android.Cold.TimeToVisibleContent";
+    private static final String FIRST_COMMIT_OCCURRED_PRE_FOREGROUND_HISTOGRAM =
+            "Startup.Android.Cold.FirstNavigationCommitOccurredPreForeground";
 
     private static final String TABBED_SUFFIX = ChromeTabbedActivity.STARTUP_UMA_HISTOGRAM_SUFFIX;
-    private static final String WEBAPK_SUFFIX = WebApkActivity.STARTUP_UMA_HISTOGRAM_SUFFIX;
+    private static final String WEBAPK_SUFFIX =
+            WebApkActivityLifecycleUmaTracker.STARTUP_UMA_HISTOGRAM_SUFFIX;
 
     @Rule
     public ChromeTabbedActivityTestRule mTabbedActivityTestRule =
             new ChromeTabbedActivityTestRule();
     @Rule
-    public ChromeActivityTestRule<WebApkActivity> mWebApkActivityTestRule =
-            new ChromeActivityTestRule<>(WebApkActivity.class);
+    public WebApkActivityTestRule mWebApkActivityTestRule = new WebApkActivityTestRule();
 
     private String mTestPage;
     private String mTestPage2;
@@ -68,7 +76,7 @@ public class StartupLoadingMetricsTest {
     private EmbeddedTestServer mTestServer;
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         Context appContext = InstrumentationRegistry.getInstrumentation()
                                      .getTargetContext()
                                      .getApplicationContext();
@@ -111,43 +119,31 @@ public class StartupLoadingMetricsTest {
         Assert.assertEquals(expectedCount,
                 RecordHistogram.getHistogramTotalCountForTesting(
                         FIRST_CONTENTFUL_PAINT_HISTOGRAM + histogramSuffix));
-    }
+        if (histogramSuffix.equals(TABBED_SUFFIX)) {
+            Assert.assertEquals(expectedCount,
+                    RecordHistogram.getHistogramTotalCountForTesting(
+                            FIRST_VISIBLE_CONTENT_HISTOGRAM));
+            Assert.assertEquals(expectedCount,
+                    RecordHistogram.getHistogramTotalCountForTesting(VISIBLE_CONTENT_HISTOGRAM));
+        }
 
-    private void startWebApkActivity(final String startUrl) throws InterruptedException {
-        Intent intent =
-                new Intent(InstrumentationRegistry.getTargetContext(), WebApkActivity.class);
-        intent.putExtra(WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME, "org.chromium.webapk.test");
-        intent.putExtra(ShortcutHelper.EXTRA_URL, startUrl);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-        WebApkActivity webApkActivity =
-                (WebApkActivity) InstrumentationRegistry.getInstrumentation().startActivitySync(
-                        intent);
-        mWebApkActivityTestRule.setActivity(webApkActivity);
-        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return mWebApkActivityTestRule.getActivity().getActivityTab() != null;
-            }
-        }, ScalableTimeout.scaleTimeout(10000), CriteriaHelper.DEFAULT_POLLING_INTERVAL);
-        ChromeTabUtils.waitForTabPageLoaded(
-                mWebApkActivityTestRule.getActivity().getActivityTab(), startUrl);
-    }
-
-    /**
-     * Tests that the startup loading histograms are recorded only once on startup.
-     */
-    @Test
-    @LargeTest
-    @RetryOnFailure
-    public void testStartWithURLRecorded() throws Exception {
-        runAndWaitForPageLoadMetricsRecorded(
-                () -> mTabbedActivityTestRule.startMainActivityWithURL(mTestPage));
-        assertHistogramsRecorded(1, TABBED_SUFFIX);
-        loadUrlAndWaitForPageLoadMetricsRecorded(mTabbedActivityTestRule, mTestPage2);
-        assertHistogramsRecorded(1, TABBED_SUFFIX);
+        if (expectedCount > 0) {
+            // If the first nav commit was recorded, it should have also been registered as having
+            // occurred post-foregrounding (since otherwise it would not have been recorded).
+            Assert.assertEquals(expectedCount,
+                    RecordHistogram.getHistogramValueCountForTesting(
+                            FIRST_COMMIT_OCCURRED_PRE_FOREGROUND_HISTOGRAM, 0));
+            Assert.assertEquals(0,
+                    RecordHistogram.getHistogramValueCountForTesting(
+                            FIRST_COMMIT_OCCURRED_PRE_FOREGROUND_HISTOGRAM, 1));
+        } else {
+            // Note that the first commit might or might not have occurred in this case depending on
+            // the test. However, if it occurred it must have occurred pre-foregrounding (since
+            // otherwise the core metric would have been recorded).
+            Assert.assertEquals(0,
+                    RecordHistogram.getHistogramValueCountForTesting(
+                            FIRST_COMMIT_OCCURRED_PRE_FOREGROUND_HISTOGRAM, 0));
+        }
     }
 
     /**
@@ -155,9 +151,9 @@ public class StartupLoadingMetricsTest {
      */
     @Test
     @LargeTest
-    @RetryOnFailure
     public void testWebApkStartRecorded() throws Exception {
-        runAndWaitForPageLoadMetricsRecorded(() -> startWebApkActivity(mTestPage));
+        runAndWaitForPageLoadMetricsRecorded(
+                () -> mWebApkActivityTestRule.startWebApkActivity(mTestPage));
         assertHistogramsRecorded(1, WEBAPK_SUFFIX);
         loadUrlAndWaitForPageLoadMetricsRecorded(mWebApkActivityTestRule, mTestPage2);
         assertHistogramsRecorded(1, WEBAPK_SUFFIX);
@@ -169,7 +165,7 @@ public class StartupLoadingMetricsTest {
      */
     @Test
     @LargeTest
-    @RetryOnFailure
+    @DisabledTest(message = "https://crbug.com/1023433")
     public void testFromExternalAppRecorded() throws Exception {
         runAndWaitForPageLoadMetricsRecorded(
                 () -> mTabbedActivityTestRule.startMainActivityFromExternalApp(mTestPage, null));
@@ -183,10 +179,9 @@ public class StartupLoadingMetricsTest {
      */
     @Test
     @LargeTest
-    @RetryOnFailure
     public void testNTPNotRecorded() throws Exception {
         runAndWaitForPageLoadMetricsRecorded(
-                () -> mTabbedActivityTestRule.startMainActivityFromLauncher());
+                () -> mTabbedActivityTestRule.startMainActivityWithURL(UrlConstants.NTP_URL));
         assertHistogramsRecorded(0, TABBED_SUFFIX);
         loadUrlAndWaitForPageLoadMetricsRecorded(mTabbedActivityTestRule, mTestPage2);
         assertHistogramsRecorded(0, TABBED_SUFFIX);
@@ -198,7 +193,6 @@ public class StartupLoadingMetricsTest {
      */
     @Test
     @LargeTest
-    @RetryOnFailure
     public void testBlankPageNotRecorded() throws Exception {
         runAndWaitForPageLoadMetricsRecorded(
                 () -> mTabbedActivityTestRule.startMainActivityOnBlankPage());
@@ -213,7 +207,7 @@ public class StartupLoadingMetricsTest {
      */
     @Test
     @LargeTest
-    @RetryOnFailure
+    @DisableIf.Build(supported_abis_includes = "x86", message = "https://crbug.com/1062055")
     public void testErrorPageNotRecorded() throws Exception {
         runAndWaitForPageLoadMetricsRecorded(
                 () -> mTabbedActivityTestRule.startMainActivityWithURL(mErrorPage));
@@ -228,9 +222,9 @@ public class StartupLoadingMetricsTest {
      */
     @Test
     @LargeTest
-    @RetryOnFailure
     public void testWebApkErrorPageNotRecorded() throws Exception {
-        runAndWaitForPageLoadMetricsRecorded(() -> startWebApkActivity(mErrorPage));
+        runAndWaitForPageLoadMetricsRecorded(
+                () -> mWebApkActivityTestRule.startWebApkActivity(mErrorPage));
         assertHistogramsRecorded(0, WEBAPK_SUFFIX);
         loadUrlAndWaitForPageLoadMetricsRecorded(mWebApkActivityTestRule, mTestPage2);
         assertHistogramsRecorded(0, WEBAPK_SUFFIX);
@@ -242,7 +236,9 @@ public class StartupLoadingMetricsTest {
      */
     @Test
     @LargeTest
-    @RetryOnFailure
+    @DisableIf.Build(supported_abis_includes = "x86", message = "https://crbug.com/1062055")
+    @DisableIf.
+    Build(sdk_is_less_than = Build.VERSION_CODES.M, message = "https://crbug.com/1062055")
     public void testBackgroundedPageNotRecorded() throws Exception {
         runAndWaitForPageLoadMetricsRecorded(() -> {
             Intent intent = new Intent(Intent.ACTION_VIEW);
@@ -251,10 +247,11 @@ public class StartupLoadingMetricsTest {
             // mSlowPage will hang for 2 seconds before sending a response. It should be enough to
             // put Chrome in background before the page is committed.
             mTabbedActivityTestRule.prepareUrlIntent(intent, mSlowPage);
-            mTabbedActivityTestRule.startActivityCompletely(intent);
+            mTabbedActivityTestRule.launchActivity(intent);
 
             // Put Chrome in background before the page is committed.
-            ApplicationTestUtils.fireHomeScreenIntent(InstrumentationRegistry.getTargetContext());
+            ChromeApplicationTestUtils.fireHomeScreenIntent(
+                    InstrumentationRegistry.getTargetContext());
 
             // Wait for a tab to be loaded.
             mTabbedActivityTestRule.waitForActivityNativeInitializationComplete();
@@ -268,9 +265,56 @@ public class StartupLoadingMetricsTest {
         assertHistogramsRecorded(0, TABBED_SUFFIX);
         runAndWaitForPageLoadMetricsRecorded(() -> {
             // Put Chrome in foreground before loading a new page.
-            ApplicationTestUtils.launchChrome(InstrumentationRegistry.getTargetContext());
+            ChromeApplicationTestUtils.launchChrome(InstrumentationRegistry.getTargetContext());
             mTabbedActivityTestRule.loadUrl(mTestPage);
         });
         assertHistogramsRecorded(0, TABBED_SUFFIX);
+    }
+
+    @Test
+    @LargeTest
+    @DisabledTest(message = "https://crbug.com/1313210")
+    public void testRecordingOfFirstNavigationCommitPreForeground() throws Exception {
+        UmaUtils.skipRecordingNextForegroundStartTimeForTesting();
+
+        runAndWaitForPageLoadMetricsRecorded(() -> {
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.addCategory(Intent.CATEGORY_LAUNCHER);
+            mTabbedActivityTestRule.startMainActivityFromIntent(intent, mTestPage);
+        });
+
+        ActivityTabStartupMetricsTracker startupMetricsTracker =
+                mTabbedActivityTestRule.getActivity().getActivityTabStartupMetricsTracker();
+
+        // Startup metrics should not have been recorded since the browser is not in the
+        // foreground.
+        Assert.assertEquals(0,
+                RecordHistogram.getHistogramTotalCountForTesting(
+                        FIRST_COMMIT_HISTOGRAM + TABBED_SUFFIX));
+        Assert.assertEquals(0,
+                RecordHistogram.getHistogramTotalCountForTesting(FIRST_VISIBLE_CONTENT_HISTOGRAM));
+
+        // The metric for the first navigation commit having occurred
+        // pre-foregrounding should also not have been recorded at this point, as there hasn't yet
+        // been a notification that the browser has come to the foreground.
+        Assert.assertEquals(0,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        FIRST_COMMIT_OCCURRED_PRE_FOREGROUND_HISTOGRAM, 1));
+
+        // Trigger the come-to-foreground event.
+        TestThreadUtils.runOnUiThreadBlocking(() -> UmaUtils.recordForegroundStartTime());
+
+        // Startup metrics should still not have been recorded...
+        Assert.assertEquals(0,
+                RecordHistogram.getHistogramTotalCountForTesting(
+                        FIRST_COMMIT_HISTOGRAM + TABBED_SUFFIX));
+        Assert.assertEquals(0,
+                RecordHistogram.getHistogramTotalCountForTesting(FIRST_VISIBLE_CONTENT_HISTOGRAM));
+
+        // ...but the metric for the first navigation commit having occurred
+        // pre-foregrounding *should* now have been recorded.
+        Assert.assertEquals(1,
+                RecordHistogram.getHistogramValueCountForTesting(
+                        FIRST_COMMIT_OCCURRED_PRE_FOREGROUND_HISTOGRAM, 1));
     }
 }

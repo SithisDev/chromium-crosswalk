@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/files/file_path.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "components/download/public/background_service/client.h"
@@ -26,9 +26,7 @@ using ClientFactory = base::OnceCallback<std::unique_ptr<Client>(Profile*)>;
 
 class DeferredClientWrapper : public Client {
  public:
-  DeferredClientWrapper(DownloadClient client_id,
-                        ClientFactory factory,
-                        SimpleFactoryKey* key);
+  DeferredClientWrapper(ClientFactory factory, SimpleFactoryKey* key);
   ~DeferredClientWrapper() override;
 
   // Client implementation.
@@ -83,14 +81,13 @@ class DeferredClientWrapper : public Client {
   std::unique_ptr<download::Client> wrapped_client_;
   std::vector<base::OnceClosure> deferred_closures_;
   ClientFactory client_factory_;
-  SimpleFactoryKey* key_;
+  raw_ptr<SimpleFactoryKey> key_;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // This is needed to record UMA for when DownloadClientWrapper requests a full
   // browser start while the browser is running in reduced mode. Reduced mode is
   // only on Android so it is ifdefed out on other platforms to prevent the
   // compiler from complaining that it is unused.
-  DownloadClient client_id_;
   bool full_browser_requested_;
   void LaunchFullBrowser();
 #endif

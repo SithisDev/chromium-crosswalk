@@ -1,14 +1,24 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/devtools/devtools_browser_context_manager.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/no_destructor.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "chrome/browser/profiles/profile_destroyer.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
+
+namespace {
+
+const int64_t kDestroyProfileTimeoutSeconds = 60;
+
+}  // namespace
 
 DevToolsBrowserContextManager::DevToolsBrowserContextManager() {}
 
@@ -22,33 +32,32 @@ DevToolsBrowserContextManager& DevToolsBrowserContextManager::GetInstance() {
 
 Profile* DevToolsBrowserContextManager::GetProfileById(
     const std::string& context_id) {
-  auto it = registrations_.find(context_id);
-  if (it == registrations_.end())
+  auto it = otr_profiles_.find(context_id);
+  if (it == otr_profiles_.end())
     return nullptr;
-  return it->second->profile();
+  return it->second;
 }
 
 content::BrowserContext* DevToolsBrowserContextManager::CreateBrowserContext() {
   Profile* original_profile =
       ProfileManager::GetActiveUserProfile()->GetOriginalProfile();
 
-  auto registration =
-      IndependentOTRProfileManager::GetInstance()->CreateFromOriginalProfile(
-          original_profile,
-          base::BindOnce(
-              &DevToolsBrowserContextManager::OnOriginalProfileDestroyed,
-              weak_factory_.GetWeakPtr()));
-  content::BrowserContext* context = registration->profile();
-  const std::string& context_id = context->UniqueId();
-  registrations_[context_id] = std::move(registration);
-  return context;
+  Profile* otr_profile = original_profile->GetOffTheRecordProfile(
+      Profile::OTRProfileID::CreateUniqueForDevTools(),
+      /*create_if_needed=*/true);
+  const std::string& context_id = otr_profile->UniqueId();
+
+  // The two lines are matched in `StopObservingProfileIfAny()`.
+  profile_observation_.AddObservation(otr_profile);
+  otr_profiles_[context_id] = otr_profile;
+  return otr_profile;
 }
 
 std::vector<content::BrowserContext*>
 DevToolsBrowserContextManager::GetBrowserContexts() {
   std::vector<content::BrowserContext*> result;
-  for (const auto& registration_pair : registrations_)
-    result.push_back(registration_pair.second->profile());
+  for (const auto& profile_pair : otr_profiles_)
+    result.push_back(profile_pair.second);
   return result;
 }
 
@@ -67,14 +76,14 @@ void DevToolsBrowserContextManager::DisposeBrowserContext(
                                        " is already pending");
     return;
   }
-  auto it = registrations_.find(context_id);
-  if (it == registrations_.end()) {
+  auto it = otr_profiles_.find(context_id);
+  if (it == otr_profiles_.end()) {
     std::move(callback).Run(
         false, "Failed to find browser context with id " + context_id);
     return;
   }
 
-  Profile* profile = it->second->profile();
+  Profile* profile = it->second;
   bool has_opened_browser = false;
   for (auto* opened_browser : *BrowserList::GetInstance()) {
     if (opened_browser->profile() == profile) {
@@ -85,7 +94,9 @@ void DevToolsBrowserContextManager::DisposeBrowserContext(
 
   // If no browsers are opened - dispose right away.
   if (!has_opened_browser) {
-    registrations_.erase(it);
+    StopObservingProfileIfAny(profile);
+    ProfileDestroyer::DestroyProfileWhenAppropriateWithTimeout(
+        profile, base::Seconds(kDestroyProfileTimeoutSeconds));
     std::move(callback).Run(true, "");
     return;
   }
@@ -99,11 +110,18 @@ void DevToolsBrowserContextManager::DisposeBrowserContext(
       true /* skip_beforeunload */);
 }
 
-void DevToolsBrowserContextManager::OnOriginalProfileDestroyed(
-    Profile* profile) {
-  base::EraseIf(registrations_, [&profile](const auto& it) {
-    return it.second->profile()->GetOriginalProfile() == profile;
-  });
+void DevToolsBrowserContextManager::OnProfileWillBeDestroyed(Profile* profile) {
+  // This is likely happening during shutdown. We'll immediately
+  // close all browser windows for our profile without unload handling.
+  BrowserList::BrowserVector browsers_to_close;
+  for (auto* browser : *BrowserList::GetInstance()) {
+    if (browser->profile() == profile)
+      browsers_to_close.push_back(browser);
+  }
+  for (auto* browser : browsers_to_close)
+    browser->window()->Close();
+
+  StopObservingProfileIfAny(profile);
 }
 
 void DevToolsBrowserContextManager::OnBrowserRemoved(Browser* browser) {
@@ -115,14 +133,29 @@ void DevToolsBrowserContextManager::OnBrowserRemoved(Browser* browser) {
     if (opened_browser->profile() == browser->profile())
       return;
   }
-  auto it = registrations_.find(context_id);
+
+  StopObservingProfileIfAny(browser->profile());
+
   // We cannot delete immediately here: the profile might still be referenced
-  // during the browser tier-down process.
-  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE,
-                                                  it->second.release());
-  registrations_.erase(it);
+  // during the browser tear-down process.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          &ProfileDestroyer::DestroyProfileWhenAppropriateWithTimeout,
+          base::Unretained(browser->profile()),
+          base::Seconds(kDestroyProfileTimeoutSeconds)));
+
   std::move(pending_disposal->second).Run(true, "");
   pending_context_disposals_.erase(pending_disposal);
   if (pending_context_disposals_.empty())
     BrowserList::RemoveObserver(this);
+}
+
+void DevToolsBrowserContextManager::StopObservingProfileIfAny(
+    Profile* profile) {
+  if (!profile_observation_.IsObservingSource(profile))
+    return;
+
+  profile_observation_.RemoveObservation(profile);
+  otr_profiles_.erase(profile->UniqueId());
 }

@@ -1,11 +1,13 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.tab;
 
-import android.support.test.filters.SmallTest;
+import android.support.test.InstrumentationRegistry;
 import android.widget.Button;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -15,13 +17,10 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.tab.Tab.TabHidingType;
-import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.util.TestWebServer;
@@ -32,12 +31,10 @@ import java.util.concurrent.ExecutionException;
  * Tests related to the sad tab logic.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@RetryOnFailure
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class SadTabTest {
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
+    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
     @Before
     public void setUp() throws InterruptedException {
@@ -45,6 +42,7 @@ public class SadTabTest {
     }
 
     private static boolean isShowingSadTab(Tab tab) {
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         try {
             return TestThreadUtils.runOnUiThreadBlocking(() -> SadTab.isShowing(tab));
         } catch (ExecutionException e) {
@@ -129,13 +127,12 @@ public class SadTabTest {
      * Confirm that after a successive refresh of a failed tab that failed to load, change the
      * button from "Reload" to "Send Feedback". If reloaded a third time and it is successful it
      * reverts from "Send Feedback" to "Reload".
-     * @throws InterruptedException
      * @throws IllegalArgumentException
      */
     @Test
     @SmallTest
     @Feature({"SadTab"})
-    public void testSadTabPageButtonText() throws IllegalArgumentException, InterruptedException {
+    public void testSadTabPageButtonText() throws IllegalArgumentException {
         final Tab tab = mActivityTestRule.getActivity().getActivityTab();
 
         Assert.assertFalse(isShowingSadTab(tab));
@@ -149,6 +146,7 @@ public class SadTabTest {
         reloadSadTab(tab);
         Assert.assertTrue(isShowingSadTab(tab));
         actualText = getSadTabButton(tab).getText().toString();
+        Assert.assertTrue(showSendFeedbackView(tab));
         Assert.assertEquals(
                 "Expected the sad tab button to have the feedback label after the tab button "
                         + "crashes twice in a row.",
@@ -173,7 +171,7 @@ public class SadTabTest {
     private static void simulateRendererKilled(final Tab tab, final boolean visible) {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             if (!visible) tab.hide(TabHidingType.CHANGED_TABS);
-            ChromeTabUtils.simulateRendererKilledForTesting(tab, false);
+            ChromeTabUtils.simulateRendererKilledForTesting(tab);
         });
     }
 
@@ -184,8 +182,17 @@ public class SadTabTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             SadTab sadTab = SadTab.from(tab);
             sadTab.removeIfPresent();
-            sadTab.show();
+            sadTab.show(tab.getContext(), () -> {}, () -> {});
         });
+    }
+
+    private static boolean showSendFeedbackView(final Tab tab) {
+        try {
+            return TestThreadUtils.runOnUiThreadBlocking(
+                    () -> SadTab.from(tab).showSendFeedbackView());
+        } catch (ExecutionException e) {
+            return false; // Make tests fail when an exception is thrown.
+        }
     }
 
     /**
@@ -195,7 +202,12 @@ public class SadTabTest {
      *         doesn't exist.
      */
     private static Button getSadTabButton(Tab tab) {
-        return (Button) tab.getContentView().findViewById(R.id.sad_tab_button);
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        try {
+            return TestThreadUtils.runOnUiThreadBlocking(
+                    () -> tab.getView().findViewById(R.id.sad_tab_button));
+        } catch (ExecutionException e) {
+            return null;
+        }
     }
-
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,6 @@
 namespace content {
 class BrowserContext;
 }
-
-class SkBitmap;
 
 namespace extensions {
 
@@ -37,23 +35,11 @@ bool CanDisplayInAppLauncher(const Extension* extension,
 bool ShouldDisplayInNewTabPage(const Extension* extension,
                                content::BrowserContext* context);
 
-// Returns true if the extension should be displayed in the extension
-// settings page (i.e. chrome://extensions). Checks whether the extension is
-// an ephemeral app.
-bool ShouldDisplayInExtensionSettings(const Extension* extension,
-                                      content::BrowserContext* context);
-
 // If |url| is an extension URL, returns the name of the associated extension,
 // with whitespace collapsed. Otherwise, returns empty string. |context| is used
 // to get at the extension registry.
-base::string16 GetEnabledExtensionNameForUrl(const GURL& url,
+std::u16string GetEnabledExtensionNameForUrl(const GURL& url,
                                              content::BrowserContext* context);
-
-// Returns true if the icon, rendered in the toolbar of the current context,
-// would be sufficiently visible to the user.
-bool IsRenderedIconSufficientlyVisibleForBrowserContext(
-    const SkBitmap& bitmap,
-    content::BrowserContext* browser_context);
 
 }  // namespace ui_util
 }  // namespace extensions

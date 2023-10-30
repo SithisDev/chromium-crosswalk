@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,9 @@ void FakeIToastNotifier::SetNotificationShownCallback(
 
 HRESULT FakeIToastNotifier::Show(
     winui::Notifications::IToastNotification* notification) {
+  if (!notification_shown_callback_)
+    return S_OK;
+
   NotificationLaunchId launch_id = GetNotificationLaunchId(notification);
   notification_shown_callback_.Run(launch_id);
   return S_OK;

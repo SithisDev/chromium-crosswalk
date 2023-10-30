@@ -1,12 +1,14 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.sync;
 
-import android.support.test.filters.LargeTest;
 import android.util.Pair;
 
+import androidx.test.filters.LargeTest;
+
+import org.hamcrest.Matchers;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -17,8 +19,10 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaNotSatisfiedException;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -30,7 +34,6 @@ import org.chromium.components.sync.protocol.SessionTab;
 import org.chromium.components.sync.protocol.SessionWindow;
 import org.chromium.components.sync.protocol.SyncEnums;
 import org.chromium.components.sync.protocol.TabNavigation;
-import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.ArrayList;
@@ -38,7 +41,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
 
 /**
  * Test suite for the open tabs (sessions) sync data type.
@@ -91,7 +93,7 @@ public class OpenTabsTest {
 
     @Before
     public void setUp() throws Exception {
-        mSyncTestRule.setUpTestAccountAndSignIn();
+        mSyncTestRule.setUpAccountAndEnableSyncForTesting();
         mClientName = getClientName();
         mSessionTagCounter = 0;
     }
@@ -100,7 +102,7 @@ public class OpenTabsTest {
     @Test
     @LargeTest
     @Feature({"Sync"})
-    public void testUploadOpenTab() throws Exception {
+    public void testUploadOpenTab() {
         mSyncTestRule.loadUrl(URL);
         waitForLocalTabsForClient(mClientName, URL);
         waitForServerTabs(URL);
@@ -110,7 +112,7 @@ public class OpenTabsTest {
     @Test
     @LargeTest
     @Feature({"Sync"})
-    public void testUploadMultipleOpenTabs() throws Exception {
+    public void testUploadMultipleOpenTabs() {
         mSyncTestRule.loadUrl(URL);
         mSyncTestRule.loadUrlInNewTab(URL2);
         mSyncTestRule.loadUrlInNewTab(URL3);
@@ -122,7 +124,7 @@ public class OpenTabsTest {
     @Test
     @LargeTest
     @Feature({"Sync"})
-    public void testUploadAndCloseOpenTab() throws Exception {
+    public void testUploadAndCloseOpenTab() {
         mSyncTestRule.loadUrl(URL);
         // Can't have zero tabs, so we have to open two to test closing one.
         mSyncTestRule.loadUrlInNewTab(URL2);
@@ -142,7 +144,7 @@ public class OpenTabsTest {
     @Test
     @LargeTest
     @Feature({"Sync"})
-    public void testDownloadOpenTab() throws Exception {
+    public void testDownloadOpenTab() {
         addFakeServerTabs(FAKE_CLIENT, URL);
         SyncTestUtil.triggerSync();
         waitForLocalTabsForClient(FAKE_CLIENT, URL);
@@ -152,7 +154,7 @@ public class OpenTabsTest {
     @Test
     @LargeTest
     @Feature({"Sync"})
-    public void testDownloadMultipleOpenTabs() throws Exception {
+    public void testDownloadMultipleOpenTabs() {
         addFakeServerTabs(FAKE_CLIENT, URL, URL2, URL3);
         SyncTestUtil.triggerSync();
         waitForLocalTabsForClient(FAKE_CLIENT, URL, URL2, URL3);
@@ -194,7 +196,7 @@ public class OpenTabsTest {
         return SESSION_TAG_PREFIX + (mSessionTagCounter++);
     }
 
-    private void addFakeServerTabs(String clientName, String... urls) throws InterruptedException {
+    private void addFakeServerTabs(String clientName, String... urls) {
         String tag = makeSessionTag();
         EntitySpecifics header = makeSessionEntity(tag, clientName, urls.length);
         mSyncTestRule.getFakeServerHelper().injectUniqueClientEntity(
@@ -254,46 +256,35 @@ public class OpenTabsTest {
         }
     }
 
-    private void waitForLocalTabsForClient(final String clientName, String... urls)
-            throws InterruptedException {
+    private void waitForLocalTabsForClient(final String clientName, String... urls) {
         final List<String> urlList = new ArrayList<>(urls.length);
         for (String url : urls) urlList.add(url);
-        mSyncTestRule.pollInstrumentationThread(
-                Criteria.equals(urlList, new Callable<List<String>>() {
-                    @Override
-                    public List<String> call() throws Exception {
-                        return getLocalTabsForClient(clientName).urls;
-                    }
-                }));
+        mSyncTestRule.pollInstrumentationThread(() -> {
+            try {
+                Criteria.checkThat(getLocalTabsForClient(clientName).urls, Matchers.is(urlList));
+            } catch (JSONException ex) {
+                throw new CriteriaNotSatisfiedException(ex);
+            }
+        });
     }
 
-    private void waitForServerTabs(final String... urls) throws InterruptedException {
+    private void waitForServerTabs(final String... urls) {
         mSyncTestRule.pollInstrumentationThread(
-                new Criteria("Expected server open tabs: " + Arrays.toString(urls)) {
-                    @Override
-                    public boolean isSatisfied() {
-                        try {
-                            return mSyncTestRule.getFakeServerHelper().verifySessions(urls);
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
-                });
+                ()
+                        -> mSyncTestRule.getFakeServerHelper().verifySessions(urls),
+                "Expected server open tabs: " + Arrays.toString(urls));
     }
 
     private String getClientName() throws Exception {
-        mSyncTestRule.pollInstrumentationThread(new Criteria(
-                "Expected at least one tab entity to exist.") {
-            @Override
-            public boolean isSatisfied() {
-                try {
-                    return SyncTestUtil
-                                   .getLocalData(mSyncTestRule.getTargetContext(), OPEN_TABS_TYPE)
-                                   .size()
-                            > 0;
-                } catch (JSONException e) {
-                    return false;
-                }
+        mSyncTestRule.pollInstrumentationThread(() -> {
+            try {
+                int size =
+                        SyncTestUtil.getLocalData(mSyncTestRule.getTargetContext(), OPEN_TABS_TYPE)
+                                .size();
+                Criteria.checkThat("Expected at least one tab entity to exist.", size,
+                        Matchers.greaterThan(0));
+            } catch (JSONException ex) {
+                throw new CriteriaNotSatisfiedException(ex);
             }
         });
         List<Pair<String, JSONObject>> tabEntities =

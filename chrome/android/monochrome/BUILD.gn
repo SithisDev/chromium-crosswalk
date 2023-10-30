@@ -1,36 +1,60 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/android/rules.gni")
+import("//build/config/android/config.gni")
+import("//build/config/python.gni")
+import("//testing/test.gni")
 
-android_library("monochrome_license_provider_java") {
-  java_files =
-      [ "java/src/com/android/webview/chromium/LicenseContentProvider.java" ]
+# A script that can be used to run the tests locally.
+# TODO(agrieve): Figure out how to have the script test used directly by bots.
+script_test("monochrome_public_apk_checker_runner") {
+  script = "scripts/monochrome_python_tests.py"
+  args = [
+    "--chrome-apk",
+    "apks/ChromePublic.apk",
+    "--chrome-pathmap",
+    "apks/ChromePublic.apk.pathmap.txt",
+    "--system-webview-apk",
+    "apks/SystemWebView.apk",
+    "--system-webview-pathmap",
+    "apks/SystemWebView.apk.pathmap.txt",
+    "--monochrome-apk",
+    "apks/MonochromePublic.apk",
+    "--monochrome-pathmap",
+    "apks/MonochromePublic.apk.pathmap.txt",
+  ]
+  data_deps = [ ":monochrome_public_apk_checker" ]
+}
 
-  deps = [
-    "//base:base_java",
-    "//chrome/android:chrome_java",
-    "//components/about_ui/android:aboutui_java",
+# The target currently referenced by the bot configs.
+python_library("monochrome_public_apk_checker") {
+  testonly = true
+  pydeps_file =
+      "//chrome/android/monochrome/scripts/monochrome_python_tests.pydeps"
+  data_deps = [
+    ":monochrome_python_tests_py",
+    "//android_webview:system_webview_apk",
+    "//chrome/android:chrome_public_apk",
+    "//chrome/android:monochrome_public_apk",
   ]
 }
 
-group("monochrome_apk_checker") {
+# Separate target so that it can be shared with downstream.
+python_library("monochrome_python_tests_py") {
   testonly = true
-  data_deps = [
-    "//chrome/android:chrome_modern_public_apk",
-    "//chrome/android:monochrome_public_apk",
-  ]
-  if (public_android_sdk) {
-    # system_webview_apk only defined for public sdk builds, so this dependency
-    # must be guarded.
-    data_deps += [ "//android_webview:system_webview_apk" ]
-  }
-
+  pydeps_file = "scripts/monochrome_python_tests.pydeps"
   data = [
-    "./scripts/monochrome_apk_checker.py",
-    "//testing/scripts/monochrome_apk_checker_wrapper.py",
-    "//testing/scripts/common.py",
-    "//testing/xvfb.py",
+    "${public_android_sdk_build_tools}/aapt2",
+    "${public_android_sdk_build_tools}/dexdump",
+  ]
+  data_deps = [
+    "//build/android:devil_chromium_py",
+
+    # Depending on logdog_wrapper here is a hack to allow all isolated scripts
+    # to be wrapped, otherwise some python dependencies are missing, since
+    # this target doesn't depend on test_runner_py like others
+    "//build/android:logdog_wrapper_py",
+    "//testing:run_isolated_script_test",
   ]
 }

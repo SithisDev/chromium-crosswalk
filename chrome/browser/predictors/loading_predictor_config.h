@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,8 +47,17 @@ enum class HintOrigin {
   // preconnect is initiated. Preconnect triggered by
   // OMNIBOX_PRERENDER_FALLBACK may be handled differently than preconnects
   // triggered by OMNIBOX since the former are triggered at higher confidence.
-  OMNIBOX_PRERENDER_FALLBACK
+  OMNIBOX_PRERENDER_FALLBACK,
+
+  // Triggered by optimization guide.
+  OPTIMIZATION_GUIDE,
 };
+
+// Gets the string that can be used to record histograms for the hint origin.
+//
+// Keep in sync with LoadingPredictorHintOrigin in histograms.xml. Will DCHECK
+// if an origin is added that is not listed in histograms.xml.
+std::string GetStringNameForHintOrigin(HintOrigin hint_origin);
 
 // Represents the config for the Loading predictor.
 struct LoadingPredictorConfig {
@@ -56,8 +65,6 @@ struct LoadingPredictorConfig {
   LoadingPredictorConfig();
   LoadingPredictorConfig(const LoadingPredictorConfig& other);
   ~LoadingPredictorConfig();
-
-  bool IsSmallDBEnabledForTest() const;
 
   // If a navigation hasn't seen a load complete event in this much time, it
   // is considered abandoned.

@@ -1,22 +1,29 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/chromeos/internet_config_dialog.h"
 
+#include "ash/public/cpp/network_config_service.h"
 #include "base/json/json_writer.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chromeos/network_element_localized_strings_provider.h"
+#include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/network/network_handler.h"
-#include "chromeos/network/network_state.h"
-#include "chromeos/network/network_state_handler.h"
-#include "chromeos/network/network_util.h"
+#include "chrome/grit/internet_config_dialog_resources.h"
+#include "chrome/grit/internet_config_dialog_resources_map.h"
+#include "chromeos/ash/components/network/network_handler.h"
+#include "chromeos/ash/components/network/network_state.h"
+#include "chromeos/ash/components/network/network_state_handler.h"
+#include "chromeos/ash/components/network/network_util.h"
+#include "chromeos/services/network_config/public/mojom/cros_network_config.mojom.h"  // nogncheck
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "ui/chromeos/strings/grit/ui_chromeos_strings.h"
+#include "ui/chromeos/strings/network_element_localized_strings_provider.h"
+#include "ui/wm/core/shadow_types.h"
 
 namespace chromeos {
 
@@ -28,10 +35,10 @@ constexpr int kDialogHeightPasswordOnly = 365;
 
 void AddInternetStrings(content::WebUIDataSource* html_source) {
   // Add default strings first.
-  chromeos::network_element::AddLocalizedStrings(html_source);
-  chromeos::network_element::AddOncLocalizedStrings(html_source);
-  chromeos::network_element::AddConfigLocalizedStrings(html_source);
-  chromeos::network_element::AddErrorLocalizedStrings(html_source);
+  ui::network_element::AddLocalizedStrings(html_source);
+  ui::network_element::AddOncLocalizedStrings(html_source);
+  ui::network_element::AddConfigLocalizedStrings(html_source);
+  ui::network_element::AddErrorLocalizedStrings(html_source);
   // Add additional strings and overrides needed by the dialog.
   struct {
     const char* name;
@@ -60,8 +67,8 @@ std::string GetId(const std::string& network_type,
 }  // namespace
 
 // static
-void InternetConfigDialog::ShowDialogForNetworkId(
-    const std::string& network_id) {
+void InternetConfigDialog::ShowDialogForNetworkId(const std::string& network_id,
+                                                  gfx::NativeWindow parent) {
   const NetworkState* network_state =
       NetworkHandler::Get()->network_state_handler()->GetNetworkStateFromGuid(
           network_id);
@@ -80,12 +87,13 @@ void InternetConfigDialog::ShowDialogForNetworkId(
 
   InternetConfigDialog* dialog =
       new InternetConfigDialog(id, network_type, network_id);
-  dialog->ShowSystemDialog();
+  dialog->ShowSystemDialog(parent);
 }
 
 // static
 void InternetConfigDialog::ShowDialogForNetworkType(
-    const std::string& network_type) {
+    const std::string& network_type,
+    gfx::NativeWindow parent) {
   std::string id = GetId(network_type, "");
   auto* instance = SystemWebDialogDelegate::FindInstance(id);
   if (instance) {
@@ -94,14 +102,14 @@ void InternetConfigDialog::ShowDialogForNetworkType(
   }
 
   InternetConfigDialog* dialog = new InternetConfigDialog(id, network_type, "");
-  dialog->ShowSystemDialog();
+  dialog->ShowSystemDialog(parent);
 }
 
 InternetConfigDialog::InternetConfigDialog(const std::string& dialog_id,
                                            const std::string& network_type,
                                            const std::string& network_id)
     : SystemWebDialogDelegate(GURL(chrome::kChromeUIIntenetConfigDialogURL),
-                              base::string16() /* title */),
+                              std::u16string() /* title */),
       dialog_id_(dialog_id),
       network_type_(network_type),
       network_id_(network_id) {}
@@ -110,6 +118,13 @@ InternetConfigDialog::~InternetConfigDialog() = default;
 
 const std::string& InternetConfigDialog::Id() {
   return dialog_id_;
+}
+
+void InternetConfigDialog::AdjustWidgetInitParams(
+    views::Widget::InitParams* params) {
+  params->type = views::Widget::InitParams::Type::TYPE_WINDOW_FRAMELESS;
+  params->shadow_type = views::Widget::InitParams::ShadowType::kDrop;
+  params->shadow_elevation = wm::kShadowElevationActiveWindow;
 }
 
 void InternetConfigDialog::GetDialogSize(gfx::Size* size) const {
@@ -136,25 +151,33 @@ std::string InternetConfigDialog::GetDialogArgs() const {
 // InternetConfigDialogUI
 
 InternetConfigDialogUI::InternetConfigDialogUI(content::WebUI* web_ui)
-    : ui::WebDialogUI(web_ui) {
+    : ui::MojoWebDialogUI(web_ui) {
   content::WebUIDataSource* source = content::WebUIDataSource::Create(
       chrome::kChromeUIInternetConfigDialogHost);
 
+  source->DisableTrustedTypesCSP();
+
   AddInternetStrings(source);
   source->AddLocalizedString("title", IDS_SETTINGS_INTERNET_CONFIG);
-  source->SetJsonPath("strings.js");
-#if BUILDFLAG(OPTIMIZE_WEBUI)
-  source->SetDefaultResource(IDR_INTERNET_CONFIG_DIALOG_VULCANIZED_HTML);
-  source->AddResourcePath("crisper.js", IDR_INTERNET_CONFIG_DIALOG_CRISPER_JS);
-#else
-  source->SetDefaultResource(IDR_INTERNET_CONFIG_DIALOG_HTML);
-  source->AddResourcePath("internet_config_dialog.js",
-                          IDR_INTERNET_CONFIG_DIALOG_JS);
-#endif
+  source->UseStringsJs();
+
+  webui::SetupWebUIDataSource(
+      source,
+      base::make_span(kInternetConfigDialogResources,
+                      kInternetConfigDialogResourcesSize),
+      IDR_INTERNET_CONFIG_DIALOG_INTERNET_CONFIG_DIALOG_CONTAINER_HTML);
 
   content::WebUIDataSource::Add(Profile::FromWebUI(web_ui), source);
 }
 
 InternetConfigDialogUI::~InternetConfigDialogUI() {}
+
+void InternetConfigDialogUI::BindInterface(
+    mojo::PendingReceiver<chromeos::network_config::mojom::CrosNetworkConfig>
+        receiver) {
+  ash::GetNetworkConfigService(std::move(receiver));
+}
+
+WEB_UI_CONTROLLER_TYPE_IMPL(InternetConfigDialogUI)
 
 }  // namespace chromeos

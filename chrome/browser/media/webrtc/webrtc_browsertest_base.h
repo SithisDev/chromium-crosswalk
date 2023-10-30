@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "chrome/browser/media/webrtc/test_stats_dictionary.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace infobars {
 class InfoBar;
@@ -61,6 +60,9 @@ class WebRtcTestBase : public InProcessBrowserTest {
     INDIVIDUAL_STREAMS
   };
 
+  WebRtcTestBase(const WebRtcTestBase&) = delete;
+  WebRtcTestBase& operator=(const WebRtcTestBase&) = delete;
+
  protected:
   WebRtcTestBase();
   ~WebRtcTestBase() override;
@@ -90,6 +92,9 @@ class WebRtcTestBase : public InProcessBrowserTest {
       content::WebContents* tab_contents) const;
   void GetUserMedia(content::WebContents* tab_contents,
                     const std::string& constraints) const;
+  void GetUserMediaReturnsFalseIfWaitIsTooLong(
+      content::WebContents* tab_contents,
+      const std::string& constraints) const;
 
   // Convenience method which opens the page at url, calls GetUserMediaAndAccept
   // and returns the new tab.
@@ -115,6 +120,10 @@ class WebRtcTestBase : public InProcessBrowserTest {
 
   std::string ExecuteJavascript(const std::string& javascript,
                                 content::WebContents* tab_contents) const;
+
+  // TODO(https://crbug.com/1004239): Remove this function as soon as browser
+  // tests stop relying on the legacy getStats() API.
+  void ChangeToLegacyGetStats(content::WebContents* tab) const;
 
   // Sets up a peer connection in the tab and adds the current local stream
   // (which you can prepare by calling one of the GetUserMedia* methods above).
@@ -178,7 +187,23 @@ class WebRtcTestBase : public InProcessBrowserTest {
   // make that work). Looks at a 320x240 area of the target video tag.
   void StartDetectingVideo(content::WebContents* tab_contents,
                            const std::string& video_element) const;
+
+  // Wait for a video to start/stop playing. StartDetectingVideo must have
+  // been called already.
   bool WaitForVideoToPlay(content::WebContents* tab_contents) const;
+  bool WaitForVideoToStop(content::WebContents* tab_contents) const;
+
+  // Methods for detecting video frames supplied to a video element. Relies on
+  // chrome/test/data/webrtc/video_frame_detector.js and dependencies loaded.
+  void EnableVideoFrameCallbacks(content::WebContents* tab_contents,
+                                 const std::string& video_element) const;
+  // Returns the current number of frame callback invocations which is expected
+  // to increase provided StartDetectingVideoFrames was called for a video
+  // element, and video frames are being supplied.
+  // If StartDetectingVideoFrames hasn't been called, the method returns 0.
+  // If the string retrieved from Javascript isn't convertible to int, -1 is
+  // returned.
+  int GetNumVideoFrameCallbacks(content::WebContents* tab_contents) const;
 
   // Returns the stream size as a string on the format <width>x<height>.
   std::string GetStreamSize(content::WebContents* tab_contents,
@@ -222,7 +247,7 @@ class WebRtcTestBase : public InProcessBrowserTest {
   // Try to open a dekstop media stream, and return the stream id.
   // On failure, will return empty string.
   std::string GetDesktopMediaStream(content::WebContents* tab);
-  base::Optional<std::string> LoadDesktopCaptureExtension();
+  absl::optional<std::string> LoadDesktopCaptureExtension();
 
  private:
   void CloseInfoBarInTab(content::WebContents* tab_contents,
@@ -246,8 +271,6 @@ class WebRtcTestBase : public InProcessBrowserTest {
 
   bool detect_errors_in_javascript_;
   scoped_refptr<const extensions::Extension> desktop_capture_extension_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebRtcTestBase);
 };
 
 #endif  // CHROME_BROWSER_MEDIA_WEBRTC_WEBRTC_BROWSERTEST_BASE_H_

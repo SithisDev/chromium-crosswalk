@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace vr {
 
@@ -46,6 +46,9 @@ class UiPixelTest : public testing::Test {
   GLuint content_overlay_texture_ = 0;
   gfx::Size frame_buffer_size_;
   std::unique_ptr<UiInterface> ui_;
+
+  // Indicates if the test is running on a supported OS level.
+  bool os_supported_ = true;
 };
 
 }  // namespace vr

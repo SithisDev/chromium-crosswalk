@@ -1,22 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/browser/api/declarative/rules_registry_service.h"
 
 #include <stddef.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/version_info/channel.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_task_traits.h"
-#include "content/public/test/test_browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/api/declarative/test_rules_registry.h"
 #include "extensions/browser/api/declarative_webrequest/webrequest_constants.h"
 #include "extensions/common/api/declarative/declarative_constants.h"
@@ -35,7 +36,7 @@ void InsertRule(scoped_refptr<extensions::RulesRegistry> registry,
                 const std::string& id) {
   std::vector<extensions::api::events::Rule> add_rules;
   add_rules.emplace_back();
-  add_rules[0].id.reset(new std::string(id));
+  add_rules[0].id = id;
   std::string error = registry->AddRules(kExtensionId, std::move(add_rules));
   EXPECT_TRUE(error.empty());
 }
@@ -63,11 +64,11 @@ class RulesRegistryServiceTest : public testing::Test {
   }
 
  protected:
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 };
 
 TEST_F(RulesRegistryServiceTest, TestConstructionAndMultiThreading) {
-  RulesRegistryService registry_service(NULL);
+  RulesRegistryService registry_service(nullptr);
 
   int key = RulesRegistryService::kDefaultRulesRegistryID;
   TestRulesRegistry* ui_registry =
@@ -85,23 +86,23 @@ TEST_F(RulesRegistryServiceTest, TestConstructionAndMultiThreading) {
   EXPECT_TRUE(registry_service.GetRulesRegistry(key, "io").get());
   EXPECT_FALSE(registry_service.GetRulesRegistry(key, "foo").get());
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&InsertRule, registry_service.GetRulesRegistry(key, "ui"),
                      "ui_task"));
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&InsertRule, registry_service.GetRulesRegistry(key, "io"),
                      "io_task"));
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&VerifyNumberOfRules,
                      registry_service.GetRulesRegistry(key, "ui"), 1));
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&VerifyNumberOfRules,
                      registry_service.GetRulesRegistry(key, "io"), 1));
 
@@ -121,13 +122,13 @@ TEST_F(RulesRegistryServiceTest, TestConstructionAndMultiThreading) {
           .Build();
   registry_service.SimulateExtensionUninstalled(extension.get());
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&VerifyNumberOfRules,
                      registry_service.GetRulesRegistry(key, "ui"), 0));
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&VerifyNumberOfRules,
                      registry_service.GetRulesRegistry(key, "io"), 0));
 
@@ -151,7 +152,7 @@ TEST_F(RulesRegistryServiceTest, DefaultRulesRegistryRegistered) {
 
     ASSERT_EQ(test_case.expect_api_enabled,
               FeatureProvider::GetAPIFeature("declarativeWebRequest")
-                  ->IsAvailableToEnvironment()
+                  ->IsAvailableToEnvironment(kUnspecifiedContextId)
                   .is_available());
 
     TestingProfile profile;

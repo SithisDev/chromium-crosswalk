@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/callback.h"
+#include "base/files/file_path.h"
 #include "base/sequence_checker.h"
-#include "base/strings/string16.h"
-
-// This is kept in the base class for now to provide access to mojom enums which
-// will be used in all classes.
-#include "components/chrome_cleaner/public/interfaces/chrome_prompt.mojom.h"
+#include "components/chrome_cleaner/public/proto/chrome_prompt.pb.h"
 
 namespace chrome_cleaner {
 
@@ -42,6 +39,12 @@ class ChromePromptIPC {
     virtual void OnConnectionClosedAfterDone() = 0;
   };
 
+  // If legacy Mojo IPC is in use this callback will be invoked by
+  // mojom::ChromePrompt::PromptUserCallback. Otherwise it will be invoked when
+  // a PromptUserResponse proto is received.
+  using PromptUserCallback =
+      base::OnceCallback<void(PromptUserResponse::PromptAcceptance)>;
+
   // Sets |error_handler| as the connection error handler and completes whatever
   // initialization that needs to be done separately from construction. This
   // object doesn't own the error handler pointer.
@@ -54,21 +57,9 @@ class ChromePromptIPC {
   // response on the right thread.
   virtual void PostPromptUserTask(
       const std::vector<base::FilePath>& files_to_delete,
-      const std::vector<base::string16>& registry_keys,
-      const std::vector<base::string16>& extension_ids,
-      mojom::ChromePrompt::PromptUserCallback callback) = 0;
-
-  // Posts a PromptDisableExtensions() task to the IPC controller's thread.
-  // Internal state must be State::kDoneInteraction when the posted task runs.
-  virtual void PostDisableExtensionsTask(
-      const std::vector<base::string16>& extension_ids,
-      mojom::ChromePrompt::DisableExtensionsCallback callback) = 0;
-
-  // Calls |delete_allowed_callback| if the IPC version supports deleting
-  // extensions, |delete_not_allowed_callback| otherwise.
-  virtual void TryDeleteExtensions(
-      base::OnceClosure delete_allowed_callback,
-      base::OnceClosure delete_not_allowed_callback) = 0;
+      const std::vector<std::wstring>& registry_keys,
+      const std::vector<std::wstring>& extension_ids,
+      PromptUserCallback callback) = 0;
 
  protected:
   virtual ~ChromePromptIPC();

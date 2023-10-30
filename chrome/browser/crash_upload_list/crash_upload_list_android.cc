@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/metrics/histogram_macros_local.h"
-#include "chrome/android/chrome_jni_headers/MinidumpUploadService_jni.h"
+#include "chrome/android/chrome_jni_headers/MinidumpUploadServiceImpl_jni.h"
 #include "ui/base/text/bytes_formatting.h"
 
 namespace {
@@ -48,20 +48,24 @@ CrashUploadListAndroid::~CrashUploadListAndroid() {}
 // static
 bool CrashUploadListAndroid::BrowserCrashMetricsInitialized() {
   JNIEnv* env = base::android::AttachCurrentThread();
-  return Java_MinidumpUploadService_browserCrashMetricsInitialized(env);
+  return Java_MinidumpUploadServiceImpl_browserCrashMetricsInitialized(env);
 }
 
 // static
 bool CrashUploadListAndroid::DidBrowserCrashRecently() {
   JNIEnv* env = base::android::AttachCurrentThread();
-  return Java_MinidumpUploadService_didBrowserCrashRecently(env);
+  return Java_MinidumpUploadServiceImpl_didBrowserCrashRecently(env);
 }
 
 std::vector<UploadList::UploadInfo> CrashUploadListAndroid::LoadUploadList() {
-  // First load the list of successfully uploaded logs.
-  std::vector<UploadInfo> uploads = TextLogUploadList::LoadUploadList();
-  // Then load the unsuccessful uploads.
+  std::vector<UploadInfo> uploads;
   LoadUnsuccessfulUploadList(&uploads);
+
+  std::vector<UploadInfo> complete_uploads =
+      TextLogUploadList::LoadUploadList();
+  for (auto info : complete_uploads) {
+    uploads.push_back(info);
+  }
   return uploads;
 }
 
@@ -69,7 +73,7 @@ void CrashUploadListAndroid::RequestSingleUpload(const std::string& local_id) {
   JNIEnv* env = base::android::AttachCurrentThread();
   base::android::ScopedJavaLocalRef<jstring> j_local_id =
       base::android::ConvertUTF8ToJavaString(env, local_id);
-  Java_MinidumpUploadService_tryUploadCrashDumpWithLocalId(env, j_local_id);
+  Java_MinidumpUploadServiceImpl_tryUploadCrashDumpWithLocalId(env, j_local_id);
 }
 
 void CrashUploadListAndroid::LoadUnsuccessfulUploadList(

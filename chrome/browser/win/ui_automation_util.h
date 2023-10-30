@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,11 +17,10 @@
 #include <string>
 #include <vector>
 
-#include "base/strings/string16.h"
 
 // Returns a cached BSTR property of |element|.
-base::string16 GetCachedBstrValue(IUIAutomationElement* element,
-                                  PROPERTYID property_id);
+std::wstring GetCachedBstrValue(IUIAutomationElement* element,
+                                PROPERTYID property_id);
 
 // Debug utilities. They are not used in release builds to avoid adding a lot of
 // unnecessary strings into executable. If DCHECK are disabled, these are dummy

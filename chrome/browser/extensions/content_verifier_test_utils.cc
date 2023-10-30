@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/containers/contains.h"
 #include "base/run_loop.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/external_install_info.h"
@@ -27,22 +28,31 @@ DownloaderTestDelegate::~DownloaderTestDelegate() {}
 void DownloaderTestDelegate::AddResponse(const ExtensionId& extension_id,
                                          const std::string& version_string,
                                          const base::FilePath& crx_path) {
-  responses_[extension_id] = std::make_pair(version_string, crx_path);
+  responses_[extension_id] =
+      std::make_pair(base::Version(version_string), crx_path);
 }
 
-const std::vector<std::unique_ptr<ManifestFetchData>>&
-DownloaderTestDelegate::requests() {
+const std::vector<ExtensionDownloaderTask>& DownloaderTestDelegate::requests() {
   return requests_;
 }
 
 void DownloaderTestDelegate::StartUpdateCheck(
     ExtensionDownloader* downloader,
     ExtensionDownloaderDelegate* delegate,
-    std::unique_ptr<ManifestFetchData> fetch_data) {
-  requests_.push_back(std::move(fetch_data));
-  const ManifestFetchData* data = requests_.back().get();
-  for (const auto& id : data->extension_ids()) {
+    std::vector<ExtensionDownloaderTask> tasks) {
+  ExtensionIdSet extension_ids;
+  std::set<int> request_ids;
+  for (ExtensionDownloaderTask& task : tasks) {
+    extension_ids.insert(task.id);
+    request_ids.insert(task.request_id);
+  }
+  for (ExtensionDownloaderTask& task : tasks)
+    requests_.push_back(std::move(task));
+  for (const auto& id : extension_ids) {
     if (base::Contains(responses_, id)) {
+      CRXFileInfo crx_info(responses_[id].second, GetTestVerifierFormat());
+      crx_info.extension_id = id;
+      crx_info.expected_version = responses_[id].first;
       // We use PostTask here instead of calling OnExtensionDownloadFinished
       // immeditately, because the calling code isn't expecting a synchronous
       // response (in non-test situations there are at least 2 network
@@ -51,10 +61,9 @@ void DownloaderTestDelegate::StartUpdateCheck(
           FROM_HERE,
           base::BindOnce(
               &ExtensionDownloaderDelegate::OnExtensionDownloadFinished,
-              base::Unretained(delegate),
-              CRXFileInfo(id, GetTestVerifierFormat(), responses_[id].second),
-              false /* pass_file_ownership */, GURL(), responses_[id].first,
-              ExtensionDownloaderDelegate::PingResult(), data->request_ids(),
+              base::Unretained(delegate), crx_info,
+              false /* pass_file_ownership */, GURL(),
+              ExtensionDownloaderDelegate::PingResult(), request_ids,
               ExtensionDownloaderDelegate::InstallCallback()));
     }
   }
@@ -68,23 +77,23 @@ std::string ForceInstallProvider::GetDebugPolicyProviderName() const {
 }
 
 bool ForceInstallProvider::UserMayModifySettings(const Extension* extension,
-                                                 base::string16* error) const {
+                                                 std::u16string* error) const {
   return extension->id() != id_;
 }
 
 bool ForceInstallProvider::MustRemainEnabled(const Extension* extension,
-                                             base::string16* error) const {
+                                             std::u16string* error) const {
   return extension->id() == id_;
 }
 
 DelayTracker::DelayTracker()
     : action_(base::BindRepeating(&DelayTracker::ReinstallAction,
                                   base::Unretained(this))) {
-  PolicyExtensionReinstaller::set_policy_reinstall_action_for_test(&action_);
+  CorruptedExtensionReinstaller::set_reinstall_action_for_test(&action_);
 }
 
 DelayTracker::~DelayTracker() {
-  PolicyExtensionReinstaller::set_policy_reinstall_action_for_test(nullptr);
+  CorruptedExtensionReinstaller::set_reinstall_action_for_test(nullptr);
 }
 
 const std::vector<base::TimeDelta>& DelayTracker::calls() {
@@ -107,7 +116,7 @@ void DelayTracker::Proceed() {
 }
 
 void DelayTracker::StopWatching() {
-  PolicyExtensionReinstaller::set_policy_reinstall_action_for_test(nullptr);
+  CorruptedExtensionReinstaller::set_reinstall_action_for_test(nullptr);
 }
 
 }  // namespace content_verifier_test

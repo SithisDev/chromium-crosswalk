@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,6 @@
 #include "components/sync_sessions/synced_window_delegate.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
-
-using content::NavigationEntry;
 
 namespace browser_sync {
 namespace {
@@ -33,9 +31,9 @@ SessionID SessionIdFromAndroidId(int android_tab_id) {
 }  // namespace
 
 SyncedTabDelegateAndroid::SyncedTabDelegateAndroid(TabAndroid* tab_android)
-    : tab_android_(tab_android), source_tab_id_(SessionID::InvalidValue()) {}
+    : tab_android_(tab_android) {}
 
-SyncedTabDelegateAndroid::~SyncedTabDelegateAndroid() {}
+SyncedTabDelegateAndroid::~SyncedTabDelegateAndroid() = default;
 
 SessionID SyncedTabDelegateAndroid::GetWindowId() const {
   return tab_android_->window_id();
@@ -45,20 +43,13 @@ SessionID SyncedTabDelegateAndroid::GetSessionId() const {
   return SessionIdFromAndroidId(tab_android_->GetAndroidId());
 }
 
-SessionID SyncedTabDelegateAndroid::GetSourceTabID() const {
-  return source_tab_id_;
-}
-
 bool SyncedTabDelegateAndroid::IsPlaceholderTab() const {
   return web_contents() == nullptr;
 }
 
 void SyncedTabDelegateAndroid::SetWebContents(
-    content::WebContents* web_contents,
-    int source_tab_android_id) {
+    content::WebContents* web_contents) {
   TabContentsSyncedTabDelegate::SetWebContents(web_contents);
-
-  source_tab_id_ = SessionIdFromAndroidId(source_tab_android_id);
 }
 
 void SyncedTabDelegateAndroid::ResetWebContents() {

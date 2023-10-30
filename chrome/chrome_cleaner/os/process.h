@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,10 @@
 #include <windows.h>
 
 #include <set>
+#include <string>
 
 #include "base/process/process_metrics_iocounters.h"
-#include "base/strings/string16.h"
+#include "base/time/time.h"
 
 namespace chrome_cleaner {
 
@@ -31,12 +32,12 @@ struct SystemResourceUsage {
 // The function might not work when enumerating modules of x64 process from a
 // x86 process.
 bool GetLoadedModuleFileNames(HANDLE process,
-                              std::set<base::string16>* module_names);
+                              std::set<std::wstring>* module_names);
 
 // Retrieve process executable module in win32 path format.
 // Provided handle must have PROCESS_QUERY_LIMITED_INFORMATION or
 // PROCESS_QUERY_INFORMATION access right.
-bool GetProcessExecutablePath(HANDLE process, base::string16* path);
+bool GetProcessExecutablePath(HANDLE process, std::wstring* path);
 
 // Retrieves system resource usage stats for the given process.
 // Provided handle must have PROCESS_QUERY_LIMITED_INFORMATION or

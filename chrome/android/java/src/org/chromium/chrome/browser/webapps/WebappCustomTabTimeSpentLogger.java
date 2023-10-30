@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,12 +42,6 @@ public class WebappCustomTabTimeSpentLogger {
         String umaSuffix;
         // TODO(peconn): Combine this with TrustedWebActivityOpenTimeRecorder.
         switch (mActivityType) {
-            case LaunchSourceType.WEBAPP:
-                umaSuffix = ".Webapp";
-                break;
-            case LaunchSourceType.WEBAPK:
-                umaSuffix = ".WebApk";
-                break;
             case LaunchSourceType.MEDIA_LAUNCHER_ACTIVITY:
                 umaSuffix = ".MediaLauncherActivity";
                 break;

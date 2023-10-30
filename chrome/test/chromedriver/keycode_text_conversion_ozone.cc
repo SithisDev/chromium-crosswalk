@@ -1,8 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/strings/string16.h"
+#include <memory>
+#include <string>
+
 #include "base/strings/utf_string_conversion_utils.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/test/chromedriver/chrome/ui_events.h"
@@ -11,10 +13,15 @@
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
-#include "ui/events/ozone/layout/keyboard_layout_engine.h"
-#include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
+#include "ui/events/ozone/layout/stub/stub_keyboard_layout_engine.h"
+#include "ui/ozone/buildflags.h"
 
-#if defined(USE_X11)
+#if defined(USE_OZONE)
+#include "ui/base/ui_base_features.h"
+#include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
+#endif
+
+#if BUILDFLAG(OZONE_PLATFORM_X11)
 bool ConvertKeyCodeToTextOzone
 #else
 bool ConvertKeyCodeToText
@@ -25,6 +32,12 @@ bool ConvertKeyCodeToText
      std::string* error_msg) {
   ui::KeyboardLayoutEngine* keyboard_layout_engine =
       ui::KeyboardLayoutEngineManager::GetKeyboardLayoutEngine();
+
+  std::unique_ptr<ui::StubKeyboardLayoutEngine> stub_layout_engine;
+  if (!keyboard_layout_engine) {
+    stub_layout_engine = std::make_unique<ui::StubKeyboardLayoutEngine>();
+    keyboard_layout_engine = stub_layout_engine.get();
+  }
   ui::DomCode dom_code = ui::UsLayoutKeyboardCodeToDomCode(key_code);
   int event_flags = ui::EF_NONE;
 
@@ -53,18 +66,16 @@ bool ConvertKeyCodeToText
   return true;
 }
 
-#if defined(USE_X11)
+#if BUILDFLAG(OZONE_PLATFORM_X11)
 bool ConvertCharToKeyCodeOzone
 #else
 bool ConvertCharToKeyCode
 #endif
-    (base::char16 key,
+    (char16_t key,
      ui::KeyboardCode* key_code,
      int* necessary_modifiers,
      std::string* error_msg) {
-  base::string16 key_string;
-  key_string.push_back(key);
-  std::string key_string_utf8 = base::UTF16ToUTF8(key_string);
+  std::string key_string_utf8 = base::UTF16ToUTF8(std::u16string(1, key));
   bool found_code = false;
   *error_msg = std::string();
   // There doesn't seem to be a way to get a CrOS key code for a given unicode

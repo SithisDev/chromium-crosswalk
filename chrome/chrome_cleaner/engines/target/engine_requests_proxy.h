@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,18 @@
 
 #include <windows.h>
 
+#include <string>
 #include <vector>
 
 #include "base/memory/ref_counted.h"
 #include "base/process/process_handle.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/chrome_cleaner/engines/target/sandbox_request_helper.h"
 #include "chrome/chrome_cleaner/mojom/engine_requests.mojom.h"
 #include "chrome/chrome_cleaner/os/task_scheduler.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 
 namespace chrome_cleaner {
 
@@ -24,14 +26,15 @@ namespace chrome_cleaner {
 class EngineRequestsProxy
     : public base::RefCountedThreadSafe<EngineRequestsProxy> {
  public:
-  EngineRequestsProxy(mojom::EngineRequestsAssociatedPtr engine_requests_ptr,
-                      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+  EngineRequestsProxy(
+      mojo::PendingAssociatedRemote<mojom::EngineRequests> engine_requests,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner() const {
     return task_runner_;
   }
 
-  void UnbindRequestsPtr();
+  void UnbindRequestsRemote();
 
   // Implements synchronous callbacks to be called on arbitrary threads.
   virtual uint32_t GetFileAttributes(const base::FilePath& file_path,
@@ -43,21 +46,24 @@ class EngineRequestsProxy
   virtual bool GetProcessImagePath(base::ProcessId pid,
                                    base::FilePath* image_path);
   virtual bool GetLoadedModules(base::ProcessId pid,
-                                std::vector<base::string16>* modules);
+                                std::vector<std::wstring>* modules);
   virtual bool GetProcessCommandLine(base::ProcessId pid,
-                                     base::string16* command_line);
+                                     std::wstring* command_line);
   virtual bool GetUserInfoFromSID(const SID* const sid,
                                   mojom::UserInformation* user_info);
   virtual uint32_t OpenReadOnlyRegistry(HANDLE root_key,
-                                        const base::string16& sub_key,
+                                        const std::wstring& sub_key,
                                         uint32_t dw_access,
                                         HANDLE* registry_handle);
   virtual uint32_t NtOpenReadOnlyRegistry(HANDLE root_key,
-                                          const String16EmbeddedNulls& sub_key,
+                                          const WStringEmbeddedNulls& sub_key,
                                           uint32_t dw_access,
                                           HANDLE* registry_handle);
 
  protected:
+  // Tests can subclass this create a proxy that's not bound to anything.
+  EngineRequestsProxy();
+
   virtual ~EngineRequestsProxy();
 
  private:
@@ -91,20 +97,20 @@ class EngineRequestsProxy
       mojom::EngineRequests::SandboxGetUserInfoFromSIDCallback result_callback);
   MojoCallStatus SandboxOpenReadOnlyRegistry(
       HANDLE root_key,
-      const base::string16& sub_key,
+      const std::wstring& sub_key,
       uint32_t dw_access,
       mojom::EngineRequests::SandboxOpenReadOnlyRegistryCallback
           result_callback);
   MojoCallStatus SandboxNtOpenReadOnlyRegistry(
       HANDLE root_key,
-      const String16EmbeddedNulls& sub_key,
+      const WStringEmbeddedNulls& sub_key,
       uint32_t dw_access,
       mojom::EngineRequests::SandboxNtOpenReadOnlyRegistryCallback
           result_callback);
 
   // A EngineRequests that will send the requests over the Mojo
   // connection.
-  mojom::EngineRequestsAssociatedPtr engine_requests_ptr_;
+  mojo::AssociatedRemote<mojom::EngineRequests> engine_requests_;
 
   // A task runner for the IPC thread.
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;

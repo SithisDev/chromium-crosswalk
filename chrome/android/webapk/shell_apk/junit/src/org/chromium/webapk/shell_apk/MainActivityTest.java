@@ -1,15 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.webapk.shell_apk;
 
 import android.content.Intent;
-import android.content.pm.ActivityInfo;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.os.Bundle;
 
@@ -19,13 +15,13 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
 import org.robolectric.RuntimeEnvironment;
-import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowApplication;
 
+import org.chromium.components.webapk.lib.common.WebApkMetaDataKeys;
 import org.chromium.testing.local.LocalRobolectricTestRunner;
 import org.chromium.webapk.lib.common.WebApkConstants;
-import org.chromium.webapk.lib.common.WebApkMetaDataKeys;
+import org.chromium.webapk.shell_apk.h2o.H2OMainActivity;
 import org.chromium.webapk.test.WebApkTestHelper;
 
 /** Unit tests for {@link MainActivity}.
@@ -37,13 +33,15 @@ import org.chromium.webapk.test.WebApkTestHelper;
 @RunWith(LocalRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public final class MainActivityTest {
-    private PackageManager mPackageManager;
     private static final String BROWSER_PACKAGE_NAME = "com.android.chrome";
+
+    private PackageManager mPackageManager;
+    private TestBrowserInstaller mBrowserInstaller = new TestBrowserInstaller();
 
     @Before
     public void setUp() {
         mPackageManager = RuntimeEnvironment.application.getPackageManager();
-        installBrowser(BROWSER_PACKAGE_NAME);
+        mBrowserInstaller.installModernBrowser(BROWSER_PACKAGE_NAME);
     }
 
     /**
@@ -67,7 +65,7 @@ public final class MainActivityTest {
                 WebApkUtilsTest.WEBAPK_PACKAGE_NAME, bundle, null /* shareTargetMetaData */);
 
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(intentStartUrl));
-        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
+        Robolectric.buildActivity(H2OMainActivity.class, launchIntent).create();
 
         Intent startedActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
         assertWebApkLaunched(startedActivityIntent, expectedStartUrl);
@@ -94,7 +92,7 @@ public final class MainActivityTest {
                 WebApkUtilsTest.WEBAPK_PACKAGE_NAME, bundle, null /* shareTargetMetaData */);
 
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(intentStartUrl));
-        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
+        Robolectric.buildActivity(H2OMainActivity.class, launchIntent).create();
 
         Intent startedActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
         assertWebApkLaunched(startedActivityIntent, expectedStartUrl);
@@ -121,7 +119,7 @@ public final class MainActivityTest {
                 WebApkUtilsTest.WEBAPK_PACKAGE_NAME, bundle, null /* shareTargetMetaData */);
 
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(intentStartUrl));
-        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
+        Robolectric.buildActivity(H2OMainActivity.class, launchIntent).create();
 
         Intent startedActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
         assertWebApkLaunched(startedActivityIntent, expectedStartUrl);
@@ -147,7 +145,7 @@ public final class MainActivityTest {
                 WebApkUtilsTest.WEBAPK_PACKAGE_NAME, bundle, null /* shareTargetMetaData */);
 
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(intentStartUrl));
-        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
+        Robolectric.buildActivity(H2OMainActivity.class, launchIntent).create();
 
         Intent startedActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
         assertWebApkLaunched(startedActivityIntent, intentStartUrl);
@@ -176,10 +174,36 @@ public final class MainActivityTest {
                 WebApkUtilsTest.WEBAPK_PACKAGE_NAME, bundle, null /* shareTargetMetaData */);
 
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(intentStartUrl));
-        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
+        Robolectric.buildActivity(H2OMainActivity.class, launchIntent).create();
 
         Intent startedActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
         assertWebApkLaunched(startedActivityIntent, expectedStartUrl);
+    }
+
+    /**
+     * Tests that if the only installed browser does not support WebAPKs that the browser is
+     * launched in tabbed mode.
+     */
+    @Test
+    public void testShouldLaunchInTabNonChromeBrowser() throws Exception {
+        final String nonChromeBrowserPackageName = "com.crazy.browser";
+        mBrowserInstaller.setInstalledBrowserWithVersion(
+                nonChromeBrowserPackageName, "10000.0.000.0");
+
+        final String startUrl = "https://www.google.com/";
+
+        Bundle bundle = new Bundle();
+        bundle.putString(WebApkMetaDataKeys.START_URL, startUrl);
+        bundle.putString(WebApkMetaDataKeys.SCOPE, startUrl);
+        // Unbound WebAPK, no runtime host.
+        WebApkTestHelper.registerWebApkWithMetaData(
+                WebApkUtilsTest.WEBAPK_PACKAGE_NAME, bundle, null /* shareTargetMetaData */);
+
+        Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(startUrl));
+        Robolectric.buildActivity(H2OMainActivity.class, launchIntent).create();
+
+        Intent startedActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
+        assertTabbedBrowserLaunched(startedActivityIntent, nonChromeBrowserPackageName, startUrl);
     }
 
     /**
@@ -188,8 +212,9 @@ public final class MainActivityTest {
      */
     @Test
     public void testShouldLaunchInTabWhenChromeVersionIsTooLow() throws Exception {
+        mBrowserInstaller.setInstalledBrowserWithVersion(BROWSER_PACKAGE_NAME, "56.0.000.0");
+
         final String startUrl = "https://www.google.com/";
-        final String oldVersionName = "56.0.000.0";
 
         Bundle bundle = new Bundle();
         bundle.putString(WebApkMetaDataKeys.START_URL, startUrl);
@@ -198,15 +223,11 @@ public final class MainActivityTest {
         WebApkTestHelper.registerWebApkWithMetaData(
                 WebApkUtilsTest.WEBAPK_PACKAGE_NAME, bundle, null /* shareTargetMetaData */);
 
-        mPackageManager.getPackageInfo(BROWSER_PACKAGE_NAME, 0).versionName = oldVersionName;
-
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(startUrl));
-        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
+        Robolectric.buildActivity(H2OMainActivity.class, launchIntent).create();
 
         Intent startedActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
-        Assert.assertEquals(BROWSER_PACKAGE_NAME, startedActivityIntent.getPackage());
-        Assert.assertEquals(Intent.ACTION_VIEW, startedActivityIntent.getAction());
-        Assert.assertEquals(startUrl, startedActivityIntent.getDataString());
+        assertTabbedBrowserLaunched(startedActivityIntent, BROWSER_PACKAGE_NAME, startUrl);
     }
 
     /**
@@ -215,8 +236,9 @@ public final class MainActivityTest {
      */
     @Test
     public void testShouldNotLaunchInTabWithNewVersionOfChrome() throws Exception {
+        mBrowserInstaller.setInstalledBrowserWithVersion(BROWSER_PACKAGE_NAME, "57.0.000.0");
+
         final String startUrl = "https://www.google.com/";
-        final String newVersionName = "57.0.000.0";
 
         Bundle bundle = new Bundle();
         bundle.putString(WebApkMetaDataKeys.START_URL, startUrl);
@@ -225,10 +247,8 @@ public final class MainActivityTest {
         WebApkTestHelper.registerWebApkWithMetaData(
                 WebApkUtilsTest.WEBAPK_PACKAGE_NAME, bundle, null /* shareTargetMetaData */);
 
-        mPackageManager.getPackageInfo(BROWSER_PACKAGE_NAME, 0).versionName = newVersionName;
-
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(startUrl));
-        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
+        Robolectric.buildActivity(H2OMainActivity.class, launchIntent).create();
 
         Intent startedActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
         assertWebApkLaunched(startedActivityIntent, startUrl);
@@ -239,7 +259,7 @@ public final class MainActivityTest {
      * launch intent are in fact propagated.
      */
     @Test
-    public void testPropagatedDeepLinkExtras() throws Exception {
+    public void testPropagatedDeepLinkExtras() {
         final String startUrl = "https://www.google.com/";
 
         Bundle extrasToPropagate = new Bundle();
@@ -260,7 +280,7 @@ public final class MainActivityTest {
 
         Intent launchIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(startUrl));
         launchIntent.putExtras((Bundle) extrasToPropagate.clone());
-        Robolectric.buildActivity(MainActivity.class, launchIntent).create();
+        Robolectric.buildActivity(H2OMainActivity.class, launchIntent).create();
 
         Intent startedActivityIntent = ShadowApplication.getInstance().getNextStartedActivity();
         assertWebApkLaunched(startedActivityIntent, startUrl);
@@ -272,6 +292,17 @@ public final class MainActivityTest {
     }
 
     /**
+     * Asserts that the passed-in intent is an intent to launch the passed-in browser package in
+     * tabbed mode.
+     */
+    private void assertTabbedBrowserLaunched(
+            Intent intent, String browserPackageName, String expectedStartUrl) {
+        Assert.assertEquals(browserPackageName, intent.getPackage());
+        Assert.assertEquals(Intent.ACTION_VIEW, intent.getAction());
+        Assert.assertEquals(expectedStartUrl, intent.getDataString());
+    }
+
+    /**
      * Asserts that the passed in intent is an intent to launch {@link BROWSER_PACKAGE_NAME} in
      * WebAPK mode.
      */
@@ -279,30 +310,5 @@ public final class MainActivityTest {
         Assert.assertEquals(BROWSER_PACKAGE_NAME, intent.getPackage());
         Assert.assertEquals(HostBrowserLauncher.ACTION_START_WEBAPK, intent.getAction());
         Assert.assertEquals(expectedStartUrl, intent.getStringExtra(WebApkConstants.EXTRA_URL));
-    }
-
-    private void installBrowser(String browserPackageName) {
-        Intent intent = WebApkUtils.getQueryInstalledBrowsersIntent();
-        Shadows.shadowOf(RuntimeEnvironment.application.getPackageManager())
-                .addResolveInfoForIntent(intent, newResolveInfo(browserPackageName));
-        Shadows.shadowOf(RuntimeEnvironment.application.getPackageManager())
-                .addPackage(newPackageInfo(browserPackageName));
-    }
-
-    private static ResolveInfo newResolveInfo(String packageName) {
-        ActivityInfo activityInfo = new ActivityInfo();
-        activityInfo.packageName = packageName;
-        ResolveInfo resolveInfo = new ResolveInfo();
-        resolveInfo.activityInfo = activityInfo;
-        return resolveInfo;
-    }
-
-    private static PackageInfo newPackageInfo(String packageName) {
-        PackageInfo packageInfo = new PackageInfo();
-        packageInfo.packageName = packageName;
-        packageInfo.versionName = "10000.0.0.0";
-        packageInfo.applicationInfo = new ApplicationInfo();
-        packageInfo.applicationInfo.enabled = true;
-        return packageInfo;
     }
 }

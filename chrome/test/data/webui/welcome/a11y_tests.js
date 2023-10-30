@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,11 @@ GEN_INCLUDE([
   '//chrome/test/data/webui/a11y/accessibility_test.js',
   '//chrome/test/data/webui/polymer_browser_test_base.js',
 ]);
-GEN('#include "chrome/browser/ui/webui/welcome/nux_helper.h"');
 
-OnboardingA11y = class extends PolymerTest {
+GEN('#include "chrome/browser/ui/webui/welcome/helpers.h"');
+GEN('#include "content/public/test/browser_test.h"');
+
+WelcomeA11y = class extends PolymerTest {
   /** @override */
   get browsePreload() {
     return 'chrome://welcome/';
@@ -17,16 +19,29 @@ OnboardingA11y = class extends PolymerTest {
 
   /** @override */
   get featureList() {
-    return {enabled: ['nux::kNuxOnboardingForceEnabled']};
+    return {enabled: ['welcome::kForceEnabled']};
+  }
+
+  /** @override */
+  get extraLibraries() {
+    return [
+      '//third_party/mocha/mocha.js',
+      '//chrome/test/data/webui/mocha_adapter.js',
+    ];
   }
 };
 
-AccessibilityTest.define('OnboardingA11y', {
+AccessibilityTest.define('WelcomeA11y', {
   // Must be unique within the test fixture and cannot have spaces.
-  name: 'OnboardingFlow',
+  name: 'WelcomeFlow',
 
   // Optional. Configuration for axe-core. Can be used to disable a test.
-  axeOptions: {},
+  axeOptions: {
+    'rules': {
+      // TODO(crbug.com/761461): enable after addressing flaky tests.
+      'color-contrast': {enabled: false},
+    },
+  },
 
   // Optional. Filter on failures. Use this for individual false positives.
   violationFilter: {},
@@ -37,7 +52,12 @@ AccessibilityTest.define('OnboardingA11y', {
   tests: {
     'Landing Page': function() {
       // Make sure we're in the right page.
-      assertEquals('Make Chrome your own', getDeepActiveElement().textContent);
+      assertEquals(
+          'Make Chrome your own',
+          document.body.querySelector('welcome-app')
+              .shadowRoot.querySelector('landing-view')
+              .shadowRoot.querySelector('h1')
+              .textContent);
     },
   },
 });

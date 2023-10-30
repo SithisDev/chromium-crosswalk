@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,24 +10,23 @@
 #include "base/metrics/field_trial_params.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/webstore_data_fetcher_delegate.h"
-#include "components/safe_browsing/features.h"
+#include "components/safe_browsing/core/common/features.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/browser/system_connector.h"
 #include "extensions/common/extension_urls.h"
 #include "net/base/load_flags.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_request_status.h"
-#include "services/data_decoder/public/cpp/safe_json_parser.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace {
 
 const char kInvalidWebstoreResponseError[] = "Invalid Chrome Web Store reponse";
+
+bool g_log_response_code_for_testing_ = false;
 
 }  // namespace
 
@@ -42,6 +41,11 @@ WebstoreDataFetcher::WebstoreDataFetcher(WebstoreDataFetcherDelegate* delegate,
       max_auto_retries_(0) {}
 
 WebstoreDataFetcher::~WebstoreDataFetcher() {}
+
+// static
+void WebstoreDataFetcher::SetLogResponseCodeForTesting(bool enabled) {
+  g_log_response_code_for_testing_ = enabled;
+}
 
 void WebstoreDataFetcher::Start(
     network::mojom::URLLoaderFactory* url_loader_factory) {
@@ -79,8 +83,8 @@ void WebstoreDataFetcher::Start(
 
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = webstore_data_url;
-  resource_request->load_flags =
-      net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DISABLE_CACHE;
+  resource_request->load_flags = net::LOAD_DISABLE_CACHE;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   resource_request->referrer = referrer_url_;
   resource_request->method = "GET";
   simple_url_loader_ = network::SimpleURLLoader::Create(
@@ -92,39 +96,58 @@ void WebstoreDataFetcher::Start(
         network::SimpleURLLoader::RETRY_ON_5XX |
             network::SimpleURLLoader::RETRY_ON_NETWORK_CHANGE);
   }
+
+  if (g_log_response_code_for_testing_) {
+    simple_url_loader_->SetOnResponseStartedCallback(base::BindOnce(
+        &WebstoreDataFetcher::OnResponseStarted, base::Unretained(this)));
+  }
+
   simple_url_loader_->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
       url_loader_factory,
       base::BindOnce(&WebstoreDataFetcher::OnSimpleLoaderComplete,
                      base::Unretained(this)));
 }
 
-void WebstoreDataFetcher::OnJsonParseSuccess(base::Value parsed_json) {
-  if (!parsed_json.is_dict()) {
-    OnJsonParseFailure(kInvalidWebstoreResponseError);
+void WebstoreDataFetcher::OnResponseStarted(
+    const GURL& final_url,
+    const network::mojom::URLResponseHead& response_head) {
+  if (!response_head.headers)
+    return;
+
+  int response_code = response_head.headers->response_code();
+  if (response_code != 200)
+    LOG(ERROR) << "Response_code: " << response_code;
+}
+
+void WebstoreDataFetcher::OnJsonParsed(
+    data_decoder::DataDecoder::ValueOrError result) {
+  if (!result.has_value()) {
+    delegate_->OnWebstoreResponseParseFailure(id_, result.error());
     return;
   }
 
-  delegate_->OnWebstoreResponseParseSuccess(base::DictionaryValue::From(
-      base::Value::ToUniquePtrValue(std::move(parsed_json))));
-}
+  if (!result->is_dict()) {
+    delegate_->OnWebstoreResponseParseFailure(id_,
+                                              kInvalidWebstoreResponseError);
+    return;
+  }
 
-void WebstoreDataFetcher::OnJsonParseFailure(
-    const std::string& error) {
-  delegate_->OnWebstoreResponseParseFailure(error);
+  delegate_->OnWebstoreResponseParseSuccess(
+      id_, base::DictionaryValue::From(
+               base::Value::ToUniquePtrValue(std::move(*result))));
 }
 
 void WebstoreDataFetcher::OnSimpleLoaderComplete(
     std::unique_ptr<std::string> response_body) {
   if (!response_body) {
-    delegate_->OnWebstoreRequestFailure();
+    delegate_->OnWebstoreRequestFailure(id_);
     return;
   }
 
   // The parser will call us back via one of the callbacks.
-  data_decoder::SafeJsonParser::Parse(
-      content::GetSystemConnector(), *response_body,
-      base::BindOnce(&WebstoreDataFetcher::OnJsonParseSuccess, AsWeakPtr()),
-      base::BindOnce(&WebstoreDataFetcher::OnJsonParseFailure, AsWeakPtr()));
+  data_decoder::DataDecoder::ParseJsonIsolated(
+      *response_body,
+      base::BindOnce(&WebstoreDataFetcher::OnJsonParsed, AsWeakPtr()));
 }
 
 }  // namespace extensions

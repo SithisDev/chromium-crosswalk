@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #import "chrome/browser/ui/cocoa/applescript/apple_event_util.h"
 #import "chrome/browser/ui/cocoa/applescript/error_applescript.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#import "components/bookmarks/common/bookmark_metrics.h"
 
 using bookmarks::BookmarkModel;
 using bookmarks::BookmarkNode;
@@ -21,9 +22,9 @@ using bookmarks::BookmarkNode;
 
 @implementation BookmarkItemAppleScript
 
-@synthesize tempURL = tempURL_;
+@synthesize tempURL = _tempURL;
 
-- (id)init {
+- (instancetype)init {
   if ((self = [super init])) {
     [self setTempURL:@""];
   }
@@ -31,7 +32,7 @@ using bookmarks::BookmarkNode;
 }
 
 - (void)dealloc {
-  [tempURL_ release];
+  [_tempURL release];
   [super dealloc];
 }
 
@@ -41,10 +42,10 @@ using bookmarks::BookmarkNode;
 }
 
 - (NSString*)URL {
-  if (!bookmarkNode_)
-    return tempURL_;
+  if (!_bookmarkNode)
+    return _tempURL;
 
-  return base::SysUTF8ToNSString(bookmarkNode_->url().spec());
+  return base::SysUTF8ToNSString(_bookmarkNode->url().spec());
 }
 
 - (void)setURL:(NSString*)aURL {
@@ -60,7 +61,7 @@ using bookmarks::BookmarkNode;
 
   // If a scripter sets a URL before the node is added, URL is saved at a
   // temporary location.
-  if (!bookmarkNode_) {
+  if (!_bookmarkNode) {
     [self setTempURL:aURL];
     return;
   }
@@ -74,7 +75,8 @@ using bookmarks::BookmarkNode;
     return;
   }
 
-  model->SetURL(bookmarkNode_, url);
+  model->SetURL(_bookmarkNode, url,
+                bookmarks::metrics::BookmarkEditSource::kOther);
 }
 
 @end

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,6 @@ namespace app_list {
 
 bool ShouldShowInLauncher(const extensions::Extension* extension,
                           content::BrowserContext* context);
-bool HideInLauncherById(std::string extension_id);
 
 // chrome.contextMenus API does not support menu item icons. This function
 // compensates for that by adding icons to menus for prominent system apps

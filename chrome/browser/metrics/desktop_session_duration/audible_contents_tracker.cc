@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,9 +37,8 @@ void AudibleContentsTracker::OnTabStripModelChanged(
     const TabStripModelChange& change,
     const TabStripSelectionChange& selection) {
   if (change.type() == TabStripModelChange::kRemoved) {
-    auto* remove = change.GetRemove();
-    if (remove->will_be_deleted) {
-      for (const auto& contents : remove->contents)
+    for (const auto& contents : change.GetRemove()->contents) {
+      if (contents.remove_reason == TabStripModelChange::RemoveReason::kDeleted)
         RemoveAudibleWebContents(contents.contents);
     }
   } else if (change.type() == TabStripModelChange::kReplaced) {

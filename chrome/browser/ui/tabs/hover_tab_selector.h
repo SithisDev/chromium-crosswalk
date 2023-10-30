@@ -1,11 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_TABS_HOVER_TAB_SELECTOR_H_
 #define CHROME_BROWSER_UI_TABS_HOVER_TAB_SELECTOR_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 
 class TabStripModel;
@@ -15,6 +15,8 @@ class TabStripModel;
 class HoverTabSelector {
  public:
   explicit HoverTabSelector(TabStripModel* tab_strip_model);
+  HoverTabSelector(const HoverTabSelector&) = delete;
+  HoverTabSelector& operator=(const HoverTabSelector&) = delete;
   ~HoverTabSelector();
 
   // Begin a delayed tab transition to the tab at |index|. Only starts
@@ -31,15 +33,13 @@ class HoverTabSelector {
   void PerformTabTransition();
 
   // Model of the tab strip on which this class operates.
-  TabStripModel* tab_strip_model_;
+  raw_ptr<TabStripModel> tab_strip_model_;
 
   // The model index of the tab to transition to.
   int tab_transition_tab_index_;
 
   // Factory for creating tab transition tasks.
   base::WeakPtrFactory<HoverTabSelector> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(HoverTabSelector);
 };
 
 #endif  // CHROME_BROWSER_UI_TABS_HOVER_TAB_SELECTOR_H_

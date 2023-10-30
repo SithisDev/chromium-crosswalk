@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,16 @@
 #define CHROME_BROWSER_TASK_MANAGER_SAMPLING_ARC_SHARED_SAMPLER_H_
 
 #include <stdint.h>
+
 #include <map>
 
+#include "ash/components/arc/mojom/process.mojom.h"
 #include "base/callback.h"
 #include "base/containers/flat_map.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/process/process_handle.h"
-#include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
+#include "base/time/time.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace task_manager {
 
@@ -22,12 +24,14 @@ namespace task_manager {
 class ArcSharedSampler {
  public:
   ArcSharedSampler();
+  ArcSharedSampler(const ArcSharedSampler&) = delete;
+  ArcSharedSampler& operator=(const ArcSharedSampler&) = delete;
   ~ArcSharedSampler();
 
   using MemoryFootprintBytes = uint64_t;
 
   using OnSamplingCompleteCallback =
-      base::RepeatingCallback<void(base::Optional<MemoryFootprintBytes>)>;
+      base::RepeatingCallback<void(absl::optional<MemoryFootprintBytes>)>;
 
   // Registers task group specific callback.
   void RegisterCallback(base::ProcessId process_id,
@@ -45,7 +49,7 @@ class ArcSharedSampler {
   // Called when ArcProcessService returns memory dump.
   void OnReceiveMemoryDump(
       int dump_type,
-      std::unique_ptr<memory_instrumentation::GlobalMemoryDump> dump);
+      std::vector<arc::mojom::ArcMemoryDumpPtr> process_dumps);
 
   // Holds callbacks registered by TaskGroup objects.
   CallbacksMap callbacks_;
@@ -56,12 +60,10 @@ class ArcSharedSampler {
 
   // The timestamp of when the last refresh call finished, for system and
   // app processes.
-  base::Time last_system_refresh = base::Time();
-  base::Time last_app_refresh = base::Time();
+  base::Time last_system_refresh_;
+  base::Time last_app_refresh_;
 
-  base::WeakPtrFactory<ArcSharedSampler> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ArcSharedSampler);
+  base::WeakPtrFactory<ArcSharedSampler> weak_ptr_factory_{this};
 };
 
 }  // namespace task_manager

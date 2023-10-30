@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,14 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "base/process/process_handle.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
+#include "chrome/browser/resource_coordinator/tab_manager_features.h"
 #include "chrome/browser/resource_coordinator/test_lifecycle_unit.h"
 #include "chrome/browser/resource_coordinator/time.h"
-#include "chromeos/dbus/fake_debug_daemon_client.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "chromeos/ash/components/dbus/debug_daemon/fake_debug_daemon_client.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace resource_coordinator {
@@ -28,7 +28,7 @@ class TabManagerDelegateTest : public testing::Test {
   ~TabManagerDelegateTest() override {}
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 };
 
 constexpr bool kIsFocused = true;
@@ -49,11 +49,11 @@ TEST_F(TabManagerDelegateTest, CandidatesSorted) {
 
   TestLifecycleUnit focused_lifecycle_unit(base::TimeTicks::Max());
   TestLifecycleUnit protected_lifecycle_unit(
-      base::TimeTicks() + base::TimeDelta::FromSeconds(5), 0, false);
+      base::TimeTicks() + base::Seconds(5), 0, false);
   TestLifecycleUnit non_focused_lifecycle_unit(base::TimeTicks() +
-                                               base::TimeDelta::FromSeconds(1));
-  TestLifecycleUnit other_non_focused_lifecycle_unit(
-      base::TimeTicks() + base::TimeDelta::FromSeconds(2));
+                                               base::Seconds(1));
+  TestLifecycleUnit other_non_focused_lifecycle_unit(base::TimeTicks() +
+                                                     base::Seconds(2));
   LifecycleUnitVector lifecycle_units{
       &focused_lifecycle_unit, &protected_lifecycle_unit,
       &non_focused_lifecycle_unit, &other_non_focused_lifecycle_unit};
@@ -102,69 +102,6 @@ TEST_F(TabManagerDelegateTest, CandidatesSortedWithFocusedAppAndTab) {
   // FOCUSED_TAB should be the first one.
   EXPECT_EQ(&focused_lifecycle_unit, candidates[0].lifecycle_unit());
   EXPECT_EQ("focused", candidates[1].app()->process_name());
-}
-
-// Test to make sure old process types are active when TabRanker experiment
-// is turned on.
-TEST_F(TabManagerDelegateTest, SortLifecycleUnitWithTabRanker) {
-  std::vector<arc::ArcProcess> arc_processes;
-  arc_processes.emplace_back(1, 10, "focused", arc::mojom::ProcessState::TOP,
-                             kIsFocused, 99);
-  arc_processes.emplace_back(2, 20, "visible1", arc::mojom::ProcessState::TOP,
-                             kNotFocused, 89);
-  arc_processes.emplace_back(
-      3, 30, "service", arc::mojom::ProcessState::SERVICE, kNotFocused, 95);
-
-  TestLifecycleUnit tab1(
-      base::TimeTicks() + base::TimeDelta::FromMilliseconds(100), 4);
-  TestLifecycleUnit tab2(
-      base::TimeTicks() + base::TimeDelta::FromMilliseconds(90), 5, false);
-  TestLifecycleUnit tab3(
-      base::TimeTicks() + base::TimeDelta::FromMilliseconds(80), 6);
-  LifecycleUnitVector lifecycle_units{&tab1, &tab2, &tab3};
-
-  TabManagerDelegate::OptionalArcProcessList opt_arc_processes(
-      std::move(arc_processes));
-  std::vector<TabManagerDelegate::Candidate> candidates;
-  candidates = TabManagerDelegate::GetSortedCandidates(lifecycle_units,
-                                                       opt_arc_processes);
-  // Verify the original order.
-  ASSERT_EQ(6U, candidates.size());
-
-  EXPECT_EQ("focused", candidates[0].app()->process_name());
-  EXPECT_EQ(ProcessType::FOCUSED_APP, candidates[0].process_type());
-
-  EXPECT_EQ(&tab2, candidates[1].lifecycle_unit());
-  EXPECT_EQ(ProcessType::PROTECTED_BACKGROUND, candidates[1].process_type());
-
-  EXPECT_EQ("visible1", candidates[2].app()->process_name());
-  EXPECT_EQ(ProcessType::PROTECTED_BACKGROUND, candidates[2].process_type());
-
-  EXPECT_EQ(&tab1, candidates[3].lifecycle_unit());
-  EXPECT_EQ(ProcessType::BACKGROUND, candidates[3].process_type());
-
-  EXPECT_EQ("service", candidates[4].app()->process_name());
-  EXPECT_EQ(ProcessType::BACKGROUND, candidates[4].process_type());
-
-  EXPECT_EQ(&tab3, candidates[5].lifecycle_unit());
-  EXPECT_EQ(ProcessType::BACKGROUND, candidates[5].process_type());
-
-  auto oldest_first = [](LifecycleUnitVector* lifecycle_units) {
-    std::sort(lifecycle_units->begin(), lifecycle_units->end(),
-              [](LifecycleUnit* a, LifecycleUnit* b) {
-                return a->GetLastFocusedTime() < b->GetLastFocusedTime();
-              });
-  };
-
-  // Verify the re-ranked order.
-  TabManagerDelegate::SortLifecycleUnitWithTabRanker(
-      &candidates, base::BindOnce(oldest_first));
-  EXPECT_EQ("focused", candidates[0].app()->process_name());
-  EXPECT_EQ(&tab2, candidates[1].lifecycle_unit());
-  EXPECT_EQ("visible1", candidates[2].app()->process_name());
-  EXPECT_EQ(&tab3, candidates[3].lifecycle_unit());
-  EXPECT_EQ("service", candidates[4].app()->process_name());
-  EXPECT_EQ(&tab1, candidates[5].lifecycle_unit());
 }
 
 class MockTabManagerDelegate : public TabManagerDelegate {
@@ -221,13 +158,13 @@ class MockTabManagerDelegate : public TabManagerDelegate {
 
   LifecycleUnitVector GetLifecycleUnits() override { return lifecycle_units_; }
 
-  chromeos::DebugDaemonClient* GetDebugDaemonClient() override {
+  ash::DebugDaemonClient* GetDebugDaemonClient() override {
     return &debugd_client_;
   }
 
  private:
   LifecycleUnitVector lifecycle_units_;
-  chromeos::FakeDebugDaemonClient debugd_client_;
+  ash::FakeDebugDaemonClient debugd_client_;
   std::vector<int> killed_arc_processes_;
   LifecycleUnitVector killed_tabs_;
   bool always_return_true_from_is_recently_killed_;
@@ -278,20 +215,15 @@ TEST_F(TabManagerDelegateTest, SetOomScoreAdj) {
                              arc::mojom::ProcessState::PERSISTENT_UI,
                              kNotFocused, 700);
 
-  TestLifecycleUnit tab1(base::TimeTicks() + base::TimeDelta::FromSeconds(3),
-                         11);
+  TestLifecycleUnit tab1(base::TimeTicks() + base::Seconds(3), 11);
   tab_manager_delegate.AddLifecycleUnit(&tab1);
-  TestLifecycleUnit tab2(base::TimeTicks() + base::TimeDelta::FromSeconds(1),
-                         11);
+  TestLifecycleUnit tab2(base::TimeTicks() + base::Seconds(1), 11);
   tab_manager_delegate.AddLifecycleUnit(&tab2);
-  TestLifecycleUnit tab3(base::TimeTicks() + base::TimeDelta::FromSeconds(5),
-                         12);
+  TestLifecycleUnit tab3(base::TimeTicks() + base::Seconds(5), 12);
   tab_manager_delegate.AddLifecycleUnit(&tab3);
-  TestLifecycleUnit tab4(base::TimeTicks() + base::TimeDelta::FromSeconds(4),
-                         12);
+  TestLifecycleUnit tab4(base::TimeTicks() + base::Seconds(4), 12);
   tab_manager_delegate.AddLifecycleUnit(&tab4);
-  TestLifecycleUnit tab5(base::TimeTicks() + base::TimeDelta::FromSeconds(2),
-                         12);
+  TestLifecycleUnit tab5(base::TimeTicks() + base::Seconds(2), 12);
   tab_manager_delegate.AddLifecycleUnit(&tab5);
 
   // Sorted order (by GetSortedCandidates):
@@ -354,7 +286,7 @@ TEST_F(TabManagerDelegateTest, IsRecentlyKilledArcProcess) {
   EXPECT_FALSE(
       tab_manager_delegate.IsRecentlyKilledArcProcess(kProcessName2, now));
   tab_manager_delegate.recently_killed_arc_processes_[kProcessName1] =
-      now - base::TimeDelta::FromMicroseconds(1);
+      now - base::Microseconds(1);
   EXPECT_TRUE(
       tab_manager_delegate.IsRecentlyKilledArcProcess(kProcessName1, now));
   EXPECT_FALSE(
@@ -370,8 +302,7 @@ TEST_F(TabManagerDelegateTest, IsRecentlyKilledArcProcess) {
   // (GetArcRespawnKillDelay() + 1) seconds ago. In this case,
   // IsRecentlyKilledArcProcess(kProcessName1) should return false.
   tab_manager_delegate.recently_killed_arc_processes_[kProcessName1] =
-      now - TabManagerDelegate::GetArcRespawnKillDelay() -
-      base::TimeDelta::FromSeconds(1);
+      now - TabManagerDelegate::GetArcRespawnKillDelay() - base::Seconds(1);
   EXPECT_FALSE(
       tab_manager_delegate.IsRecentlyKilledArcProcess(kProcessName1, now));
   EXPECT_FALSE(
@@ -425,20 +356,15 @@ TEST_F(TabManagerDelegateTest, KillMultipleProcesses) {
                              arc::mojom::ProcessState::PERSISTENT, kNotFocused,
                              400);
 
-  TestLifecycleUnit tab1(base::TimeTicks() + base::TimeDelta::FromSeconds(3),
-                         11);
+  TestLifecycleUnit tab1(base::TimeTicks() + base::Seconds(3), 11);
   tab_manager_delegate.AddLifecycleUnit(&tab1);
-  TestLifecycleUnit tab2(base::TimeTicks() + base::TimeDelta::FromSeconds(1),
-                         11);
+  TestLifecycleUnit tab2(base::TimeTicks() + base::Seconds(1), 11);
   tab_manager_delegate.AddLifecycleUnit(&tab2);
-  TestLifecycleUnit tab3(base::TimeTicks() + base::TimeDelta::FromSeconds(5),
-                         12);
+  TestLifecycleUnit tab3(base::TimeTicks() + base::Seconds(5), 12);
   tab_manager_delegate.AddLifecycleUnit(&tab3);
-  TestLifecycleUnit tab4(base::TimeTicks() + base::TimeDelta::FromSeconds(4),
-                         12);
+  TestLifecycleUnit tab4(base::TimeTicks() + base::Seconds(4), 12);
   tab_manager_delegate.AddLifecycleUnit(&tab4);
-  TestLifecycleUnit tab5(base::TimeTicks() + base::TimeDelta::FromSeconds(2),
-                         12);
+  TestLifecycleUnit tab5(base::TimeTicks() + base::Seconds(2), 12);
   tab_manager_delegate.AddLifecycleUnit(&tab5);
 
   // Sorted order (by GetSortedCandidates):
@@ -468,7 +394,7 @@ TEST_F(TabManagerDelegateTest, KillMultipleProcesses) {
   memory_stat->SetProcessPss(10, 100000);
 
   tab_manager_delegate.LowMemoryKillImpl(
-      base::TimeTicks::Now(), ::mojom::LifecycleUnitDiscardReason::PROACTIVE,
+      base::TimeTicks::Now(), ::mojom::LifecycleUnitDiscardReason::EXTERNAL,
       TabManager::TabDiscardDoneCB(base::DoNothing()),
       std::move(arc_processes));
 

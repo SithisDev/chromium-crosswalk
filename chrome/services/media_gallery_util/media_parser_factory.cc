@@ -1,24 +1,23 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/services/media_gallery_util/media_parser_factory.h"
 
-#include "base/allocator/buildflags.h"
 #include "build/build_config.h"
 #include "chrome/services/media_gallery_util/media_parser.h"
 #include "media/base/media.h"
 #include "media/media_buildflags.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "chrome/services/media_gallery_util/media_parser_android.h"
 #endif
 
 MediaParserFactory::MediaParserFactory(
-    std::unique_ptr<service_manager::ServiceContextRef> service_ref)
-    : service_ref_(std::move(service_ref)) {}
+    mojo::PendingReceiver<chrome::mojom::MediaParserFactory> receiver)
+    : receiver_(this, std::move(receiver)) {}
 
 MediaParserFactory::~MediaParserFactory() = default;
 
@@ -27,15 +26,16 @@ void MediaParserFactory::CreateMediaParser(int64_t libyuv_cpu_flags,
                                            CreateMediaParserCallback callback) {
   media::InitializeMediaLibraryInSandbox(libyuv_cpu_flags, libavutil_cpu_flags);
 
-  chrome::mojom::MediaParserPtr media_parser_ptr;
+  mojo::PendingRemote<chrome::mojom::MediaParser> remote_media_parser;
   std::unique_ptr<MediaParser> media_parser;
-#if defined(OS_ANDROID)
-  media_parser = std::make_unique<MediaParserAndroid>(service_ref_->Clone());
+#if BUILDFLAG(IS_ANDROID)
+  media_parser = std::make_unique<MediaParserAndroid>();
 #else
-  media_parser = std::make_unique<MediaParser>(service_ref_->Clone());
+  media_parser = std::make_unique<MediaParser>();
 #endif
-  mojo::MakeStrongBinding(std::move(media_parser),
-                          mojo::MakeRequest(&media_parser_ptr));
+  mojo::MakeSelfOwnedReceiver(
+      std::move(media_parser),
+      remote_media_parser.InitWithNewPipeAndPassReceiver());
 
-  std::move(callback).Run(std::move(media_parser_ptr));
+  std::move(callback).Run(std::move(remote_media_parser));
 }

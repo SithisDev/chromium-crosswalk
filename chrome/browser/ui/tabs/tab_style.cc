@@ -1,10 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/tabs/tab_style.h"
 
-#include "ui/base/material_design/material_design_controller.h"
+#include "ui/base/pointer/touch_ui_controller.h"
 #include "ui/views/layout/layout_provider.h"
 
 namespace {
@@ -15,7 +15,7 @@ constexpr int kSeparatorThickness = 1;
 
 // Returns the height of the separator between tabs.
 int GetSeparatorHeight() {
-  return ui::MaterialDesignController::touch_ui() ? 24 : 20;
+  return ui::TouchUiController::Get()->touch_ui() ? 24 : 20;
 }
 
 }  // namespace
@@ -32,7 +32,7 @@ int TabStyle::GetStandardWidth() {
 
 // static
 int TabStyle::GetPinnedWidth() {
-  constexpr int kTabPinnedContentWidth = 23;
+  constexpr int kTabPinnedContentWidth = 24;
   return kTabPinnedContentWidth + GetContentsHorizontalInsetSize() * 2;
 }
 
@@ -48,7 +48,7 @@ int TabStyle::GetDragHandleExtension(int height) {
 
 // static
 gfx::Insets TabStyle::GetTabInternalPadding() {
-  return gfx::Insets(0, GetCornerRadius());
+  return gfx::Insets::VH(0, GetCornerRadius());
 }
 
 // static
@@ -66,7 +66,7 @@ gfx::Size TabStyle::GetPreviewImageSize() {
 // static
 int TabStyle::GetCornerRadius() {
   return views::LayoutProvider::Get()->GetCornerRadiusMetric(
-      views::EMPHASIS_HIGH);
+      views::Emphasis::kHigh);
 }
 
 // static

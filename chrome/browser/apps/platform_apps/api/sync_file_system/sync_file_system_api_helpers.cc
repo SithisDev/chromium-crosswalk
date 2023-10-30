@@ -1,13 +1,13 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/apps/platform_apps/api/sync_file_system/sync_file_system_api_helpers.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/values.h"
-#include "storage/browser/fileapi/file_system_url.h"
-#include "storage/common/fileapi/file_system_util.h"
+#include "storage/browser/file_system/file_system_url.h"
+#include "storage/common/file_system/file_system_util.h"
 
 namespace chrome_apps {
 namespace api {
@@ -107,12 +107,12 @@ ConflictResolutionPolicyToExtensionEnum(
   return sync_file_system::CONFLICT_RESOLUTION_POLICY_NONE;
 }
 
-std::unique_ptr<base::DictionaryValue> CreateDictionaryValueForFileSystemEntry(
+absl::optional<base::Value::Dict> CreateDictionaryValueForFileSystemEntry(
     const storage::FileSystemURL& url,
     ::sync_file_system::SyncFileType file_type) {
   if (!url.is_valid() ||
       file_type == ::sync_file_system::SYNC_FILE_TYPE_UNKNOWN)
-    return nullptr;
+    return absl::nullopt;
 
   std::string file_path =
       base::FilePath(storage::VirtualPath::GetNormalizedFilePath(url.path()))
@@ -126,15 +126,15 @@ std::unique_ptr<base::DictionaryValue> CreateDictionaryValueForFileSystemEntry(
     root_url.append("/");
   }
 
-  auto dict = std::make_unique<base::DictionaryValue>();
-  dict->SetString("fileSystemType",
-                  storage::GetFileSystemTypeString(url.mount_type()));
-  dict->SetString("fileSystemName", storage::GetFileSystemName(
-                                        url.origin().GetURL(), url.type()));
-  dict->SetString("rootUrl", root_url);
-  dict->SetString("filePath", file_path);
-  dict->SetBoolean("isDirectory",
-                   (file_type == ::sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
+  base::Value::Dict dict;
+  dict.Set("fileSystemType",
+           storage::GetFileSystemTypeString(url.mount_type()));
+  dict.Set("fileSystemName",
+           storage::GetFileSystemName(url.origin().GetURL(), url.type()));
+  dict.Set("rootUrl", root_url);
+  dict.Set("filePath", file_path);
+  dict.Set("isDirectory",
+           (file_type == ::sync_file_system::SYNC_FILE_TYPE_DIRECTORY));
 
   return dict;
 }

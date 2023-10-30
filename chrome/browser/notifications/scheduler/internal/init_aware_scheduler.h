@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,13 @@
 #define CHROME_BROWSER_NOTIFICATIONS_SCHEDULER_INTERNAL_INIT_AWARE_SCHEDULER_H_
 
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "chrome/browser/notifications/scheduler/internal/notification_scheduler.h"
 #include "chrome/browser/notifications/scheduler/public/notification_scheduler_types.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace notifications {
 
@@ -27,6 +25,10 @@ class InitAwareNotificationScheduler : public NotificationScheduler {
  public:
   explicit InitAwareNotificationScheduler(
       std::unique_ptr<NotificationScheduler> impl);
+  InitAwareNotificationScheduler(const InitAwareNotificationScheduler&) =
+      delete;
+  InitAwareNotificationScheduler& operator=(
+      const InitAwareNotificationScheduler&) = delete;
   ~InitAwareNotificationScheduler() override;
 
  private:
@@ -35,17 +37,12 @@ class InitAwareNotificationScheduler : public NotificationScheduler {
   void Schedule(
       std::unique_ptr<NotificationParams> notification_params) override;
   void DeleteAllNotifications(SchedulerClientType type) override;
-  void GetImpressionDetail(
+  void GetClientOverview(
       SchedulerClientType type,
-      ImpressionDetail::ImpressionDetailCallback callback) override;
-  void OnStartTask(SchedulerTaskTime task_time,
-                   TaskFinishedCallback callback) override;
-  void OnStopTask(SchedulerTaskTime task_time) override;
-  void OnClick(SchedulerClientType type, const std::string& guid) override;
-  void OnActionClick(SchedulerClientType type,
-                     const std::string& guid,
-                     ActionButtonType button_type) override;
-  void OnDismiss(SchedulerClientType type, const std::string& guid) override;
+      ClientOverview::ClientOverviewCallback callback) override;
+  void OnStartTask(TaskFinishedCallback callback) override;
+  void OnStopTask() override;
+  void OnUserAction(const UserActionData& action_data) override;
 
   // Called after initialization is done.
   void OnInitialized(InitCallback init_callback, bool success);
@@ -59,7 +56,7 @@ class InitAwareNotificationScheduler : public NotificationScheduler {
 
   // Whether the initialization is successful. No value if initialization is not
   // finished.
-  base::Optional<bool> init_success_;
+  absl::optional<bool> init_success_;
 
   // Cached calls.
   std::vector<base::OnceClosure> cached_closures_;
@@ -68,7 +65,6 @@ class InitAwareNotificationScheduler : public NotificationScheduler {
   std::unique_ptr<NotificationScheduler> impl_;
 
   base::WeakPtrFactory<InitAwareNotificationScheduler> weak_ptr_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(InitAwareNotificationScheduler);
 };
 
 }  // namespace notifications

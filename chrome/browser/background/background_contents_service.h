@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,14 +12,15 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/scoped_observer.h"
+#include "base/observer_list.h"
+#include "base/scoped_observation.h"
+#include "base/values.h"
 #include "chrome/browser/background/background_contents.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "extensions/browser/extension_host_registry.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "net/base/backoff_entry.h"
@@ -31,7 +32,6 @@ class Profile;
 
 namespace base {
 class CommandLine;
-class DictionaryValue;
 }  // namespace base
 
 namespace content {
@@ -47,7 +47,6 @@ class Rect;
 }
 
 class BackgroundContentsServiceObserver;
-struct BackgroundContentsOpenedDetails;
 
 // BackgroundContentsService is owned by the profile, and is responsible for
 // managing the lifetime of BackgroundContents (tracking the set of background
@@ -57,13 +56,19 @@ struct BackgroundContentsOpenedDetails;
 // It is also responsible for tracking the association between
 // BackgroundContents and their parent app, and shutting them down when the
 // parent app is unloaded.
-class BackgroundContentsService : private content::NotificationObserver,
-                                  public extensions::ExtensionRegistryObserver,
-                                  public BackgroundContents::Delegate,
-                                  public KeyedService {
+class BackgroundContentsService
+    : public extensions::ExtensionRegistryObserver,
+      public extensions::ExtensionHostRegistry::Observer,
+      public BackgroundContents::Delegate,
+      public KeyedService {
  public:
   BackgroundContentsService(Profile* profile,
                             const base::CommandLine* command_line);
+
+  BackgroundContentsService(const BackgroundContentsService&) = delete;
+  BackgroundContentsService& operator=(const BackgroundContentsService&) =
+      delete;
+
   ~BackgroundContentsService() override;
 
   // Allows tests to reduce the time between a force-installed app/extension
@@ -102,13 +107,16 @@ class BackgroundContentsService : private content::NotificationObserver,
 
   // BackgroundContents::Delegate implementation.
   void AddWebContents(std::unique_ptr<content::WebContents> new_contents,
+                      const GURL& target_url,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_rect,
+                      const blink::mojom::WindowFeatures& window_features,
                       bool* was_blocked) override;
   void OnBackgroundContentsNavigated(BackgroundContents* contents) override;
   void OnBackgroundContentsTerminated(BackgroundContents* contents) override;
   void OnBackgroundContentsClosed(BackgroundContents* contents) override;
-  void OnBackgroundContentsDeleted(BackgroundContents* contents) override;
+
+  // KeyedService implementation.
+  void Shutdown() override;
 
   // Gets the parent application id for the passed BackgroundContents. Returns
   // an empty string if no parent application found (e.g. passed
@@ -116,29 +124,26 @@ class BackgroundContentsService : private content::NotificationObserver,
   const std::string& GetParentApplicationId(BackgroundContents* contents) const;
 
   // Creates a new BackgroundContents using the passed |site| and
-  // the |route_id| and begins tracking the object internally so it can be
-  // shutdown if the parent application is uninstalled.
-  // A BACKGROUND_CONTENTS_OPENED notification will be generated with the passed
-  // |frame_name| and |application_id| values, using the passed |profile| as the
-  // Source..
+  // begins tracking the object internally so it can be shutdown if the parent
+  // application is uninstalled.
+  // Observers will receive a OnBackgroundContentsOpened call.
   BackgroundContents* CreateBackgroundContents(
       scoped_refptr<content::SiteInstance> site,
       content::RenderFrameHost* opener,
-      int32_t route_id,
-      int32_t main_frame_route_id,
-      int32_t main_frame_widget_route_id,
-      Profile* profile,
+      bool is_new_browsing_instance,
       const std::string& frame_name,
       const std::string& application_id,
-      const std::string& partition_id,
+      const content::StoragePartitionConfig& partition_config,
       content::SessionStorageNamespace* session_storage_namespace);
+
+  // Removes |contents| from |contents_map_|, deleting it.
+  void DeleteBackgroundContents(BackgroundContents* contents);
 
   // Load the manifest-specified background page for the specified hosted app.
   // If the manifest doesn't specify one, then load the BackgroundContents
   // registered in the pref. This is typically used to reload a crashed
   // background page.
-  void LoadBackgroundContentsForExtension(Profile* profile,
-                                          const std::string& extension_id);
+  void LoadBackgroundContentsForExtension(const std::string& extension_id);
 
  private:
   friend class BackgroundContentsServiceTest;
@@ -152,10 +157,10 @@ class BackgroundContentsService : private content::NotificationObserver,
   // Registers for various notifications.
   void StartObserving();
 
-  // content::NotificationObserver implementation.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // extensions::ExtensionHostRegistry::Observer:
+  void OnExtensionHostRenderProcessGone(
+      content::BrowserContext* browser_context,
+      extensions::ExtensionHost* extension_host) override;
 
   // Called when ExtensionSystem is ready.
   void OnExtensionSystemReady();
@@ -172,34 +177,31 @@ class BackgroundContentsService : private content::NotificationObserver,
 
   // Restarts a force-installed app/extension after a crash.
   void RestartForceInstalledExtensionOnCrash(
-      const extensions::Extension* extension,
-      Profile* profile);
+      const extensions::Extension* extension);
 
   // Loads all registered BackgroundContents at startup.
-  void LoadBackgroundContentsFromPrefs(Profile* profile);
+  void LoadBackgroundContentsFromPrefs();
 
   // Load a BackgroundContent; the settings are read from the provided
   // dictionary.
-  void LoadBackgroundContentsFromDictionary(
-      Profile* profile,
-      const std::string& extension_id,
-      const base::DictionaryValue* contents);
+  void LoadBackgroundContentsFromDictionary(const std::string& extension_id,
+                                            const base::Value::Dict& contents);
 
   // Load the manifest-specified BackgroundContents for all apps for the
   // profile.
-  void LoadBackgroundContentsFromManifests(Profile* profile);
+  void LoadBackgroundContentsFromManifests();
 
   // Creates a single BackgroundContents associated with the specified |appid|,
   // creates an associated RenderView with the name specified by |frame_name|,
   // and navigates to the passed |url|.
-  void LoadBackgroundContents(Profile* profile,
-                              const GURL& url,
+  void LoadBackgroundContents(const GURL& url,
                               const std::string& frame_name,
                               const std::string& appid);
 
   // Invoked when a new BackgroundContents is opened.
-  void BackgroundContentsOpened(BackgroundContentsOpenedDetails* details,
-                                Profile* profile);
+  void AddBackgroundContents(std::unique_ptr<BackgroundContents> contents,
+                             const std::string& application_id,
+                             const std::string& frame_name);
 
   // Registers the |contents->GetURL()| to be run at startup. Only happens for
   // the first navigation after window.open() (future calls to
@@ -232,19 +234,21 @@ class BackgroundContentsService : private content::NotificationObserver,
   // Delay (in ms) before restarting a force-installed extension that crashed.
   static int restart_delay_in_ms_;
 
-  Profile* profile_;
+  raw_ptr<Profile> profile_;
 
   base::ObserverList<BackgroundContentsServiceObserver> observers_;
 
   // PrefService used to store list of background pages (or NULL if this is
   // running under an incognito profile).
-  PrefService* prefs_ = nullptr;
-  content::NotificationRegistrar registrar_;
+  raw_ptr<PrefService> prefs_ = nullptr;
 
   // Information we track about each BackgroundContents.
   struct BackgroundContentsInfo {
+    BackgroundContentsInfo();
+    ~BackgroundContentsInfo();
+
     // The BackgroundContents whose information we are tracking.
-    BackgroundContents* contents;
+    std::unique_ptr<BackgroundContents> contents;
     // The name of the top level frame for this BackgroundContents.
     std::string frame_name;
   };
@@ -262,13 +266,14 @@ class BackgroundContentsService : private content::NotificationObserver,
       ComponentExtensionBackoffEntryMap;
   ComponentExtensionBackoffEntryMap component_backoff_map_;
 
-  ScopedObserver<extensions::ExtensionRegistry,
-                 extensions::ExtensionRegistryObserver>
-      extension_registry_observer_{this};
+  base::ScopedObservation<extensions::ExtensionRegistry,
+                          extensions::ExtensionRegistryObserver>
+      extension_registry_observation_{this};
+  base::ScopedObservation<extensions::ExtensionHostRegistry,
+                          extensions::ExtensionHostRegistry::Observer>
+      extension_host_registry_observation_{this};
 
   base::WeakPtrFactory<BackgroundContentsService> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BackgroundContentsService);
 };
 
 #endif  // CHROME_BROWSER_BACKGROUND_BACKGROUND_CONTENTS_SERVICE_H_

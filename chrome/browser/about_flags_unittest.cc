@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,186 +9,202 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 
-#include "base/base_paths.h"
-#include "base/feature_list.h"
-#include "base/files/file_path.h"
-#include "base/format_macros.h"
-#include "base/json/json_file_value_serializer.h"
-#include "base/path_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_enum_reader.h"
-#include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/common/chrome_version.h"
 #include "components/flags_ui/feature_entry.h"
+#include "components/flags_ui/feature_entry_macros.h"
+#include "components/flags_ui/flags_test_helpers.h"
+#include "components/flags_ui/flags_ui_metrics.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace about_flags {
 
 namespace {
 
-typedef base::HistogramBase::Sample Sample;
-typedef std::map<std::string, Sample> SwitchToIdMap;
+using Sample = base::HistogramBase::Sample;
+using SwitchToIdMap = std::map<std::string, Sample>;
 
 // Get all associated switches corresponding to defined about_flags.cc entries.
-std::set<std::string> GetAllSwitchesAndFeaturesForTesting() {
+std::set<std::string> GetAllPublicSwitchesAndFeaturesForTesting() {
   std::set<std::string> result;
 
-  size_t num_entries = 0;
-  const flags_ui::FeatureEntry* entries =
-      testing::GetFeatureEntries(&num_entries);
+  for (const auto& entry : testing::GetFeatureEntries()) {
+    // Skip over flags that are part of the flags system itself - they don't
+    // have any of the usual metadata or histogram entries for flags, since they
+    // are synthesized during the build process.
+    // TODO(https://crbug.com/1068258): Remove the need for this by generating
+    // histogram entries automatically.
+    if (entry.supported_platforms & flags_ui::kFlagInfrastructure)
+      continue;
 
-  for (size_t i = 0; i < num_entries; ++i) {
-    const flags_ui::FeatureEntry& entry = entries[i];
     switch (entry.type) {
       case flags_ui::FeatureEntry::SINGLE_VALUE:
       case flags_ui::FeatureEntry::SINGLE_DISABLE_VALUE:
-        result.insert(entry.command_line_switch);
+        result.insert(entry.switches.command_line_switch);
         break;
       case flags_ui::FeatureEntry::ORIGIN_LIST_VALUE:
         // Do nothing, origin list values are not added as feature flags.
         break;
       case flags_ui::FeatureEntry::MULTI_VALUE:
-        for (int j = 0; j < entry.num_options; ++j) {
+        for (int j = 0; j < entry.NumOptions(); ++j) {
           result.insert(entry.ChoiceForOption(j).command_line_switch);
         }
         break;
       case flags_ui::FeatureEntry::ENABLE_DISABLE_VALUE:
-        result.insert(entry.command_line_switch);
-        result.insert(entry.disable_command_line_switch);
+        result.insert(entry.switches.command_line_switch);
+        result.insert(entry.switches.disable_command_line_switch);
         break;
       case flags_ui::FeatureEntry::FEATURE_VALUE:
       case flags_ui::FeatureEntry::FEATURE_WITH_PARAMS_VALUE:
-        result.insert(std::string(entry.feature->name) + ":enabled");
-        result.insert(std::string(entry.feature->name) + ":disabled");
+        result.insert(std::string(entry.feature.feature->name) + ":enabled");
+        result.insert(std::string(entry.feature.feature->name) + ":disabled");
         break;
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+      case flags_ui::FeatureEntry::PLATFORM_FEATURE_NAME_VALUE:
+      case flags_ui::FeatureEntry::PLATFORM_FEATURE_NAME_WITH_PARAMS_VALUE:
+        std::string name(entry.platform_feature_name.name);
+        result.insert(name + ":enabled");
+        result.insert(name + ":disabled");
+        break;
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
     }
   }
   return result;
 }
 
-struct FlagMetadataEntry {
-  std::vector<std::string> owners;
-  int expiry_milestone;
-};
-
-using FlagMetadataMap = std::map<std::string, FlagMetadataEntry>;
-
-FlagMetadataMap LoadFlagMetadata() {
-  FlagMetadataMap metadata;
-  base::FilePath metadata_path;
-  base::PathService::Get(base::DIR_SOURCE_ROOT, &metadata_path);
-  JSONFileValueDeserializer deserializer(
-      metadata_path.AppendASCII("chrome").AppendASCII("browser").AppendASCII(
-          "flag-metadata.json"));
-  int error_code;
-  std::string error_message;
-  std::unique_ptr<base::Value> metadata_json =
-      deserializer.Deserialize(&error_code, &error_message);
-  DCHECK(metadata_json) << "Failed to load flag metadata: " << error_code << " "
-                        << error_message;
-
-  for (const auto& entry : metadata_json->GetList()) {
-    std::string name = entry.FindKey("name")->GetString();
-    std::vector<std::string> owners;
-    if (const base::Value* e = entry.FindKey("owners")) {
-      for (const auto& owner : e->GetList())
-        owners.push_back(owner.GetString());
+// Returns all variation ids defined in flags entries.
+std::vector<std::string> GetAllVariationIds() {
+  std::vector<std::string> variation_ids;
+  for (const auto& entry : testing::GetFeatureEntries()) {
+    // Only FEATURE_WITH_PARAMS_VALUE or PLATFORM_FEATURE_NAME_WITH_PARAMS_VALUE
+    // entries can have a variation id.
+    if (entry.type != flags_ui::FeatureEntry::FEATURE_WITH_PARAMS_VALUE
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+        && entry.type !=
+               flags_ui::FeatureEntry::PLATFORM_FEATURE_NAME_WITH_PARAMS_VALUE
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+    ) {
+      continue;
     }
-    int expiry_milestone = entry.FindKey("expiry_milestone")->GetInt();
-    metadata[name] = FlagMetadataEntry{owners, expiry_milestone};
-  }
 
-  return metadata;
+    for (const auto& variation : entry.GetVariations()) {
+      if (variation.variation_id)
+        variation_ids.push_back(variation.variation_id);
+    }
+  }
+  return variation_ids;
 }
 
-std::vector<std::string> LoadFlagNeverExpireList() {
-  base::FilePath list_path;
-  base::PathService::Get(base::DIR_SOURCE_ROOT, &list_path);
-  JSONFileValueDeserializer deserializer(
-      list_path.AppendASCII("chrome").AppendASCII("browser").AppendASCII(
-          "flag-never-expire-list.json"));
-  int error_code;
-  std::string error_message;
-  std::unique_ptr<base::Value> list_json =
-      deserializer.Deserialize(&error_code, &error_message);
-  DCHECK(list_json) << "Failed to load flag never expire list: " << error_code
-                    << " " << error_message;
-
-  std::vector<std::string> result;
-  for (const auto& entry : list_json->GetList()) {
-    result.push_back(entry.GetString());
-  }
-  return result;
+// Returns the parsed |variation_id|. If it is malformed, returns absl::nullopt.
+absl::optional<int> ParseVariationId(const std::string& variation_id) {
+  // Remove the "t" prefix if it is there.
+  std::string trimmed_id =
+      base::StartsWith(variation_id, "t", base::CompareCase::SENSITIVE)
+          ? variation_id.substr(1)
+          : variation_id;
+  int id;
+  if (base::StringToInt(trimmed_id, &id) && id >= 0)
+    return id;
+  return absl::nullopt;
 }
 
-}  // anonymous namespace
+}  // namespace
 
 // Makes sure there are no separators in any of the entry names.
 TEST(AboutFlagsTest, NoSeparators) {
-  size_t count;
-  const flags_ui::FeatureEntry* entries = testing::GetFeatureEntries(&count);
-  for (size_t i = 0; i < count; ++i) {
-    std::string name = entries[i].internal_name;
+  for (const auto& entry : testing::GetFeatureEntries()) {
+    const std::string name(entry.internal_name);
     EXPECT_EQ(std::string::npos, name.find(flags_ui::testing::kMultiSeparator))
-        << i;
+        << name;
   }
 }
 
 // Makes sure that every flag has an owner and an expiry entry in
 // flag-metadata.json.
 TEST(AboutFlagsTest, EveryFlagHasMetadata) {
-  size_t count;
-  const flags_ui::FeatureEntry* entries = testing::GetFeatureEntries(&count);
-  FlagMetadataMap metadata = LoadFlagMetadata();
-
-  std::vector<std::string> missing_flags;
-
-  for (size_t i = 0; i < count; ++i) {
-    if (metadata.count(entries[i].internal_name) == 0)
-      missing_flags.push_back(entries[i].internal_name);
-  }
-
-  std::sort(missing_flags.begin(), missing_flags.end());
-
-  EXPECT_EQ(0u, missing_flags.size())
-      << "Missing flags: " << base::JoinString(missing_flags, "\n  ");
+  flags_ui::testing::EnsureEveryFlagHasMetadata(testing::GetFeatureEntries());
 }
 
+// Ensures that all flags marked as never expiring in flag-metadata.json is
+// listed in flag-never-expire-list.json.
 TEST(AboutFlagsTest, OnlyPermittedFlagsNeverExpire) {
-  FlagMetadataMap metadata = LoadFlagMetadata();
-  std::vector<std::string> listed_flags = LoadFlagNeverExpireList();
-  std::vector<std::string> missing_flags;
+  flags_ui::testing::EnsureOnlyPermittedFlagsNeverExpire();
+}
 
-  for (const auto& entry : metadata) {
-    if (entry.second.expiry_milestone == -1 &&
-        std::find(listed_flags.begin(), listed_flags.end(), entry.first) ==
-            listed_flags.end()) {
-      missing_flags.push_back(entry.first);
+// Ensures that every flag has an owner.
+TEST(AboutFlagsTest, EveryFlagHasNonEmptyOwners) {
+  flags_ui::testing::EnsureEveryFlagHasNonEmptyOwners();
+}
+
+// Ensures that owners conform to rules in flag-metadata.json.
+TEST(AboutFlagsTest, OwnersLookValid) {
+  flags_ui::testing::EnsureOwnersLookValid();
+}
+
+// For some bizarre reason, far too many people see a file filled with
+// alphabetically-ordered items and think "hey, let me drop this new item into a
+// random location!" Prohibit such behavior in the flags files.
+TEST(AboutFlagsTest, FlagsListedInAlphabeticalOrder) {
+  flags_ui::testing::EnsureFlagsAreListedInAlphabeticalOrder();
+}
+
+TEST(AboutFlagsTest, EveryFlagIsValid) {
+  for (const auto& entry : testing::GetFeatureEntries()) {
+    EXPECT_TRUE(entry.IsValid()) << entry.internal_name;
+  }
+}
+
+TEST(AboutFlagsTest, RecentUnexpireFlagsArePresent) {
+  flags_ui::testing::EnsureRecentUnexpireFlagsArePresent(
+      testing::GetFeatureEntries(), CHROME_VERSION_MAJOR);
+}
+
+// Ensures that all variation IDs specified are well-formed and unique.
+TEST(AboutFlagsTest, VariationIdsAreValid) {
+  std::set<int> variation_ids;
+
+  for (const std::string& variation_id : GetAllVariationIds()) {
+    absl::optional<int> id = ParseVariationId(variation_id);
+    EXPECT_TRUE(id)
+        << "Variation ID \"" << variation_id
+        << "\" is malformed. It must be a nonnegative integer and can "
+           "optionally start with a \"t\".";
+
+    if (id.has_value()) {
+      EXPECT_TRUE(variation_ids.insert(id.value()).second)
+          << "Variation ID " << variation_id << " is duplicated.";
     }
   }
-
-  std::sort(missing_flags.begin(), missing_flags.end());
-
-  EXPECT_EQ(0u, missing_flags.size())
-      << "Flags not listed for no-expire: "
-      << base::JoinString(missing_flags, "\n  ");
 }
 
-TEST(AboutFlagsTest, EveryFlagHasNonEmptyOwners) {
-  FlagMetadataMap metadata = LoadFlagMetadata();
-  std::vector<std::string> sad_flags;
-
-  for (const auto& it : metadata) {
-    if (it.second.owners.empty())
-      sad_flags.push_back(it.first);
+// Test that ScopedFeatureEntries restores existing feature entries on
+// destruction.
+TEST(AboutFlagsTest, ScopedFeatureEntriesRestoresFeatureEntries) {
+  const base::span<const flags_ui::FeatureEntry> old_entries =
+      testing::GetFeatureEntries();
+  EXPECT_GT(old_entries.size(), 0U);
+  const char* first_feature_name = old_entries[0].internal_name;
+  {
+    const base::Feature kTestFeature1{"FeatureName1",
+                                      base::FEATURE_ENABLED_BY_DEFAULT};
+    testing::ScopedFeatureEntries feature_entries(
+        {{"feature-1", "", "", flags_ui::FlagsState::GetCurrentPlatform(),
+          FEATURE_VALUE_TYPE(kTestFeature1)}});
+    EXPECT_EQ(testing::GetFeatureEntries().size(), 1U);
   }
 
-  std::sort(sad_flags.begin(), sad_flags.end());
-
-  EXPECT_EQ(0u, sad_flags.size())
-      << "Flags missing owners: " << base::JoinString(sad_flags, "\n  ");
+  const base::span<const flags_ui::FeatureEntry> new_entries =
+      testing::GetFeatureEntries();
+  EXPECT_EQ(old_entries.size(), new_entries.size());
+  EXPECT_TRUE(about_flags::GetCurrentFlagsState()->FindFeatureEntryByName(
+      first_feature_name));
 }
 
 class AboutFlagsHistogramTest : public ::testing::Test {
@@ -203,7 +219,8 @@ class AboutFlagsHistogramTest : public ::testing::Test {
     if (!status.second) {
       EXPECT_TRUE(status.first->second == switch_histogram_id)
           << "Duplicate switch '" << switch_name
-          << "' found in enum 'LoginCustomFlags' in histograms.xml.";
+          << "' found in enum 'LoginCustomFlags' in "
+             "tools/metrics/histograms/enums.xml.";
     }
   }
 
@@ -217,59 +234,63 @@ class AboutFlagsHistogramTest : public ::testing::Test {
 };
 
 TEST_F(AboutFlagsHistogramTest, CheckHistograms) {
-  base::Optional<base::HistogramEnumEntryMap> login_custom_flags =
+  absl::optional<base::HistogramEnumEntryMap> login_custom_flags =
       base::ReadEnumFromEnumsXml("LoginCustomFlags");
   ASSERT_TRUE(login_custom_flags)
-      << "Error reading enum 'LoginCustomFlags' from enums.xml.";
+      << "Error reading enum 'LoginCustomFlags' from "
+         "tools/metrics/histograms/enums.xml.";
 
   // Build reverse map {switch_name => id} from login_custom_flags.
-  SwitchToIdMap histograms_xml_switches_ids;
+  SwitchToIdMap metadata_switches_ids;
 
-  EXPECT_TRUE(login_custom_flags->count(testing::kBadSwitchFormatHistogramId))
+  EXPECT_TRUE(
+      login_custom_flags->count(flags_ui::testing::kBadSwitchFormatHistogramId))
       << "Entry for UMA ID of incorrect command-line flag is not found in "
-         "enums.xml enum LoginCustomFlags. "
+         "tools/metrics/histograms/enums.xml enum LoginCustomFlags. "
          "Consider adding entry:\n"
       << "  " << GetHistogramEnumEntryText("BAD_FLAG_FORMAT", 0);
   // Check that all LoginCustomFlags entries have correct values.
   for (const auto& entry : *login_custom_flags) {
-    if (entry.first == testing::kBadSwitchFormatHistogramId) {
+    if (entry.first == flags_ui::testing::kBadSwitchFormatHistogramId) {
       // Add error value with empty name.
       SetSwitchToHistogramIdMapping(std::string(), entry.first,
-                                    &histograms_xml_switches_ids);
+                                    &metadata_switches_ids);
       continue;
     }
-    const Sample uma_id = GetSwitchUMAId(entry.second);
+    const Sample uma_id = flags_ui::GetSwitchUMAId(entry.second);
     EXPECT_EQ(uma_id, entry.first)
-        << "enums.xml enum LoginCustomFlags "
+        << "tools/metrics/histograms/enums.xml enum LoginCustomFlags "
            "entry '"
         << entry.second << "' has incorrect value=" << entry.first << ", but "
         << uma_id << " is expected. Consider changing entry to:\n"
         << "  " << GetHistogramEnumEntryText(entry.second, uma_id);
     SetSwitchToHistogramIdMapping(entry.second, entry.first,
-                                  &histograms_xml_switches_ids);
+                                  &metadata_switches_ids);
   }
 
   // Check that all flags in about_flags.cc have entries in login_custom_flags.
-  std::set<std::string> all_flags = GetAllSwitchesAndFeaturesForTesting();
+  std::set<std::string> all_flags = GetAllPublicSwitchesAndFeaturesForTesting();
   for (const std::string& flag : all_flags) {
     // Skip empty placeholders.
     if (flag.empty())
       continue;
-    const Sample uma_id = GetSwitchUMAId(flag);
-    EXPECT_NE(testing::kBadSwitchFormatHistogramId, uma_id)
+    const Sample uma_id = flags_ui::GetSwitchUMAId(flag);
+    EXPECT_NE(flags_ui::testing::kBadSwitchFormatHistogramId, uma_id)
         << "Command-line switch '" << flag
         << "' from about_flags.cc has UMA ID equal to reserved value "
            "kBadSwitchFormatHistogramId="
-        << testing::kBadSwitchFormatHistogramId
+        << flags_ui::testing::kBadSwitchFormatHistogramId
         << ". Please modify switch name.";
-    auto enum_entry = histograms_xml_switches_ids.lower_bound(flag);
+    auto enum_entry = metadata_switches_ids.lower_bound(flag);
 
     // Ignore case here when switch ID is incorrect - it has already been
     // reported in the previous loop.
-    EXPECT_TRUE(enum_entry != histograms_xml_switches_ids.end() &&
+    EXPECT_TRUE(enum_entry != metadata_switches_ids.end() &&
                 enum_entry->first == flag)
-        << "enums.xml enum LoginCustomFlags doesn't contain switch '" << flag
-        << "' (value=" << uma_id << " expected). Consider adding entry:\n"
+        << "tools/metrics/histograms/enums.xml enum LoginCustomFlags doesn't "
+           "contain switch '"
+        << flag << "' (value=" << uma_id
+        << " expected). Consider adding entry:\n"
         << "  " << GetHistogramEnumEntryText(flag, uma_id);
   }
 }

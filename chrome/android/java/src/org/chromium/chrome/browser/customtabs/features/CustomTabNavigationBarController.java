@@ -1,18 +1,19 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.customtabs.features;
 
-import android.app.Activity;
+import android.content.Context;
 import android.os.Build;
 import android.view.Window;
 
-import org.chromium.base.ApiCompatibilityUtils;
+import androidx.annotation.Nullable;
+
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
-import org.chromium.chrome.browser.util.ColorUtils;
+import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider;
 import org.chromium.ui.UiUtils;
+import org.chromium.ui.util.ColorUtils;
 
 /**
  * Configures the system navigation bar while a Custom Tab activity is running.
@@ -24,21 +25,37 @@ public class CustomTabNavigationBarController {
     private CustomTabNavigationBarController() {}
 
     /**
+     * Sets the navigation bar color and navigation divider color according to intent extras.
+     */
+    public static void update(
+            Window window, BrowserServicesIntentDataProvider intentDataProvider, Context context) {
+        Integer navigationBarColor = intentDataProvider.getColorProvider().getNavigationBarColor();
+        Integer navigationBarDividerColor =
+                intentDataProvider.getColorProvider().getNavigationBarDividerColor();
+
+        // PCCT is deemed incapable of system dark button support due to the way it implements
+        // partial height (window coordinate translation). We do the darkening ourselves.
+        boolean supportsDarkButtons = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && !intentDataProvider.isPartialHeightCustomTab();
+        boolean needsDarkButtons = navigationBarColor != null
+                && !ColorUtils.shouldUseLightForegroundOnBackground(navigationBarColor);
+
+        updateBarColor(window, navigationBarColor, supportsDarkButtons, needsDarkButtons);
+
+        // navigationBarDividerColor can only be set in Android P+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return;
+        Integer dividerColor = getDividerColor(
+                context, navigationBarColor, navigationBarDividerColor, needsDarkButtons);
+
+        if (dividerColor != null) window.setNavigationBarDividerColor(dividerColor);
+    }
+
+    /**
      * Sets the navigation bar color according to intent extras.
      */
-    public static void updateNavigationBarColor(Activity activity,
-            CustomTabIntentDataProvider intentDataProvider) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            return; // Window#setNavigationBar not available.
-        }
-
-        Integer color = intentDataProvider.getNavigationBarColor();
-        if (color == null) return;
-
-        Window window = activity.getWindow();
-
-        boolean needsDarkButtons = !ColorUtils.shouldUseLightForegroundOnBackground(color);
-        boolean supportsDarkButtons = Build.VERSION.SDK_INT > Build.VERSION_CODES.O;
+    private static void updateBarColor(Window window, Integer navigationBarColor,
+            boolean supportsDarkButtons, boolean needsDarkButtons) {
+        if (navigationBarColor == null) return;
 
         if (supportsDarkButtons) {
             UiUtils.setNavigationBarIconColor(window.getDecorView().getRootView(),
@@ -46,18 +63,28 @@ public class CustomTabNavigationBarController {
         } else if (needsDarkButtons) {
             // Can't make the buttons dark, darken the background instead with the same algorithm
             // as for the status bar.
-            color = ColorUtils.getDarkenedColorForStatusBar(color);
+            navigationBarColor = ColorUtils.getDarkenedColorForStatusBar(navigationBarColor);
         }
 
-        window.setNavigationBarColor(color);
+        window.setNavigationBarColor(navigationBarColor);
+    }
 
-        if (needsDarkButtons && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+    /**
+     * Return the navigation bar divider color.
+     * @param context {@link Context} to get color resource from.
+     * @param navigationBarColor Color of the navigation bar.
+     * @param navigationBarDividerColor Color of the divider.
+     * @param needsDarkButtons Whether the buttons and the bar has a low contrast.
+     */
+    public static @Nullable Integer getDividerColor(Context context, Integer navigationBarColor,
+            Integer navigationBarDividerColor, boolean needsDarkButtons) {
+        if (navigationBarDividerColor == null && navigationBarColor != null && needsDarkButtons) {
             // Add grey divider color if the background is light (similar to
             // TabbedNavigationBarColorController#setNavigationBarColor).
             // bottom_system_nav_divider_color is overridden to black on Q+, so using it's pre-Q
             // value, black_alpha_12, directly.
-            window.setNavigationBarDividerColor(ApiCompatibilityUtils.getColor(
-                    activity.getResources(), R.color.black_alpha_12));
+            return context.getColor(R.color.black_alpha_12);
         }
+        return navigationBarDividerColor;
     }
 }

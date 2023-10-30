@@ -1,6 +1,6 @@
 #!/bin/bash -p
 
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -595,10 +595,9 @@ main() {
 
   trap cleanup EXIT HUP INT QUIT TERM
 
-  readonly PRODUCT_NAME="Google Chrome"
-  readonly APP_DIR="${PRODUCT_NAME}.app"
-  readonly ALTERNATE_APP_DIR="${PRODUCT_NAME} Canary.app"
-  readonly FRAMEWORK_NAME="${PRODUCT_NAME} Framework"
+  readonly APP_DIR_NAMES=( "Google Chrome.app" "Google Chrome Beta.app"
+                           "Google Chrome Dev.app" "Google Chrome Canary.app" )
+  readonly FRAMEWORK_NAME="Google Chrome Framework"
   readonly FRAMEWORK_DIR="${FRAMEWORK_NAME}.framework"
   readonly PATCH_DIR=".patch"
   readonly CONTENTS_DIR="Contents"
@@ -608,6 +607,8 @@ main() {
   readonly VERSIONS_DIR_OLD="${CONTENTS_DIR}/Versions"
   readonly UNROOTED_BRAND_PLIST="Library/Google/Google Chrome Brand"
   readonly UNROOTED_DEBUG_FILE="Library/Google/Google Chrome Updater Debug"
+  readonly UNROOTED_KS_BUNDLE_DIR=\
+"Library/Google/GoogleSoftwareUpdate/GoogleSoftwareUpdate.bundle"
 
   readonly APP_VERSION_KEY="CFBundleShortVersionString"
   readonly APP_BUNDLEID_KEY="CFBundleIdentifier"
@@ -615,6 +616,7 @@ main() {
   readonly KS_PRODUCT_KEY="KSProductID"
   readonly KS_URL_KEY="KSUpdateURL"
   readonly KS_BRAND_KEY="KSBrandID"
+  readonly USER_DATA_DIR_PATH_KEY="CrProductDirName"
 
   readonly QUARANTINE_ATTR="com.apple.quarantine"
 
@@ -703,29 +705,28 @@ main() {
 
   local update_version_app update_version_ks product_id update_layout_new
   if [[ -z "${is_patch}" ]]; then
-    update_app="${update_dmg_mount_point}/${APP_DIR}"
+    local found_app
+    for app_dir_name in "${APP_DIR_NAMES[@]}"; do
+      note "looking for ${app_dir_name}"
+      update_app="${update_dmg_mount_point}/${app_dir_name}"
+
+      if [[ -d "${update_app}" ]]; then
+        note "found ${app_dir_name}"
+        found_app="y"
+        break
+      fi
+    done
+
+    if [[ -z "${found_app}" ]]; then
+      err "couldn't locate any app on the update dmg"
+      exit 2
+    fi
     note "update_app = ${update_app}"
 
     # Make sure that it's an absolute path.
     if [[ "${update_app:0:1}" != "/" ]]; then
       err "update_app must be an absolute path"
       exit 2
-    fi
-
-    # Make sure there's something to copy from.
-    if ! [[ -d "${update_app}" ]]; then
-      update_app="${update_dmg_mount_point}/${ALTERNATE_APP_DIR}"
-      note "update_app = ${update_app}"
-
-      if [[ "${update_app:0:1}" != "/" ]]; then
-        err "update_app (alternate) must be an absolute path"
-        exit 2
-      fi
-
-      if ! [[ -d "${update_app}" ]]; then
-        err "update_app must be a directory"
-        exit 2
-      fi
     fi
 
     # Get some information about the update.
@@ -850,6 +851,9 @@ framework_${update_version_app_old}_${update_version_app}.dirpatch"
   if [[ -n "${GOOGLE_CHROME_UPDATER_TEST_PATH}" ]]; then
     note "test mode: not calling Keystone, installed_app is from environment"
     installed_app="${GOOGLE_CHROME_UPDATER_TEST_PATH}"
+  elif [[ -n "${KS_TICKET_XC_PATH}" ]]; then
+    note "installed_app is from KS_TICKET_XC_PATH"
+    installed_app="${KS_TICKET_XC_PATH}"
   elif ! installed_app="$(ksadmin -pP "${product_id}" | sed -Ene \
       "s%^[[:space:]]+xc=<KSPathExistenceChecker:.* path=(/.+)>\$%\\1%p")" ||
       [[ -z "${installed_app}" ]]; then
@@ -875,12 +879,12 @@ framework_${update_version_app_old}_${update_version_app}.dirpatch"
   fi
   note "system_ticket = ${system_ticket}"
 
-  # If this script is being driven by a user ticket, but a system ticket is
-  # also present, there's a potential for the two to collide.  Both ticket
-  # types might be present if another user on the system promoted the ticket
-  # to system: the other user could not have removed this user's user ticket.
-  # Handle that case here by deleting the user ticket and exiting early with
-  # a discrete exit code.
+  # If this script is being driven by a user ticket, but a system ticket is also
+  # present and system Keystone is installed, there's a potential for the two
+  # tickets to collide.  Both ticket types might be present if another user on
+  # the system promoted the ticket to system: the other user could not have
+  # removed this user's user ticket.  Handle that case here by deleting the user
+  # ticket and exiting early with a discrete exit code.
   #
   # Current versions of ksadmin will exit 1 (false) when asked to print tickets
   # and given a specific product ID to print.  Older versions of ksadmin would
@@ -893,6 +897,7 @@ framework_${update_version_app_old}_${update_version_app}.dirpatch"
   # something is eventually able to remove it.
   if [[ -z "${GOOGLE_CHROME_UPDATER_TEST_PATH}" ]] &&
      [[ -z "${system_ticket}" ]] &&
+     [[ -d "/${UNROOTED_KS_BUNDLE_DIR}" ]] &&
      ksadmin -S --print-tickets --productid "${product_id}" >& /dev/null; then
     ksadmin --delete --productid "${product_id}" || true
     err "can't update on a user ticket when a system ticket is also present"
@@ -1001,8 +1006,7 @@ framework_${update_version_app_old}_${update_version_app}.dirpatch"
     exit 5
   fi
 
-  local new_versioned_dir
-  new_versioned_dir="${installed_versions_dir}/${update_version_app}"
+  local new_versioned_dir="${installed_versions_dir}/${update_version_app}"
   note "new_versioned_dir = ${new_versioned_dir}"
 
   # If there's an entry at ${new_versioned_dir} but it's not a directory
@@ -1117,8 +1121,12 @@ framework_${update_version_app_old}_${update_version_app}.dirpatch"
     # exists, and ${installed_app} needs to be used as input to dirpatcher
     # in any event.  The new application will be rsynced into place once
     # dirpatcher creates it.
+
     ensure_temp_dir
-    update_app="${g_temp_dir}/${APP_DIR}"
+    # The name of the app for ${update_app} does not matter, as the user's
+    # choice of name for their installed app will not be changed. Choose the
+    # first of the ${APP_DIR_NAMES} as an arbitrary choice.
+    update_app="${g_temp_dir}/${APP_DIR_NAMES[0]}"
     note "update_app = ${update_app}"
 
     note "dirpatching app directory"
@@ -1211,9 +1219,6 @@ framework_${update_version_app_old}_${update_version_app}.dirpatch"
   fi
   note "new_version_app = ${new_version_app}"
 
-  local new_versioned_dir="${installed_versions_dir}/${new_version_app}"
-  note "new_versioned_dir = ${new_versioned_dir}"
-
   local new_ks_plist="${installed_app_plist}"
   note "new_ks_plist = ${new_ks_plist}"
 
@@ -1245,6 +1250,13 @@ framework_${update_version_app_old}_${update_version_app}.dirpatch"
   local tag_key="${KS_CHANNEL_KEY}"
   note "tag = ${tag}"
   note "tag_key = ${tag_key}"
+
+  # The user data dir path key is only present for some Chromes.  Suppress
+  # stderr to prevent Keystone from seeing possible error output.
+  local is_sxs_capable
+  is_sxs_capable="$(infoplist_read "${installed_app_plist}" \
+      "${USER_DATA_DIR_PATH_KEY}" 2> /dev/null || true)"
+  note "is_sxs_capable = ${is_sxs_capable}"
 
   # Make sure that the update was successful by comparing the version found in
   # the update with the version now on disk.
@@ -1288,19 +1300,19 @@ framework_${update_version_app_old}_${update_version_app}.dirpatch"
   local ksadmin_brand_plist_path
   local ksadmin_brand_key
 
-  # Only the stable channel, identified by an empty channel string, has a
-  # brand code. On the beta and dev channels, remove the brand plist if
-  # present. Its presence means that the ticket used to manage a
-  # stable-channel Chrome but the user has since replaced it with a beta or
-  # dev channel version. Since the canary channel can run side-by-side with
-  # another Chrome installation, don't remove the brand plist on that channel,
-  # but skip the rest of the brand logic.
-  if [[ "${channel}" = "beta" ]] || [[ "${channel}" = "dev" ]]; then
+  # Only side-by-side capable channels, either the stable channel (identified by
+  # an empty channel string) or a Chrome that has a custom user data dir, has a
+  # brand code. On non-side-by-side beta and dev channels, remove the brand
+  # plist if present. Its presence means that the ticket used to manage a
+  # stable-channel Chrome but the user has since replaced it with a beta or dev
+  # channel version. With side-by-side channels, don't remove the brand plist on
+  # that channel, but skip the rest of the brand logic.
+  if [[ -n "${is_sxs_capable}" ]]; then
+    # Side-by-side capable Chrome.
+    note "skipping brand code on side-by-side channel ${channel}"
+  elif [[ "${channel}" = "beta" ]] || [[ "${channel}" = "dev" ]]; then
     note "defeating brand code on channel ${channel}"
     rm -f "${brand_plist_path}" 2>/dev/null || true
-  elif [[ -n "${channel}" ]]; then
-    # Canary channel.
-    note "skipping brand code on channel ${channel}"
   else
     # Stable channel.
     # If the user manually updated their copy of Chrome, there might be new

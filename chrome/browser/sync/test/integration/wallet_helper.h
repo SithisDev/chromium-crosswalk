@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,14 @@
 #define CHROME_BROWSER_SYNC_TEST_INTEGRATION_WALLET_HELPER_H_
 
 #include <map>
+#include <string>
 #include <utility>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/time/time.h"
 #include "chrome/browser/sync/test/integration/multi_client_status_change_checker.h"
 #include "components/autofill/core/browser/personal_data_manager_observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -19,34 +23,37 @@ struct AutofillMetadata;
 class AutofillProfile;
 class AutofillWebDataService;
 class CreditCard;
-class PersonalDataManager;
+struct CreditCardCloudTokenData;
 struct PaymentsCustomerData;
+class PersonalDataManager;
 }  // namespace autofill
 
 namespace sync_pb {
 class SyncEntity;
+class ModelType;
 class ModelTypeState;
-}
+}  // namespace sync_pb
 
 namespace wallet_helper {
 
-extern const char kDefaultCardID[];
-extern const char kDefaultAddressID[];
-extern const char kDefaultCustomerID[];
-extern const char kDefaultBillingAddressID[];
+inline constexpr char kDefaultCardID[] = "wallet card ID";
+inline constexpr char kDefaultAddressID[] = "wallet address ID";
+inline constexpr char kDefaultCustomerID[] = "deadbeef";
+inline constexpr char kDefaultBillingAddressID[] = "billing address entity ID";
+inline constexpr char kDefaultCreditCardCloudTokenDataID[] =
+    "cloud token data ID";
 
 // Used to access the personal data manager within a particular sync profile.
-autofill::PersonalDataManager* GetPersonalDataManager(int index)
-    WARN_UNUSED_RESULT;
+[[nodiscard]] autofill::PersonalDataManager* GetPersonalDataManager(int index);
 
 // Used to access the web data service within a particular sync profile.
-scoped_refptr<autofill::AutofillWebDataService> GetProfileWebDataService(
-    int index) WARN_UNUSED_RESULT;
+[[nodiscard]] scoped_refptr<autofill::AutofillWebDataService>
+GetProfileWebDataService(int index);
 
 // Used to access the account-scoped web data service within a particular sync
 // profile.
-scoped_refptr<autofill::AutofillWebDataService> GetAccountWebDataService(
-    int index) WARN_UNUSED_RESULT;
+[[nodiscard]] scoped_refptr<autofill::AutofillWebDataService>
+GetAccountWebDataService(int index);
 
 void SetServerCreditCards(
     int profile,
@@ -58,6 +65,10 @@ void SetServerProfiles(int profile,
 void SetPaymentsCustomerData(
     int profile,
     const autofill::PaymentsCustomerData& customer_data);
+
+void SetCreditCardCloudTokenData(
+    int profile,
+    const std::vector<autofill::CreditCardCloudTokenData>& cloud_token_data);
 
 void UpdateServerCardMetadata(int profile,
                               const autofill::CreditCard& credit_card);
@@ -72,17 +83,21 @@ std::map<std::string, autofill::AutofillMetadata> GetServerCardsMetadata(
 std::map<std::string, autofill::AutofillMetadata> GetServerAddressesMetadata(
     int profile);
 
-sync_pb::ModelTypeState GetWalletDataModelTypeState(int profile);
+// Function supports AUTOFILL_WALLET_DATA and AUTOFILL_WALLET_OFFER.
+sync_pb::ModelTypeState GetWalletModelTypeState(syncer::ModelType type,
+                                                int profile);
 
 void UnmaskServerCard(int profile,
                       const autofill::CreditCard& credit_card,
-                      const base::string16& full_number);
+                      const std::u16string& full_number);
 
 sync_pb::SyncEntity CreateDefaultSyncWalletCard();
 
 sync_pb::SyncEntity CreateSyncWalletCard(const std::string& name,
                                          const std::string& last_four,
-                                         const std::string& billing_address_id);
+                                         const std::string& billing_address_id,
+                                         const std::string& nickname = "",
+                                         int64_t instrument_id = 1);
 
 sync_pb::SyncEntity CreateSyncPaymentsCustomerData(
     const std::string& customer_id);
@@ -98,6 +113,10 @@ sync_pb::SyncEntity CreateDefaultSyncWalletAddress();
 
 sync_pb::SyncEntity CreateSyncWalletAddress(const std::string& name,
                                             const std::string& company);
+
+sync_pb::SyncEntity CreateSyncCreditCardCloudTokenData(
+    const std::string& cloud_token_data_id);
+sync_pb::SyncEntity CreateDefaultSyncCreditCardCloudTokenData();
 
 // TODO(sebsg): Instead add a function to create a card, and one to inject in
 // the server. Then compare the cards directly.
@@ -124,8 +143,7 @@ class AutofillWalletChecker : public StatusChangeChecker,
 
   // StatusChangeChecker implementation.
   bool Wait() override;
-  bool IsExitConditionSatisfied() override;
-  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 
   // autofill::PersonalDataManager implementation.
   void OnPersonalDataChanged() override;
@@ -146,8 +164,7 @@ class AutofillWalletConversionChecker
 
   // StatusChangeChecker implementation.
   bool Wait() override;
-  bool IsExitConditionSatisfied() override;
-  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 
   // autofill::PersonalDataManager implementation.
   void OnPersonalDataChanged() override;
@@ -165,8 +182,7 @@ class AutofillWalletMetadataSizeChecker
   ~AutofillWalletMetadataSizeChecker() override;
 
   // StatusChangeChecker implementation.
-  bool IsExitConditionSatisfied() override;
-  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 
   // autofill::PersonalDataManager implementation.
   void OnPersonalDataChanged() override;
@@ -179,28 +195,35 @@ class AutofillWalletMetadataSizeChecker
   bool checking_exit_condition_in_flight_ = false;
 };
 
-// Class that enables or disables USS for Wallet metadata based on test
-// parameter. Must be the first base class of the test fixture.
-// TODO(jkrcal): When the new implementation fully launches, remove this class,
-// convert all tests from *_P back to *_F and remove the instance at the end.
-class UssWalletSwitchToggler : public testing::WithParamInterface<bool> {
+// Checker to block until a new progress marker with correct timestamp is
+// received.
+class FullUpdateTypeProgressMarkerChecker : public StatusChangeChecker,
+                                            public syncer::SyncServiceObserver {
  public:
-  UssWalletSwitchToggler();
+  FullUpdateTypeProgressMarkerChecker(
+      base::Time min_required_progress_marker_timestamp,
+      syncer::SyncService* service,
+      syncer::ModelType model_type);
+  ~FullUpdateTypeProgressMarkerChecker() override;
 
-  // Sets up feature overrides, based on the parameter of the test. Must be
-  // called before the test body is entered (otherwise TSan complains about a
-  // data race).
-  void InitWithDefaultFeatures();
+  FullUpdateTypeProgressMarkerChecker(
+      const FullUpdateTypeProgressMarkerChecker&) = delete;
+  FullUpdateTypeProgressMarkerChecker& operator=(
+      const FullUpdateTypeProgressMarkerChecker&) = delete;
 
-  // Sets up feature overrides, adds the toggled feature on top of specified
-  // |enabled_features| and |disabled_features|. Vectors are passed by value
-  // because we need to alter them anyway. Must be called before the test body
-  // is entered (otherwise TSan complains about a data race).
-  void InitWithFeatures(std::vector<base::Feature> enabled_features,
-                        std::vector<base::Feature> disabled_features);
+  // StatusChangeChecker:
+  bool IsExitConditionSatisfied(std::ostream* os) override;
+
+  // syncer::SyncServiceObserver:
+  void OnSyncCycleCompleted(syncer::SyncService* sync) override;
 
  private:
-  base::test::ScopedFeatureList override_features_;
+  const base::Time min_required_progress_marker_timestamp_;
+  const raw_ptr<const syncer::SyncService> service_;
+  const syncer::ModelType model_type_;
+
+  base::ScopedObservation<syncer::SyncService, syncer::SyncServiceObserver>
+      scoped_observation_{this};
 };
 
 #endif  // CHROME_BROWSER_SYNC_TEST_INTEGRATION_WALLET_HELPER_H_

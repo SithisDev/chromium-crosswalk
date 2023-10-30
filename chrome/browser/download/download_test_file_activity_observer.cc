@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_core_service.h"
@@ -54,14 +54,14 @@ class DownloadTestFileActivityObserver::MockDownloadManagerDelegate
   void ShowFilePickerForDownload(
       download::DownloadItem* download,
       const base::FilePath& suggested_path,
-      const DownloadTargetDeterminerDelegate::ConfirmationCallback& callback)
+      DownloadTargetDeterminerDelegate::ConfirmationCallback callback)
       override {
     file_chooser_displayed_ = true;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::BindOnce(
             &MockDownloadManagerDelegate::OnConfirmationCallbackComplete,
-            base::Unretained(this), callback,
+            base::Unretained(this), std::move(callback),
             (file_chooser_enabled_ ? DownloadConfirmationResult::CONFIRMED
                                    : DownloadConfirmationResult::CANCELED),
             suggested_path));

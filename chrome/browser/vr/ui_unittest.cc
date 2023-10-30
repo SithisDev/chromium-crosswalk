@@ -1,13 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/vr/ui_scene_creator.h"
 
-#include "base/macros.h"
 #include "base/numerics/ranges.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/version.h"
 #include "build/build_config.h"
@@ -141,8 +139,8 @@ TEST_F(UiTest, WebVrToastTransience) {
   browser_ui->SetCapturingState(CapturingStateModel(), CapturingStateModel(),
                                 CapturingStateModel());
   EXPECT_TRUE(IsVisible(kWebVrExclusiveScreenToast));
-  EXPECT_TRUE(
-      RunForSeconds(kWmrInitialIndicatorsTimeoutSeconds + kSmallDelaySeconds));
+  EXPECT_TRUE(RunForSeconds(kWindowsInitialIndicatorsTimeoutSeconds +
+                            kSmallDelaySeconds));
   EXPECT_FALSE(IsVisible(kWebVrExclusiveScreenToast));
 
   browser_ui->SetWebVrMode(false);
@@ -155,21 +153,21 @@ TEST_F(UiTest, PlatformToast) {
   auto browser_ui = ui_->GetBrowserUiWeakPtr();
 
   // show and hide toast after a timeout.
-  browser_ui->ShowPlatformToast(base::UTF8ToUTF16("Downloading"));
+  browser_ui->ShowPlatformToast(u"Downloading");
   EXPECT_TRUE(IsVisible(kPlatformToast));
   EXPECT_TRUE(RunForSeconds(kToastTimeoutSeconds + kSmallDelaySeconds));
   EXPECT_FALSE(IsVisible(kPlatformToast));
 
   // toast can be cancelled.
-  browser_ui->ShowPlatformToast(base::UTF8ToUTF16("Downloading"));
+  browser_ui->ShowPlatformToast(u"Downloading");
   EXPECT_TRUE(IsVisible(kPlatformToast));
   browser_ui->CancelPlatformToast();
   EXPECT_FALSE(IsVisible(kPlatformToast));
 
   // toast can refresh visible timeout.
-  browser_ui->ShowPlatformToast(base::UTF8ToUTF16("Downloading"));
+  browser_ui->ShowPlatformToast(u"Downloading");
   EXPECT_TRUE(RunForSeconds(kSmallDelaySeconds));
-  browser_ui->ShowPlatformToast(base::UTF8ToUTF16("Downloading"));
+  browser_ui->ShowPlatformToast(u"Downloading");
   EXPECT_TRUE(RunForSeconds(kToastTimeoutSeconds - kSmallDelaySeconds));
   EXPECT_TRUE(IsVisible(kPlatformToast));
   EXPECT_TRUE(RunForSeconds(kToastTimeoutSeconds + kSmallDelaySeconds));
@@ -182,7 +180,7 @@ TEST_F(UiTest, CaptureToasts) {
 
   for (auto& spec : GetIndicatorSpecs()) {
     for (int i = 0; i < 3; ++i) {
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
       if (i == 1)  // Skip background tabs for non-Android platforms.
         continue;
 #endif
@@ -222,7 +220,7 @@ TEST_F(UiTest, CaptureToasts) {
                                     potential_capturing);
       EXPECT_TRUE(IsVisible(kWebVrExclusiveScreenToast));
       EXPECT_TRUE(IsVisible(spec.webvr_name) == (string_id != 0));
-      EXPECT_TRUE(RunForSeconds(kWmrInitialIndicatorsTimeoutSeconds +
+      EXPECT_TRUE(RunForSeconds(kWindowsInitialIndicatorsTimeoutSeconds +
                                 kSmallDelaySeconds));
       EXPECT_FALSE(IsVisible(kWebVrExclusiveScreenToast));
 
@@ -308,11 +306,11 @@ TEST_F(UiTest, VoiceSearchHiddenInIncognito) {
   CreateScene(kNotInWebVr);
 
   model_->push_mode(kModeEditingOmnibox);
-  EXPECT_TRUE(OnBeginFrame());
+  EXPECT_TRUE(AdvanceFrame());
   EXPECT_TRUE(IsVisible(kOmniboxVoiceSearchButton));
 
   model_->incognito = true;
-  EXPECT_TRUE(OnBeginFrame());
+  EXPECT_TRUE(AdvanceFrame());
   EXPECT_FALSE(IsVisible(kOmniboxVoiceSearchButton));
 }
 
@@ -321,11 +319,11 @@ TEST_F(UiTest, VoiceSearchHiddenWhenCantAskForPermission) {
 
   model_->push_mode(kModeEditingOmnibox);
   model_->speech.has_or_can_request_record_audio_permission = true;
-  EXPECT_TRUE(OnBeginFrame());
+  EXPECT_TRUE(AdvanceFrame());
   EXPECT_TRUE(IsVisible(kOmniboxVoiceSearchButton));
 
   model_->speech.has_or_can_request_record_audio_permission = false;
-  EXPECT_TRUE(OnBeginFrame());
+  EXPECT_TRUE(AdvanceFrame());
   EXPECT_FALSE(IsVisible(kOmniboxVoiceSearchButton));
 }
 
@@ -335,11 +333,11 @@ TEST_F(UiTest, VoiceSearchHiddenWhenContentCapturingAudio) {
   model_->push_mode(kModeEditingOmnibox);
   model_->speech.has_or_can_request_record_audio_permission = true;
   model_->active_capturing.audio_capture_enabled = false;
-  EXPECT_TRUE(OnBeginFrame());
+  EXPECT_TRUE(AdvanceFrame());
   EXPECT_TRUE(IsVisible(kOmniboxVoiceSearchButton));
 
   model_->active_capturing.audio_capture_enabled = true;
-  EXPECT_TRUE(OnBeginFrame());
+  EXPECT_TRUE(AdvanceFrame());
   EXPECT_FALSE(IsVisible(kOmniboxVoiceSearchButton));
 }
 
@@ -372,14 +370,14 @@ TEST_F(UiTest, UiModeOmniboxEditing) {
   VerifyOnlyElementsVisible("Initial", kElementsVisibleInBrowsing);
 
   model_->push_mode(kModeEditingOmnibox);
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_EQ(model_->ui_modes.size(), 2u);
   EXPECT_EQ(model_->ui_modes[1], kModeEditingOmnibox);
   EXPECT_EQ(model_->ui_modes[0], kModeBrowsing);
   EXPECT_GT(NumVisibleInTree(kOmniboxRoot), 0);
 
   model_->pop_mode(kModeEditingOmnibox);
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_EQ(model_->ui_modes.size(), 1u);
   EXPECT_EQ(model_->ui_modes.back(), kModeBrowsing);
   VerifyOnlyElementsVisible("Browsing", kElementsVisibleInBrowsing);
@@ -418,7 +416,7 @@ TEST_F(UiTest, UiModeVoiceSearchFromOmnibox) {
   model_->pop_mode(kModeEditingOmnibox);
   EXPECT_EQ(model_->ui_modes.size(), 1u);
   EXPECT_EQ(model_->ui_modes.back(), kModeBrowsing);
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_FALSE(IsVisible(kOmniboxBackground));
   EXPECT_TRUE(IsVisible(kContentQuad));
 }
@@ -428,11 +426,11 @@ TEST_F(UiTest, HostedUiInWebVr) {
   VerifyVisibility({kWebVrHostedUi, kWebVrFloor}, false);
 
   ui_->SetAlertDialogEnabled(true, nullptr, 0, 0);
-  OnBeginFrame();
+  AdvanceFrame();
   VerifyVisibility({kWebVrHostedUi, kWebVrBackground, kWebVrFloor}, true);
 
   ui_->SetAlertDialogEnabled(false, nullptr, 0, 0);
-  OnBeginFrame();
+  AdvanceFrame();
   VerifyVisibility({kWebVrHostedUi, kWebVrFloor}, false);
 }
 
@@ -531,7 +529,7 @@ TEST_F(UiTest, ClickingOmniboxTriggersUnsupportedMode) {
   ClickElement(omnibox);
   ui_->GetBrowserUiWeakPtr()->ShowExitVrPrompt(
       UiUnsupportedMode::kNeedsKeyboardUpdate);
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_EQ(model_->active_modal_prompt_type,
             ModalPromptType::kModalPromptTypeUpdateKeyboard);
   EXPECT_TRUE(scene_->GetUiElementByName(kExitPrompt)->IsVisible());
@@ -549,7 +547,7 @@ TEST_F(UiTest, WebInputEditingTriggersUnsupportedMode) {
               OnUnsupportedMode(UiUnsupportedMode::kNeedsKeyboardUpdate));
   browser_ui->ShowSoftInput(true);
   browser_ui->ShowExitVrPrompt(UiUnsupportedMode::kNeedsKeyboardUpdate);
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_EQ(model_->active_modal_prompt_type,
             ModalPromptType::kModalPromptTypeUpdateKeyboard);
   EXPECT_TRUE(scene_->GetUiElementByName(kExitPrompt)->IsVisible());
@@ -559,14 +557,14 @@ TEST_F(UiTest, ExitWebInputEditingOnMenuButtonClick) {
   CreateScene(kNotInWebVr);
   EXPECT_FALSE(scene_->GetUiElementByName(kKeyboard)->IsVisible());
   ui_->GetBrowserUiWeakPtr()->ShowSoftInput(true);
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_TRUE(scene_->GetUiElementByName(kKeyboard)->IsVisible());
   InputEventList events;
   events.push_back(
       std::make_unique<InputEvent>(InputEvent::kMenuButtonClicked));
   ui_->HandleMenuButtonEvents(&events);
   base::RunLoop().RunUntilIdle();
-  OnBeginFrame();
+  AdvanceFrame();
   // Clicking menu button should hide the keyboard.
   EXPECT_FALSE(scene_->GetUiElementByName(kKeyboard)->IsVisible());
 }
@@ -592,7 +590,7 @@ TEST_F(UiTest, PrimaryButtonClickTriggersOnExitPrompt) {
   VerifyOnlyElementsVisible("Initial", kElementsVisibleInBrowsing);
   ui_->GetBrowserUiWeakPtr()->ShowExitVrPrompt(
       UiUnsupportedMode::kUnhandledPageInfo);
-  OnBeginFrame();
+  AdvanceFrame();
 
   // Click on 'EXIT VR' should trigger UI browser interface and close prompt.
   EXPECT_CALL(*browser_,
@@ -610,7 +608,7 @@ TEST_F(UiTest, SecondaryButtonClickTriggersOnExitPrompt) {
   // Initial state.
   VerifyOnlyElementsVisible("Initial", kElementsVisibleInBrowsing);
   model_->active_modal_prompt_type = kModalPromptTypeExitVRForSiteInfo;
-  OnBeginFrame();
+  AdvanceFrame();
 
   // Click on 'BACK' should trigger UI browser interface and close prompt.
   EXPECT_CALL(*browser_,
@@ -628,7 +626,7 @@ TEST_F(UiTest, ClickOnPromptBackgroundDoesNothing) {
 
   ui_->GetBrowserUiWeakPtr()->ShowExitVrPrompt(
       UiUnsupportedMode::kUnhandledPageInfo);
-  OnBeginFrame();
+  AdvanceFrame();
 
   EXPECT_CALL(*browser_, OnExitVrPromptResult(testing::_, testing::_)).Times(0);
   auto* prompt = scene_->GetUiElementByName(kExitPrompt);
@@ -747,7 +745,7 @@ TEST_F(UiTest, PropagateContentBoundsOnStart) {
                   SizeFsAreApproximatelyEqual(expected_bounds, kTolerance)));
 
   ui_->OnProjMatrixChanged(GetPixelDaydreamProjMatrix());
-  OnBeginFrame();
+  AdvanceFrame();
 }
 
 TEST_F(UiTest, PropagateContentBoundsOnFullscreen) {
@@ -762,7 +760,7 @@ TEST_F(UiTest, PropagateContentBoundsOnFullscreen) {
                   SizeFsAreApproximatelyEqual(expected_bounds, kTolerance)));
 
   ui_->OnProjMatrixChanged(GetPixelDaydreamProjMatrix());
-  OnBeginFrame();
+  AdvanceFrame();
 }
 
 TEST_F(UiTest, DontPropagateContentBoundsOnNegligibleChange) {
@@ -775,7 +773,7 @@ TEST_F(UiTest, DontPropagateContentBoundsOnNegligibleChange) {
   gfx::SizeF content_quad_size = content_quad->size();
   content_quad_size.Scale(1.2f);
   content_quad->SetSize(content_quad_size.width(), content_quad_size.height());
-  OnBeginFrame();
+  AdvanceFrame();
 
   EXPECT_CALL(*browser_, OnContentScreenBoundsChanged(testing::_)).Times(0);
 
@@ -821,7 +819,7 @@ TEST_F(UiTest, WebVrTimeout) {
 
   RunForMs(500);
   // On Windows, the timeout message button is not shown.
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
   VerifyVisibility(
       {kWebVrTimeoutSpinner, kWebVrTimeoutMessage, kWebVrTimeoutMessageLayout,
        kWebVrTimeoutMessageIcon, kWebVrTimeoutMessageText,
@@ -832,7 +830,7 @@ TEST_F(UiTest, WebVrTimeout) {
       {kWebVrTimeoutSpinner, kWebVrTimeoutMessage, kWebVrTimeoutMessageLayout,
        kWebVrTimeoutMessageIcon, kWebVrTimeoutMessageText},
       false);
-#endif  // OS_WIN
+#endif  // !BUILDFLAG(IS_WIN)
   VerifyVisibility(
       {
           kWebVrBackground,
@@ -842,7 +840,7 @@ TEST_F(UiTest, WebVrTimeout) {
   model_->web_vr.state = kWebVrTimeoutImminent;
   RunForMs(500);
   // On Windows, the timeout message button is not shown.
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
   VerifyVisibility({kWebVrTimeoutMessage, kWebVrTimeoutMessageLayout,
                     kWebVrTimeoutMessageIcon, kWebVrTimeoutMessageText,
                     kWebVrTimeoutMessageButton, kWebVrTimeoutMessageButtonText},
@@ -851,7 +849,7 @@ TEST_F(UiTest, WebVrTimeout) {
   VerifyVisibility({kWebVrTimeoutMessage, kWebVrTimeoutMessageLayout,
                     kWebVrTimeoutMessageIcon, kWebVrTimeoutMessageText},
                    false);
-#endif  // OS_WIN
+#endif  // !BUILDFLAG(IS_WIN)
   VerifyVisibility(
       {
           kWebVrTimeoutSpinner, kWebVrBackground,
@@ -866,7 +864,7 @@ TEST_F(UiTest, WebVrTimeout) {
       },
       false);
 // On Windows, the timeout message button is not shown.
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
   VerifyVisibility(
       {kWebVrBackground, kWebVrTimeoutMessage, kWebVrTimeoutMessageLayout,
        kWebVrTimeoutMessageIcon, kWebVrTimeoutMessageText,
@@ -877,7 +875,7 @@ TEST_F(UiTest, WebVrTimeout) {
       {kWebVrBackground, kWebVrTimeoutMessage, kWebVrTimeoutMessageLayout,
        kWebVrTimeoutMessageIcon, kWebVrTimeoutMessageText},
       true);
-#endif  // OS_WIN
+#endif  // !BUILDFLAG(IS_WIN)
 }
 
 TEST_F(UiTest, SpeechRecognitionUiVisibility) {
@@ -912,7 +910,7 @@ TEST_F(UiTest, SpeechRecognitionUiVisibility) {
 
   // Mock received speech result.
   model_->speech.speech_recognition_state = SPEECH_RECOGNITION_END;
-  browser_ui->SetRecognitionResult(base::ASCIIToUTF16("test"));
+  browser_ui->SetRecognitionResult(u"test");
   browser_ui->SetSpeechRecognitionEnabled(false);
 
   EXPECT_TRUE(RunForMs(10));
@@ -982,7 +980,7 @@ TEST_F(UiTest, OmniboxSuggestionBindings) {
   UiElement* container = scene_->GetUiElementByName(kOmniboxSuggestions);
   ASSERT_NE(container, nullptr);
 
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_EQ(container->children().size(), 0u);
 
   model_->push_mode(kModeEditingOmnibox);
@@ -990,15 +988,15 @@ TEST_F(UiTest, OmniboxSuggestionBindings) {
   EXPECT_EQ(NumVisibleInTree(kOmniboxSuggestions), 0);
 
   model_->omnibox_suggestions.emplace_back(
-      OmniboxSuggestion(base::string16(), base::string16(),
+      OmniboxSuggestion(std::u16string(), std::u16string(),
                         ACMatchClassifications(), ACMatchClassifications(),
-                        nullptr, GURL(), base::string16(), base::string16()));
-  OnBeginFrame();
+                        nullptr, GURL(), std::u16string(), std::u16string()));
+  AdvanceFrame();
   EXPECT_EQ(container->children().size(), 1u);
   EXPECT_GT(NumVisibleInTree(kOmniboxSuggestions), 1);
 
   model_->omnibox_suggestions.clear();
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_EQ(container->children().size(), 0u);
   EXPECT_EQ(NumVisibleInTree(kOmniboxSuggestions), 0);
 }
@@ -1008,10 +1006,10 @@ TEST_F(UiTest, OmniboxSuggestionNavigates) {
   GURL gurl("http://test.com/");
   model_->push_mode(kModeEditingOmnibox);
   model_->omnibox_suggestions.emplace_back(
-      OmniboxSuggestion(base::string16(), base::string16(),
+      OmniboxSuggestion(std::u16string(), std::u16string(),
                         ACMatchClassifications(), ACMatchClassifications(),
-                        nullptr, gurl, base::string16(), base::string16()));
-  OnBeginFrame();
+                        nullptr, gurl, std::u16string(), std::u16string()));
+  AdvanceFrame();
 
   // Let the omnibox fade in.
   RunForMs(200);
@@ -1245,20 +1243,20 @@ TEST_F(UiTest, ResetRepositioner) {
   Repositioner* repositioner = static_cast<Repositioner*>(
       scene_->GetUiElementByName(k2dBrowsingRepositioner));
 
-  OnBeginFrame();
+  AdvanceFrame();
   gfx::Transform original = repositioner->world_space_transform();
 
   repositioner->set_laser_direction(kForwardVector);
   repositioner->SetEnabled(true);
   repositioner->set_laser_direction({1, 0, 0});
-  OnBeginFrame();
+  AdvanceFrame();
 
   EXPECT_NE(original, repositioner->world_space_transform());
   repositioner->SetEnabled(false);
 
   model_->mutable_primary_controller().recentered = true;
 
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_EQ(original, repositioner->world_space_transform());
 }
 
@@ -1290,32 +1288,32 @@ TEST_F(UiTest, DisableResizeWhenEditing) {
   UiElement* hit_plane = scene_->GetUiElementByName(kContentFrameHitPlane);
   EXPECT_TRUE(hit_plane->hit_testable());
   model_->editing_web_input = true;
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_FALSE(hit_plane->hit_testable());
   model_->editing_web_input = false;
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_TRUE(hit_plane->hit_testable());
 
   model_->editing_input = true;
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_FALSE(hit_plane->hit_testable());
   model_->editing_input = false;
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_TRUE(hit_plane->hit_testable());
 
   model_->hosted_platform_ui.hosted_ui_enabled = true;
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_FALSE(hit_plane->hit_testable());
   model_->hosted_platform_ui.hosted_ui_enabled = false;
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_TRUE(hit_plane->hit_testable());
 
   model_->active_modal_prompt_type =
       kModalPromptTypeExitVRForVoiceSearchRecordAudioOsPermission;
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_FALSE(hit_plane->hit_testable());
   model_->active_modal_prompt_type = kModalPromptTypeNone;
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_TRUE(hit_plane->hit_testable());
 }
 
@@ -1327,13 +1325,13 @@ TEST_F(UiTest, RepositionHostedUi) {
   UiElement* hosted_ui = scene_->GetUiElementByName(k2dBrowsingHostedUi);
 
   model_->hosted_platform_ui.hosted_ui_enabled = true;
-  OnBeginFrame();
+  AdvanceFrame();
   gfx::Transform original = hosted_ui->world_space_transform();
 
   repositioner->set_laser_direction(kForwardVector);
   repositioner->SetEnabled(true);
   repositioner->set_laser_direction({0, 1, 0});
-  OnBeginFrame();
+  AdvanceFrame();
 
   EXPECT_NE(original, hosted_ui->world_space_transform());
   repositioner->SetEnabled(false);
@@ -1341,7 +1339,7 @@ TEST_F(UiTest, RepositionHostedUi) {
 
 // Ensures that permissions do not appear after showing hosted UI.
 TEST_F(UiTest, DoNotShowIndicatorsAfterHostedUi) {
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
   CreateScene(kInWebVr);
   auto browser_ui = ui_->GetBrowserUiWeakPtr();
   browser_ui->SetWebVrMode(true);
@@ -1349,14 +1347,14 @@ TEST_F(UiTest, DoNotShowIndicatorsAfterHostedUi) {
   ui_->GetSchedulerUiPtr()->OnWebXrFrameAvailable();
   browser_ui->SetCapturingState(CapturingStateModel(), CapturingStateModel(),
                                 CapturingStateModel());
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_TRUE(IsVisible(kWebVrExclusiveScreenToast));
   RunForSeconds(8);
   EXPECT_FALSE(IsVisible(kWebVrExclusiveScreenToast));
   model_->web_vr.showing_hosted_ui = true;
-  OnBeginFrame();
+  AdvanceFrame();
   model_->web_vr.showing_hosted_ui = false;
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_FALSE(IsVisible(kWebVrExclusiveScreenToast));
 #endif
 }
@@ -1365,7 +1363,7 @@ TEST_F(UiTest, DoNotShowIndicatorsAfterHostedUi) {
 // is released that we do not show the exclusive screen toast. Distinguishing
 // these cases requires knowledge of the previous state.
 TEST_F(UiTest, LongPressMenuButtonInWebVrMode) {
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
   CreateScene(kInWebVr);
   auto browser_ui = ui_->GetBrowserUiWeakPtr();
   browser_ui->SetWebVrMode(true);
@@ -1373,7 +1371,7 @@ TEST_F(UiTest, LongPressMenuButtonInWebVrMode) {
   ui_->GetSchedulerUiPtr()->OnWebXrFrameAvailable();
   browser_ui->SetCapturingState(CapturingStateModel(), CapturingStateModel(),
                                 CapturingStateModel());
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_TRUE(IsVisible(kWebVrExclusiveScreenToast));
   RunForSeconds(8);
   EXPECT_FALSE(IsVisible(kWebVrExclusiveScreenToast));
@@ -1383,12 +1381,12 @@ TEST_F(UiTest, LongPressMenuButtonInWebVrMode) {
   events.push_back(
       std::make_unique<InputEvent>(InputEvent::kMenuButtonLongPressStart));
   ui_->HandleMenuButtonEvents(&events);
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_TRUE(model_->menu_button_long_pressed);
   EXPECT_FALSE(IsVisible(kWebVrExclusiveScreenToast));
   EXPECT_TRUE(IsVisible(kWebVrAudioCaptureIndicator));
   RunForSeconds(8);
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_TRUE(model_->menu_button_long_pressed);
   EXPECT_FALSE(IsVisible(kWebVrAudioCaptureIndicator));
   EXPECT_FALSE(IsVisible(kWebVrAudioCaptureIndicator));
@@ -1409,17 +1407,17 @@ TEST_F(UiTest, MenuItems) {
   EXPECT_EQ(IsVisible(kOverflowMenuPreferencesItem), false);
 
   model_->incognito_tabs_open = true;
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_EQ(IsVisible(kOverflowMenuNewIncognitoTabItem), true);
   EXPECT_EQ(IsVisible(kOverflowMenuCloseAllIncognitoTabsItem), true);
 
   model_->incognito = true;
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_EQ(IsVisible(kOverflowMenuNewIncognitoTabItem), false);
   EXPECT_EQ(IsVisible(kOverflowMenuCloseAllIncognitoTabsItem), true);
 
   model_->standalone_vr_device = true;
-  OnBeginFrame();
+  AdvanceFrame();
   EXPECT_EQ(IsVisible(kOverflowMenuPreferencesItem), true);
 }
 
@@ -1427,7 +1425,7 @@ TEST_F(UiTest, SteadyState) {
   CreateScene(kNotInWebVr);
   RunForSeconds(10.0f);
   // Should have reached steady state.
-  EXPECT_FALSE(OnBeginFrame());
+  EXPECT_FALSE(AdvanceFrame());
 }
 
 }  // namespace vr

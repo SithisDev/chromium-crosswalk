@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,24 +12,30 @@ import static org.junit.Assert.fail;
 
 import android.os.Build;
 import android.os.Bundle;
-import android.support.test.filters.MediumTest;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 
 import org.hamcrest.Matchers;
 import org.junit.Before;
+import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
+import org.chromium.chrome.test.batch.BlankCTATabInitialStateRule;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.ArrayList;
@@ -41,10 +47,15 @@ import java.util.List;
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @MinAndroidSdkLevel(Build.VERSION_CODES.N)
+@Batch(Batch.PER_CLASS)
 public class MenuDirectActionHandlerTest {
+    @ClassRule
+    public static ChromeTabbedActivityTestRule sActivityTestRule =
+            new ChromeTabbedActivityTestRule();
+
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
+    public BlankCTATabInitialStateRule mBlankCTATabInitialStateRule =
+            new BlankCTATabInitialStateRule(sActivityTestRule, false);
 
     private MenuDirectActionHandler mHandler;
     private ChromeActivity mActivity;
@@ -52,8 +63,7 @@ public class MenuDirectActionHandlerTest {
 
     @Before
     public void setUp() throws Exception {
-        mActivityTestRule.startMainActivityOnBlankPage();
-        mActivity = mActivityTestRule.getActivity();
+        mActivity = sActivityTestRule.getActivity();
         mTabModelSelector = mActivity.getTabModelSelector();
         mHandler = new MenuDirectActionHandler(mActivity, mTabModelSelector);
     }
@@ -61,7 +71,7 @@ public class MenuDirectActionHandlerTest {
     @Test
     @MediumTest
     @Feature({"DirectActions"})
-    public void testPerformDirectActionThroughActivity() throws Exception {
+    public void testPerformDirectActionThroughActivity() {
         mHandler.allowAllActions();
 
         List<Bundle> results = new ArrayList<>();
@@ -81,13 +91,17 @@ public class MenuDirectActionHandlerTest {
     @Test
     @SmallTest
     @Feature({"DirectActions"})
-    public void testReportAvailableActions() throws Exception {
+    public void testReportAvailableActions() {
         mHandler.allowAllActions();
 
         assertThat(getDirectActions(),
                 Matchers.containsInAnyOrder("bookmark_this_page", "reload", "downloads", "help",
                         "new_tab", "open_history", "preferences", "close_all_tabs"));
+
         TestThreadUtils.runOnUiThreadBlocking(() -> { mTabModelSelector.closeAllTabs(); });
+        // Wait for any pending animations for tab closures to complete.
+        CriteriaHelper.pollUiThread(
+                () -> Criteria.checkThat(mTabModelSelector.getTotalTabCount(), Matchers.is(0)));
         assertThat(getDirectActions(),
                 Matchers.containsInAnyOrder("downloads", "help", "new_tab", "preferences"));
     }
@@ -95,16 +109,16 @@ public class MenuDirectActionHandlerTest {
     @Test
     @MediumTest
     @Feature({"DirectActions"})
-    public void testRestrictAvailableActions() throws Exception {
+    public void testRestrictAvailableActions() {
         // By default, MenuDirectActionHandler supports no actions.
         assertThat(getDirectActions(), Matchers.empty());
 
         // Allow new_tab, then downloads
-        mHandler.whitelistActions(R.id.new_tab_menu_id);
+        mHandler.allowlistActions(R.id.new_tab_menu_id);
 
         assertThat(getDirectActions(), Matchers.contains("new_tab"));
 
-        mHandler.whitelistActions(R.id.downloads_menu_id);
+        mHandler.allowlistActions(R.id.downloads_menu_id);
         assertThat(getDirectActions(), Matchers.containsInAnyOrder("new_tab", "downloads"));
 
         // Other actions cannot be called.
@@ -113,12 +127,12 @@ public class MenuDirectActionHandlerTest {
                     "help", Bundle.EMPTY, (r) -> fail("Unexpected result: " + r)));
         });
 
-        // Allow all actions. This allows "help", never whitelisted explicitly
+        // Allow all actions. This allows "help", never allowlisted explicitly
         mHandler.allowAllActions();
         assertThat(getDirectActions(), Matchers.hasItem("help"));
 
-        // Whitelisting extra actions is ignored and does not hide the other actions.
-        mHandler.whitelistActions(R.id.new_tab_menu_id);
+        // Allowlisting extra actions is ignored and does not hide the other actions.
+        mHandler.allowlistActions(R.id.new_tab_menu_id);
 
         assertThat(getDirectActions(), Matchers.hasItem("help"));
     }

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,23 +22,19 @@ std::string ToJSONString(const base::Value& value) {
   std::string json;
   JSONStringValueSerializer serializer(&json);
   serializer.set_pretty_print(true);
-  if (!serializer.Serialize(value)) {
-    DVLOG(1) << "Failed to serialize log to JSON.";
-    return "";
-  }
-  return json;
+  return serializer.Serialize(value) ? json : "";
 }
 
 // Returns UUID if |sink_id| is in the format of "cast:<UUID>" or "dial:<UUID>";
 // otherwise returns |sink_id| as UUID.
 base::StringPiece ExtractUUID(const base::StringPiece& sink_id) {
-  if (!sink_id.ends_with(">"))
+  if (!base::EndsWith(sink_id, ">"))
     return sink_id;
 
   size_t prefix_length = 0;
-  if (sink_id.starts_with(kCastPrefix))
+  if (base::StartsWith(sink_id, kCastPrefix))
     prefix_length = sizeof(kCastPrefix) - 1;
-  if (sink_id.starts_with(kDialPrefix))
+  if (base::StartsWith(sink_id, kDialPrefix))
     prefix_length = sizeof(kDialPrefix) - 1;
 
   if (prefix_length == 0)
@@ -52,7 +48,7 @@ base::StringPiece ExtractUUID(const base::StringPiece& sink_id) {
 
 // Returns the last four characters of UUID. UUID is extracted from |sink_id|.
 std::string TruncateSinkId(const std::string& sink_id) {
-  std::string uuid = ExtractUUID(sink_id).as_string();
+  std::string uuid(ExtractUUID(sink_id));
   return uuid.length() <= 4 ? uuid : uuid.substr(uuid.length() - 4);
 }
 
@@ -83,7 +79,7 @@ base::Value ToValue(const MediaSinkInternal& sink_internal) {
     dict.SetKey("capabilities", base::Value(extra_data.capabilities));
     dict.SetKey("channel_id", base::Value(extra_data.cast_channel_id));
     dict.SetKey("discovered_by_dial",
-                base::Value(extra_data.discovered_by_dial));
+        base::Value(extra_data.discovery_type == CastDiscoveryType::kDial));
   }
   return dict;
 }
@@ -96,7 +92,7 @@ base::Value ConvertDiscoveredSinksToValues(
   for (const auto& sinks_it : sinks) {
     base::ListValue list;
     for (const auto& inner_sink : sinks_it.second)
-      list.GetList().push_back(ToValue(inner_sink));
+      list.Append(ToValue(inner_sink));
     dict.SetKey(sinks_it.first, std::move(list));
   }
   return dict;
@@ -105,14 +101,14 @@ base::Value ConvertDiscoveredSinksToValues(
 // Helper function to convert |available_sinks| to a dictionary of availability
 // strings in JSON format represented by base::Value.
 base::Value ConvertAvailableSinksToValues(
-    const base::MRUCache<std::string, std::vector<MediaSinkInternal>>&
+    const base::LRUCache<std::string, std::vector<MediaSinkInternal>>&
         available_sinks) {
   base::Value dict(base::Value::Type::DICTIONARY);
   for (const auto& sinks_it : available_sinks) {
     base::Value list(base::Value::Type::LIST);
     for (const auto& inner_sink : sinks_it.second) {
       std::string sink_id = inner_sink.sink().id();
-      list.GetList().push_back(base::Value(TruncateSinkId(sink_id)));
+      list.Append(base::Value(TruncateSinkId(sink_id)));
     }
     dict.SetKey(sinks_it.first, std::move(list));
   }
@@ -132,9 +128,11 @@ void MediaSinkServiceStatus::UpdateDiscoveredSinks(
 }
 
 void MediaSinkServiceStatus::UpdateAvailableSinks(
-    MediaRouteProviderId provider_id,
+    mojom::MediaRouteProviderId provider_id,
     const std::string& media_source,
     const std::vector<MediaSinkInternal>& available_sinks) {
+  // TODO(takumif): It'd be safer and more efficient to make use
+  // pair<MediaRouteProviderId, string> than a serialized "id:name" string.
   std::string key =
       base::StrCat({ProviderIdToString(provider_id), ":", media_source});
   available_sinks_.Put(key, available_sinks);

@@ -1,24 +1,27 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/run_loop.h"
-#include "base/strings/stringprintf.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "chrome/browser/browser_features.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/content_verifier_test_utils.h"
 #include "chrome/browser/extensions/extension_management_test_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/updater/chrome_update_client_config.h"
 #include "chrome/browser/extensions/updater/extension_update_client_base_browsertest.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
+#include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/update_client/net/url_loader_post_interceptor.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/content_verifier.h"
 #include "extensions/browser/extension_registry.h"
@@ -29,6 +32,9 @@
 #include "extensions/browser/updater/manifest_fetch_data.h"
 #include "extensions/common/extension_updater_uma.h"
 #include "extensions/common/extension_urls.h"
+#include "extensions/common/mojom/manifest.mojom-shared.h"
+
+using extensions::mojom::ManifestLocation;
 
 namespace extensions {
 
@@ -42,8 +48,8 @@ using UpdateClientEvents = update_client::UpdateClient::Observer::Events;
 
 class UpdateServiceTest : public ExtensionUpdateClientBaseTest {
  public:
-  UpdateServiceTest() : ExtensionUpdateClientBaseTest() {}
-  ~UpdateServiceTest() override {}
+  UpdateServiceTest() = default;
+  ~UpdateServiceTest() override = default;
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionUpdateClientBaseTest::SetUpCommandLine(command_line);
@@ -53,6 +59,14 @@ class UpdateServiceTest : public ExtensionUpdateClientBaseTest {
   }
 
   bool ShouldEnableContentVerification() override { return true; }
+
+  void ExpectProfileKeepAlive(bool expected) {
+    if (!base::FeatureList::IsEnabled(features::kDestroyProfileOnBrowserClose))
+      return;
+    EXPECT_EQ(expected,
+              g_browser_process->profile_manager()->HasKeepAliveForTesting(
+                  profile(), ProfileKeepAliveOrigin::kExtensionUpdater));
+  }
 };
 
 IN_PROC_BROWSER_TEST_F(UpdateServiceTest, NoUpdate) {
@@ -67,7 +81,7 @@ IN_PROC_BROWSER_TEST_F(UpdateServiceTest, NoUpdate) {
 
   const base::FilePath crx_path = test_data_dir_.AppendASCII("updater/v1.crx");
   const Extension* extension =
-      InstallExtension(crx_path, 1, Manifest::EXTERNAL_POLICY_DOWNLOAD);
+      InstallExtension(crx_path, 1, ManifestLocation::kExternalPolicyDownload);
   ASSERT_TRUE(extension);
   EXPECT_EQ(kExtensionId, extension->id());
 
@@ -76,23 +90,8 @@ IN_PROC_BROWSER_TEST_F(UpdateServiceTest, NoUpdate) {
   extension_service()->updater()->CheckNow(std::move(params));
 
   // UpdateService should emit a not-updated event.
-  EXPECT_EQ(UpdateClientEvents::COMPONENT_NOT_UPDATED,
+  EXPECT_EQ(UpdateClientEvents::COMPONENT_ALREADY_UP_TO_DATE,
             WaitOnComponentUpdaterCompleteEvent(kExtensionId));
-
-  content::FetchHistogramsFromChildProcesses();
-  EXPECT_THAT(histogram_tester.GetAllSamples(
-                  "Extensions.ExtensionUpdaterRawUpdateCalls"),
-              testing::ElementsAre(base::Bucket(1, 1)));
-  EXPECT_THAT(
-      histogram_tester.GetAllSamples("Extensions.ExtensionUpdaterUpdateCalls"),
-      testing::ElementsAre(base::Bucket(1, 1)));
-  EXPECT_THAT(
-      histogram_tester.GetAllSamples(
-          "Extensions.ExtensionUpdaterUpdateResults"),
-      testing::ElementsAre(base::Bucket(
-          static_cast<int>(ExtensionUpdaterUpdateResult::NO_UPDATE), 1)));
-  histogram_tester.ExpectTotalCount(
-      "Extensions.UnifiedExtensionUpdaterUpdateCheckErrors", 0);
 
   ASSERT_EQ(1, update_interceptor_->GetCount())
       << update_interceptor_->GetRequestsAsString();
@@ -125,7 +124,7 @@ IN_PROC_BROWSER_TEST_F(UpdateServiceTest, UpdateCheckError) {
 
   const base::FilePath crx_path = test_data_dir_.AppendASCII("updater/v1.crx");
   const Extension* extension =
-      InstallExtension(crx_path, 1, Manifest::EXTERNAL_POLICY_DOWNLOAD);
+      InstallExtension(crx_path, 1, ManifestLocation::kExternalPolicyDownload);
   ASSERT_TRUE(extension);
   EXPECT_EQ(kExtensionId, extension->id());
 
@@ -136,23 +135,6 @@ IN_PROC_BROWSER_TEST_F(UpdateServiceTest, UpdateCheckError) {
   // UpdateService should emit an error update event.
   EXPECT_EQ(UpdateClientEvents::COMPONENT_UPDATE_ERROR,
             WaitOnComponentUpdaterCompleteEvent(kExtensionId));
-
-  content::FetchHistogramsFromChildProcesses();
-  EXPECT_THAT(
-      histogram_tester.GetAllSamples("Extensions.ExtensionUpdaterUpdateCalls"),
-      testing::ElementsAre(base::Bucket(1, 1)));
-  EXPECT_THAT(histogram_tester.GetAllSamples(
-                  "Extensions.ExtensionUpdaterRawUpdateCalls"),
-              testing::ElementsAre(base::Bucket(1, 1)));
-  EXPECT_THAT(
-      histogram_tester.GetAllSamples(
-          "Extensions.ExtensionUpdaterUpdateResults"),
-      testing::ElementsAre(base::Bucket(
-          static_cast<int>(ExtensionUpdaterUpdateResult::UPDATE_CHECK_ERROR),
-          1)));
-  EXPECT_THAT(histogram_tester.GetAllSamples(
-                  "Extensions.UnifiedExtensionUpdaterUpdateCheckErrors"),
-              testing::ElementsAre(base::Bucket(403, 1)));
 
   ASSERT_EQ(1, update_interceptor_->GetCount())
       << update_interceptor_->GetRequestsAsString();
@@ -189,9 +171,9 @@ IN_PROC_BROWSER_TEST_F(UpdateServiceTest, TwoUpdateCheckErrors) {
   const base::FilePath crx_path1 = test_data_dir_.AppendASCII("updater/v1.crx");
   const base::FilePath crx_path2 = test_data_dir_.AppendASCII("updater/v2.crx");
   const Extension* extension1 =
-      InstallExtension(crx_path1, 1, Manifest::EXTERNAL_POLICY_DOWNLOAD);
+      InstallExtension(crx_path1, 1, ManifestLocation::kExternalPolicyDownload);
   const Extension* extension2 =
-      InstallExtension(crx_path2, 1, Manifest::EXTERNAL_POLICY_DOWNLOAD);
+      InstallExtension(crx_path2, 1, ManifestLocation::kExternalPolicyDownload);
   ASSERT_TRUE(extension1 && extension2);
 
   extensions::ExtensionUpdater::CheckParams params;
@@ -207,23 +189,6 @@ IN_PROC_BROWSER_TEST_F(UpdateServiceTest, TwoUpdateCheckErrors) {
   params.callback = run_loop2.QuitClosure();
   extension_service()->updater()->CheckNow(std::move(params));
   run_loop2.Run();
-
-  content::FetchHistogramsFromChildProcesses();
-  EXPECT_THAT(histogram_tester.GetAllSamples(
-                  "Extensions.ExtensionUpdaterRawUpdateCalls"),
-              testing::ElementsAre(base::Bucket(1, 1), base::Bucket(2, 1)));
-  EXPECT_THAT(
-      histogram_tester.GetAllSamples("Extensions.ExtensionUpdaterUpdateCalls"),
-      testing::ElementsAre(base::Bucket(1, 1), base::Bucket(2, 1)));
-  EXPECT_THAT(
-      histogram_tester.GetAllSamples(
-          "Extensions.ExtensionUpdaterUpdateResults"),
-      testing::ElementsAre(base::Bucket(
-          static_cast<int>(ExtensionUpdaterUpdateResult::UPDATE_CHECK_ERROR),
-          3)));
-  EXPECT_THAT(histogram_tester.GetAllSamples(
-                  "Extensions.UnifiedExtensionUpdaterUpdateCheckErrors"),
-              testing::ElementsAre(base::Bucket(304, 2), base::Bucket(305, 1)));
 
   ASSERT_EQ(2, update_interceptor_->GetCount())
       << update_interceptor_->GetRequestsAsString();
@@ -261,8 +226,10 @@ IN_PROC_BROWSER_TEST_F(UpdateServiceTest, SuccessfulUpdate) {
         return true;
       }));
 
+  ExpectProfileKeepAlive(false);
+
   const Extension* extension =
-      InstallExtension(crx_path, 1, Manifest::EXTERNAL_POLICY_DOWNLOAD);
+      InstallExtension(crx_path, 1, ManifestLocation::kExternalPolicyDownload);
   ASSERT_TRUE(extension);
   EXPECT_EQ(kExtensionId, extension->id());
 
@@ -273,25 +240,12 @@ IN_PROC_BROWSER_TEST_F(UpdateServiceTest, SuccessfulUpdate) {
   params.callback = run_loop.QuitClosure();
   extension_service()->updater()->CheckNow(std::move(params));
 
+  ExpectProfileKeepAlive(true);
+
   EXPECT_EQ(UpdateClientEvents::COMPONENT_UPDATED,
             WaitOnComponentUpdaterCompleteEvent(kExtensionId));
 
   run_loop.Run();
-
-  content::FetchHistogramsFromChildProcesses();
-  EXPECT_THAT(histogram_tester.GetAllSamples(
-                  "Extensions.ExtensionUpdaterRawUpdateCalls"),
-              testing::ElementsAre(base::Bucket(1, 1)));
-  EXPECT_THAT(
-      histogram_tester.GetAllSamples("Extensions.ExtensionUpdaterUpdateCalls"),
-      testing::ElementsAre(base::Bucket(1, 1)));
-  EXPECT_THAT(
-      histogram_tester.GetAllSamples(
-          "Extensions.ExtensionUpdaterUpdateResults"),
-      testing::ElementsAre(base::Bucket(
-          static_cast<int>(ExtensionUpdaterUpdateResult::UPDATE_SUCCESS), 1)));
-  histogram_tester.ExpectTotalCount(
-      "Extensions.UnifiedExtensionUpdaterUpdateCheckErrors", 0);
 
   ASSERT_EQ(1, update_interceptor_->GetCount())
       << update_interceptor_->GetRequestsAsString();
@@ -339,17 +293,17 @@ IN_PROC_BROWSER_TEST_F(UpdateServiceTest, PolicyCorrupted) {
   content_verifier_test::ForceInstallProvider policy(kExtensionId);
   system->management_policy()->RegisterProvider(&policy);
   auto external_provider = std::make_unique<MockExternalProvider>(
-      service, Manifest::EXTERNAL_POLICY_DOWNLOAD);
+      service, ManifestLocation::kExternalPolicyDownload);
   external_provider->UpdateOrAddExtension(
       std::make_unique<ExternalInstallInfoUpdateUrl>(
           kExtensionId, std::string() /* install_parameter */,
           extension_urls::GetWebstoreUpdateUrl(),
-          Manifest::EXTERNAL_POLICY_DOWNLOAD, 0 /* creation_flags */,
+          ManifestLocation::kExternalPolicyDownload, 0 /* creation_flags */,
           true /* mark_acknowledged */));
   service->AddProviderForTesting(std::move(external_provider));
 
   const Extension* extension =
-      InstallExtension(crx_path, 1, Manifest::EXTERNAL_POLICY_DOWNLOAD);
+      InstallExtension(crx_path, 1, ManifestLocation::kExternalPolicyDownload);
   ASSERT_TRUE(extension);
   EXPECT_EQ(kExtensionId, extension->id());
 
@@ -407,7 +361,7 @@ IN_PROC_BROWSER_TEST_F(UpdateServiceTest, UninstallExtensionWhileUpdating) {
   const base::FilePath crx_path = test_data_dir_.AppendASCII("updater/v1.crx");
 
   const Extension* extension =
-      InstallExtension(crx_path, 1, Manifest::EXTERNAL_POLICY_DOWNLOAD);
+      InstallExtension(crx_path, 1, ManifestLocation::kExternalPolicyDownload);
   ASSERT_TRUE(extension);
   EXPECT_EQ(kExtensionId, extension->id());
 
@@ -437,8 +391,8 @@ IN_PROC_BROWSER_TEST_F(UpdateServiceTest, UninstallExtensionWhileUpdating) {
 class PolicyUpdateServiceTest : public ExtensionUpdateClientBaseTest,
                                 public testing::WithParamInterface<bool> {
  public:
-  PolicyUpdateServiceTest() : ExtensionUpdateClientBaseTest() {}
-  ~PolicyUpdateServiceTest() override {}
+  PolicyUpdateServiceTest() = default;
+  ~PolicyUpdateServiceTest() override = default;
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionUpdateClientBaseTest::SetUpCommandLine(command_line);
@@ -450,15 +404,16 @@ class PolicyUpdateServiceTest : public ExtensionUpdateClientBaseTest,
   void SetUpInProcessBrowserTestFixture() override {
     ExtensionUpdateClientBaseTest::SetUpInProcessBrowserTestFixture();
 
-    EXPECT_CALL(policy_provider_, IsInitializationComplete(testing::_))
-        .WillRepeatedly(testing::Return(true));
+    policy_provider_.SetDefaultReturns(
+        /*is_initialization_complete_return=*/true,
+        /*is_first_policy_load_complete_return=*/true);
 
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
         &policy_provider_);
     // ExtensionManagementPolicyUpdater requires a single-threaded context to
     // call RunLoop::RunUntilIdle internally, and it isn't ready at this setup
     // moment.
-    base::test::ScopedTaskEnvironment env;
+    base::test::TaskEnvironment env;
     ExtensionManagementPolicyUpdater management_policy(&policy_provider_);
     management_policy.SetIndividualExtensionAutoInstalled(
         id_, extension_urls::kChromeWebstoreUpdateURL, true /* forced */);
@@ -469,7 +424,7 @@ class PolicyUpdateServiceTest : public ExtensionUpdateClientBaseTest,
     const base::FilePath crx_path =
         test_data_dir_.AppendASCII("updater/v1.crx");
     ExtensionDownloader::set_test_delegate(&downloader_);
-    downloader_.AddResponse(id_, "2", crx_path);
+    downloader_.AddResponse(id_, "0.10", crx_path);
   }
 
   void SetUpNetworkInterceptors() override {
@@ -531,7 +486,7 @@ class PolicyUpdateServiceTest : public ExtensionUpdateClientBaseTest,
   std::string id_ = "aohghmighlieiainnegkcijnfilokake";
 
  private:
-  policy::MockConfigurationPolicyProvider policy_provider_;
+  testing::NiceMock<policy::MockConfigurationPolicyProvider> policy_provider_;
   content_verifier_test::DownloaderTestDelegate downloader_;
 };
 
@@ -540,7 +495,6 @@ class PolicyUpdateServiceTest : public ExtensionUpdateClientBaseTest,
 // CheckForExternalUpdates() will fail.
 IN_PROC_BROWSER_TEST_F(PolicyUpdateServiceTest, FailedUpdateRetries) {
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
-  ExtensionService* service = extension_service();
   ContentVerifier* verifier =
       ExtensionSystem::Get(profile())->content_verifier();
 
@@ -552,20 +506,23 @@ IN_PROC_BROWSER_TEST_F(PolicyUpdateServiceTest, FailedUpdateRetries) {
   }
 
   content_verifier_test::DelayTracker delay_tracker;
-  service->set_external_updates_disabled_for_test(true);
   TestExtensionRegistryObserver registry_observer(registry, id_);
-  verifier->VerifyFailedForTest(id_, ContentVerifyJob::HASH_MISMATCH);
-  EXPECT_TRUE(registry_observer.WaitForExtensionUnloaded());
+  {
+    base::AutoReset<bool> disable_scope =
+        ExtensionService::DisableExternalUpdatesForTesting();
 
-  const std::vector<base::TimeDelta>& calls = delay_tracker.calls();
-  ASSERT_EQ(1u, calls.size());
-  EXPECT_EQ(base::TimeDelta(), delay_tracker.calls()[0]);
+    verifier->VerifyFailedForTest(id_, ContentVerifyJob::HASH_MISMATCH);
+    EXPECT_TRUE(registry_observer.WaitForExtensionUnloaded());
 
-  delay_tracker.Proceed();
+    const std::vector<base::TimeDelta>& calls = delay_tracker.calls();
+    ASSERT_EQ(1u, calls.size());
+    EXPECT_EQ(base::TimeDelta(), delay_tracker.calls()[0]);
 
-  // Remove the override and set ExtensionService to update again. The extension
-  // should be now installed.
-  service->set_external_updates_disabled_for_test(false);
+    delay_tracker.Proceed();
+  }
+
+  // Update ExtensionService again without disabling external updates.
+  // The extension should now get installed.
   delay_tracker.StopWatching();
   delay_tracker.Proceed();
 

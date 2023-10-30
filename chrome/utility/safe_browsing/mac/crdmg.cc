@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,6 @@
 
 #include "base/files/file.h"
 #include "base/logging.h"
-#include "base/mac/availability.h"
-#include "base/macros.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -41,6 +39,10 @@ namespace {
 class SafeDMG {
  public:
   SafeDMG();
+
+  SafeDMG(const SafeDMG&) = delete;
+  SafeDMG& operator=(const SafeDMG&) = delete;
+
   ~SafeDMG();
 
   int Main(int argc, const char* argv[]);
@@ -61,8 +63,6 @@ class SafeDMG {
   // If this is running an unpack, rather than just a list operation, this is
   // a directory FD under which all the contents are written.
   base::ScopedFD unpack_dir_;
-
-  DISALLOW_COPY_AND_ASSIGN(SafeDMG);
 };
 
 SafeDMG::SafeDMG() : dmg_file_(), unpack_dir_() {}
@@ -89,16 +89,11 @@ int SafeDMG::Main(int argc, const char* argv[]) {
   if (argc == 3 && !PrepareUnpack(argv[2]))
     return EXIT_FAILURE;
 
-  if (__builtin_available(macOS 10.10, *)) {
-    if (!EnableSandbox())
-      return EXIT_FAILURE;
-
-    if (!ParseDMG())
-      return EXIT_FAILURE;
-  } else {
-    LOG(ERROR) << "Requires 10.10 or higher";
+  if (!EnableSandbox())
     return EXIT_FAILURE;
-  }
+
+  if (!ParseDMG())
+    return EXIT_FAILURE;
 
   return EXIT_SUCCESS;
 }
@@ -177,15 +172,11 @@ bool SafeDMG::ParseDMG() {
     printf("=== Partition #%zu: %s ===\n", i,
            udif_parser.GetPartitionName(i).c_str());
 
-    std::string partition_type = udif_parser.GetPartitionType(i);
-    if (partition_type != "Apple_HFS" && partition_type != "Apple_HFSX")
-      continue;
-
     std::unique_ptr<safe_browsing::dmg::ReadStream> partition_stream(
         udif_parser.GetPartitionReadStream(i));
     safe_browsing::dmg::HFSIterator iterator(partition_stream.get());
     if (!iterator.Open()) {
-      LOG(ERROR) << "Failed to open HFS partition";
+      VLOG(1) << "Skipped since this is not an HFS partition";
       continue;
     }
 

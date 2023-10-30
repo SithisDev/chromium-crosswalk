@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_MENU_BRIDGE_H_
 
 #include <map>
+
+#include "base/memory/raw_ptr.h"
 
 #import "base/mac/scoped_nsobject.h"
 #include "components/bookmarks/browser/bookmark_model_observer.h"
@@ -41,6 +43,10 @@ class AppMenuControllerTest;
 class BookmarkMenuBridge : public bookmarks::BookmarkModelObserver {
  public:
   BookmarkMenuBridge(Profile* profile, NSMenu* menu_root);
+
+  BookmarkMenuBridge(const BookmarkMenuBridge&) = delete;
+  BookmarkMenuBridge& operator=(const BookmarkMenuBridge&) = delete;
+
   ~BookmarkMenuBridge() override;
 
   // bookmarks::BookmarkModelObserver:
@@ -54,7 +60,8 @@ class BookmarkMenuBridge : public bookmarks::BookmarkModelObserver {
                          size_t new_index) override;
   void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
                          const bookmarks::BookmarkNode* parent,
-                         size_t index) override;
+                         size_t index,
+                         bool added_by_user) override;
   void BookmarkNodeRemoved(bookmarks::BookmarkModel* model,
                            const bookmarks::BookmarkNode* parent,
                            size_t old_index,
@@ -137,7 +144,7 @@ class BookmarkMenuBridge : public bookmarks::BookmarkModelObserver {
   // True iff the menu is up to date with the actual BookmarkModel.
   bool menuIsValid_;
 
-  Profile* const profile_;  // weak
+  const raw_ptr<Profile> profile_;  // weak
   base::scoped_nsobject<BookmarkMenuCocoaController> controller_;
   base::scoped_nsobject<NSMenu> menu_root_;
 
@@ -147,8 +154,6 @@ class BookmarkMenuBridge : public bookmarks::BookmarkModelObserver {
   // In order to appropriately update items in the bookmark menu, without
   // forcing a rebuild, map the model's nodes to menu items.
   std::map<const bookmarks::BookmarkNode*, NSMenuItem*> bookmark_nodes_;
-
-  DISALLOW_COPY_AND_ASSIGN(BookmarkMenuBridge);
 };
 
 #endif  // CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_MENU_BRIDGE_H_

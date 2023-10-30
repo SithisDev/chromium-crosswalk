@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,23 +14,25 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "chrome/browser/predictors/loading_predictor_config.h"
-#include "chrome/browser/predictors/loading_predictor_key_value_data.h"
-#include "chrome/browser/predictors/navigation_id.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor_tables.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "content/public/common/resource_type.h"
-#include "net/base/network_isolation_key.h"
+#include "components/optimization_guide/content/browser/optimization_guide_decider.h"
+#include "components/sqlite_proto/key_value_data.h"
+#include "net/base/network_anonymization_key.h"
+#include "services/network/public/mojom/fetch_api.mojom-forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 class PredictorsHandler;
 class Profile;
@@ -56,35 +58,69 @@ class ResourcePrefetcherManager;
 // Stores all values needed to trigger a preconnect/preresolve job to a single
 // origin.
 struct PreconnectRequest {
-  // |network_isolation_key| specifies the key that network requests for the
+  // |network_anonymization_key| specifies the key that network requests for the
   // preconnected URL are expected to use. If a request is issued with a
   // different key, it may not use the preconnected socket. It has no effect
   // when |num_sockets| == 0.
-  //
-  // TODO(https://crbug.com/966896): Update consumers and make
-  // |network_isolation_key| a mandatory argument.
-  PreconnectRequest(const GURL& origin,
-                    int num_sockets,
-                    net::NetworkIsolationKey network_isolation_key =
-                        net::NetworkIsolationKey());
+  PreconnectRequest(
+      const url::Origin& origin,
+      int num_sockets,
+      const net::NetworkAnonymizationKey& network_anonymization_key);
+  PreconnectRequest(const PreconnectRequest&) = default;
+  PreconnectRequest(PreconnectRequest&&) = default;
+  PreconnectRequest& operator=(const PreconnectRequest&) = default;
+  PreconnectRequest& operator=(PreconnectRequest&&) = default;
 
-  GURL origin;
+  url::Origin origin;
   // A zero-value means that we need to preresolve a host only.
   int num_sockets = 0;
   bool allow_credentials = true;
-  net::NetworkIsolationKey network_isolation_key;
+  net::NetworkAnonymizationKey network_anonymization_key;
 };
 
-// Stores a result of preconnect prediction. The |requests| vector is the main
-// result of prediction and other fields are used for histograms reporting.
+struct PrefetchRequest {
+  PrefetchRequest(const GURL& url,
+                  const net::NetworkAnonymizationKey& network_anonymization_key,
+                  network::mojom::RequestDestination destination);
+
+  PrefetchRequest(const PrefetchRequest&) = default;
+  PrefetchRequest(PrefetchRequest&&) = default;
+  PrefetchRequest& operator=(const PrefetchRequest&) = default;
+  PrefetchRequest& operator=(PrefetchRequest&&) = default;
+
+  GURL url;
+  net::NetworkAnonymizationKey network_anonymization_key;
+  network::mojom::RequestDestination destination;
+};
+
+// Stores a result of pre* prediction. The |requests| vector is the main
+// result for preconnects, while the |prefetch_requests| vector is the main
+// result for prefetches. Other fields are used for metrics reporting.
 struct PreconnectPrediction {
   PreconnectPrediction();
   PreconnectPrediction(const PreconnectPrediction& other);
+  PreconnectPrediction(PreconnectPrediction&& other);
+
+  PreconnectPrediction& operator=(const PreconnectPrediction& other);
+  PreconnectPrediction& operator=(PreconnectPrediction&& other);
   ~PreconnectPrediction();
 
   bool is_redirected = false;
   std::string host;
   std::vector<PreconnectRequest> requests;
+  std::vector<PrefetchRequest> prefetch_requests;
+};
+
+// Stores a result of a prediction from the optimization guide.
+struct OptimizationGuidePrediction {
+  OptimizationGuidePrediction();
+  OptimizationGuidePrediction(const OptimizationGuidePrediction& other);
+  ~OptimizationGuidePrediction();
+
+  optimization_guide::OptimizationGuideDecision decision;
+  PreconnectPrediction preconnect_prediction;
+  std::vector<GURL> predicted_subresources;
+  absl::optional<base::TimeTicks> optimization_guide_prediction_arrived;
 };
 
 // Contains logic for learning what can be prefetched and for kicking off
@@ -123,15 +159,17 @@ class ResourcePrefetchPredictor : public history::HistoryServiceObserver {
   };
 
   using RedirectDataMap =
-      LoadingPredictorKeyValueData<RedirectData,
-                                   internal::LastVisitTimeCompare>;
+      sqlite_proto::KeyValueData<RedirectData, internal::LastVisitTimeCompare>;
   using OriginDataMap =
-      LoadingPredictorKeyValueData<OriginData, internal::LastVisitTimeCompare>;
-  using NavigationMap =
-      std::map<NavigationID, std::unique_ptr<PageRequestSummary>>;
+      sqlite_proto::KeyValueData<OriginData, internal::LastVisitTimeCompare>;
 
   ResourcePrefetchPredictor(const LoadingPredictorConfig& config,
                             Profile* profile);
+
+  ResourcePrefetchPredictor(const ResourcePrefetchPredictor&) = delete;
+  ResourcePrefetchPredictor& operator=(const ResourcePrefetchPredictor&) =
+      delete;
+
   ~ResourcePrefetchPredictor() override;
 
   // Starts initialization by posting a task to the DB sequence of the
@@ -194,10 +232,13 @@ class ResourcePrefetchPredictor : public history::HistoryServiceObserver {
   FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest, GetCorrectPLT);
   FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest,
                            PopulatePrefetcherRequest);
-  FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest, GetRedirectEndpoint);
+  FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest, GetRedirectOrigin);
   FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest, GetPrefetchData);
+  FRIEND_TEST_ALL_PREFIXES(
+      ResourcePrefetchPredictorPreconnectToRedirectTargetTest,
+      TestPredictPreconnectOrigins);
   FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest,
-                           TestPredictPreconnectOrigins);
+                           TestPredictPreconnectOrigins_RedirectsToNewOrigin);
   FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest,
                            TestPrecisionRecallHistograms);
   FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest,
@@ -212,14 +253,21 @@ class ResourcePrefetchPredictor : public history::HistoryServiceObserver {
   };
 
   // Returns true iff one of the following conditions is true
-  // * |redirect_data| contains confident redirect endpoint for |entry_point|
-  //   and assigns it to the |redirect_endpoint|
+  // * |redirect_data| contains confident redirect origin for |entry_origin|
+  //   and assigns it to the |redirect_origin|
   //
-  // * |redirect_data| doens't contain an entry for |entry_point| and assigns
-  //   |entry_point| to the |redirect_endpoint|.
-  bool GetRedirectEndpoint(const std::string& entry_point,
-                           const RedirectDataMap& redirect_data,
-                           std::string* redirect_endpoint) const;
+  // * |redirect_data| doesn't contain an entry for |entry_origin| and assigns
+  //   |entry_origin| to the |redirect_origin|.
+  static bool GetRedirectOrigin(const url::Origin& entry_origin,
+                                const RedirectDataMap& redirect_data,
+                                url::Origin* redirect_origin);
+
+  // Returns true if a redirect endpoint is available. Appends the redirect
+  // domains to |prediction->requests|. Sets |prediction->host| if it's empty.
+  bool GetRedirectEndpointsForPreconnect(
+      const url::Origin& entry_origin,
+      const RedirectDataMap& redirect_data,
+      PreconnectPrediction* prediction) const;
 
   // Callback for the task to read the predictor database. Takes ownership of
   // all arguments.
@@ -240,9 +288,10 @@ class ResourcePrefetchPredictor : public history::HistoryServiceObserver {
                      const GURL& final_redirect,
                      RedirectDataMap* redirect_data);
 
-  void LearnOrigins(const std::string& host,
-                    const GURL& main_frame_origin,
-                    const std::map<GURL, OriginRequestSummary>& summaries);
+  void LearnOrigins(
+      const std::string& host,
+      const GURL& main_frame_origin,
+      const std::map<url::Origin, OriginRequestSummary>& summaries);
 
   // history::HistoryServiceObserver:
   void OnURLsDeleted(history::HistoryService* history_service,
@@ -259,8 +308,8 @@ class ResourcePrefetchPredictor : public history::HistoryServiceObserver {
     tables_ = tables;
   }
 
-  Profile* const profile_;
-  TestObserver* observer_;
+  const raw_ptr<Profile> profile_;
+  raw_ptr<TestObserver> observer_;
   const LoadingPredictorConfig config_;
   InitializationState initialization_state_;
   scoped_refptr<ResourcePrefetchPredictorTables> tables_;
@@ -269,22 +318,24 @@ class ResourcePrefetchPredictor : public history::HistoryServiceObserver {
   std::unique_ptr<RedirectDataMap> host_redirect_data_;
   std::unique_ptr<OriginDataMap> origin_data_;
 
-  ScopedObserver<history::HistoryService, history::HistoryServiceObserver>
-      history_service_observer_;
+  base::ScopedObservation<history::HistoryService,
+                          history::HistoryServiceObserver>
+      history_service_observation_{this};
 
   // Indicates if all predictors data should be deleted after the
   // initialization is completed.
   bool delete_all_data_requested_ = false;
 
   base::WeakPtrFactory<ResourcePrefetchPredictor> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ResourcePrefetchPredictor);
 };
 
 // An interface used to notify that data in the ResourcePrefetchPredictor
 // has changed. All methods are invoked on the UI thread.
 class TestObserver {
  public:
+  TestObserver(const TestObserver&) = delete;
+  TestObserver& operator=(const TestObserver&) = delete;
+
   // De-registers itself from |predictor_| on destruction.
   virtual ~TestObserver();
 
@@ -298,9 +349,7 @@ class TestObserver {
   explicit TestObserver(ResourcePrefetchPredictor* predictor);
 
  private:
-  ResourcePrefetchPredictor* predictor_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestObserver);
+  raw_ptr<ResourcePrefetchPredictor> predictor_;
 };
 
 }  // namespace predictors

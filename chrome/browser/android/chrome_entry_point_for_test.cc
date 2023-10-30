@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,8 @@
 #include "chrome/utility/chrome_content_utility_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/network_service_test_helper.h"
-#include "services/service_manager/sandbox/switches.h"
+#include "sandbox/policy/switches.h"
+#include "services/network/public/mojom/network_service.mojom.h"
 
 namespace {
 
@@ -30,39 +31,36 @@ bool NativeInit(base::android::LibraryProcessType) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->GetSwitchValueASCII(switches::kProcessType) ==
           switches::kUtilityProcess &&
-      command_line->GetSwitchValueASCII(
-          service_manager::switches::kServiceSandboxType) ==
-          service_manager::switches::kNetworkSandbox) {
-    ChromeContentUtilityClient::SetNetworkBinderCreationCallback(
-        base::BindRepeating(
-            [](content::NetworkServiceTestHelper* helper,
-               service_manager::BinderRegistry* registry) {
-              helper->RegisterNetworkBinders(registry);
-            },
-            GetNetworkServiceTestHelper()));
+      command_line->GetSwitchValueASCII(switches::kUtilitySubType) ==
+          network::mojom::NetworkService::Name_) {
+    ChromeContentUtilityClient::SetNetworkBinderCreationCallback(base::BindOnce(
+        [](content::NetworkServiceTestHelper* helper,
+           service_manager::BinderRegistry* registry) {
+          helper->RegisterNetworkBinders(registry);
+        },
+        GetNetworkServiceTestHelper()));
   }
 
   return android::OnJNIOnLoadInit();
+}
+
+void RegisterNonMainDexNatives() {
+  RegisterNonMainDexNatives(base::android::AttachCurrentThread());
 }
 
 }  // namespace
 
 // This is called by the VM when the shared library is first loaded.
 JNI_EXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-  // By default, all JNI methods are registered. However, since render processes
-  // don't need very much Java code, we enable selective JNI registration on the
-  // Java side and only register a subset of JNI methods.
+  // All MainDex JNI methods are registered. Since render processes don't need
+  // very much Java code, we enable selective JNI registration on the
+  // Java side and only register Non-MainDex JNI when necessary through
+  // RegisterNonMainDexNatives().
   base::android::InitVM(vm);
-  JNIEnv* env = base::android::AttachCurrentThread();
-
-  if (!base::android::IsSelectiveJniRegistrationEnabled(env) &&
-      !RegisterNonMainDexNatives(env)) {
+  if (!RegisterMainDexNatives(base::android::AttachCurrentThread())) {
     return -1;
   }
-
-  if (!RegisterMainDexNatives(env)) {
-    return -1;
-  }
+  base::android::SetNonMainDexJniRegistrationHook(RegisterNonMainDexNatives);
   base::android::SetNativeInitializationHook(NativeInit);
   return JNI_VERSION_1_4;
 }

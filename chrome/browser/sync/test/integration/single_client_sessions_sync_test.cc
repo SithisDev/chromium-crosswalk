@@ -1,49 +1,65 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/macros.h"
+#include "base/base64.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_feature_list.h"
+#include "base/test/test_timeouts.h"
+#include "base/threading/thread_restrictions.h"
+#include "build/build_config.h"
+#include "chrome/browser/browser_features.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/favicon/large_icon_service_factory.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/sessions/session_service.h"
-#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/sync/session_sync_service_factory.h"
 #include "chrome/browser/sync/sessions/sync_sessions_router_tab_helper.h"
-#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/session_hierarchy_match_checker.h"
 #include "chrome/browser/sync/test/integration/sessions_helper.h"
+#include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
+#include "chrome/browser/sync/test/integration/sync_service_impl_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/typed_urls_helper.h"
 #include "chrome/browser/sync/test/integration/updated_progress_marker_checker.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
-#include "components/favicon/core/features.h"
+#include "components/favicon/core/favicon_service.h"
+#include "components/favicon/core/large_icon_service_impl.h"
+#include "components/favicon_base/favicon_types.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/sessions/content/session_tab_helper.h"
 #include "components/sessions/core/session_types.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "components/sync/base/time.h"
+#include "components/sync/engine/cycle/entity_change_metric_recording.h"
+#include "components/sync/protocol/entity_specifics.pb.h"
 #include "components/sync/protocol/proto_value_conversions.h"
 #include "components/sync/protocol/session_specifics.pb.h"
-#include "components/sync/test/fake_server/sessions_hierarchy.h"
+#include "components/sync/protocol/sync.pb.h"
+#include "components/sync/protocol/sync_entity.pb.h"
+#include "components/sync/test/sessions_hierarchy.h"
 #include "components/sync_sessions/session_store.h"
 #include "components/sync_sessions/session_sync_service.h"
 #include "components/sync_sessions/session_sync_test_helper.h"
 #include "components/sync_sessions/synced_session_tracker.h"
+#include "content/public/test/browser_test.h"
 #include "google_apis/gaia/gaia_auth_util.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/embedded_test_server/http_request.h"
+#include "net/test/embedded_test_server/http_response.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/mojom/window_open_disposition.mojom.h"
 
 namespace {
 
-using base::HistogramBase;
-using base::HistogramSamples;
-using base::HistogramTester;
 using fake_server::SessionsHierarchy;
 using sessions_helper::CheckInitialState;
 using sessions_helper::CloseTab;
@@ -56,7 +72,6 @@ using sessions_helper::NavigateTabBack;
 using sessions_helper::NavigateTabForward;
 using sessions_helper::OpenTab;
 using sessions_helper::OpenTabAtIndex;
-using sessions_helper::OpenTabFromSourceIndex;
 using sessions_helper::ScopedWindowMap;
 using sessions_helper::SessionWindowMap;
 using sessions_helper::SyncedSessionVector;
@@ -76,40 +91,40 @@ static const char* kBaseFragmentURL =
 static const char* kSpecifiedFragmentURL =
     "data:text/html,<html><title>Fragment</title><body></body></html>#fragment";
 
-void ExpectUniqueSampleGE(const HistogramTester& histogram_tester,
-                          const std::string& name,
-                          HistogramBase::Sample sample,
-                          HistogramBase::Count expected_inclusive_lower_bound) {
-  std::unique_ptr<HistogramSamples> samples =
-      histogram_tester.GetHistogramSamplesSinceCreation(name);
-  int sample_count = samples->GetCount(sample);
-  EXPECT_GE(sample_count, expected_inclusive_lower_bound)
-      << " for histogram " << name << " sample " << sample;
-  EXPECT_EQ(sample_count, samples->TotalCount())
-      << " for histogram " << name << " sample " << sample;
+std::unique_ptr<net::test_server::HttpResponse> FaviconServerRequestHandler(
+    const net::test_server::HttpRequest& request) {
+  // An arbitrary 16x16 png (opaque black square), Base64 encoded.
+  const std::string kTestPngBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAQAAAC1+jfqAAAAE0lEQVR42mNk+M+"
+      "AFzCOKhhJCgBrLxABLz0PwwAAAABJRU5ErkJggg==";
+  std::string content;
+  base::Base64Decode(kTestPngBase64, &content);
+
+  std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
+      new net::test_server::BasicHttpResponse);
+  http_response->set_content(content);
+  http_response->set_code(net::HTTP_OK);
+  return std::move(http_response);
 }
 
 class IsHistoryURLSyncedChecker : public SingleClientStatusChangeChecker {
  public:
   IsHistoryURLSyncedChecker(const std::string& url,
                             fake_server::FakeServer* fake_server,
-                            syncer::ProfileSyncService* service)
+                            syncer::SyncServiceImpl* service)
       : SingleClientStatusChangeChecker(service),
         url_(url),
         fake_server_(fake_server) {}
 
   // StatusChangeChecker implementation.
-  bool IsExitConditionSatisfied() override {
+  bool IsExitConditionSatisfied(std::ostream* os) override {
+    *os << "Waiting for URLs to be commited to the server";
     return fake_server_->GetCommittedHistoryURLs().count(url_) != 0;
-  }
-
-  std::string GetDebugMessage() const override {
-    return "Waiting for URLs to be commited to the server";
   }
 
  private:
   const std::string url_;
-  fake_server::FakeServer* fake_server_;
+  raw_ptr<fake_server::FakeServer> fake_server_;
 };
 
 class IsIconURLSyncedChecker : public SingleClientStatusChangeChecker {
@@ -117,17 +132,18 @@ class IsIconURLSyncedChecker : public SingleClientStatusChangeChecker {
   IsIconURLSyncedChecker(const std::string& page_url,
                          const std::string& icon_url,
                          fake_server::FakeServer* fake_server,
-                         syncer::ProfileSyncService* service)
+                         syncer::SyncServiceImpl* service)
       : SingleClientStatusChangeChecker(service),
         page_url_(page_url),
         icon_url_(icon_url),
         fake_server_(fake_server) {}
 
   // StatusChangeChecker implementation.
-  bool IsExitConditionSatisfied() override {
+  bool IsExitConditionSatisfied(std::ostream* os) override {
+    *os << "Waiting for URLs to be commited to the server";
     std::vector<sync_pb::SyncEntity> sessions =
         fake_server_->GetSyncEntitiesByModelType(syncer::SESSIONS);
-    for (const auto& entity : sessions) {
+    for (const sync_pb::SyncEntity& entity : sessions) {
       const sync_pb::SessionSpecifics& session_specifics =
           entity.specifics().session();
       if (!session_specifics.has_tab()) {
@@ -145,20 +161,85 @@ class IsIconURLSyncedChecker : public SingleClientStatusChangeChecker {
     return false;
   }
 
-  std::string GetDebugMessage() const override {
-    return "Waiting for URLs to be commited to the server";
-  }
-
  private:
   const std::string page_url_;
   const std::string icon_url_;
-  fake_server::FakeServer* fake_server_;
+  raw_ptr<fake_server::FakeServer> fake_server_;
+};
+
+// Checker to block until the history DB for |profile| does / does not have a
+// favicon for |page_url| (depending on |should_be_available|).
+class FaviconForPageUrlAvailableChecker : public StatusChangeChecker {
+ public:
+  FaviconForPageUrlAvailableChecker(Profile* profile,
+                                    const GURL& page_url,
+                                    bool should_be_available)
+      : profile_(profile),
+        page_url_(page_url),
+        should_be_available_(should_be_available) {
+    history::HistoryService* history_service =
+        HistoryServiceFactory::GetForProfile(
+            profile_, ServiceAccessType::EXPLICIT_ACCESS);
+    callback_subscription_ =
+        history_service->AddFaviconsChangedCallback(base::BindRepeating(
+            &FaviconForPageUrlAvailableChecker::OnFaviconsChanged,
+            base::Unretained(this)));
+
+    // Load the state asynchronously to figure out if further waiting is needed.
+    CheckExitConditionAsync();
+  }
+  ~FaviconForPageUrlAvailableChecker() override = default;
+
+ protected:
+  // StatusChangeChecker implementation.
+  bool IsExitConditionSatisfied(std::ostream* os) override {
+    return exit_condition_satisfied_;
+  }
+
+ private:
+  void OnFaviconsChanged(const std::set<GURL>& page_urls,
+                         const GURL& icon_url) {
+    for (const GURL& page_url : page_urls) {
+      if (page_url == page_url_) {
+        CheckExitConditionAsync();
+      }
+    }
+  }
+
+  void CheckExitConditionAsync() {
+    favicon::FaviconService* favicon_service =
+        FaviconServiceFactory::GetForProfile(
+            profile_, ServiceAccessType::EXPLICIT_ACCESS);
+    favicon_service->GetFaviconImageForPageURL(
+        page_url_,
+        base::BindOnce(&FaviconForPageUrlAvailableChecker::OnFaviconLoaded,
+                       base::Unretained(this)),
+        &tracker_);
+  }
+
+  void OnFaviconLoaded(const favicon_base::FaviconImageResult& result) {
+    bool is_available = !result.image.IsEmpty();
+    exit_condition_satisfied_ = (is_available == should_be_available_);
+    CheckExitCondition();
+  }
+
+  const raw_ptr<Profile> profile_;
+  const GURL page_url_;
+  const bool should_be_available_;
+  base::CallbackListSubscription callback_subscription_;
+  bool exit_condition_satisfied_ = false;
+  base::CancelableTaskTracker tracker_;
 };
 
 class SingleClientSessionsSyncTest : public SyncTest {
  public:
   SingleClientSessionsSyncTest() : SyncTest(SINGLE_CLIENT) {}
-  ~SingleClientSessionsSyncTest() override {}
+
+  SingleClientSessionsSyncTest(const SingleClientSessionsSyncTest&) = delete;
+  SingleClientSessionsSyncTest& operator=(const SingleClientSessionsSyncTest&) =
+      delete;
+
+  ~SingleClientSessionsSyncTest() override = default;
 
   void ExpectNavigationChain(const std::vector<GURL>& urls) {
     ScopedWindowMap windows;
@@ -169,9 +250,10 @@ class SingleClientSessionsSyncTest : public SyncTest {
 
     int index = 0;
     EXPECT_EQ(urls.size(), tab->navigations.size());
-    for (auto it = tab->navigations.begin(); it != tab->navigations.end();
-         ++it, ++index) {
-      EXPECT_EQ(urls[index], it->virtual_url());
+    for (const sessions::SerializedNavigationEntry& navigation :
+         tab->navigations) {
+      EXPECT_EQ(urls[index], navigation.virtual_url());
+      index++;
     }
   }
 
@@ -193,11 +275,11 @@ class SingleClientSessionsSyncTest : public SyncTest {
 
   // Simulates receiving list of accounts in the cookie jar from ListAccounts
   // endpoint. Adds |account_ids| into signed in accounts, notifies
-  // ProfileSyncService and waits for change to propagate to sync engine.
-  void UpdateCookieJarAccountsAndWait(std::vector<std::string> account_ids,
+  // SyncServiceImpl and waits for change to propagate to sync engine.
+  void UpdateCookieJarAccountsAndWait(std::vector<CoreAccountId> account_ids,
                                       bool expected_cookie_jar_mismatch) {
     std::vector<gaia::ListedAccount> accounts;
-    for (const auto& account_id : account_ids) {
+    for (const CoreAccountId& account_id : account_ids) {
       gaia::ListedAccount signed_in_account;
       signed_in_account.id = account_id;
       accounts.push_back(signed_in_account);
@@ -209,9 +291,6 @@ class SingleClientSessionsSyncTest : public SyncTest {
         accounts, run_loop.QuitClosure());
     run_loop.Run();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SingleClientSessionsSyncTest);
 };
 
 IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest,
@@ -356,7 +435,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, NavigateThenCloseTab) {
   // issue another navigation to make sure association logic kicks in.
   NavigateTab(0, GURL(kURL3));
   ASSERT_TRUE(WaitForTabsToLoad(0, {GURL(kURL1), GURL(kURL3)}));
-  CloseTab(/*index=*/0, /*tab_index=*/1);
+  CloseTab(/*browser_index=*/0, /*tab_index=*/1);
   NavigateTab(0, GURL(kURL4));
 
   ASSERT_TRUE(
@@ -370,19 +449,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, NavigateThenCloseTab) {
           .Wait());
 }
 
-class SingleClientSessionsWithDeferRecyclingSyncTest
-    : public SingleClientSessionsSyncTest {
- public:
-  SingleClientSessionsWithDeferRecyclingSyncTest() {
-    features_.InitAndEnableFeature(
-        sync_sessions::kDeferRecyclingOfSyncTabNodesIfUnsynced);
-  }
-
- private:
-  base::test::ScopedFeatureList features_;
-};
-
-IN_PROC_BROWSER_TEST_F(SingleClientSessionsWithDeferRecyclingSyncTest,
+IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest,
                        NavigateThenCloseTabThenOpenTab) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(CheckInitialState(0));
@@ -396,7 +463,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsWithDeferRecyclingSyncTest,
   // addition, a new tab is opened.
   NavigateTab(0, GURL(kURL3));
   ASSERT_TRUE(WaitForTabsToLoad(0, {GURL(kURL1), GURL(kURL3)}));
-  CloseTab(/*index=*/0, /*tab_index=*/1);
+  CloseTab(/*browser_index=*/0, /*tab_index=*/1);
   ASSERT_TRUE(OpenTab(0, GURL(kURL4)));
 
   ASSERT_TRUE(
@@ -422,19 +489,19 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, TimestampMatchesHistory) {
   ASSERT_TRUE(GetLocalWindows(0, &windows));
 
   int found_navigations = 0;
-  for (auto it = windows.begin(); it != windows.end(); ++it) {
-    for (auto it2 = it->second->wrapped_window.tabs.begin();
-         it2 != it->second->wrapped_window.tabs.end(); ++it2) {
-      for (auto it3 = (*it2)->navigations.begin();
-           it3 != (*it2)->navigations.end(); ++it3) {
-        const base::Time timestamp = it3->timestamp();
-
+  for (const auto& [window_id, window] : windows) {
+    for (const std::unique_ptr<sessions::SessionTab>& tab :
+         window->wrapped_window.tabs) {
+      for (const sessions::SerializedNavigationEntry& navigation :
+           tab->navigations) {
         history::URLRow virtual_row;
-        ASSERT_TRUE(GetUrlFromClient(0, it3->virtual_url(), &virtual_row));
+        ASSERT_TRUE(
+            GetUrlFromClient(0, navigation.virtual_url(), &virtual_row));
         const base::Time history_timestamp = virtual_row.last_visit();
         // Propagated timestamps have millisecond-level resolution, so we avoid
         // exact comparison here (i.e. usecs might differ).
-        ASSERT_EQ(0, (timestamp - history_timestamp).InMilliseconds());
+        ASSERT_EQ(
+            0, (navigation.timestamp() - history_timestamp).InMilliseconds());
         ++found_navigations;
       }
     }
@@ -453,12 +520,12 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, ResponseCodeIsPreserved) {
   ASSERT_TRUE(GetLocalWindows(0, &windows));
 
   int found_navigations = 0;
-  for (auto it = windows.begin(); it != windows.end(); ++it) {
-    for (auto it2 = it->second->wrapped_window.tabs.begin();
-         it2 != it->second->wrapped_window.tabs.end(); ++it2) {
-      for (auto it3 = (*it2)->navigations.begin();
-           it3 != (*it2)->navigations.end(); ++it3) {
-        EXPECT_EQ(200, it3->http_status_code());
+  for (const auto& [window_id, window] : windows) {
+    for (const std::unique_ptr<sessions::SessionTab>& tab :
+         window->wrapped_window.tabs) {
+      for (const sessions::SerializedNavigationEntry& navigation :
+           tab->navigations) {
+        EXPECT_EQ(200, navigation.http_status_code());
         ++found_navigations;
       }
     }
@@ -574,8 +641,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest,
   const SessionID kWindowId = SessionID::FromSerializedValue(5);
   const SessionID kTabId1 = SessionID::FromSerializedValue(1);
   const SessionID kTabId2 = SessionID::FromSerializedValue(2);
-  const base::Time kLastModifiedTime =
-      base::Time::Now() - base::TimeDelta::FromDays(100);
+  const base::Time kLastModifiedTime = base::Time::Now() - base::Days(100);
 
   SessionSyncTestHelper helper;
 
@@ -617,9 +683,56 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest,
     EXPECT_NE(kForeignSessionTag, entity.specifics().session().session_tag());
   }
 
-  EXPECT_EQ(
-      3, histogram_tester.GetBucketCount("Sync.ModelTypeEntityChange3.SESSION",
-                                         /*LOCAL_DELETION=*/0));
+  EXPECT_EQ(3, histogram_tester.GetBucketCount(
+                   "Sync.ModelTypeEntityChange3.SESSION",
+                   syncer::ModelTypeEntityChange::kLocalDeletion));
+}
+
+IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest,
+                       GarbageCollectionOfForeignOrphanTabWithoutHeader) {
+  const std::string kForeignSessionTag = "ForeignSessionTag";
+  const SessionID kWindowId = SessionID::FromSerializedValue(5);
+  const SessionID kTabId1 = SessionID::FromSerializedValue(1);
+  const SessionID kTabId2 = SessionID::FromSerializedValue(2);
+  const base::Time kLastModifiedTime = base::Time::Now() - base::Days(100);
+
+  SessionSyncTestHelper helper;
+
+  // There are two orphan tab entities without a header entity.
+
+  sync_pb::EntitySpecifics tab1;
+  *tab1.mutable_session() =
+      helper.BuildTabSpecifics(kForeignSessionTag, kWindowId, kTabId1);
+
+  sync_pb::EntitySpecifics tab2;
+  *tab2.mutable_session() =
+      helper.BuildTabSpecifics(kForeignSessionTag, kWindowId, kTabId2);
+
+  for (const sync_pb::EntitySpecifics& specifics : {tab1, tab2}) {
+    GetFakeServer()->InjectEntity(
+        syncer::PersistentUniqueClientEntity::CreateFromSpecificsForTesting(
+            /*non_unique_name=*/"",
+            sync_sessions::SessionStore::GetClientTag(specifics.session()),
+            specifics,
+            /*creation_time=*/syncer::TimeToProtoTime(kLastModifiedTime),
+            /*last_modified_time=*/syncer::TimeToProtoTime(kLastModifiedTime)));
+  }
+
+  base::HistogramTester histogram_tester;
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+
+  // Verify that all entities have been deleted.
+  WaitForHierarchyOnServer(SessionsHierarchy());
+
+  std::vector<sync_pb::SyncEntity> entities =
+      fake_server_->GetSyncEntitiesByModelType(syncer::SESSIONS);
+  for (const sync_pb::SyncEntity& entity : entities) {
+    EXPECT_NE(kForeignSessionTag, entity.specifics().session().session_tag());
+  }
+
+  EXPECT_EQ(2, histogram_tester.GetBucketCount(
+                   "Sync.ModelTypeEntityChange3.SESSION",
+                   syncer::ModelTypeEntityChange::kLocalDeletion));
 }
 
 // Regression test for crbug.com/915133 that verifies the browser doesn't crash
@@ -694,111 +807,52 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, TabMovedToOtherWindow) {
       {{base_url.spec()}, {new_window_url.spec(), moved_tab_url.spec()}}));
 }
 
-IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, SourceTabIDSet) {
-  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-  ASSERT_TRUE(CheckInitialState(0));
-
-  GURL base_url = GURL(kURL1);
-  ASSERT_TRUE(OpenTab(0, base_url));
-
-  WaitForURLOnServer(base_url);
-
-  GURL new_tab_url = GURL(kURL2);
-  ASSERT_TRUE(OpenTabFromSourceIndex(
-      0, 0, new_tab_url, WindowOpenDisposition::NEW_FOREGROUND_TAB));
-  WaitForHierarchyOnServer(
-      SessionsHierarchy({{base_url.spec(), new_tab_url.spec()}}));
-
-  content::WebContents* original_tab_contents =
-      GetBrowser(0)->tab_strip_model()->GetWebContentsAt(0);
-  content::WebContents* new_tab_contents =
-      GetBrowser(0)->tab_strip_model()->GetWebContentsAt(1);
-
-  SessionID source_tab_id = SessionTabHelper::IdForTab(original_tab_contents);
-  sync_sessions::SyncSessionsRouterTabHelper* new_tab_helper =
-      sync_sessions::SyncSessionsRouterTabHelper::FromWebContents(
-          new_tab_contents);
-  EXPECT_EQ(new_tab_helper->source_tab_id(), source_tab_id);
-}
-
 IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, CookieJarMismatch) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   ASSERT_TRUE(CheckInitialState(0));
 
-  // Simulate empty list of accounts in the cookie jar. This will record cookie
-  // jar mismatch.
+  // Simulate empty list of accounts in the cookie jar.
   UpdateCookieJarAccountsAndWait({},
                                  /*expected_cookie_jar_mismatch=*/true);
-  // The HistogramTester objects are scoped to allow more precise verification.
-  {
-    HistogramTester histogram_tester;
 
-    // Add a new session to client 0 and wait for it to sync.
-    GURL url = GURL(kURL1);
-    ASSERT_TRUE(OpenTab(0, url));
-    WaitForURLOnServer(url);
+  // Add a new session to client 0 and wait for it to sync.
+  ASSERT_TRUE(OpenTab(0, GURL(kURL1)));
+  WaitForURLOnServer(GURL(kURL1));
 
-    sync_pb::ClientToServerMessage message;
-    ASSERT_TRUE(GetFakeServer()->GetLastCommitMessage(&message));
-    ASSERT_TRUE(message.commit().config_params().cookie_jar_mismatch());
-
-    // It is possible that multiple sync cycles occurred during the call to
-    // OpenTab, which would cause multiple identical samples.
-    ExpectUniqueSampleGE(histogram_tester, "Sync.CookieJarMatchOnNavigation",
-                         /*sample=*/false,
-                         /*expected_inclusive_lower_bound=*/1);
-    ExpectUniqueSampleGE(histogram_tester, "Sync.CookieJarEmptyOnMismatch",
-                         /*sample=*/true,
-                         /*expected_inclusive_lower_bound=*/1);
-  }
+  // Verify the cookie jar mismatch bool is set to true.
+  sync_pb::ClientToServerMessage first_commit;
+  ASSERT_TRUE(GetFakeServer()->GetLastCommitMessage(&first_commit));
+  EXPECT_TRUE(first_commit.commit().config_params().cookie_jar_mismatch())
+      << *syncer::ClientToServerMessageToValue(first_commit, /*options=*/{});
 
   // Avoid interferences from actual IdentityManager trying to fetch gaia
   // account information, which would exercise
-  // ProfileSyncService::OnAccountsInCookieUpdated().
+  // SyncServiceImpl::OnAccountsInCookieUpdated().
   signin::CancelAllOngoingGaiaCookieOperations(
       IdentityManagerFactory::GetForProfile(GetProfile(0)));
 
   // Trigger a cookie jar change (user signing in to content area).
   // Updating the cookie jar has to travel to the sync engine. It is possible
   // something is already running or scheduled to run on the sync thread. We
-  // want to block here and not create the HistogramTester below until we know
-  // the cookie jar stats have been updated.
+  // want to block here until we know the cookie jar stats have been updated.
   UpdateCookieJarAccountsAndWait(
-      {GetClient(0)->service()->GetAuthenticatedAccountInfo().account_id},
+      {GetClient(0)->service()->GetAccountInfo().account_id},
       /*expected_cookie_jar_mismatch=*/false);
 
-  {
-    HistogramTester histogram_tester;
+  // Trigger a sync and wait for it.
+  NavigateTab(0, GURL(kURL2));
+  WaitForURLOnServer(GURL(kURL2));
 
-    // Trigger a sync and wait for it.
-    GURL url = GURL(kURL2);
-    NavigateTab(0, url);
-    WaitForURLOnServer(url);
-
-    ASSERT_NE(
-        0, histogram_tester.GetBucketCount("Sync.PostedClientToServerMessage",
-                                           /*COMMIT=*/1));
-
-    // Verify the cookie jar mismatch bool is set to false.
-    sync_pb::ClientToServerMessage message;
-    ASSERT_TRUE(GetFakeServer()->GetLastCommitMessage(&message));
-    EXPECT_FALSE(message.commit().config_params().cookie_jar_mismatch())
-        << *syncer::ClientToServerMessageToValue(message, true);
-
-    // Verify the histograms were recorded properly.
-    ExpectUniqueSampleGE(histogram_tester, "Sync.CookieJarMatchOnNavigation",
-                         /*sample=*/true, /*expected_inclusive_lower_bound=*/1);
-    histogram_tester.ExpectTotalCount("Sync.CookieJarEmptyOnMismatch", 0);
-  }
+  // Verify the cookie jar mismatch bool is set to false.
+  sync_pb::ClientToServerMessage second_commit;
+  ASSERT_TRUE(GetFakeServer()->GetLastCommitMessage(&second_commit));
+  EXPECT_FALSE(second_commit.commit().config_params().cookie_jar_mismatch())
+      << *syncer::ClientToServerMessageToValue(second_commit, /*options=*/{});
 }
 
 IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest,
                        ShouldNotifyLoadedIconUrl) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(
-      favicon::kNotifySessionsOfMostRecentIconUrlChange);
-
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(CheckInitialState(0));
 
@@ -817,5 +871,165 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest,
                                  GetSyncService(0));
   EXPECT_TRUE(checker.Wait());
 }
+
+class SingleClientSessionsSyncTestWithFaviconTestServer
+    : public SingleClientSessionsSyncTest {
+ public:
+  SingleClientSessionsSyncTestWithFaviconTestServer() = default;
+
+  SingleClientSessionsSyncTestWithFaviconTestServer(
+      const SingleClientSessionsSyncTestWithFaviconTestServer&) = delete;
+  SingleClientSessionsSyncTestWithFaviconTestServer& operator=(
+      const SingleClientSessionsSyncTestWithFaviconTestServer&) = delete;
+
+  ~SingleClientSessionsSyncTestWithFaviconTestServer() override = default;
+
+ protected:
+  void SetUpOnMainThread() override {
+    // Mock favicon server response.
+    embedded_test_server()->RegisterRequestHandler(
+        base::BindRepeating(&FaviconServerRequestHandler));
+    ASSERT_TRUE(embedded_test_server()->Start());
+    SingleClientSessionsSyncTest::SetUpOnMainThread();
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTestWithFaviconTestServer,
+                       ShouldDeleteOnDemandIconsOnSessionsDisabled) {
+  const std::string kForeignSessionTag = "ForeignSessionTag";
+  const SessionID kWindowId = SessionID::FromSerializedValue(5);
+  const SessionID kTabId = SessionID::FromSerializedValue(1);
+  const base::Time kLastModifiedTime = base::Time::Now();
+
+  // Inject fake data on the server.
+  SessionSyncTestHelper helper;
+  sync_pb::EntitySpecifics tab;
+  *tab.mutable_session() =
+      helper.BuildTabSpecifics(kForeignSessionTag, kWindowId, kTabId);
+  sync_pb::EntitySpecifics header;
+  SessionSyncTestHelper::BuildSessionSpecifics(kForeignSessionTag,
+                                               header.mutable_session());
+  SessionSyncTestHelper::AddWindowSpecifics(kWindowId, {kTabId},
+                                            header.mutable_session());
+  for (const sync_pb::EntitySpecifics& specifics : {tab, header}) {
+    GetFakeServer()->InjectEntity(
+        syncer::PersistentUniqueClientEntity::CreateFromSpecificsForTesting(
+            "somename",
+            sync_sessions::SessionStore::GetClientTag(specifics.session()),
+            specifics,
+            /*creation_time=*/syncer::TimeToProtoTime(kLastModifiedTime),
+            /*last_modified_time=*/syncer::TimeToProtoTime(kLastModifiedTime)));
+  }
+
+  ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
+
+  // Override large icon service to talk to the mock server.
+  favicon::LargeIconServiceImpl* large_icon_service =
+      static_cast<favicon::LargeIconServiceImpl*>(
+          LargeIconServiceFactory::GetForBrowserContext(GetProfile(0)));
+  large_icon_service->SetServerUrlForTesting(
+      embedded_test_server()->GetURL("/"));
+
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+
+  // Expect injected foreign sessions to be synced down.
+  SyncedSessionVector sessions;
+  ASSERT_TRUE(GetSessionData(0, &sessions));
+  ASSERT_EQ(1U, sessions.size());
+
+  // Force creation of RecentTabsSubMenuModel which as a result fetches the
+  // favicon for the injected fake recent tab.
+  chrome::ShowAppMenu(GetBrowser(0));
+
+  EXPECT_TRUE(FaviconForPageUrlAvailableChecker(GetProfile(0),
+                                                GURL("http://foo/1"),
+                                                /*should_be_available=*/true)
+                  .Wait());
+
+  // Disable tabs and history toggles.
+  ASSERT_TRUE(
+      GetClient(0)->DisableSyncForType(syncer::UserSelectableType::kTabs));
+  ASSERT_TRUE(
+      GetClient(0)->DisableSyncForType(syncer::UserSelectableType::kHistory));
+
+  EXPECT_TRUE(FaviconForPageUrlAvailableChecker(GetProfile(0),
+                                                GURL("http://foo/1"),
+                                                /*should_be_available=*/false)
+                  .Wait());
+}
+
+class SingleClientSessionsWithoutDestroyProfileSyncTest
+    : public SingleClientSessionsSyncTest {
+ public:
+  SingleClientSessionsWithoutDestroyProfileSyncTest() {
+    features_.InitAndDisableFeature(features::kDestroyProfileOnBrowserClose);
+  }
+
+ private:
+  base::test::ScopedFeatureList features_;
+};
+
+IN_PROC_BROWSER_TEST_F(SingleClientSessionsWithoutDestroyProfileSyncTest,
+                       ShouldDeleteLastClosedTab) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(CheckInitialState(0));
+
+  ASSERT_TRUE(OpenTab(0, GURL(kURL1)));
+  ASSERT_TRUE(OpenTab(0, GURL(kURL2)));
+  WaitForHierarchyOnServer(SessionsHierarchy({{kURL1, kURL2}}));
+
+  CloseTab(/*browser_index=*/0, /*tab_index=*/0);
+  WaitForHierarchyOnServer(SessionsHierarchy({{kURL2}}));
+  CloseTab(/*browser_index=*/0, /*tab_index=*/0);
+  WaitForHierarchyOnServer(SessionsHierarchy());
+}
+
+#if !BUILDFLAG(IS_CHROMEOS)
+class SingleClientSessionsWithDestroyProfileSyncTest
+    : public SingleClientSessionsSyncTest {
+ public:
+  SingleClientSessionsWithDestroyProfileSyncTest() {
+    features_.InitAndEnableFeature(features::kDestroyProfileOnBrowserClose);
+  }
+
+ private:
+  base::test::ScopedFeatureList features_;
+};
+
+IN_PROC_BROWSER_TEST_F(SingleClientSessionsWithDestroyProfileSyncTest,
+                       ShouldNotDeleteLastClosedTab) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(CheckInitialState(0));
+
+  ASSERT_TRUE(OpenTab(0, GURL(kURL1)));
+  ASSERT_TRUE(OpenTab(0, GURL(kURL2)));
+  WaitForHierarchyOnServer(SessionsHierarchy({{kURL1, kURL2}}));
+
+  CloseTab(/*browser_index=*/0, /*tab_index=*/0);
+  WaitForHierarchyOnServer(SessionsHierarchy({{kURL2}}));
+
+  {
+    // Closing the last tab results in profile destruction and hence may require
+    // running blocking tasks which are normally disallowed during tests.
+    // TODO(crbug.com/1334091): remove once it's clear why it results in
+    // blocking tasks.
+    base::ScopedAllowUnresponsiveTasksForTesting scoped_allow_sync_primitives;
+    CloseTab(/*browser_index=*/0, /*tab_index=*/0);
+    // TODO(crbug.com/1039234): When DestroyProfileOnBrowserClose is enabled,
+    // the last CloseTab() triggers Profile deletion (and SyncService deletion).
+    // This means the last tab close never gets synced. We should fix this
+    // regression eventually. Once that's done, merge this test with the
+    // WithoutDestroyProfile version.
+    base::RunLoop run_loop;
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, run_loop.QuitClosure(), TestTimeouts::action_timeout());
+    run_loop.Run();
+  }
+
+  // Even after several seconds, state didn't change on the server.
+  fake_server::FakeServerVerifier verifier(GetFakeServer());
+  EXPECT_TRUE(verifier.VerifySessions(SessionsHierarchy({{kURL2}})));
+}
+#endif  // !BUILDFLAG(IS_CHROMEOS)
 
 }  // namespace

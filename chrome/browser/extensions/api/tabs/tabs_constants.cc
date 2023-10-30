@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@ const char kFileKey[] = "file";
 const char kFocusedKey[] = "focused";
 const char kFormatKey[] = "format";
 const char kFromIndexKey[] = "fromIndex";
+const char kGroupIdKey[] = "groupId";
 const char kHeightKey[] = "height";
 const char kIdKey[] = "id";
 const char kIncognitoKey[] = "incognito";
@@ -48,6 +49,7 @@ const char kTitleKey[] = "title";
 const char kToIndexKey[] = "toIndex";
 const char kTopKey[] = "top";
 const char kUrlKey[] = "url";
+const char kPendingUrlKey[] = "pendingUrl";
 const char kWindowClosing[] = "isWindowClosing";
 const char kWidthKey[] = "width";
 const char kWindowIdKey[] = "windowId";
@@ -62,8 +64,6 @@ const char kShowStateValueMinimized[] = "minimized";
 const char kShowStateValueMaximized[] = "maximized";
 const char kShowStateValueFullscreen[] = "fullscreen";
 const char kShowStateValueLockedFullscreen[] = "locked-fullscreen";
-const char kStatusValueComplete[] = "complete";
-const char kStatusValueLoading[] = "loading";
 
 const char kWindowTypeValueNormal[] = "normal";
 const char kWindowTypeValuePopup[] = "popup";
@@ -92,6 +92,10 @@ const char kCannotDiscardTab[] = "Cannot discard tab with id: *.";
 const char kCannotFindTabToDiscard[] = "Cannot find a tab to discard.";
 const char kTabStripNotEditableError[] =
     "Tabs cannot be edited right now (user may be dragging a tab).";
+const char kTabStripNotEditableQueryError[] =
+    "Tabs cannot be queried right now (user may be dragging a tab).";
+const char kTabStripDoesNotSupportTabGroupsError[] =
+    "Grouping is not supported by tabs in this window.";
 const char kNoSelectedTabError[] = "No selected tab";
 const char kNoHighlightedTabError[] = "No highlighted tab";
 const char kIncognitoModeIsDisabled[] = "Incognito mode is disabled.";
@@ -104,7 +108,13 @@ const char kNotImplementedError[] = "This call is not yet implemented";
 const char kSupportedInWindowsOnlyError[] = "Supported in Windows only";
 const char kInvalidWindowTypeError[] = "Invalid value for type";
 const char kInvalidWindowStateError[] = "Invalid value for state";
+const char kInvalidWindowBoundsError[] =
+    "Invalid value for bounds. Bounds must be at least 50% within visible "
+    "screen space.";
 const char kScreenshotsDisabled[] = "Taking screenshots has been disabled";
+const char kScreenshotsDisabledByDlp[] =
+    "Administrator policy disables screen capture when confidential content is "
+    "visible";
 const char kCannotUpdateMuteCaptured[] =
     "Cannot update mute state for tab *, tab has audio or video currently "
     "being captured";
@@ -117,6 +127,20 @@ const char kJavaScriptUrlsNotAllowedInTabsUpdate[] =
     "JavaScript URLs are not allowed in chrome.tabs.update. Use "
     "chrome.tabs.executeScript instead.";
 const char kBrowserWindowNotAllowed[] = "Browser windows not allowed.";
+const char kLockedFullscreenModeNewTabError[] =
+    "You cannot create new tabs while in locked fullscreen mode.";
+const char kGroupParamsError[] =
+    "Cannot specify 'createProperties' along with a 'groupId'.";
+const char kCannotNavigateToDevtools[] =
+    "Cannot navigate to a devtools:// page without either the devtools or "
+    "debugger permission.";
+const char kCannotNavigateToChromeUntrusted[] =
+    "Cannot navigate to a chrome-untrusted:// page.";
+const char kCannotHighlightTabs[] =
+    "Cannot change tab highlight. This may be due to user dragging in "
+    "progress.";
+const char kNotAllowedForDevToolsError[] =
+    "Operation not allowed for DevTools windows";
 
 }  // namespace tabs_constants
 }  // namespace extensions

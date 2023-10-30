@@ -1,11 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/media_galleries/win/portable_device_map_service.h"
 
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/check_op.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace {
@@ -21,7 +20,7 @@ PortableDeviceMapService* PortableDeviceMapService::GetInstance() {
 }
 
 void PortableDeviceMapService::AddPortableDevice(
-    const base::string16& device_location,
+    const std::wstring& device_location,
     IPortableDevice* device) {
   DCHECK(!device_location.empty());
   DCHECK(device);
@@ -30,7 +29,7 @@ void PortableDeviceMapService::AddPortableDevice(
 }
 
 void PortableDeviceMapService::MarkPortableDeviceForDeletion(
-    const base::string16& device_location) {
+    const std::wstring& device_location) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   DCHECK(!device_location.empty());
   base::AutoLock lock(lock_);
@@ -40,7 +39,7 @@ void PortableDeviceMapService::MarkPortableDeviceForDeletion(
 }
 
 void PortableDeviceMapService::RemovePortableDevice(
-    const base::string16& device_location) {
+    const std::wstring& device_location) {
   DCHECK(!device_location.empty());
   base::AutoLock lock(lock_);
   PortableDeviceMap::const_iterator it = device_map_.find(device_location);
@@ -49,7 +48,7 @@ void PortableDeviceMapService::RemovePortableDevice(
 }
 
 IPortableDevice* PortableDeviceMapService::GetPortableDevice(
-    const base::string16& device_location) {
+    const std::wstring& device_location) {
   DCHECK(!device_location.empty());
   base::AutoLock lock(lock_);
   PortableDeviceMap::const_iterator it = device_map_.find(device_location);

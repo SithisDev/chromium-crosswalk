@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -24,7 +24,7 @@ def WriteSource(base_name,
           variables will be available as globals.
   """
   copyright_header_template = (
-      '// Copyright 2018 The Chromium Authors. All rights reserved.\n'
+      '// Copyright 2018 The Chromium Authors\n'
       '// Use of this source code is governed by a BSD-style license '
       'that can be\n'
       '// found in the LICENSE file.\n\n'
@@ -34,7 +34,7 @@ def WriteSource(base_name,
 
   # Write header file.
   externs = []
-  for name in global_string_map.iterkeys():
+  for name in global_string_map.keys():
     externs += ['extern const char %s[];' % name]
 
   temp = '_'.join(dir_from_src.split('/') + [base_name])
@@ -58,7 +58,7 @@ def WriteSource(base_name,
     return line.replace('\\', '\\\\').replace('"', '\\"')
 
   definitions = []
-  for name, contents in global_string_map.iteritems():
+  for name, contents in global_string_map.items():
     lines = []
     if '\n' not in contents:
       lines = ['    "%s"' % EscapeLine(contents)]

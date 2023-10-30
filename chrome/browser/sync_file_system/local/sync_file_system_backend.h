@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,15 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "chrome/browser/profiles/profile.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/sync_file_system/sync_callbacks.h"
 #include "chrome/browser/sync_file_system/sync_status_code.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "storage/browser/fileapi/file_system_backend.h"
-#include "storage/browser/fileapi/file_system_quota_util.h"
-#include "storage/browser/fileapi/sandbox_file_system_backend_delegate.h"
-#include "storage/browser/fileapi/task_runner_bound_observer_list.h"
+#include "storage/browser/file_system/file_system_backend.h"
+#include "storage/browser/file_system/file_system_quota_util.h"
+#include "storage/browser/file_system/sandbox_file_system_backend_delegate.h"
+#include "storage/browser/file_system/task_runner_bound_observer_list.h"
+
+class Profile;
 
 namespace sync_file_system {
 
@@ -28,6 +27,10 @@ class LocalFileSyncContext;
 class SyncFileSystemBackend : public storage::FileSystemBackend {
  public:
   explicit SyncFileSystemBackend(Profile* profile);
+
+  SyncFileSystemBackend(const SyncFileSystemBackend&) = delete;
+  SyncFileSystemBackend& operator=(const SyncFileSystemBackend&) = delete;
+
   ~SyncFileSystemBackend() override;
 
   static std::unique_ptr<SyncFileSystemBackend> CreateForTesting();
@@ -37,7 +40,7 @@ class SyncFileSystemBackend : public storage::FileSystemBackend {
   void Initialize(storage::FileSystemContext* context) override;
   void ResolveURL(const storage::FileSystemURL& url,
                   storage::OpenFileSystemMode mode,
-                  OpenFileSystemCallback callback) override;
+                  ResolveURLCallback callback) override;
   storage::AsyncFileUtil* GetAsyncFileUtil(
       storage::FileSystemType type) override;
   storage::WatcherManager* GetWatcherManager(
@@ -45,7 +48,7 @@ class SyncFileSystemBackend : public storage::FileSystemBackend {
   storage::CopyOrMoveFileValidatorFactory* GetCopyOrMoveFileValidatorFactory(
       storage::FileSystemType type,
       base::File::Error* error_code) override;
-  storage::FileSystemOperation* CreateFileSystemOperation(
+  std::unique_ptr<storage::FileSystemOperation> CreateFileSystemOperation(
       const storage::FileSystemURL& url,
       storage::FileSystemContext* context,
       base::File::Error* error_code) const override;
@@ -81,48 +84,30 @@ class SyncFileSystemBackend : public storage::FileSystemBackend {
   void set_sync_context(LocalFileSyncContext* sync_context);
 
  private:
-  class ProfileHolder : public content::NotificationObserver {
-   public:
-    explicit ProfileHolder(Profile* profile);
-
-    // NotificationObserver override.
-    void Observe(int type,
-                 const content::NotificationSource& source,
-                 const content::NotificationDetails& details) override;
-
-    Profile* GetProfile();
-
-   private:
-    content::NotificationRegistrar registrar_;
-    Profile* profile_;
-  };
-
   // Not owned.
-  storage::FileSystemContext* context_;
+  raw_ptr<storage::FileSystemContext> context_ = nullptr;
 
   std::unique_ptr<LocalFileChangeTracker> change_tracker_;
   scoped_refptr<LocalFileSyncContext> sync_context_;
 
-  // Should be accessed on the UI thread.
-  std::unique_ptr<ProfileHolder> profile_holder_;
+  // |profile_| will initially be valid but may be destroyed before |this|, so
+  // it should be checked before being accessed.
+  raw_ptr<Profile> profile_;
 
   // A flag to skip the initialization sequence of SyncFileSystemService for
   // testing.
-  bool skip_initialize_syncfs_service_for_testing_;
+  bool skip_initialize_syncfs_service_for_testing_ = false;
 
   storage::SandboxFileSystemBackendDelegate* GetDelegate() const;
 
-  void InitializeSyncFileSystemService(
-      const GURL& origin_url,
-      const SyncStatusCallback& callback);
+  void InitializeSyncFileSystemService(const GURL& origin_url,
+                                       SyncStatusCallback callback);
   void DidInitializeSyncFileSystemService(storage::FileSystemContext* context,
                                           const GURL& origin_url,
                                           storage::FileSystemType type,
                                           storage::OpenFileSystemMode mode,
-                                          OpenFileSystemCallback callback,
+                                          ResolveURLCallback callback,
                                           SyncStatusCode status);
-
-  DISALLOW_COPY_AND_ASSIGN(SyncFileSystemBackend);
 };
 
 }  // namespace sync_file_system

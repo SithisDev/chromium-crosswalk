@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,16 +29,15 @@ TrustedSourcesManagerWin::~TrustedSourcesManagerWin() = default;
 
 bool TrustedSourcesManagerWin::IsFromTrustedSource(const GURL& url) const {
   Microsoft::WRL::ComPtr<IInternetSecurityManager> security_manager;
-  HRESULT hr = ::CoInternetCreateSecurityManager(
-      NULL, security_manager.GetAddressOf(), NULL);
+  HRESULT hr = ::CoInternetCreateSecurityManager(NULL, &security_manager, NULL);
   // URLZONE_LOCAL_MACHINE 0
   // URLZONE_INTRANET      1
   // URLZONE_TRUSTED       2
   // URLZONE_INTERNET      3
   // URLZONE_UNTRUSTED     4
   DWORD zone = 0;
-  base::string16 url16 = base::ASCIIToUTF16(url.spec());
-  hr = security_manager->MapUrlToZone(url16.c_str(), &zone, 0);
+  std::wstring urlw = base::ASCIIToWide(url.spec());
+  hr = security_manager->MapUrlToZone(urlw.c_str(), &zone, 0);
   if (FAILED(hr)) {
     LOG(ERROR) << "security_manager->MapUrlToZone failed with hr: " << std::hex
                << hr;

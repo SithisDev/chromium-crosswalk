@@ -1,21 +1,29 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/base/mojo_web_ui_browser_test.h"
 
+#include <utility>
+
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/macros.h"
-#include "base/path_service.h"
+#include "base/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/bind.h"
+#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/web_ui_test_handler.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/data/grit/webui_test_resources.h"
+#include "chrome/test/data/webui/web_ui_test.mojom.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
-#include "ui/base/l10n/l10n_util.h"
+#include "content/public/browser/web_ui_browser_interface_broker_registry.h"
+#include "content/public/common/content_client.h"
+#include "mojo/public/cpp/bindings/binder_map.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "ui/base/resource/resource_bundle.h"
 
 namespace {
@@ -24,66 +32,90 @@ namespace {
 class WebUITestPageHandler : public web_ui_test::mojom::TestRunner,
                              public WebUITestHandler {
  public:
-  explicit WebUITestPageHandler(content::WebUI* web_ui)
-      : web_ui_(web_ui), binding_(this) {}
-  ~WebUITestPageHandler() override {}
+  explicit WebUITestPageHandler(content::WebUI* web_ui) : web_ui_(web_ui) {}
+  WebUITestPageHandler(const WebUITestPageHandler&) = delete;
+  WebUITestPageHandler& operator=(const WebUITestPageHandler&) = delete;
+  ~WebUITestPageHandler() override = default;
 
   // Binds the Mojo test interface to this handler.
-  void BindToTestRunnerRequest(web_ui_test::mojom::TestRunnerRequest request) {
-    binding_.Bind(std::move(request));
+  void BindToTestRunnerReceiver(
+      mojo::PendingReceiver<web_ui_test::mojom::TestRunner> receiver) {
+    receiver_.Bind(std::move(receiver));
   }
 
   // web_ui_test::mojom::TestRunner:
-  void TestComplete(const base::Optional<std::string>& message) override {
+  void TestComplete(const absl::optional<std::string>& message) override {
     WebUITestHandler::TestComplete(message);
   }
 
   content::WebUI* GetWebUI() override { return web_ui_; }
 
  private:
-  content::WebUI* web_ui_;
-  mojo::Binding<web_ui_test::mojom::TestRunner> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebUITestPageHandler);
+  raw_ptr<content::WebUI> web_ui_;
+  mojo::Receiver<web_ui_test::mojom::TestRunner> receiver_{this};
 };
 
 }  // namespace
 
-MojoWebUIBrowserTest::MojoWebUIBrowserTest() {
-  registry_.AddInterface<web_ui_test::mojom::TestRunner>(base::BindRepeating(
-      &MojoWebUIBrowserTest::BindTestRunner, base::Unretained(this)));
-}
+class MojoWebUIBrowserTest::WebUITestContentBrowserClient
+    : public ChromeContentBrowserClient {
+ public:
+  WebUITestContentBrowserClient() {}
+  WebUITestContentBrowserClient(const WebUITestContentBrowserClient&) = delete;
+  WebUITestContentBrowserClient& operator=(
+      const WebUITestContentBrowserClient&) = delete;
+
+  ~WebUITestContentBrowserClient() override {}
+
+  void RegisterBrowserInterfaceBindersForFrame(
+      content::RenderFrameHost* render_frame_host,
+      mojo::BinderMapWithContext<content::RenderFrameHost*>* map) override {
+    ChromeContentBrowserClient::RegisterBrowserInterfaceBindersForFrame(
+        render_frame_host, map);
+    map->Add<web_ui_test::mojom::TestRunner>(
+        base::BindRepeating(&WebUITestContentBrowserClient::BindWebUITestRunner,
+                            base::Unretained(this)));
+  }
+
+  void RegisterWebUIInterfaceBrokers(
+      content::WebUIBrowserInterfaceBrokerRegistry& registry) override {
+    ChromeContentBrowserClient::RegisterWebUIInterfaceBrokers(registry);
+
+    registry.AddBinderForTesting(base::BindLambdaForTesting(
+        [&](content::WebUIController* controller,
+            mojo::PendingReceiver<web_ui_test::mojom::TestRunner> receiver) {
+          content::RenderFrameHost* rfh =
+              controller->web_ui()->GetWebContents()->GetPrimaryMainFrame();
+          this->BindWebUITestRunner(rfh, std::move(receiver));
+        }));
+  }
+
+  void set_test_page_handler(WebUITestPageHandler* test_page_handler) {
+    test_page_handler_ = test_page_handler;
+  }
+
+  void BindWebUITestRunner(
+      content::RenderFrameHost* const render_frame_host,
+      mojo::PendingReceiver<web_ui_test::mojom::TestRunner> receiver) {
+    // Right now, this is expected to be called only for main frames.
+    ASSERT_FALSE(render_frame_host->GetParent());
+    test_page_handler_->BindToTestRunnerReceiver(std::move(receiver));
+  }
+
+ private:
+  raw_ptr<WebUITestPageHandler> test_page_handler_;
+};
+
+MojoWebUIBrowserTest::MojoWebUIBrowserTest()
+    : test_content_browser_client_(
+          std::make_unique<WebUITestContentBrowserClient>()) {}
 
 MojoWebUIBrowserTest::~MojoWebUIBrowserTest() = default;
 
 void MojoWebUIBrowserTest::SetUpOnMainThread() {
   BaseWebUIBrowserTest::SetUpOnMainThread();
 
-  base::FilePath pak_path;
-  ASSERT_TRUE(base::PathService::Get(base::DIR_MODULE, &pak_path));
-  pak_path = pak_path.AppendASCII("browser_tests.pak");
-  ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
-      pak_path, ui::SCALE_FACTOR_NONE);
-}
-
-void MojoWebUIBrowserTest::OnInterfaceRequestFromFrame(
-    content::RenderFrameHost* render_frame_host,
-    const std::string& interface_name,
-    mojo::ScopedMessagePipeHandle* interface_pipe) {
-  // Right now, this is expected to be called only for main frames.
-  if (render_frame_host->GetParent()) {
-    FAIL() << "Terminating renderer for requesting " << interface_name
-           << " interface from subframe";
-    render_frame_host->GetProcess()->ShutdownForBadMessage(
-        content::RenderProcessHost::CrashReportMode::GENERATE_CRASH_DUMP);
-    return;
-  }
-  registry_.TryBindInterface(interface_name, interface_pipe);
-}
-
-void MojoWebUIBrowserTest::BindTestRunner(
-    web_ui_test::mojom::TestRunnerRequest request) {
-  test_page_handler_->BindToTestRunnerRequest(std::move(request));
+  content::SetBrowserClientForTesting(test_content_browser_client_.get());
 }
 
 void MojoWebUIBrowserTest::SetupHandlers() {
@@ -94,36 +126,28 @@ void MojoWebUIBrowserTest::SetupHandlers() {
   ASSERT_TRUE(web_ui_instance != nullptr);
 
   auto test_handler = std::make_unique<WebUITestPageHandler>(web_ui_instance);
-  test_page_handler_ = test_handler.get();
+  test_content_browser_client_->set_test_page_handler(test_handler.get());
   set_test_handler(std::move(test_handler));
-
-  Observe(web_ui_instance->GetWebContents());
 }
 
 void MojoWebUIBrowserTest::BrowsePreload(const GURL& browse_to) {
   BaseWebUIBrowserTest::BrowsePreload(browse_to);
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
+  if (use_mojo_modules_)
+    return;
+
   if (use_mojo_lite_bindings_) {
-    base::string16 file_content =
-        l10n_util::GetStringUTF16(IDR_WEB_UI_TEST_MOJO_LITE_JS);
-    // The generated script assumes that mojo has already been imported by the
-    // page. This is not the case when native HTML imports are disabled. If
-    // the polyfill is in place, wait for HTMLImports.whenReady().
-    base::string16 wrapped_file_content =
-        base::UTF8ToUTF16(
-            "const promise = typeof HTMLImports === 'undefined' ? "
-            "Promise.resolve() : "
-            "new Promise(resolve => { "
-            "HTMLImports.whenReady(resolve); "
-            "}); "
-            "promise.then(() => {") +
-        file_content + base::UTF8ToUTF16("});");
-    web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-        wrapped_file_content, base::NullCallback());
+    std::string test_mojo_lite_js =
+        ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
+            IDR_WEB_UI_TEST_MOJO_LITE_JS);
+    web_contents->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
+        base::UTF8ToUTF16(test_mojo_lite_js), base::NullCallback());
   } else {
-    web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-        l10n_util::GetStringUTF16(IDR_WEB_UI_TEST_MOJO_JS),
-        base::NullCallback());
+    std::string test_mojo_js =
+        ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
+            IDR_WEB_UI_TEST_MOJO_JS);
+    web_contents->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
+        base::UTF8ToUTF16(test_mojo_js), base::NullCallback());
   }
 }

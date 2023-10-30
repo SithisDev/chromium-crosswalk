@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,13 +17,13 @@ class Value;
 
 class Status;
 
-typedef base::Callback<
+typedef base::RepeatingCallback<
     void(const Status&, std::unique_ptr<base::Value>, const std::string&, bool)>
     CommandCallback;
 
-typedef base::Callback<void(
-    const base::DictionaryValue&,
-    const std::string&,
-    const CommandCallback&)> Command;
+typedef base::RepeatingCallback<void(const base::DictionaryValue&,
+                                     const std::string&,
+                                     const CommandCallback&)>
+    Command;
 
 #endif  // CHROME_TEST_CHROMEDRIVER_COMMAND_H_

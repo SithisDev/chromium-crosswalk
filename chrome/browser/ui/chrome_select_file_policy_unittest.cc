@@ -1,13 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 
 #include <memory>
+#include <string>
 
 #include "base/files/file_path.h"
-#include "base/strings/string16.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -15,7 +15,7 @@
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
@@ -44,12 +44,12 @@ class FileSelectionUser : public ui::SelectFileDialog::Listener {
         this, std::make_unique<ChromeSelectFilePolicy>(nullptr));
 
     const base::FilePath file_path;
-    const base::string16 title = base::string16();
+    const std::u16string title = std::u16string();
 
     file_selection_initialisation_in_progress = true;
-    select_file_dialog_->SelectFile(ui::SelectFileDialog::SELECT_OPEN_FILE,
-                                    title, file_path, NULL, 0,
-                                    base::FilePath::StringType(), NULL, NULL);
+    select_file_dialog_->SelectFile(
+        ui::SelectFileDialog::SELECT_OPEN_FILE, title, file_path, nullptr, 0,
+        base::FilePath::StringType(), nullptr, nullptr);
     file_selection_initialisation_in_progress = false;
   }
 
@@ -80,7 +80,7 @@ typedef testing::Test ChromeSelectFilePolicyTest;
 // Tests if SelectFileDialog::SelectFile returns asynchronously with
 // file-selection dialogs disabled by policy.
 TEST_F(ChromeSelectFilePolicyTest, MAYBE_ExpectAsynchronousListenerCall) {
-  content::TestBrowserThreadBundle test_browser_thread_bundle;
+  content::BrowserTaskEnvironment task_environment;
 
   ScopedTestingLocalState local_state(TestingBrowserProcess::GetGlobal());
 

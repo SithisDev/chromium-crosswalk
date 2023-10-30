@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,17 @@
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/drive/file_system_core_util.h"
 #include "content/public/common/url_constants.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "content/public/test/browser_task_environment.h"
+#include "storage/browser/file_system/file_system_url.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 
 namespace chromeos {
 
 namespace {
 
 // Sets up ProfileManager for testing and marks the current thread as UI by
-// TestBrowserThreadBundle. We need the thread since Profile objects must be
+// BrowserTaskEnvironment. We need the thread since Profile objects must be
 // touched from UI and hence has CHECK/DCHECKs for it.
 class ExternalFileURLUtilTest : public testing::Test {
  protected:
@@ -33,15 +34,15 @@ class ExternalFileURLUtilTest : public testing::Test {
 
   storage::FileSystemURL CreateExpectedURL(const base::FilePath& path) {
     return storage::FileSystemURL::CreateForTest(
-        url::Origin::Create(GURL("chrome-extension://xxx")),
+        blink::StorageKey::CreateFromStringForTesting("chrome-extension://xxx"),
         storage::kFileSystemTypeExternal,
-        base::FilePath("drive-test-user-hash").Append(path), "",
-        storage::kFileSystemTypeDrive, base::FilePath(), "",
+        base::FilePath("arc-documents-provider").Append(path), "",
+        storage::kFileSystemTypeArcDocumentsProvider, base::FilePath(), "",
         storage::FileSystemMountOption());
   }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfileManager testing_profile_manager_;
 };
 
@@ -66,7 +67,7 @@ TEST_F(ExternalFileURLUtilTest, FilePathToExternalFileURL) {
             ExternalFileURLToVirtualPath(FileSystemURLToExternalFileURL(url)));
 
   // Path with multi byte characters.
-  base::string16 utf16_string;
+  std::u16string utf16_string;
   utf16_string.push_back(0x307b);  // HIRAGANA_LETTER_HO
   utf16_string.push_back(0x3052);  // HIRAGANA_LETTER_GE
   url = CreateExpectedURL(
@@ -102,7 +103,7 @@ TEST_F(ExternalFileURLUtilTest, VirtualPathToExternalFileURL) {
                              "foo/bar%20%22%23%3C%3E%3F%60%7B%7D.txt");
 
   // (U+3000) IDEOGRAPHIC SPACE and (U+1F512) LOCK are examples of characters
-  // potentially used for URL spoofing. Those are blacklisted from unescaping
+  // potentially used for URL spoofing. Those are blocklisted from unescaping
   // when a URL is displayed, but this should not prevent it from being
   // unescaped when converting a URL to a virtual file path. See
   // crbug.com/585422 for detail.

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@ runTests([
   function startXMLHttpRequestAndRemoveFrame() {
     const hostname = 'slow-resourcetype-xhr-immediately-remove-frame';
     const url = getSlowURL(hostname);
-    const initiator = 'chrome-extension://' + chrome.runtime.id;
+    const initiator = getServerDomain(initiators.WEB_INITIATED, hostname)
     const mainUrl = getPageWithFrame('empty.html', hostname);
 
     expect([
@@ -19,7 +19,10 @@ runTests([
         details: {
           type: 'xmlhttprequest',
           url,
+          documentId: 2,
           frameId: 1,
+          frameType: 'sub_frame',
+          parentDocumentId: 1,
           parentFrameId: 0,
           frameUrl: 'unknown frame URL',
           initiator: initiator
@@ -30,7 +33,10 @@ runTests([
         details: {
           type: 'xmlhttprequest',
           url,
+          documentId: 2,
           frameId: 1,
+          frameType: 'sub_frame',
+          parentDocumentId: 1,
           parentFrameId: 0,
           initiator: initiator
         },
@@ -40,7 +46,10 @@ runTests([
         details: {
           type: 'xmlhttprequest',
           url,
+          documentId: 2,
           frameId: 1,
+          frameType: 'sub_frame',
+          parentDocumentId: 1,
           parentFrameId: 0,
           initiator: initiator
         },
@@ -50,7 +59,10 @@ runTests([
         details: {
           type: 'xmlhttprequest',
           url,
+          documentId: 2,
           frameId: 1,
+          frameType: 'sub_frame',
+          parentDocumentId: 1,
           parentFrameId: 0,
           fromCache: false,
           error: 'net::ERR_ABORTED',
@@ -81,7 +93,7 @@ runTests([
   function startXMLHttpRequestAndRemoveTab() {
     const hostname = 'slow-resourcetype-xhr-immediately-remove-tab';
     const url = getSlowURL(hostname);
-    const initiator = 'chrome-extension://' + chrome.runtime.id;
+    const initiator = getServerDomain(initiators.WEB_INITIATED, hostname)
     const mainUrl = getServerURL('empty.html', hostname);
 
     expect([
@@ -92,7 +104,8 @@ runTests([
           url,
           frameUrl: 'unknown frame URL',
           tabId: 1,
-          initiator: initiator
+          initiator: initiator,
+          documentId: 1
         }
       },
       { label: 'onBeforeSendHeaders',
@@ -101,7 +114,8 @@ runTests([
           type: 'xmlhttprequest',
           url,
           tabId: 1,
-          initiator: initiator
+          initiator: initiator,
+          documentId: 1
         },
       },
       { label: 'onSendHeaders',
@@ -110,7 +124,8 @@ runTests([
           type: 'xmlhttprequest',
           url,
           tabId: 1,
-          initiator: initiator
+          initiator: initiator,
+          documentId: 1
         },
       },
       { label: 'onErrorOccurred',
@@ -121,7 +136,8 @@ runTests([
           fromCache: false,
           error: 'net::ERR_ABORTED',
           tabId: 1,
-          initiator: initiator
+          initiator: initiator,
+          documentId: 1
         },
       }],
       [['onBeforeRequest', 'onBeforeSendHeaders', 'onSendHeaders',

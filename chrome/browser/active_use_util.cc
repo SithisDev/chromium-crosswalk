@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,12 @@
 #include "base/command_line.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_switches.h"
-
-#if defined(OS_WIN)
-#include "chrome/install_static/install_modes.h"
-#endif
+#include "chrome/install_static/buildflags.h"
 
 bool ShouldRecordActiveUse(const base::CommandLine& command_line) {
-#if defined(OS_WIN)
-  if (!install_static::kUseGoogleUpdateIntegration)
-    return false;
-#endif
+#if BUILDFLAG(IS_WIN) && !BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
+  return false;
+#else
   return command_line.GetSwitchValueNative(switches::kTryChromeAgain).empty();
+#endif
 }

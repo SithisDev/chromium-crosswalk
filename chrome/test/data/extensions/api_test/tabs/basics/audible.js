@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,10 +36,7 @@ chrome.test.runTests([
   },
 
   function audibleUpdateAttemptShouldFail() {
-    var expectedJsBindingsError =
-        'Invalid value for argument 2. Property \'audible\': ' +
-        'Unexpected property.';
-    var expectedNativeBindingsError =
+    var expectedError =
         'Error in invocation of tabs.update(' +
         'optional integer tabId, object updateProperties, ' +
         'optional function callback): Error at parameter ' +
@@ -50,9 +47,7 @@ chrome.test.runTests([
         chrome.test.fail('Updated audible property via chrome.tabs.update');
       });
     } catch (e) {
-      assertTrue(e.message == expectedJsBindingsError ||
-                 e.message == expectedNativeBindingsError,
-                 e.message);
+      assertEq(expectedError, e.message);
       chrome.test.succeed();
     }
   },

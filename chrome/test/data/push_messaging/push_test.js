@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -140,6 +140,18 @@ function documentSubscribePushWithBase64URLEncodedString() {
   }).catch(sendErrorToTest);
 }
 
+function documentSubscribePushGetExpirationTime() {
+  navigator.serviceWorker.ready.then(function(swRegistration) {
+    return swRegistration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: kApplicationServerKey.buffer
+        })
+        .then(function(subscription) {
+          sendResultToTest(subscription.expirationTime);
+        });
+  }).catch(sendErrorToTest);
+}
+
 function workerSubscribePush() {
   // Send the message to the worker for it to subscribe
   navigator.serviceWorker.controller.postMessage({command: 'workerSubscribe'});
@@ -176,12 +188,32 @@ function GetP256dh() {
   }).catch(sendErrorToTest);
 }
 
-function permissionState() {
+function GetSubscriptionExpirationTime() {
+  navigator.serviceWorker.ready.then(function(swRegistration) {
+    return swRegistration.pushManager.getSubscription()
+        .then(function(subscription) {
+          sendResultToTest(subscription.expirationTime);
+        });
+  }).catch(sendErrorToTest);
+}
+
+function pushManagerPermissionState() {
   navigator.serviceWorker.ready.then(function(swRegistration) {
     return swRegistration.pushManager.permissionState({userVisibleOnly: true})
         .then(function(permission) {
           sendResultToTest('permission status - ' + permission);
         });
+  }).catch(sendErrorToTest);
+}
+
+function notificationPermissionState() {
+  sendResultToTest('permission status - ' + Notification.permission);
+}
+
+function notificationPermissionAPIState() {
+  navigator.permissions.query({name: 'notifications'}).then(
+      permission_status => {
+    sendResultToTest('permission status - ' + permission_status.state);
   }).catch(sendErrorToTest);
 }
 
@@ -242,8 +274,12 @@ function hasSubscription() {
 
 navigator.serviceWorker.addEventListener('message', function(event) {
   var message = JSON.parse(event.data);
-  if (message.type == 'push')
+  if (message.type === 'push') {
     resultQueue.push(message.data);
-  else
+  } else if (message.type === 'pushsubscriptionchange') {
+    resultQueue.push(message.data.oldEndpoint);
+    resultQueue.push(message.data.newEndpoint);
+  } else {
     sendResultToTest(message.data);
+  }
 }, false);

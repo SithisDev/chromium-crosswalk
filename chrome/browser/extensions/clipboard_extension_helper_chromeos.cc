@@ -1,17 +1,18 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/clipboard_extension_helper_chromeos.h"
 
+#include <memory>
 #include <utility>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/atomic_flag.h"
-#include "chrome/browser/image_decoder.h"
+#include "chrome/browser/image_decoder/image_decoder.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 
@@ -27,21 +28,24 @@ class ClipboardExtensionHelper::ClipboardImageDataDecoder
   explicit ClipboardImageDataDecoder(ClipboardExtensionHelper* owner)
       : owner_(owner) {}
 
+  ClipboardImageDataDecoder(const ClipboardImageDataDecoder&) = delete;
+  ClipboardImageDataDecoder& operator=(const ClipboardImageDataDecoder&) =
+      delete;
+
   ~ClipboardImageDataDecoder() override { ImageDecoder::Cancel(this); }
 
   bool has_request_pending() const { return has_request_pending_; }
 
-  void Start(const std::vector<char>& image_data, clipboard::ImageType type) {
+  void Start(std::vector<uint8_t> image_data, clipboard::ImageType type) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
-    std::string image_data_str(image_data.begin(), image_data.end());
 
     ImageDecoder::ImageCodec codec = ImageDecoder::DEFAULT_CODEC;
     switch (type) {
       case clipboard::IMAGE_TYPE_PNG:
-        codec = ImageDecoder::ROBUST_PNG_CODEC;
+        codec = ImageDecoder::PNG_CODEC;
         break;
       case clipboard::IMAGE_TYPE_JPEG:
-        codec = ImageDecoder::ROBUST_JPEG_CODEC;
+        codec = ImageDecoder::DEFAULT_CODEC;
         break;
       case clipboard::IMAGE_TYPE_NONE:
         NOTREACHED();
@@ -49,7 +53,7 @@ class ClipboardExtensionHelper::ClipboardImageDataDecoder
     }
 
     has_request_pending_ = true;
-    ImageDecoder::StartWithOptions(this, image_data_str, codec, true);
+    ImageDecoder::StartWithOptions(this, std::move(image_data), codec, true);
   }
 
   void Cancel() {
@@ -69,24 +73,23 @@ class ClipboardExtensionHelper::ClipboardImageDataDecoder
   }
 
  private:
-  ClipboardExtensionHelper* owner_;  // Not owned.
+  raw_ptr<ClipboardExtensionHelper> owner_;  // Not owned.
   bool has_request_pending_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(ClipboardImageDataDecoder);
 };
 
 ClipboardExtensionHelper::ClipboardExtensionHelper() {
-  clipboard_image_data_decoder_.reset(new ClipboardImageDataDecoder(this));
+  clipboard_image_data_decoder_ =
+      std::make_unique<ClipboardImageDataDecoder>(this);
 }
 
 ClipboardExtensionHelper::~ClipboardExtensionHelper() {}
 
 void ClipboardExtensionHelper::DecodeAndSaveImageData(
-    const std::vector<char>& data,
+    std::vector<uint8_t> data,
     clipboard::ImageType type,
     AdditionalDataItemList additional_items,
-    const base::Closure& success_callback,
-    const base::Callback<void(const std::string&)>& error_callback) {
+    base::OnceClosure success_callback,
+    base::OnceCallback<void(const std::string&)> error_callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // If there is a previous image decoding request still running, cancel it
@@ -99,9 +102,9 @@ void ClipboardExtensionHelper::DecodeAndSaveImageData(
   // Cache additonal items.
   additonal_items_ = std::move(additional_items);
 
-  image_save_success_callback_ = success_callback;
-  image_save_error_callback_ = error_callback;
-  clipboard_image_data_decoder_->Start(data, type);
+  image_save_success_callback_ = std::move(success_callback);
+  image_save_error_callback_ = std::move(error_callback);
+  clipboard_image_data_decoder_->Start(std::move(data), type);
 }
 
 void ClipboardExtensionHelper::OnImageDecodeFailure() {
@@ -110,7 +113,7 @@ void ClipboardExtensionHelper::OnImageDecodeFailure() {
 
 void ClipboardExtensionHelper::OnImageDecoded(const SkBitmap& bitmap) {
   {
-    ui::ScopedClipboardWriter scw(ui::ClipboardType::kCopyPaste);
+    ui::ScopedClipboardWriter scw(ui::ClipboardBuffer::kCopyPaste);
     // Write the decoded image data to clipboard.
     if (!bitmap.empty() && !bitmap.isNull())
       scw.WriteImage(bitmap);

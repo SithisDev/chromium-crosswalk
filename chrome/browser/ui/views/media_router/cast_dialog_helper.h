@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@ namespace media_router {
 
 // Icon sizes in DIP.
 constexpr int kPrimaryIconSize = 20;
-constexpr int kPrimaryIconBorderWidth = 6;
+constexpr auto kPrimaryIconBorder = gfx::Insets(6);
 
 // Creates a view containing a throbber. The throbber has a border around it so
 // that the view's size is the same with the primary icon with its border.

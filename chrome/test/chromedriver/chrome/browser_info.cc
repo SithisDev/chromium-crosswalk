@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,24 +12,16 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
-
-namespace {
-
-const char kVersionPrefix[] = "Chrome/";
-const size_t kVersionPrefixLen = sizeof(kVersionPrefix) - 1;
-
-const char kHeadlessVersionPrefix[] = "HeadlessChrome/";
-const size_t kHeadlessVersionPrefixLen = sizeof(kHeadlessVersionPrefix) - 1;
-
-}  // namespace
+#include "chrome/test/chromedriver/constants/version.h"
 
 BrowserInfo::BrowserInfo()
     : major_version(0),
       build_no(kToTBuildNo),
       blink_revision(kToTBlinkRevision),
-      is_android(false) {
-}
+      is_android(false),
+      is_headless(false) {}
 
 BrowserInfo::~BrowserInfo() {}
 
@@ -38,34 +30,37 @@ Status ParseBrowserInfo(const std::string& data, BrowserInfo* browser_info) {
   if (!value.get())
     return Status(kUnknownError, "version info not in JSON");
 
-  base::DictionaryValue* dict;
-  if (!value->GetAsDictionary(&dict))
+  if (!value->is_dict())
     return Status(kUnknownError, "version info not a dictionary");
 
-  bool has_android_package = dict->HasKey("Android-Package");
-  if (has_android_package) {
-    if (!dict->GetString("Android-Package", &browser_info->android_package))
+  const base::Value* android_package = value->FindKey("Android-Package");
+  if (android_package) {
+    if (!android_package->is_string())
       return Status(kUnknownError, "'Android-Package' is not a string");
+    browser_info->android_package = android_package->GetString();
   }
 
-  std::string browser_string;
-  if (!dict->GetString("Browser", &browser_string))
+  const std::string* browser_string = value->FindStringKey("Browser");
+  if (!browser_string)
     return Status(kUnknownError, "version doesn't include 'Browser'");
 
-  Status status =
-      ParseBrowserString(has_android_package, browser_string, browser_info);
+  Status status = ParseBrowserString(android_package != nullptr,
+                                     *browser_string, browser_info);
   if (status.IsError())
     return status;
 
   // "webSocketDebuggerUrl" is only returned on Chrome 62.0.3178 and above,
   // thus it's not an error if it's missing.
-  dict->GetString("webSocketDebuggerUrl", &browser_info->web_socket_url);
+  const std::string* web_socket_url_in =
+      value->FindStringKey("webSocketDebuggerUrl");
+  if (web_socket_url_in)
+    browser_info->web_socket_url = *web_socket_url_in;
 
-  std::string blink_version;
-  if (!dict->GetString("WebKit-Version", &blink_version))
+  const std::string* blink_version = value->FindStringKey("WebKit-Version");
+  if (!blink_version)
     return Status(kUnknownError, "version doesn't include 'WebKit-Version'");
 
-  return ParseBlinkVersionString(blink_version, &browser_info->blink_revision);
+  return ParseBlinkVersionString(*blink_version, &browser_info->blink_revision);
 }
 
 Status ParseBrowserString(bool has_android_package,
@@ -79,19 +74,21 @@ Status ParseBrowserString(bool has_android_package,
     return Status(kOk);
   }
 
-  const Status error =
-      Status(kUnknownError, "unrecognized Chrome version: " + browser_string);
+  static const std::string kVersionPrefix =
+      std::string(kUserAgentProductName) + "/";
+  static const std::string kHeadlessVersionPrefix =
+      std::string(kHeadlessUserAgentProductName) + "/";
 
   int build_no = 0;
   if (base::StartsWith(browser_string, kVersionPrefix,
                        base::CompareCase::SENSITIVE) ||
       base::StartsWith(browser_string, kHeadlessVersionPrefix,
                        base::CompareCase::SENSITIVE)) {
-    std::string version = browser_string.substr(kVersionPrefixLen);
+    std::string version = browser_string.substr(kVersionPrefix.length());
     bool headless = false;
     if (base::StartsWith(browser_string, kHeadlessVersionPrefix,
                          base::CompareCase::SENSITIVE)) {
-      version = browser_string.substr(kHeadlessVersionPrefixLen);
+      version = browser_string.substr(kHeadlessVersionPrefix.length());
       headless = true;
     }
 
@@ -101,10 +98,13 @@ Status ParseBrowserString(bool has_android_package,
       return status;
 
     if (build_no != 0) {
-      if (headless)
-        browser_info->browser_name = "headless chrome";
-      else
-        browser_info->browser_name = "chrome";
+      if (headless) {
+        browser_info->browser_name =
+            base::StringPrintf("headless %s", kBrowserCapabilityName);
+        browser_info->is_headless = true;
+      } else {
+        browser_info->browser_name = kBrowserCapabilityName;
+      }
       browser_info->browser_version = version;
       browser_info->build_no = build_no;
       return Status(kOk);
@@ -117,7 +117,7 @@ Status ParseBrowserString(bool has_android_package,
     if (pos != std::string::npos) {
       browser_info->browser_name = "webview";
       browser_info->browser_version =
-          browser_string.substr(pos + kVersionPrefixLen);
+          browser_string.substr(pos + kVersionPrefix.length());
       browser_info->is_android = true;
       return ParseBrowserVersionString(browser_info->browser_version,
                                        &browser_info->major_version, &build_no);
@@ -125,7 +125,9 @@ Status ParseBrowserString(bool has_android_package,
     return Status(kOk);
   }
 
-  return error;
+  return Status(kUnknownError,
+                base::StringPrintf("unrecognized %s version: %s",
+                                   kBrowserShortName, browser_string.c_str()));
 }
 
 Status ParseBrowserVersionString(const std::string& browser_version,

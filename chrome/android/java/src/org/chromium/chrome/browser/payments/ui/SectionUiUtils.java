@@ -1,18 +1,19 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.payments.ui;
 
 import android.content.Context;
-import android.support.annotation.Nullable;
 import android.text.Layout;
 import android.text.TextPaint;
 import android.view.View;
 import android.widget.TextView;
 
+import androidx.annotation.Nullable;
+
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.widget.prefeditor.EditableOption;
+import org.chromium.components.autofill.EditableOption;
 
 /**
  * Utility functions for PaymentRequestSection.

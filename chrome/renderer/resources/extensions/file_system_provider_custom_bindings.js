@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,7 +41,7 @@ function annotateDate(date) {
  */
 function verifyImageURI(uri) {
   // The URI is specified by a user, so the type may be incorrect.
-  if (typeof uri != 'string' && !(uri instanceof String))
+  if (typeof uri !== 'string' && !(uri instanceof String))
     return false;
 
   return METADATA_THUMBNAIL_FORMAT.test(uri);

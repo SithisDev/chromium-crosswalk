@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 #include "base/time/time.h"
 #include "chrome/browser/page_load_metrics/observers/histogram_suffixes.h"
 #include "chrome/browser/page_load_metrics/observers/page_load_metrics_observer_test_harness.h"
-#include "chrome/browser/page_load_metrics/page_load_tracker.h"
-#include "chrome/common/page_load_metrics/test/page_load_metrics_test_util.h"
+#include "components/page_load_metrics/browser/page_load_tracker.h"
+#include "components/page_load_metrics/common/test/page_load_metrics_test_util.h"
 #include "components/tab_count_metrics/tab_count_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
@@ -47,15 +47,11 @@ class LiveTabCountPageLoadMetricsObserverTest
 
     page_load_metrics::mojom::PageLoadTiming timing;
     page_load_metrics::InitPageLoadTimingForTest(&timing);
+    timing.parse_timing->parse_start = base::Milliseconds(10);
     timing.navigation_start = base::Time::FromDoubleT(1);
-    timing.paint_timing->first_contentful_paint =
-        base::TimeDelta::FromMilliseconds(300);
-    timing.paint_timing->first_meaningful_paint =
-        base::TimeDelta::FromMilliseconds(700);
-    timing.interactive_timing->first_input_delay =
-        base::TimeDelta::FromMilliseconds(5);
-    timing.interactive_timing->first_input_timestamp =
-        base::TimeDelta::FromMilliseconds(4780);
+    timing.paint_timing->first_contentful_paint = base::Milliseconds(300);
+    timing.interactive_timing->first_input_delay = base::Milliseconds(5);
+    timing.interactive_timing->first_input_timestamp = base::Milliseconds(4780);
     PopulateRequiredTimingFields(&timing);
 
     if (tab_state == kBackground) {
@@ -70,7 +66,7 @@ class LiveTabCountPageLoadMetricsObserverTest
       web_contents()->WasShown();
     }
 
-    SimulateTimingUpdate(timing);
+    tester()->SimulateTimingUpdate(timing);
   }
 
  protected:
@@ -86,7 +82,7 @@ class LiveTabCountPageLoadMetricsObserverTest
         std::string(internal::kHistogramPrefixLiveTabCount) +
         std::string(page_load_histogram_suffix);
     for (size_t bucket = 0; bucket < expected_counts.size(); bucket++) {
-      histogram_tester().ExpectTotalCount(
+      tester()->histogram_tester().ExpectTotalCount(
           tab_count_metrics::HistogramName(histogram_prefix,
                                            /* live_tabs_only = */ true, bucket),
           expected_counts[bucket]);
@@ -113,7 +109,6 @@ TEST_P(LiveTabCountPageLoadMetricsObserverTest, LoadTabs100) {
     if (tab_state == TabState::kForeground)
       ++counts[bucket];
     ValidateHistograms(internal::kHistogramFirstContentfulPaintSuffix, counts);
-    ValidateHistograms(internal::kHistogramFirstMeaningfulPaintSuffix, counts);
     ValidateHistograms(internal::kHistogramFirstInputDelaySuffix, counts);
   }
   // Make sure we are testing each bucket.

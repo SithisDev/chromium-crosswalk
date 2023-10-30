@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,8 @@
 #include <utility>
 #include <vector>
 
-#include "base/strings/string16.h"
-#include "base/time/time.h"
-#include "components/ntp_tiles/tile_source.h"
-#include "components/ntp_tiles/tile_title_source.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/color_palette.h"
 #include "url/gurl.h"
 
 // ID used by Instant code to refer to objects (e.g. Autocomplete results, Most
@@ -43,42 +40,25 @@ enum ThemeBackgroundImageTiling {
   THEME_BKGRND_IMAGE_LAST = THEME_BKGRND_IMAGE_REPEAT,
 };
 
-// Theme background settings for the NTP.
-struct ThemeBackgroundInfo {
-  ThemeBackgroundInfo();
-  ~ThemeBackgroundInfo();
+// Theme settings for the NTP.
+struct NtpTheme {
+  NtpTheme();
+  NtpTheme(const NtpTheme& other);
+  ~NtpTheme();
 
-  bool operator==(const ThemeBackgroundInfo& rhs) const;
+  bool operator==(const NtpTheme& rhs) const;
 
   // True if the default theme is selected.
-  bool using_default_theme;
-
-  // True if dark mode is enabled.
-  bool using_dark_mode;
-
-  // Url of the custom background selected by the user.
-  GURL custom_background_url;
-
-  // First attribution string for custom background.
-  std::string custom_background_attribution_line_1;
-
-  // Second attribution string for custom background.
-  std::string custom_background_attribution_line_2;
-
-  // Url to learn more info about the custom background.
-  GURL custom_background_attribution_action_url;
-
-  // Id of the collection being used for "daily refresh".
-  std::string collection_id;
+  bool using_default_theme = true;
 
   // The theme background color. Always valid.
-  SkColor background_color;
+  SkColor background_color = gfx::kPlaceholderColor;
 
   // The theme text color.
-  SkColor text_color;
+  SkColor text_color = gfx::kPlaceholderColor;
 
   // The theme text color light.
-  SkColor text_color_light;
+  SkColor text_color_light = gfx::kPlaceholderColor;
 
   // The theme id for the theme background image.
   // Value is only valid if there's a custom theme background image.
@@ -86,42 +66,26 @@ struct ThemeBackgroundInfo {
 
   // The theme background image horizontal alignment is only valid if |theme_id|
   // is valid.
-  ThemeBackgroundImageAlignment image_horizontal_alignment;
+  ThemeBackgroundImageAlignment image_horizontal_alignment =
+      THEME_BKGRND_IMAGE_ALIGN_CENTER;
 
   // The theme background image vertical alignment is only valid if |theme_id|
   // is valid.
-  ThemeBackgroundImageAlignment image_vertical_alignment;
+  ThemeBackgroundImageAlignment image_vertical_alignment =
+      THEME_BKGRND_IMAGE_ALIGN_CENTER;
 
   // The theme background image tiling is only valid if |theme_id| is valid.
-  ThemeBackgroundImageTiling image_tiling;
+  ThemeBackgroundImageTiling image_tiling = THEME_BKGRND_IMAGE_NO_REPEAT;
 
   // True if theme has attribution logo.
   // Value is only valid if |theme_id| is valid.
-  bool has_attribution;
+  bool has_attribution = false;
 
   // True if theme has an alternate logo.
-  bool logo_alternate;
+  bool logo_alternate = false;
 
   // True if theme has NTP image.
-  bool has_theme_image;
-
-  // The theme name.
-  std::string theme_name;
-
-  // The color id for Chrome Colors. It is -1 if Chrome Colors is not set, 0
-  // when Chrome Colors is set but not from predefined color list, and > 0 if
-  // Chrome Colors is set from predefined color list.
-  int color_id;
-
-  // The dark color for Chrome Colors. Valid only if Chrome Colors is set.
-  SkColor color_dark;
-
-  // The light color for Chrome Colors. Valid only if Chrome Colors is set.
-  SkColor color_light;
-
-  // The picked custom color for Chrome Colors. Valid only if Chrome Colors is
-  // set.
-  SkColor color_picked;
+  bool has_theme_image = false;
 };
 
 struct InstantMostVisitedItem {
@@ -134,20 +98,10 @@ struct InstantMostVisitedItem {
 
   // The title of the Most Visited page.  May be empty, in which case the |url|
   // is used as the title.
-  base::string16 title;
+  std::u16string title;
 
   // The external URL of the favicon associated with this page.
   GURL favicon;
-
-  // The source of the item's |title|.
-  ntp_tiles::TileTitleSource title_source;
-
-  // The source of the item, e.g. server-side or client-side.
-  ntp_tiles::TileSource source;
-
-  // The timestamp representing when the tile data (e.g. URL) was generated
-  // originally, regardless of the impression timestamp.
-  base::Time data_generation_time;
 };
 
 struct InstantMostVisitedInfo {
@@ -156,18 +110,6 @@ struct InstantMostVisitedInfo {
   ~InstantMostVisitedInfo();
 
   std::vector<InstantMostVisitedItem> items;
-
-  // True if the source of the |items| is custom links (i.e.
-  // ntp_tiles::TileSource::CUSTOM_LINKS). Required since the source cannot be
-  // checked if |items| is empty.
-  bool items_are_custom_links;
-
-  // True if Most Visited functionality is enabled instead of customizable
-  // shortcuts.
-  bool use_most_visited;
-
-  // True if the items are visible and not hidden by the user.
-  bool is_visible;
 };
 
 // An InstantMostVisitedItem along with its assigned restricted ID.

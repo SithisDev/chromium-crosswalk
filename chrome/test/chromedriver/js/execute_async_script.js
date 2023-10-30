@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,6 +49,7 @@ function getAsyncScriptInfo() {
 function executeAsyncScript(script, args, isUserSupplied) {
   let resolveHandle;
   let rejectHandle;
+  const Promise = window.cdc_adoQpoasnfa76pfcZLmcfl_Promise || window.Promise;
   var promise = new Promise((resolve, reject) => {
     resolveHandle = resolve;
     rejectHandle = reject;

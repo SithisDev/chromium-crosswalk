@@ -1,12 +1,16 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/signin/chrome_signin_url_loader_throttle.h"
 
+#include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/signin/header_modification_delegate.h"
 #include "components/signin/core/browser/signin_header_helper.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace signin {
 
@@ -16,88 +20,66 @@ class URLLoaderThrottle::ThrottleRequestAdapter : public ChromeRequestAdapter {
                          const net::HttpRequestHeaders& original_headers,
                          net::HttpRequestHeaders* modified_headers,
                          std::vector<std::string>* headers_to_remove)
-      : ChromeRequestAdapter(nullptr),
-        throttle_(throttle),
-        original_headers_(original_headers),
-        modified_headers_(modified_headers),
-        headers_to_remove_(headers_to_remove) {}
+      : ChromeRequestAdapter(throttle->request_url_,
+                             original_headers,
+                             modified_headers,
+                             headers_to_remove),
+        throttle_(throttle) {}
+
+  ThrottleRequestAdapter(const ThrottleRequestAdapter&) = delete;
+  ThrottleRequestAdapter& operator=(const ThrottleRequestAdapter&) = delete;
 
   ~ThrottleRequestAdapter() override = default;
 
   // ChromeRequestAdapter
-  content::ResourceRequestInfo::WebContentsGetter GetWebContentsGetter()
-      const override {
+  content::WebContents::Getter GetWebContentsGetter() const override {
     return throttle_->web_contents_getter_;
   }
 
-  content::ResourceType GetResourceType() const override {
-    return throttle_->request_resource_type_;
+  network::mojom::RequestDestination GetRequestDestination() const override {
+    return throttle_->request_destination_;
   }
 
-  GURL GetReferrerOrigin() const override {
-    return throttle_->request_referrer_.GetOrigin();
+  bool IsOutermostMainFrame() const override {
+    return throttle_->is_outermost_main_frame_;
   }
+
+  bool IsFetchLikeAPI() const override {
+    return throttle_->request_is_fetch_like_api_;
+  }
+
+  GURL GetReferrer() const override { return throttle_->request_referrer_; }
 
   void SetDestructionCallback(base::OnceClosure closure) override {
     if (!throttle_->destruction_callback_)
       throttle_->destruction_callback_ = std::move(closure);
   }
 
-  // RequestAdapter
-  const GURL& GetUrl() override { return throttle_->request_url_; }
-
-  bool HasHeader(const std::string& name) override {
-    return (original_headers_.HasHeader(name) ||
-            modified_headers_->HasHeader(name)) &&
-           !base::Contains(*headers_to_remove_, name);
-  }
-
-  void RemoveRequestHeaderByName(const std::string& name) override {
-    if (!base::Contains(*headers_to_remove_, name))
-      headers_to_remove_->push_back(name);
-  }
-
-  void SetExtraHeaderByName(const std::string& name,
-                            const std::string& value) override {
-    modified_headers_->SetHeader(name, value);
-
-    auto it =
-        std::find(headers_to_remove_->begin(), headers_to_remove_->end(), name);
-    if (it != headers_to_remove_->end())
-      headers_to_remove_->erase(it);
-  }
-
  private:
-  URLLoaderThrottle* const throttle_;
-  const net::HttpRequestHeaders& original_headers_;
-  net::HttpRequestHeaders* const modified_headers_;
-  std::vector<std::string>* const headers_to_remove_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThrottleRequestAdapter);
+  const raw_ptr<URLLoaderThrottle> throttle_;
 };
 
 class URLLoaderThrottle::ThrottleResponseAdapter : public ResponseAdapter {
  public:
   ThrottleResponseAdapter(URLLoaderThrottle* throttle,
                           net::HttpResponseHeaders* headers)
-      : ResponseAdapter(nullptr), throttle_(throttle), headers_(headers) {}
+      : throttle_(throttle), headers_(headers) {}
+
+  ThrottleResponseAdapter(const ThrottleResponseAdapter&) = delete;
+  ThrottleResponseAdapter& operator=(const ThrottleResponseAdapter&) = delete;
 
   ~ThrottleResponseAdapter() override = default;
 
   // ResponseAdapter
-  content::ResourceRequestInfo::WebContentsGetter GetWebContentsGetter()
-      const override {
+  content::WebContents::Getter GetWebContentsGetter() const override {
     return throttle_->web_contents_getter_;
   }
 
-  bool IsMainFrame() const override {
-    return throttle_->request_resource_type_ ==
-           content::ResourceType::kMainFrame;
+  bool IsOutermostMainFrame() const override {
+    return throttle_->is_outermost_main_frame_;
   }
 
-  GURL GetOrigin() const override {
-    return throttle_->request_url_.GetOrigin();
-  }
+  GURL GetURL() const override { return throttle_->request_url_; }
 
   const net::HttpResponseHeaders* GetHeaders() const override {
     return headers_;
@@ -118,18 +100,15 @@ class URLLoaderThrottle::ThrottleResponseAdapter : public ResponseAdapter {
   }
 
  private:
-  URLLoaderThrottle* const throttle_;
-  net::HttpResponseHeaders* headers_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThrottleResponseAdapter);
+  const raw_ptr<URLLoaderThrottle> throttle_;
+  raw_ptr<net::HttpResponseHeaders> headers_;
 };
 
 // static
 std::unique_ptr<URLLoaderThrottle> URLLoaderThrottle::MaybeCreate(
     std::unique_ptr<HeaderModificationDelegate> delegate,
-    content::NavigationUIData* navigation_ui_data,
-    content::ResourceRequestInfo::WebContentsGetter web_contents_getter) {
-  if (!delegate->ShouldInterceptNavigation(navigation_ui_data))
+    content::WebContents::Getter web_contents_getter) {
+  if (!delegate->ShouldInterceptNavigation(web_contents_getter.Run()))
     return nullptr;
 
   return base::WrapUnique(new URLLoaderThrottle(
@@ -145,8 +124,9 @@ void URLLoaderThrottle::WillStartRequest(network::ResourceRequest* request,
                                          bool* defer) {
   request_url_ = request->url;
   request_referrer_ = request->referrer;
-  request_resource_type_ =
-      static_cast<content::ResourceType>(request->resource_type);
+  request_destination_ = request->destination;
+  is_outermost_main_frame_ = request->is_outermost_main_frame;
+  request_is_fetch_like_api_ = request->is_fetch_like_api;
 
   net::HttpRequestHeaders modified_request_headers;
   std::vector<std::string> to_be_removed_request_headers;
@@ -164,14 +144,16 @@ void URLLoaderThrottle::WillStartRequest(network::ResourceRequest* request,
   // FixAccountConsistencyRequestHeader. Perhaps this could be replaced with
   // more specific per-request state.
   request_headers_.CopyFrom(request->headers);
+  request_cors_exempt_headers_.CopyFrom(request->cors_exempt_headers);
 }
 
 void URLLoaderThrottle::WillRedirectRequest(
     net::RedirectInfo* redirect_info,
-    const network::ResourceResponseHead& response_head,
+    const network::mojom::URLResponseHead& response_head,
     bool* /* defer */,
     std::vector<std::string>* to_be_removed_request_headers,
-    net::HttpRequestHeaders* modified_request_headers) {
+    net::HttpRequestHeaders* modified_request_headers,
+    net::HttpRequestHeaders* modified_cors_exempt_request_headers) {
   ThrottleRequestAdapter request_adapter(this, request_headers_,
                                          modified_request_headers,
                                          to_be_removed_request_headers);
@@ -192,7 +174,7 @@ void URLLoaderThrottle::WillRedirectRequest(
 
 void URLLoaderThrottle::WillProcessResponse(
     const GURL& response_url,
-    network::ResourceResponseHead* response_head,
+    network::mojom::URLResponseHead* response_head,
     bool* defer) {
   ThrottleResponseAdapter adapter(this, response_head->headers.get());
   delegate_->ProcessResponse(&adapter, GURL() /* redirect_url */);
@@ -200,7 +182,7 @@ void URLLoaderThrottle::WillProcessResponse(
 
 URLLoaderThrottle::URLLoaderThrottle(
     std::unique_ptr<HeaderModificationDelegate> delegate,
-    content::ResourceRequestInfo::WebContentsGetter web_contents_getter)
+    content::WebContents::Getter web_contents_getter)
     : delegate_(std::move(delegate)),
       web_contents_getter_(std::move(web_contents_getter)) {}
 

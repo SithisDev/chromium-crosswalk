@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,15 @@ import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.Pair;
 
+import org.chromium.components.webapk.lib.common.WebApkMetaDataKeys;
 import org.chromium.webapk.lib.common.WebApkConstants;
-import org.chromium.webapk.lib.common.WebApkMetaDataKeys;
 
 import java.util.ArrayList;
 import java.util.Locale;
 
 /** Convenience wrapper for parameters to {@link HostBrowserLauncher} methods. */
 public class HostBrowserLauncherParams {
+    private boolean mIsNewStyleWebApk;
     private String mHostBrowserPackageName;
     private int mHostBrowserMajorChromiumVersion;
     private boolean mDialogShown;
@@ -30,6 +31,7 @@ public class HostBrowserLauncherParams {
     private int mSource;
     private boolean mForceNavigation;
     private long mLaunchTimeMs;
+    private long mSplashShownTimeMs;
     private String mSelectedShareTargetActivityClassName;
 
     /**
@@ -37,7 +39,8 @@ public class HostBrowserLauncherParams {
      * in the Android Manifest.
      */
     public static HostBrowserLauncherParams createForIntent(Context context, Intent intent,
-            String hostBrowserPackageName, boolean dialogShown, long launchTimeMs) {
+            String hostBrowserPackageName, boolean dialogShown, long launchTimeMs,
+            long splashShownTimeMs) {
         Bundle metadata = WebApkUtils.readMetaData(context);
         if (metadata == null) return null;
 
@@ -49,7 +52,7 @@ public class HostBrowserLauncherParams {
         }
 
         String startUrl = null;
-        int source = WebApkConstants.SHORTCUT_SOURCE_UNKNOWN;
+        int source = WebApkConstants.ShortcutSource.UNKNOWN;
         boolean forceNavigation = false;
 
         // If the intent was from the WebAPK relaunching itself or from the host browser relaunching
@@ -68,16 +71,16 @@ public class HostBrowserLauncherParams {
                     new ComponentName(
                             context.getPackageName(), selectedShareTargetActivityClassName));
             startUrl = computeStartUrlForShareTarget(shareTargetMetaData, intent);
-            source = WebApkConstants.SHORTCUT_SOURCE_SHARE;
+            source = WebApkConstants.ShortcutSource.WEBAPK_SHARE_TARGET;
             forceNavigation = true;
         } else if (!TextUtils.isEmpty(intent.getDataString())) {
             startUrl = intent.getDataString();
             source = intent.getIntExtra(
-                    WebApkConstants.EXTRA_SOURCE, WebApkConstants.SHORTCUT_SOURCE_EXTERNAL_INTENT);
+                    WebApkConstants.EXTRA_SOURCE, WebApkConstants.ShortcutSource.EXTERNAL_INTENT);
             forceNavigation = intent.getBooleanExtra(WebApkConstants.EXTRA_FORCE_NAVIGATION, true);
         } else {
             startUrl = metadata.getString(WebApkMetaDataKeys.START_URL);
-            source = WebApkConstants.SHORTCUT_SOURCE_UNKNOWN;
+            source = WebApkConstants.ShortcutSource.UNKNOWN;
             forceNavigation = false;
         }
 
@@ -88,9 +91,12 @@ public class HostBrowserLauncherParams {
         // Ignore deep links which came with non HTTP/HTTPS schemes and which were not rewritten.
         if (!doesUrlUseHttpOrHttpsScheme(startUrl)) return null;
 
-        return new HostBrowserLauncherParams(hostBrowserPackageName,
+        boolean isNewStyleWebApk = metadata.getBoolean(WebApkMetaDataKeys.IS_NEW_STYLE_WEBAPK);
+
+        return new HostBrowserLauncherParams(isNewStyleWebApk, hostBrowserPackageName,
                 hostBrowserMajorChromiumVersion, dialogShown, intent, startUrl, source,
-                forceNavigation, launchTimeMs, selectedShareTargetActivityClassName);
+                forceNavigation, launchTimeMs, splashShownTimeMs,
+                selectedShareTargetActivityClassName);
     }
 
     private static Bundle fetchActivityMetaData(
@@ -173,6 +179,9 @@ public class HostBrowserLauncherParams {
      */
     protected static String createGETWebShareTargetUriString(
             String action, ArrayList<Pair<String, String>> entryList) {
+        // Building the query string here is unnecessary if the host browser is M83+. M83+ Chrome
+        // builds the query string from the WebAPK's <meta-data>.
+
         Uri.Builder queryBuilder = new Uri.Builder();
         for (Pair<String, String> nameValue : entryList) {
             if (!TextUtils.isEmpty(nameValue.first) && !TextUtils.isEmpty(nameValue.second)) {
@@ -196,10 +205,11 @@ public class HostBrowserLauncherParams {
         return url != null && (url.startsWith("http:") || url.startsWith("https:"));
     }
 
-    private HostBrowserLauncherParams(String hostBrowserPackageName,
+    private HostBrowserLauncherParams(boolean isNewStyleWebApk, String hostBrowserPackageName,
             int hostBrowserMajorChromiumVersion, boolean dialogShown, Intent originalIntent,
             String startUrl, int source, boolean forceNavigation, long launchTimeMs,
-            String selectedShareTargetActivityClassName) {
+            long splashShownTimeMs, String selectedShareTargetActivityClassName) {
+        mIsNewStyleWebApk = isNewStyleWebApk;
         mHostBrowserPackageName = hostBrowserPackageName;
         mHostBrowserMajorChromiumVersion = hostBrowserMajorChromiumVersion;
         mDialogShown = dialogShown;
@@ -208,7 +218,16 @@ public class HostBrowserLauncherParams {
         mSource = source;
         mForceNavigation = forceNavigation;
         mLaunchTimeMs = launchTimeMs;
+        mSplashShownTimeMs = splashShownTimeMs;
         mSelectedShareTargetActivityClassName = selectedShareTargetActivityClassName;
+    }
+
+    /**
+     * Returns whether the WebAPK is a new-style WebAPK. {@link H2OOpaqueMainActivity} can be
+     * enabled for new-style WebAPKs.
+     */
+    public boolean isNewStyleWebApk() {
+        return mIsNewStyleWebApk;
     }
 
     /** Returns the chosen host browser. */
@@ -259,6 +278,14 @@ public class HostBrowserLauncherParams {
      */
     public long getLaunchTimeMs() {
         return mLaunchTimeMs;
+    }
+
+    /**
+     * Returns timestamp that the splash screen was shown. Returns -1 if the splash screen is not
+     * shown by the ShellAPK.
+     */
+    public long getSplashShownTimeMs() {
+        return mSplashShownTimeMs;
     }
 
     /** Returns the class name of the share activity that the user selected. */

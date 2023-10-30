@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,25 +10,44 @@
 #include <memory>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
+#include "base/files/file_path.h"
+#include "base/values.h"
+#include "build/build_config.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/models/image_model.h"
+#include "ui/gfx/image/image_skia.h"
 
 namespace base {
 class FilePath;
-class ListValue;
 }
 
 namespace gfx {
 class Image;
 }
 
+class Profile;
+class ProfileAttributesEntry;
 class SkBitmap;
 
 namespace profiles {
 
+#if BUILDFLAG(IS_WIN)
+// The avatar badge size needs to be half of the shortcut icon size because
+// the Windows taskbar icon is 32x32 and the avatar icon overlay is 16x16. So to
+// get the shortcut avatar badge and the avatar icon overlay to match up, we
+// need to preserve those ratios when creating the shortcut icon.
+const int kShortcutIconSizeWin = 48;
+const int kProfileAvatarBadgeSizeWin = kShortcutIconSizeWin / 2;
+#endif  // BUILDFLAG(IS_WIN)
+
+// Size of the small identity images for list of profiles to switch to.
+constexpr int kMenuAvatarIconSize = 20;
+
 // Avatar access.
-extern const char kGAIAPictureFileName[];
-extern const char kHighResAvatarFolderName[];
+extern const base::FilePath::CharType kGAIAPictureFileName[];
+extern const base::FilePath::CharType kHighResAvatarFolderName[];
 
 // Avatar formatting.
 extern const int kAvatarIconSize;
@@ -44,34 +63,33 @@ enum AvatarShape {
   SHAPE_SQUARE,
 };
 
+// Returns the default guest avatar.
+ui::ImageModel GetGuestAvatar(int size = 256);
+
 // Returns a version of |image| of a specific size. Note that no checks are
 // done on the width/height so make sure they're reasonable values; in the
 // range of 16-256 is probably best.
 gfx::Image GetSizedAvatarIcon(const gfx::Image& image,
-                              bool is_rectangle,
                               int width,
                               int height,
                               AvatarShape shape);
 
-gfx::Image GetSizedAvatarIcon(const gfx::Image& image,
-                              bool is_rectangle,
-                              int width,
-                              int height);
+gfx::Image GetSizedAvatarIcon(const gfx::Image& image, int width, int height);
 
 // Returns a version of |image| suitable for use in WebUI.
-gfx::Image GetAvatarIconForWebUI(const gfx::Image& image,
-                                 bool is_rectangle);
+gfx::Image GetAvatarIconForWebUI(const gfx::Image& image);
 
 // Returns a version of |image| suitable for use in title bars. The returned
 // image is scaled to fit |dst_width| and |dst_height|.
 gfx::Image GetAvatarIconForTitleBar(const gfx::Image& image,
-                                    bool is_rectangle,
                                     int dst_width,
                                     int dst_height);
 
-// Returns a bitmap with a couple of columns shaved off so it is more square,
-// so that when resized to a square aspect ratio it looks pretty.
-SkBitmap GetAvatarIconAsSquare(const SkBitmap& source_bitmap, int scale_factor);
+#if BUILDFLAG(IS_MAC)
+// Returns the image for the profile at |profile_path| that is suitable for use
+// in the macOS menu bar.
+gfx::Image GetAvatarIconForNSMenu(const base::FilePath& profile_path);
+#endif
 
 // Gets the number of default avatar icons that exist.
 size_t GetDefaultAvatarIconCount();
@@ -95,8 +113,19 @@ int GetPlaceholderAvatarIconResourceID();
 // Returns a URL for the placeholder avatar icon.
 std::string GetPlaceholderAvatarIconUrl();
 
+// Returns colored generic avatar.
+gfx::Image GetPlaceholderAvatarIconWithColors(SkColor fill_color,
+                                              SkColor stroke_color,
+                                              int size);
+
 // Gets the resource ID of the default avatar icon at |index|.
 int GetDefaultAvatarIconResourceIDAtIndex(size_t index);
+
+#if BUILDFLAG(IS_WIN)
+// Gets the resource ID of the 2x sized version of the old profile avatar icon
+// at |index|.
+int GetOldDefaultAvatar2xIconResourceIDAtIndex(size_t index);
+#endif  // BUILDFLAG(IS_WIN)
 
 // Gets the resource filename of the default avatar icon at |index|.
 const char* GetDefaultAvatarIconFileNameAtIndex(size_t index);
@@ -117,17 +146,56 @@ bool IsDefaultAvatarIconIndex(size_t index);
 // is, returns true and its index through |icon_index|. If not, returns false.
 bool IsDefaultAvatarIconUrl(const std::string& icon_url, size_t *icon_index);
 
-// Returns a list of dictionaries containing the default profile avatar icons as
+// Returns dictionary containing the avatar icon info in the format expected by
+// the WebUI component 'cr-profile-avatar-selector'.
+base::Value::Dict GetAvatarIconAndLabelDict(const std::string& url,
+                                            const std::u16string& label,
+                                            size_t index,
+                                            bool selected,
+                                            bool is_gaia_avatar);
+
+// Returns dictionary containing the default generic avatar icon, label, index
+// and selected state.
+base::Value::Dict GetDefaultProfileAvatarIconAndLabel(SkColor fill_color,
+                                                      SkColor stroke_color,
+                                                      bool selected);
+
+// Returns a list of dictionaries containing modern profile avatar icons as
 // well as avatar labels used for accessibility purposes. The list is ordered
 // according to the avatars' default order. If |selected_avatar_idx| is one of
 // the available indices, the corresponding avatar is marked as selected.
-std::unique_ptr<base::ListValue> GetDefaultProfileAvatarIconsAndLabels(
+base::Value::List GetCustomProfileAvatarIconsAndLabels(
     size_t selected_avatar_idx = SIZE_MAX);
 
 // This method tries to find a random avatar index that is not in
 // |used_icon_indices|. If there is no such index, a random index is returned.
 size_t GetRandomAvatarIconIndex(
     const std::unordered_set<size_t>& used_icon_indices);
+
+#if !BUILDFLAG(IS_ANDROID)
+// Get all the available profile icons to choose from for a specific profile
+// with |profile_path|.
+base::Value::List GetIconsAndLabelsForProfileAvatarSelector(
+    const base::FilePath& profile_path);
+#endif  // !BUILDFLAG(IS_ANDROID)
+
+// Set the default profile avatar icon index to |avatar_icon_index| for a
+// specific |profile|.
+void SetDefaultProfileAvatarIndex(Profile* profile, size_t avatar_icon_index);
+
+#if BUILDFLAG(IS_WIN)
+// Get the 2x avatar image for a ProfileAttributesEntry.
+SkBitmap GetWin2xAvatarImage(ProfileAttributesEntry* entry);
+
+// Returns a bitmap with a couple of columns shaved off so it is more square,
+// so that when resized to a square aspect ratio it looks pretty.
+SkBitmap GetWin2xAvatarIconAsSquare(const SkBitmap& source_bitmap);
+
+// Badges |app_icon_bitmap| with |avatar_bitmap| at the bottom right corner and
+// returns the resulting SkBitmap.
+SkBitmap GetBadgedWinIconBitmapForAvatar(const SkBitmap& app_icon_bitmap,
+                                         const SkBitmap& avatar_bitmap);
+#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace profiles
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,18 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/metrics/field_trial.h"
+#include "base/notreached.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/url_constants.h"
 #include "components/language/core/browser/language_model.h"
 #include "components/prefs/pref_service.h"
 #include "components/translate/core/browser/translate_download_manager.h"
@@ -23,16 +25,17 @@
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/common/url_constants.h"
 #include "url/gurl.h"
+#include "url/url_constants.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/file_manager/app_id.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/file_manager/app_id.h"
 #include "extensions/common/constants.h"
 #endif
 
 namespace {
 // The singleton instance of TranslateService.
 TranslateService* g_translate_service = nullptr;
-}
+}  // namespace
 
 TranslateService::TranslateService()
     : resource_request_allowed_notifier_(
@@ -66,15 +69,8 @@ void TranslateService::Initialize() {
 }
 
 // static
-void TranslateService::Shutdown(bool cleanup_pending_fetcher) {
-  translate::TranslateDownloadManager* download_manager =
-      translate::TranslateDownloadManager::GetInstance();
-  if (cleanup_pending_fetcher) {
-    download_manager->Shutdown();
-  } else {
-    // This path is only used by browser tests.
-    download_manager->set_url_loader_factory(nullptr);
-  }
+void TranslateService::Shutdown() {
+  translate::TranslateDownloadManager::GetInstance()->Shutdown();
 }
 
 // static
@@ -111,7 +107,7 @@ void TranslateService::OnResourceRequestsAllowed() {
 
 // static
 bool TranslateService::IsTranslateBubbleEnabled() {
-#if defined(USE_AURA) || defined(OS_MACOSX)
+#if defined(USE_AURA) || BUILDFLAG(IS_MAC)
   return true;
 #else
   // The bubble UX is not implemented on other platforms.
@@ -129,20 +125,22 @@ std::string TranslateService::GetTargetLanguage(
 
 // static
 bool TranslateService::IsTranslatableURL(const GURL& url) {
-  // A URLs is translatable unless it is one of the following:
+  // A URL is translatable unless it is one of the following:
   // - empty (can happen for popups created with window.open(""))
-  // - an internal URL (chrome:// and others)
+  // - an internal URL:
+  //   - chrome:// and chrome-native:// for all platforms
   // - the devtools (which is considered UI)
+  // - about:blank
   // - Chrome OS file manager extension
-  // - an FTP page (as FTP pages tend to have long lists of filenames that may
-  //   confuse the CLD)
+  // Note: Keep in sync with condition in TranslateAgent::PageCaptured.
   return !url.is_empty() && !url.SchemeIs(content::kChromeUIScheme) &&
+         !url.SchemeIs(chrome::kChromeNativeScheme) &&
          !url.SchemeIs(content::kChromeDevToolsScheme) &&
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
          !(url.SchemeIs(extensions::kExtensionScheme) &&
            url.DomainIs(file_manager::kFileManagerAppId)) &&
 #endif
-         !url.SchemeIs(url::kFtpScheme);
+         !url.IsAboutBlank();
 }
 
 bool TranslateService::IsAvailable(PrefService* prefs) {

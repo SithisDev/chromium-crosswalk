@@ -1,29 +1,25 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.native_page;
 
-import android.support.annotation.Nullable;
+import android.app.Activity;
 
-import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.device.DeviceClassManager;
+import androidx.annotation.Nullable;
+
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.offlinepages.DownloadUiActionFlags;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.offlinepages.RequestCoordinatorBridge;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.tab.InterceptNavigationDelegateImpl;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.TabLaunchType;
+import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet.SheetState;
+import org.chromium.chrome.browser.ui.native_page.NativePageHost;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.mojom.WindowOpenDisposition;
-import org.chromium.ui.widget.Toast;
 
 /**
  * {@link NativePageNavigationDelegate} implementation.
@@ -32,21 +28,24 @@ public class NativePageNavigationDelegateImpl implements NativePageNavigationDel
     private static final String TAG = "PageNavDelegate";
     private final Profile mProfile;
     private final TabModelSelector mTabModelSelector;
+    private final Tab mTab;
 
-    protected final ChromeActivity mActivity;
+    protected final Activity mActivity;
     protected final NativePageHost mHost;
 
-    public NativePageNavigationDelegateImpl(ChromeActivity activity, Profile profile,
-            NativePageHost host, TabModelSelector tabModelSelector) {
+    public NativePageNavigationDelegateImpl(Activity activity, Profile profile, NativePageHost host,
+            TabModelSelector tabModelSelector, Tab tab) {
         mActivity = activity;
         mProfile = profile;
         mHost = host;
         mTabModelSelector = tabModelSelector;
+        mTab = tab;
     }
 
     @Override
     public boolean isOpenInNewWindowEnabled() {
-        return MultiWindowUtils.getInstance().isOpenInOtherWindowSupported(mActivity);
+        return MultiWindowUtils.getInstance().isOpenInOtherWindowSupported(mActivity)
+                || MultiWindowUtils.getInstance().canEnterMultiWindowMode(mActivity);
     }
 
     @Override
@@ -56,21 +55,14 @@ public class NativePageNavigationDelegateImpl implements NativePageNavigationDel
 
         switch (windowOpenDisposition) {
             case WindowOpenDisposition.CURRENT_TAB:
-                if (FeatureUtilities.isNoTouchModeEnabled()) {
-                    // Allow PWAs to handle navigation.
-                    InterceptNavigationDelegateImpl delegate =
-                            InterceptNavigationDelegateImpl.get(mHost.getActiveTab());
-                    if (delegate != null
-                            && delegate.shouldIgnoreNewTab(loadUrlParams.getUrl(),
-                                    mTabModelSelector.isIncognitoSelected())) {
-                        break;
-                    }
-                }
                 mHost.loadUrl(loadUrlParams, mTabModelSelector.isIncognitoSelected());
-                loadingTab = mHost.getActiveTab();
+                loadingTab = mTab;
+                break;
+            case WindowOpenDisposition.NEW_FOREGROUND_TAB:
+                loadingTab = openUrlInNewTab(loadUrlParams, windowOpenDisposition);
                 break;
             case WindowOpenDisposition.NEW_BACKGROUND_TAB:
-                loadingTab = openUrlInNewTab(loadUrlParams);
+                loadingTab = openUrlInNewTab(loadUrlParams, windowOpenDisposition);
                 break;
             case WindowOpenDisposition.OFF_THE_RECORD:
                 mHost.loadUrl(loadUrlParams, true);
@@ -88,32 +80,30 @@ public class NativePageNavigationDelegateImpl implements NativePageNavigationDel
         return loadingTab;
     }
 
-    private void openUrlInNewWindow(LoadUrlParams loadUrlParams) {
-        TabDelegate tabDelegate = new TabDelegate(false);
-        tabDelegate.createTabInOtherWindow(loadUrlParams, mActivity, mHost.getParentId());
+    @Override
+    public Tab openUrlInGroup(int windowOpenDisposition, LoadUrlParams loadUrlParams) {
+        return mTabModelSelector.openNewTab(loadUrlParams,
+                TabLaunchType.FROM_LONGPRESS_BACKGROUND_IN_GROUP, mTab, /* incognito = */ false);
     }
 
-    private Tab openUrlInNewTab(LoadUrlParams loadUrlParams) {
-        Tab tab = mTabModelSelector.openNewTab(loadUrlParams,
-                TabLaunchType.FROM_LONGPRESS_BACKGROUND, mHost.getActiveTab(),
-                /* incognito = */ false);
+    private void openUrlInNewWindow(LoadUrlParams loadUrlParams) {
+        TabDelegate tabDelegate = new TabDelegate(false);
+        tabDelegate.createTabInOtherWindow(loadUrlParams, mActivity, mHost.getParentId(),
+                MultiWindowUtils.getAdjacentWindowActivity(mActivity));
+    }
 
-        // If animations are disabled in the DeviceClassManager, a toast is already displayed for
-        // all tabs opened in the background.
-        // TODO(twellington): Replace this with an animation.
-        if (mActivity.getBottomSheet() != null
-                && mActivity.getBottomSheet().getSheetState() == SheetState.FULL
-                && DeviceClassManager.enableAnimations()) {
-            Toast.makeText(mActivity, R.string.open_in_new_tab_toast, Toast.LENGTH_SHORT).show();
+    private Tab openUrlInNewTab(LoadUrlParams loadUrlParams, int windowOpenDisposition) {
+        int tabLaunchType = TabLaunchType.FROM_LONGPRESS_BACKGROUND;
+        if (windowOpenDisposition == WindowOpenDisposition.NEW_FOREGROUND_TAB) {
+            tabLaunchType = TabLaunchType.FROM_LONGPRESS_FOREGROUND;
         }
-
-        return tab;
+        return mTabModelSelector.openNewTab(
+                loadUrlParams, tabLaunchType, mTab, /* incognito = */ false);
     }
 
     private void saveUrlForOffline(String url) {
-        if (mHost.getActiveTab() != null) {
-            OfflinePageBridge.getForProfile(mProfile).scheduleDownload(
-                    mHost.getActiveTab().getWebContents(),
+        if (mTab != null) {
+            OfflinePageBridge.getForProfile(mProfile).scheduleDownload(mTab.getWebContents(),
                     OfflinePageBridge.NTP_SUGGESTIONS_NAMESPACE, url, DownloadUiActionFlags.ALL);
         } else {
             RequestCoordinatorBridge.getForProfile(mProfile).savePageLater(

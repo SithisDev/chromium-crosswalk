@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include <aclapi.h>
 #include <shlobj.h>
-#include <shlwapi.h>
 #include <stdint.h>
 #include <wincrypt.h>
 
@@ -23,13 +22,14 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/test/scoped_command_line.h"
 #include "base/test/scoped_path_override.h"
 #include "base/test/test_shortcut_win.h"
 #include "base/test/test_timeouts.h"
+#include "base/win/shlwapi.h"
 #include "base/win/shortcut.h"
+#include "base/win/sid.h"
 #include "chrome/chrome_cleaner/constants/chrome_cleaner_switches.h"
 #include "chrome/chrome_cleaner/constants/quarantine_constants.h"
 #include "chrome/chrome_cleaner/os/disk_util.h"
@@ -41,7 +41,6 @@
 #include "chrome/chrome_cleaner/test/test_scoped_service_handle.h"
 #include "chrome/chrome_cleaner/test/test_strings.h"
 #include "chrome/chrome_cleaner/test/test_util.h"
-#include "sandbox/win/src/sid.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -49,8 +48,13 @@ namespace chrome_cleaner {
 
 namespace {
 
-class ServiceUtilCleanerTest : public testing::Test {
+class ServiceUtilCleanerRunningServiceTest : public testing::Test {
  public:
+  static void SetUpTestCase() {
+    // Tests calling StartService() need this.
+    ASSERT_TRUE(chrome_cleaner::ResetAclForUcrtbase());
+  }
+
   void SetUp() override {
     // Cleanup previous run. This may happen when previous execution of unittest
     // crashed, leaving background processes/services.
@@ -74,7 +78,7 @@ TEST(SystemUtilCleanerTests, OpenRegistryKeyWithInvalidParameter) {
   EXPECT_FALSE(key_path.Open(KEY_READ, &key));
 }
 
-TEST_F(ServiceUtilCleanerTest, DeleteService) {
+TEST_F(ServiceUtilCleanerRunningServiceTest, DeleteService) {
   TestScopedServiceHandle service_handle;
   ASSERT_TRUE(service_handle.InstallService());
   service_handle.Close();
@@ -85,7 +89,8 @@ TEST_F(ServiceUtilCleanerTest, DeleteService) {
   EXPECT_FALSE(DoesServiceExist(service_handle.service_name()));
 }
 
-TEST_F(ServiceUtilCleanerTest, StopAndDeleteRunningService) {
+// TODO(crbug.com/1061171): Test is flaky.
+TEST_F(ServiceUtilCleanerRunningServiceTest, DISABLED_StopAndDeleteRunningService) {
   // Install and launch the service.
   TestScopedServiceHandle service_handle;
   ASSERT_TRUE(service_handle.InstallService());
@@ -108,7 +113,8 @@ TEST_F(ServiceUtilCleanerTest, StopAndDeleteRunningService) {
   EXPECT_FALSE(IsProcessRunning(kTestServiceExecutableName));
 }
 
-TEST_F(ServiceUtilCleanerTest, DeleteRunningService) {
+// TODO(crbug.com/1061171): Test is flaky.
+TEST_F(ServiceUtilCleanerRunningServiceTest, DISABLED_DeleteRunningService) {
   // Install and launch the service.
   TestScopedServiceHandle service_handle;
   ASSERT_TRUE(service_handle.InstallService());
@@ -126,7 +132,7 @@ TEST_F(ServiceUtilCleanerTest, DeleteRunningService) {
   EXPECT_FALSE(IsProcessRunning(kTestServiceExecutableName));
 }
 
-TEST_F(ServiceUtilCleanerTest, QuarantineFolderPermission) {
+TEST_F(ServiceUtilCleanerRunningServiceTest, QuarantineFolderPermission) {
   base::ScopedPathOverride local_app_data_override(
       CsidlToPathServiceKey(CSIDL_LOCAL_APPDATA));
 
@@ -139,16 +145,17 @@ TEST_F(ServiceUtilCleanerTest, QuarantineFolderPermission) {
   // Get the ownership and ACL of the quarantine folder and check the values.
   ASSERT_EQ(static_cast<DWORD>(ERROR_SUCCESS),
             ::GetNamedSecurityInfo(
-                quarantine_path.AsUTF16Unsafe().c_str(), SE_FILE_OBJECT,
+                quarantine_path.value().c_str(), SE_FILE_OBJECT,
                 OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
                 &owner_sid, /*psidGroup=*/nullptr, &dacl,
                 /*pSacl=*/nullptr, &security_descriptor));
 
-  sandbox::Sid admin_sid(WinBuiltinAdministratorsSid);
-  ASSERT_TRUE(admin_sid.IsValid());
+  const absl::optional<base::win::Sid> admin_sid = base::win::Sid::FromKnownSid(
+      base::win::WellKnownSid::kBuiltinAdministrators);
+  ASSERT_TRUE(admin_sid);
 
   // Check that the administrator group is the owner.
-  EXPECT_TRUE(::EqualSid(owner_sid, admin_sid.GetPSID()));
+  EXPECT_TRUE(::EqualSid(owner_sid, admin_sid->GetPSID()));
 
   EXPLICIT_ACCESS* explicit_access;
   ULONG entry_count;
@@ -166,13 +173,13 @@ TEST_F(ServiceUtilCleanerTest, QuarantineFolderPermission) {
   EXPECT_EQ(TRUSTEE_IS_SID, explicit_access[0].Trustee.TrusteeForm);
   // The trustee of the rule should be administrator group.
   EXPECT_TRUE(
-      ::EqualSid(explicit_access[0].Trustee.ptstrName, admin_sid.GetPSID()));
+      ::EqualSid(explicit_access[0].Trustee.ptstrName, admin_sid->GetPSID()));
 
   ::LocalFree(explicit_access);
   ::LocalFree(security_descriptor);
 }
 
-TEST_F(ServiceUtilCleanerTest, DefaultQuarantineFolderPath) {
+TEST_F(ServiceUtilCleanerRunningServiceTest, DefaultQuarantineFolderPath) {
   base::ScopedPathOverride local_app_data_override(
       CsidlToPathServiceKey(CSIDL_LOCAL_APPDATA));
 
@@ -185,7 +192,7 @@ TEST_F(ServiceUtilCleanerTest, DefaultQuarantineFolderPath) {
   EXPECT_EQ(quarantine_path, default_path);
 }
 
-TEST_F(ServiceUtilCleanerTest, SpecifiedQuarantineFolderPath) {
+TEST_F(ServiceUtilCleanerRunningServiceTest, SpecifiedQuarantineFolderPath) {
   // Override the default path of local appdata, so if we fail to redirect the
   // quarantine folder, the test won't drop any file in the real directory.
   base::ScopedPathOverride local_app_data_override(

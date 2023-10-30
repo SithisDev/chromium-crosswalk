@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,24 +14,24 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process/kill.h"
 #include "base/process/launch.h"
 #include "base/process/process.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
-#include "base/time/time.h"
+#include "base/task/thread_pool.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "chrome/installer/util/initial_preferences.h"
+#include "chrome/installer/util/initial_preferences_constants.h"
 #include "chrome/installer/util/install_util.h"
-#include "chrome/installer/util/master_preferences.h"
-#include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/util_constants.h"
 #include "components/strings/grit/components_locale_settings.h"
 #include "content/public/browser/browser_thread.h"
-#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/win/shell.h"
 
 namespace {
@@ -68,10 +68,11 @@ bool LaunchSetupForEula(const base::FilePath::StringType& value,
 // Returns true if the EULA is required but has not been accepted by this user.
 // The EULA is considered having been accepted if the user has gotten past
 // first run in the "other" environment (desktop or metro).
-bool IsEULANotAccepted(installer::MasterPreferences* install_prefs) {
+bool IsEULANotAccepted(installer::InitialPreferences* install_prefs) {
   bool value = false;
-  if (install_prefs->GetBool(installer::master_preferences::kRequireEula,
-          &value) && value) {
+  if (install_prefs->GetBool(installer::initial_preferences::kRequireEula,
+                             &value) &&
+      value) {
     base::FilePath eula_sentinel;
     // Be conservative and show the EULA if the path to the sentinel can't be
     // determined.
@@ -86,7 +87,9 @@ bool IsEULANotAccepted(installer::MasterPreferences* install_prefs) {
 // Writes the EULA to a temporary file, returned in |*eula_path|, and returns
 // true if successful.
 bool WriteEULAtoTempFile(base::FilePath* eula_path) {
-  std::string terms = l10n_util::GetStringUTF8(IDS_TERMS_HTML);
+  std::string terms =
+      ui::ResourceBundle::GetSharedInstance().LoadLocalizedResourceString(
+          IDS_TERMS_HTML);
   return (!terms.empty() &&
           base::CreateTemporaryFile(eula_path) &&
           base::WriteFile(*eula_path, terms.data(), terms.size()) != -1);
@@ -112,19 +115,14 @@ void DoPostImportPlatformSpecificTasks(Profile* /* profile */) {
   if (!InstallUtil::IsPerUserInstall()) {
     content::BrowserThread::PostBestEffortTask(
         FROM_HERE,
-        base::CreateTaskRunnerWithTraits(
+        base::ThreadPool::CreateTaskRunner(
             {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
              base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN}),
         base::BindOnce(&InstallUtil::TriggerActiveSetupCommand));
   }
 }
 
-bool IsFirstRunSentinelPresent() {
-  base::FilePath sentinel;
-  return !GetFirstRunSentinelFilePath(&sentinel) || base::PathExists(sentinel);
-}
-
-bool ShowPostInstallEULAIfNeeded(installer::MasterPreferences* install_prefs) {
+bool ShowPostInstallEULAIfNeeded(installer::InitialPreferences* install_prefs) {
   if (IsEULANotAccepted(install_prefs)) {
     // Show the post-installation EULA. This is done by setup.exe and the
     // result determines if we continue or not. We wait here until the user
@@ -155,12 +153,17 @@ bool ShowPostInstallEULAIfNeeded(installer::MasterPreferences* install_prefs) {
   return true;
 }
 
-base::FilePath MasterPrefsPath() {
-  // The standard location of the master prefs is next to the chrome binary.
-  base::FilePath master_prefs;
-  if (!base::PathService::Get(base::DIR_EXE, &master_prefs))
+base::FilePath InitialPrefsPath() {
+  // The standard location of the initial prefs is next to the chrome binary.
+  base::FilePath dir_exe;
+  if (!base::PathService::Get(base::DIR_EXE, &dir_exe))
     return base::FilePath();
-  return master_prefs.AppendASCII(installer::kDefaultMasterPrefs);
+
+  base::FilePath initial_prefs = dir_exe.AppendASCII(installer::kInitialPrefs);
+  if (base::PathIsReadable(initial_prefs))
+    return initial_prefs;
+
+  return dir_exe.AppendASCII(installer::kLegacyInitialPrefs);
 }
 
 }  // namespace internal

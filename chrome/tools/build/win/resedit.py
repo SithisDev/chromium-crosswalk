@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -197,7 +197,7 @@ class ResourceEditor(object):
     # Raise an error on failure.
     if ret == 0:
       error = win32api.GetLastError()
-      print "error", error
+      print ("error", error)
       raise RuntimeError(error)
     self._modified = True
 

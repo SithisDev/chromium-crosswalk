@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,10 @@
 class AppListControllerDelegate;
 class Profile;
 
+namespace ash {
+class AppListNotifier;
+}
+
 namespace app_list {
 
 class SearchController;
@@ -20,7 +24,8 @@ class SearchController;
 std::unique_ptr<SearchController> CreateSearchController(
     Profile* profile,
     AppListModelUpdater* model_updater,
-    AppListControllerDelegate* list_controller);
+    AppListControllerDelegate* list_controller,
+    ash::AppListNotifier* notifier);
 
 }  // namespace app_list
 

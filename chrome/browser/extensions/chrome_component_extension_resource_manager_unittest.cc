@@ -1,11 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/files/file_path.h"
 #include "base/path_service.h"
+#include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/grit/component_extension_resources.h"
+#include "chrome/grit/component_extension_resources_map.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/component_extension_resource_manager.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/common/constants.h"
@@ -17,13 +22,16 @@
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ui/file_manager/grit/file_manager_resources.h"
 #endif
 
 namespace extensions {
 
-typedef testing::Test ChromeComponentExtensionResourceManagerTest;
+class ChromeComponentExtensionResourceManagerTest : public testing::Test {
+ private:
+  content::BrowserTaskEnvironment task_environment_;
+};
 
 // Tests IsComponentExtensionResource function.
 TEST_F(ChromeComponentExtensionResourceManagerTest,
@@ -50,11 +58,9 @@ TEST_F(ChromeComponentExtensionResourceManagerTest,
   resources_path = resources_path.AppendASCII("file_manager");
 
   // Create a simulated component extension.
-  scoped_refptr<Extension> extension = Extension::Create(resources_path,
-                                                         Manifest::COMPONENT,
-                                                         *manifest,
-                                                         Extension::NO_FLAGS,
-                                                         &error);
+  scoped_refptr<Extension> extension =
+      Extension::Create(resources_path, mojom::ManifestLocation::kComponent,
+                        *manifest, Extension::NO_FLAGS, &error);
   ASSERT_TRUE(extension.get());
 
   // Load one of the icons.
@@ -63,7 +69,7 @@ TEST_F(ChromeComponentExtensionResourceManagerTest,
                                  extension_misc::EXTENSION_ICON_BITTY,
                                  ExtensionIconSet::MATCH_EXACTLY);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // The resource is a component resource.
   int resource_id = 0;
   ASSERT_TRUE(resource_manager->IsComponentExtensionResource(

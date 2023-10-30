@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,9 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
 #include "base/win/registry.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/common/chrome_switches.h"
@@ -32,12 +31,12 @@ void BackgroundModeManager::EnableLaunchOnStartup(bool should_launch) {
   task_runner_->PostTask(
       FROM_HERE,
       should_launch
-          ? base::Bind(auto_launch_util::EnableBackgroundStartAtLogin)
-          : base::Bind(auto_launch_util::DisableBackgroundStartAtLogin));
+          ? base::BindOnce(auto_launch_util::EnableBackgroundStartAtLogin)
+          : base::BindOnce(auto_launch_util::DisableBackgroundStartAtLogin));
 }
 
 void BackgroundModeManager::DisplayClientInstalledNotification(
-    const base::string16& name) {
+    const std::u16string& name) {
   // Create a status tray notification balloon explaining to the user what has
   // been installed.
   CreateStatusTrayIcon();
@@ -53,7 +52,7 @@ void BackgroundModeManager::DisplayClientInstalledNotification(
 
 scoped_refptr<base::SequencedTaskRunner>
 BackgroundModeManager::CreateTaskRunner() {
-  return base::CreateSequencedTaskRunnerWithTraits(
+  return base::ThreadPool::CreateSequencedTaskRunner(
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
 }

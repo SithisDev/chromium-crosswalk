@@ -1,7 +1,8 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//chrome/common/extensions/api/api_sources.gni")
@@ -50,6 +51,7 @@ generated_json_strings("generated_api_json_strings") {
     "app.json",
     "commands.json",
     "declarative_content.json",
+    "dom.json",
     "privacy.json",
     "proxy.json",
     "tts.json",
@@ -57,7 +59,8 @@ generated_json_strings("generated_api_json_strings") {
   ]
   if (is_chromeos) {
     sources += [ "file_browser_handler.json" ]
-  } else {
+  }
+  if (!is_chromeos_ash) {
     # On ChromeOS, input_method_private is fully compiled (as part of
     # schema_files), and so gets added to the bundle already. On other
     # platforms, we still need it added to the bundle.
@@ -66,22 +69,19 @@ generated_json_strings("generated_api_json_strings") {
   }
 
   root_namespace = chrome_extensions_api_root_namespace
-  deps = [
-    "//extensions/common/api",
-  ]
+  deps = [ "//extensions/common/api" ]
 
   visibility = [ ":api" ]
 }
 
 generated_types("generated_api_types") {
-  sources = chrome_extensions_api_schema_sources
+  sources = chrome_extensions_api_schema_sources +
+            chrome_extensions_manifest_only_schema_sources
   configs = [ "//build/config:precompiled_headers" ]
   schema_include_rules = chrome_extensions_api_schema_include_rules
 
   root_namespace = chrome_extensions_api_root_namespace
-  deps = [
-    "//extensions/common/api",
-  ]
+  deps = [ "//extensions/common/api" ]
 
   visibility = [ ":api" ]
 }
@@ -89,26 +89,20 @@ generated_types("generated_api_types") {
 json_features("api_features") {
   feature_type = "APIFeature"
   method_name = "AddChromeAPIFeatures"
-  sources = [
-    "_api_features.json",
-  ]
+  sources = [ "_api_features.json" ]
   visibility = [ ":extensions_features" ]
 }
 
 json_features("permission_features") {
   feature_type = "PermissionFeature"
   method_name = "AddChromePermissionFeatures"
-  sources = [
-    "_permission_features.json",
-  ]
+  sources = [ "_permission_features.json" ]
   visibility = [ ":extensions_features" ]
 }
 
 json_features("manifest_features") {
   feature_type = "ManifestFeature"
   method_name = "AddChromeManifestFeatures"
-  sources = [
-    "_manifest_features.json",
-  ]
+  sources = [ "_manifest_features.json" ]
   visibility = [ ":extensions_features" ]
 }

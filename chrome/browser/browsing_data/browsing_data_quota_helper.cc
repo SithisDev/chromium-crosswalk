@@ -1,13 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/browsing_data/browsing_data_quota_helper.h"
 
 #include "base/location.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-
-using content::BrowserThread;
 
 BrowsingDataQuotaHelper::QuotaInfo::QuotaInfo() {}
 
@@ -28,7 +27,7 @@ BrowsingDataQuotaHelper::QuotaInfo::~QuotaInfo() {}
 // static
 void BrowsingDataQuotaHelperDeleter::Destruct(
     const BrowsingDataQuotaHelper* helper) {
-  BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE, helper);
+  content::GetIOThreadTaskRunner({})->DeleteSoon(FROM_HERE, helper);
 }
 
 BrowsingDataQuotaHelper::BrowsingDataQuotaHelper() {}

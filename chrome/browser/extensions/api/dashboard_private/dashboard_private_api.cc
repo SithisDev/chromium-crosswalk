@@ -1,12 +1,14 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/api/dashboard_private/dashboard_private_api.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
 #include "chrome/browser/profiles/profile.h"
@@ -14,7 +16,6 @@
 #include "content/public/browser/storage_partition.h"
 #include "extensions/common/extension.h"
 #include "net/base/load_flags.h"
-#include "net/url_request/url_request.h"
 #include "url/gurl.h"
 
 namespace extensions {
@@ -56,7 +57,7 @@ DashboardPrivateShowPermissionPromptForDelegatedInstallFunction::
 
 ExtensionFunction::ResponseAction
 DashboardPrivateShowPermissionPromptForDelegatedInstallFunction::Run() {
-  params_ = Params::Create(*args_);
+  params_ = Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params_);
 
   if (!crx_file::id_util::IdIsValid(params_->details.id)) {
@@ -76,13 +77,13 @@ DashboardPrivateShowPermissionPromptForDelegatedInstallFunction::Run() {
 
   network::mojom::URLLoaderFactory* loader_factory = nullptr;
   if (!icon_url.is_empty()) {
-    loader_factory =
-        content::BrowserContext::GetDefaultStoragePartition(browser_context())
-            ->GetURLLoaderFactoryForBrowserProcess()
-            .get();
+    loader_factory = browser_context()
+                         ->GetDefaultStoragePartition()
+                         ->GetURLLoaderFactoryForBrowserProcess()
+                         .get();
   }
 
-  scoped_refptr<WebstoreInstallHelper> helper = new WebstoreInstallHelper(
+  auto helper = base::MakeRefCounted<WebstoreInstallHelper>(
       this, params_->details.id, params_->details.manifest, icon_url);
 
   // The helper will call us back via OnWebstoreParseSuccess or
@@ -134,9 +135,9 @@ void DashboardPrivateShowPermissionPromptForDelegatedInstallFunction::
           ExtensionInstallPrompt::DELEGATED_PERMISSIONS_PROMPT));
   prompt->set_delegated_username(details().delegated_user);
 
-  install_prompt_.reset(new ExtensionInstallPrompt(web_contents));
+  install_prompt_ = std::make_unique<ExtensionInstallPrompt>(web_contents);
   install_prompt_->ShowDialog(
-      base::Bind(
+      base::BindOnce(
           &DashboardPrivateShowPermissionPromptForDelegatedInstallFunction::
               OnInstallPromptDone,
           this),
@@ -160,8 +161,8 @@ void DashboardPrivateShowPermissionPromptForDelegatedInstallFunction::
 }
 
 void DashboardPrivateShowPermissionPromptForDelegatedInstallFunction::
-    OnInstallPromptDone(ExtensionInstallPrompt::Result result) {
-  bool accepted = (result == ExtensionInstallPrompt::Result::ACCEPTED);
+    OnInstallPromptDone(ExtensionInstallPrompt::DoneCallbackPayload payload) {
+  bool accepted = (payload.result == ExtensionInstallPrompt::Result::ACCEPTED);
   Respond(
       BuildResponse(accepted ? api::dashboard_private::RESULT_EMPTY_STRING
                              : api::dashboard_private::RESULT_USER_CANCELLED,
@@ -174,16 +175,10 @@ ExtensionFunction::ResponseValue
 DashboardPrivateShowPermissionPromptForDelegatedInstallFunction::BuildResponse(
     api::dashboard_private::Result result, const std::string& error) {
   // The web store expects an empty string on success.
+  auto args = ShowPermissionPromptForDelegatedInstall::Results::Create(result);
   if (result == api::dashboard_private::RESULT_EMPTY_STRING)
-    return ArgumentList(CreateResults(result));
-  return ErrorWithArguments(CreateResults(result), error);
-}
-
-std::unique_ptr<base::ListValue>
-DashboardPrivateShowPermissionPromptForDelegatedInstallFunction::CreateResults(
-    api::dashboard_private::Result result) const {
-  return ShowPermissionPromptForDelegatedInstall::Results::Create(result);
+    return ArgumentList(std::move(args));
+  return ErrorWithArguments(std::move(args), error);
 }
 
 }  // namespace extensions
-

@@ -1,21 +1,21 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.dependency_injection;
 
 import org.chromium.chrome.browser.AppHooksModule;
-import org.chromium.chrome.browser.browserservices.SessionDataHolder;
 import org.chromium.chrome.browser.browserservices.ClearDataDialogResultRecorder;
+import org.chromium.chrome.browser.browserservices.SessionDataHolder;
 import org.chromium.chrome.browser.browserservices.TrustedWebActivityClient;
-import org.chromium.chrome.browser.browserservices.permissiondelegation.NotificationPermissionUpdater;
-import org.chromium.chrome.browser.browserservices.permissiondelegation.TrustedWebActivityPermissionManager;
+import org.chromium.chrome.browser.browserservices.permissiondelegation.InstalledWebappPermissionManager;
+import org.chromium.chrome.browser.browserservices.permissiondelegation.PermissionUpdater;
 import org.chromium.chrome.browser.customtabs.CustomTabsClientFileProcessor;
 import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
-import org.chromium.chrome.browser.customtabs.dependency_injection.CustomTabActivityComponent;
-import org.chromium.chrome.browser.customtabs.dependency_injection.CustomTabActivityModule;
-import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
-import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
+import org.chromium.chrome.browser.customtabs.dependency_injection.BaseCustomTabActivityComponent;
+import org.chromium.chrome.browser.customtabs.dependency_injection.BaseCustomTabActivityModule;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
+import org.chromium.components.externalauth.ExternalAuthUtils;
 
 import javax.inject.Singleton;
 
@@ -29,16 +29,16 @@ import dagger.Component;
 public interface ChromeAppComponent {
     ChromeActivityComponent createChromeActivityComponent(ChromeActivityCommonsModule module);
 
-    CustomTabActivityComponent createCustomTabActivityComponent(ChromeActivityCommonsModule module,
-            CustomTabActivityModule customTabActivityModule);
+    BaseCustomTabActivityComponent createBaseCustomTabActivityComponent(
+            ChromeActivityCommonsModule module,
+            BaseCustomTabActivityModule baseCustomTabActivityModule);
 
     CustomTabsConnection resolveCustomTabsConnection();
-    ChromePreferenceManager resolvePreferenceManager();
-    ClearDataDialogResultRecorder resolveTwaClearDataDialogRecorder();
-    TrustedWebActivityPermissionManager resolveTwaPermissionManager();
-    NotificationPermissionUpdater resolveTwaPermissionUpdater();
+    SharedPreferencesManager resolveSharedPreferencesManager();
+    ClearDataDialogResultRecorder resolveClearDataDialogResultRecorder();
+    InstalledWebappPermissionManager resolvePermissionManager();
+    PermissionUpdater resolvePermissionUpdater();
     TrustedWebActivityClient resolveTrustedWebActivityClient();
-
     ExternalAuthUtils resolveExternalAuthUtils();
 
     CustomTabsClientFileProcessor resolveCustomTabsFileProcessor();

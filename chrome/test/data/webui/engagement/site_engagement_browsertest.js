@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,11 @@
 var EXAMPLE_URL_1 = 'http://example.com/';
 var EXAMPLE_URL_2 = 'http://shmlexample.com/';
 
-GEN('#include "chrome/browser/engagement/site_engagement_service.h"');
+GEN('#include "components/site_engagement/content/site_engagement_service.h"');
 GEN('#include "chrome/browser/engagement/site_engagement_service_factory.h"');
+GEN('#include "chrome/browser/profiles/profile.h"');
 GEN('#include "chrome/browser/ui/browser.h"');
+GEN('#include "content/public/test/browser_test.h"');
 
 function SiteEngagementBrowserTest() {}
 
@@ -19,13 +21,11 @@ SiteEngagementBrowserTest.prototype = {
 
   browsePreload: 'chrome://site-engagement',
 
-  runAccessibilityChecks: false,
-
   isAsync: true,
 
   testGenPreamble: function() {
-    GEN('SiteEngagementService* service =');
-    GEN('  SiteEngagementServiceFactory::GetForProfile(browser()->profile());');
+    GEN('site_engagement::SiteEngagementService* service =');
+    GEN('    site_engagement::SiteEngagementServiceFactory::GetForProfile(browser()->profile());');
     GEN('service->ResetBaseScoreForURL(GURL("' + EXAMPLE_URL_1 + '"), 10);');
     GEN('service->ResetBaseScoreForURL(GURL("' + EXAMPLE_URL_2 +
         '"), 3.14159);');
@@ -68,7 +68,8 @@ TEST_F('SiteEngagementBrowserTest', 'All', function() {
     });
   }
 
-  setup(function() {
+  setup(async function() {
+    await import('chrome://test/mojo_webui_test_support.js');
     cells = getCells();
   });
 
@@ -89,7 +90,7 @@ TEST_F('SiteEngagementBrowserTest', 'All', function() {
     firstRow.scoreInput.value = 50;
     firstRow.scoreInput.dispatchEvent(new Event('change'));
 
-    let {info} = await engagementDetailsProvider.getSiteEngagementDetails();
+    const {info} = await engagementDetailsProvider.getSiteEngagementDetails();
     assertEquals(firstRow.origin.textContent, info[0].origin.url);
     assertEquals(50, info[0].baseScore);
   });

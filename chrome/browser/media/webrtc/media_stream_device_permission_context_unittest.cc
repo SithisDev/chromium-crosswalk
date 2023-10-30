@@ -1,29 +1,27 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/media/webrtc/media_stream_device_permission_context.h"
 
 #include "base/bind.h"
-#include "base/macros.h"
-#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/permissions/permission_request_id.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/infobars/content/content_infobar_manager.h"
+#include "components/permissions/permission_request_id.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if !defined(OS_ANDROID)
-#include "chrome/browser/permissions/permission_request_manager.h"
+#if !BUILDFLAG(IS_ANDROID)
+#include "components/permissions/permission_request_manager.h"
 #endif
 
 namespace {
@@ -42,6 +40,12 @@ class TestPermissionContext : public MediaStreamDevicePermissionContext {
 // converted to tests in this file.
 class MediaStreamDevicePermissionContextTests
     : public ChromeRenderViewHostTestHarness {
+ public:
+  MediaStreamDevicePermissionContextTests(
+      const MediaStreamDevicePermissionContextTests&) = delete;
+  MediaStreamDevicePermissionContextTests& operator=(
+      const MediaStreamDevicePermissionContextTests&) = delete;
+
  protected:
   MediaStreamDevicePermissionContextTests() = default;
 
@@ -53,19 +57,19 @@ class MediaStreamDevicePermissionContextTests
     // Check that there is no saved content settings.
     EXPECT_EQ(CONTENT_SETTING_ASK,
               HostContentSettingsMapFactory::GetForProfile(profile())
-                  ->GetContentSetting(insecure_url.GetOrigin(),
-                                      insecure_url.GetOrigin(),
-                                      content_settings_type, std::string()));
+                  ->GetContentSetting(insecure_url.DeprecatedGetOriginAsURL(),
+                                      insecure_url.DeprecatedGetOriginAsURL(),
+                                      content_settings_type));
     EXPECT_EQ(CONTENT_SETTING_ASK,
               HostContentSettingsMapFactory::GetForProfile(profile())
-                  ->GetContentSetting(secure_url.GetOrigin(),
-                                      insecure_url.GetOrigin(),
-                                      content_settings_type, std::string()));
+                  ->GetContentSetting(secure_url.DeprecatedGetOriginAsURL(),
+                                      insecure_url.DeprecatedGetOriginAsURL(),
+                                      content_settings_type));
     EXPECT_EQ(CONTENT_SETTING_ASK,
               HostContentSettingsMapFactory::GetForProfile(profile())
-                  ->GetContentSetting(insecure_url.GetOrigin(),
-                                      secure_url.GetOrigin(),
-                                      content_settings_type, std::string()));
+                  ->GetContentSetting(insecure_url.DeprecatedGetOriginAsURL(),
+                                      secure_url.DeprecatedGetOriginAsURL(),
+                                      content_settings_type));
 
     EXPECT_EQ(CONTENT_SETTING_BLOCK,
               permission_context
@@ -87,10 +91,9 @@ class MediaStreamDevicePermissionContextTests
     // Check that there is no saved content settings.
     EXPECT_EQ(CONTENT_SETTING_ASK,
               HostContentSettingsMapFactory::GetForProfile(profile())
-                  ->GetContentSetting(secure_url.GetOrigin(),
-                                      secure_url.GetOrigin(),
-                                      content_settings_type,
-                                      std::string()));
+                  ->GetContentSetting(secure_url.DeprecatedGetOriginAsURL(),
+                                      secure_url.DeprecatedGetOriginAsURL(),
+                                      content_settings_type));
 
     EXPECT_EQ(CONTENT_SETTING_ASK,
               permission_context
@@ -103,34 +106,32 @@ class MediaStreamDevicePermissionContextTests
   // ChromeRenderViewHostTestHarness:
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
-#if defined(OS_ANDROID)
-    InfoBarService::CreateForWebContents(web_contents());
+#if BUILDFLAG(IS_ANDROID)
+    infobars::ContentInfoBarManager::CreateForWebContents(web_contents());
 #else
-    PermissionRequestManager::CreateForWebContents(web_contents());
+    permissions::PermissionRequestManager::CreateForWebContents(web_contents());
 #endif
   }
-
-  DISALLOW_COPY_AND_ASSIGN(MediaStreamDevicePermissionContextTests);
 };
 
 // MEDIASTREAM_MIC permission status should be ask for insecure origin to
 // accommodate the usage case of Flash.
 TEST_F(MediaStreamDevicePermissionContextTests, TestMicInsecureQueryingUrl) {
-  TestInsecureQueryingUrl(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
+  TestInsecureQueryingUrl(ContentSettingsType::MEDIASTREAM_MIC);
 }
 
 // MEDIASTREAM_CAMERA permission status should be ask for insecure origin to
 // accommodate the usage case of Flash.
 TEST_F(MediaStreamDevicePermissionContextTests, TestCameraInsecureQueryingUrl) {
-  TestInsecureQueryingUrl(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
+  TestInsecureQueryingUrl(ContentSettingsType::MEDIASTREAM_CAMERA);
 }
 
 // MEDIASTREAM_MIC permission status should be ask for Secure origin.
 TEST_F(MediaStreamDevicePermissionContextTests, TestMicSecureQueryingUrl) {
-  TestSecureQueryingUrl(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
+  TestSecureQueryingUrl(ContentSettingsType::MEDIASTREAM_MIC);
 }
 
 // MEDIASTREAM_CAMERA permission status should be ask for Secure origin.
 TEST_F(MediaStreamDevicePermissionContextTests, TestCameraSecureQueryingUrl) {
-  TestSecureQueryingUrl(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
+  TestSecureQueryingUrl(ContentSettingsType::MEDIASTREAM_CAMERA);
 }

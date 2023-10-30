@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,11 @@
 
 #include <list>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
 #include "chrome/browser/extensions/window_controller.h"
 
-class UIThreadExtensionFunction;
+class ExtensionFunction;
 
 namespace extensions {
 
@@ -25,10 +23,13 @@ class WindowControllerList {
   typedef std::list<WindowController*> ControllerList;
 
   WindowControllerList();
+  WindowControllerList(const WindowControllerList&) = delete;
+  WindowControllerList& operator=(const WindowControllerList&) = delete;
   ~WindowControllerList();
 
   void AddExtensionWindow(WindowController* window);
   void RemoveExtensionWindow(WindowController* window);
+  void NotifyWindowBoundsChanged(WindowController* window);
 
   void AddObserver(WindowControllerListObserver* observer);
   void RemoveObserver(WindowControllerListObserver* observer);
@@ -36,19 +37,19 @@ class WindowControllerList {
   // Returns a window matching the context the function was invoked in
   // using |filter|.
   WindowController* FindWindowForFunctionByIdWithFilter(
-      const UIThreadExtensionFunction* function,
+      const ExtensionFunction* function,
       int id,
       WindowController::TypeFilter filter) const;
 
   // Returns the focused or last added window matching the context the function
   // was invoked in.
   WindowController* CurrentWindowForFunction(
-      const UIThreadExtensionFunction* function) const;
+      const ExtensionFunction* function) const;
 
   // Returns the focused or last added window matching the context the function
   // was invoked in using |filter|.
   WindowController* CurrentWindowForFunctionWithFilter(
-      const UIThreadExtensionFunction* function,
+      const ExtensionFunction* function,
       WindowController::TypeFilter filter) const;
 
   const ControllerList& windows() const { return windows_; }
@@ -62,8 +63,6 @@ class WindowControllerList {
   ControllerList windows_;
 
   base::ObserverList<WindowControllerListObserver>::Unchecked observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(WindowControllerList);
 };
 
 }  // namespace extensions

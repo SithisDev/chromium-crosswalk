@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,11 +17,7 @@ int GetProtectedFilesDigestResourceId() {
   return 0;
 }
 
-int GetUwEMatchersResourceID() {
-  return 0;
-}
-
-std::unordered_map<base::string16, int> GetEmbeddedLibraryResourceIds(
+std::unordered_map<std::wstring, int> GetEmbeddedLibraryResourceIds(
     Engine::Name engine) {
   return {};
 }
@@ -30,20 +26,20 @@ int GetLibrariesDigestResourcesId(Engine::Name engine) {
   return 0;
 }
 
-base::string16 GetTestStubFileName(Engine::Name engine) {
-  return base::string16();
+std::wstring GetTestStubFileName(Engine::Name engine) {
+  return std::wstring();
 }
 
-std::set<base::string16> GetLibrariesToLoad(Engine::Name engine) {
+std::set<std::wstring> GetLibrariesToLoad(Engine::Name engine) {
   return {};
 }
 
-std::unordered_map<base::string16, base::string16> GetLibraryTestReplacements(
+std::unordered_map<std::wstring, std::wstring> GetLibraryTestReplacements(
     Engine::Name engine) {
   return {};
 }
 
-std::vector<base::string16> GetDLLNames(Engine::Name engine) {
+std::vector<std::wstring> GetDLLNames(Engine::Name engine) {
   return {};
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,14 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string>
 
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
-#include "base/callback_forward.h"
-#include "base/macros.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/android/tab_state.h"
+#include "base/observer_list.h"
+#include "base/supports_user_data.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate_android.h"
+#include "chrome/browser/tab/web_contents_state.h"
 #include "components/infobars/core/infobar_manager.h"
 #include "components/omnibox/browser/location_bar_model.h"
 #include "components/sessions/core/session_id.h"
@@ -30,27 +30,19 @@ class Layer;
 
 namespace android {
 class TabWebContentsDelegateAndroid;
-class TabContentManager;
 }
 
 namespace content {
 class DevToolsAgentHost;
 class WebContents;
-}
+}  // namespace content
 
-namespace prerender {
-class PrerenderManager;
-}
-
-class TabAndroid {
+class TabAndroid : public base::SupportsUserData {
  public:
-  // A Java counterpart will be generated for this enum.
-  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser
-  enum TabLoadStatus {
-    PAGE_LOAD_FAILED = 0,
-    DEFAULT_PAGE_LOAD = 1,
-    PARTIAL_PRERENDERED_PAGE_LOAD = 2,
-    FULL_PRERENDERED_PAGE_LOAD = 3,
+  class Observer : public base::CheckedObserver {
+   public:
+    // Called when WebContents is initialized.
+    virtual void OnInitWebContents(TabAndroid* tab) = 0;
   };
 
   // Convenience method to retrieve the Tab associated with the passed
@@ -62,11 +54,21 @@ class TabAndroid {
   static TabAndroid* GetNativeTab(JNIEnv* env,
                                   const base::android::JavaRef<jobject>& obj);
 
+  // Returns the a vector of native TabAndroid stored in the Java Tab array
+  // represented by |obj_array|.
+  static std::vector<TabAndroid*> GetAllNativeTabs(
+      JNIEnv* env,
+      const base::android::ScopedJavaLocalRef<jobjectArray>& obj_array);
+
   // Function to attach helpers to the contentView.
   static void AttachTabHelpers(content::WebContents* web_contents);
 
   TabAndroid(JNIEnv* env, const base::android::JavaRef<jobject>& obj);
-  ~TabAndroid();
+
+  TabAndroid(const TabAndroid&) = delete;
+  TabAndroid& operator=(const TabAndroid&) = delete;
+
+  ~TabAndroid() override;
 
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject();
 
@@ -80,11 +82,12 @@ class TabAndroid {
   const SessionID& window_id() const { return session_window_id_; }
 
   int GetAndroidId() const;
-  int GetSyncId() const;
   bool IsNativePage() const;
+  int GetLaunchType() const;
+  int GetUserAgent() const;
 
   // Return the tab title.
-  base::string16 GetTitle() const;
+  std::u16string GetTitle() const;
 
   // Return the tab url.
   GURL GetURL() const;
@@ -98,121 +101,74 @@ class TabAndroid {
   Profile* GetProfile() const;
   sync_sessions::SyncedTabDelegate* GetSyncedTabDelegate() const;
 
+  // Whether this tab is an incognito tab. Prefer
+  // `GetProfile()->IsOffTheRecord()` unless `web_contents()` is nullptr.
+  bool IsIncognito() const;
+
   // Delete navigation entries matching predicate from frozen state.
   void DeleteFrozenNavigationEntries(
       const WebContentsState::DeletionPredicate& predicate);
 
   void SetWindowSessionID(SessionID window_id);
-  void SetSyncId(int sync_id);
 
-  bool HasPrerenderedUrl(GURL gurl);
+  std::unique_ptr<content::WebContents> SwapWebContents(
+      std::unique_ptr<content::WebContents> new_contents,
+      bool did_start_load,
+      bool did_finish_load);
 
-  // Returns true if this tab is currently presented in the context of custom
-  // tabs. Tabs can be moved between different activities so the returned value
-  // might change over the lifetime of the tab.
-  bool IsCurrentlyACustomTab();
+  bool IsCustomTab();
+  bool IsHidden();
+
+  static bool isHardwareKeyboardAvailable(raw_ptr<TabAndroid> tab_android);
+
+  // Observers -----------------------------------------------------------------
+
+  // Adds/Removes an Observer.
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
 
   // Methods called from Java via JNI -----------------------------------------
 
-  void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
+  void Destroy(JNIEnv* env);
   void InitWebContents(
       JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
       jboolean incognito,
       jboolean is_background_tab,
       const base::android::JavaParamRef<jobject>& jweb_contents,
-      jint jparent_tab_id,
       const base::android::JavaParamRef<jobject>& jweb_contents_delegate,
-      const base::android::JavaParamRef<jobject>& jcontext_menu_populator);
+      const base::android::JavaParamRef<jobject>&
+          jcontext_menu_populator_factory);
   void UpdateDelegates(
-        JNIEnv* env,
-        const base::android::JavaParamRef<jobject>& obj,
-        const base::android::JavaParamRef<jobject>& jweb_contents_delegate,
-        const base::android::JavaParamRef<jobject>& jcontext_menu_populator);
-  void DestroyWebContents(JNIEnv* env,
-                          const base::android::JavaParamRef<jobject>& obj);
-  void ReleaseWebContents(JNIEnv* env,
-                          const base::android::JavaParamRef<jobject>& obj);
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& jweb_contents_delegate,
+      const base::android::JavaParamRef<jobject>&
+          jcontext_menu_populator_factory);
+  void DestroyWebContents(JNIEnv* env);
+  void ReleaseWebContents(JNIEnv* env);
   void OnPhysicalBackingSizeChanged(
       JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
       const base::android::JavaParamRef<jobject>& jweb_contents,
       jint width,
       jint height);
-  base::android::ScopedJavaLocalRef<jobject> GetProfileAndroid(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
-  TabLoadStatus LoadUrl(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jstring>& url,
-      const base::android::JavaParamRef<jstring>& j_initiator_origin,
-      const base::android::JavaParamRef<jstring>& j_extra_headers,
-      const base::android::JavaParamRef<jobject>& j_post_data,
-      jint page_transition,
-      const base::android::JavaParamRef<jstring>& j_referrer_url,
-      jint referrer_policy,
-      jboolean is_renderer_initiated,
-      jboolean should_replace_current_entry,
-      jboolean has_user_gesture,
-      jboolean should_clear_history_list,
-      jlong omnibox_input_received_timestamp,
-      jlong intent_received_timestamp);
   void SetActiveNavigationEntryTitleForUrl(
       JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
       const base::android::JavaParamRef<jstring>& jurl,
       const base::android::JavaParamRef<jstring>& jtitle);
 
-  // Called to get default favicon of current tab, return null if no
-  // favicon is avaliable for current tab.
-  base::android::ScopedJavaLocalRef<jobject> GetFavicon(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
-
-  void CreateHistoricalTab(JNIEnv* env,
-                           const base::android::JavaParamRef<jobject>& obj);
-
-  static void CreateHistoricalTabFromContents(
-      content::WebContents* web_contents);
-
-  void LoadOriginalImage(JNIEnv* env,
-                         const base::android::JavaParamRef<jobject>& obj);
-
-  jlong GetBookmarkId(JNIEnv* env,
-                      const base::android::JavaParamRef<jobject>& obj,
-                      jboolean only_editable);
-
-  void SetInterceptNavigationDelegate(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jobject>& delegate);
-
-  bool HasPrerenderedUrl(JNIEnv* env,
-                         const base::android::JavaParamRef<jobject>& obj,
-                         const base::android::JavaParamRef<jstring>& url);
+  void LoadOriginalImage(JNIEnv* env);
+  void OnShow(JNIEnv* env);
 
   scoped_refptr<content::DevToolsAgentHost> GetDevToolsAgentHost();
 
   void SetDevToolsAgentHost(scoped_refptr<content::DevToolsAgentHost> host);
 
-  void AttachDetachedTab(JNIEnv* env,
-                         const base::android::JavaParamRef<jobject>& obj);
-
-  bool AreRendererInputEventsIgnored(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
-
  private:
-  prerender::PrerenderManager* GetPrerenderManager() const;
-
   JavaObjectWeakGlobalRef weak_java_tab_;
 
   // Identifier of the window the tab is in.
   SessionID session_window_id_;
 
   scoped_refptr<cc::Layer> content_layer_;
-  android::TabContentManager* tab_content_manager_;
 
   std::unique_ptr<content::WebContents> web_contents_;
   std::unique_ptr<android::TabWebContentsDelegateAndroid>
@@ -220,7 +176,7 @@ class TabAndroid {
   scoped_refptr<content::DevToolsAgentHost> devtools_host_;
   std::unique_ptr<browser_sync::SyncedTabDelegateAndroid> synced_tab_delegate_;
 
-  DISALLOW_COPY_AND_ASSIGN(TabAndroid);
+  base::ObserverList<Observer> observers_;
 };
 
 #endif  // CHROME_BROWSER_ANDROID_TAB_ANDROID_H_

@@ -1,10 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/try_chrome_dialog_win/button_layout.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/view.h"
 

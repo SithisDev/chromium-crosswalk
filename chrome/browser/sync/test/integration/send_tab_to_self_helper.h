@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/sync/test/integration/status_change_checker.h"
 #include "components/send_tab_to_self/send_tab_to_self_model_observer.h"
 #include "components/sync_device_info/device_info_tracker.h"
@@ -30,11 +31,14 @@ class SendTabToSelfUrlChecker
   // object.
   SendTabToSelfUrlChecker(send_tab_to_self::SendTabToSelfSyncService* service,
                           const GURL& url);
+
+  SendTabToSelfUrlChecker(const SendTabToSelfUrlChecker&) = delete;
+  SendTabToSelfUrlChecker& operator=(const SendTabToSelfUrlChecker&) = delete;
+
   ~SendTabToSelfUrlChecker() override;
 
   // StatusChangeChecker implementation.
-  bool IsExitConditionSatisfied() override;
-  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 
   // SendTabToSelfModelObserver implementation.
   void SendTabToSelfModelLoaded() override;
@@ -46,9 +50,7 @@ class SendTabToSelfUrlChecker
 
  private:
   const GURL url_;
-  send_tab_to_self::SendTabToSelfSyncService* const service_;
-
-  DISALLOW_COPY_AND_ASSIGN(SendTabToSelfUrlChecker);
+  const raw_ptr<send_tab_to_self::SendTabToSelfSyncService> service_;
 };
 
 // Class that allows waiting until a particular |url| is marked opened by the
@@ -62,11 +64,15 @@ class SendTabToSelfUrlOpenedChecker
   SendTabToSelfUrlOpenedChecker(
       send_tab_to_self::SendTabToSelfSyncService* service,
       const GURL& url);
+
+  SendTabToSelfUrlOpenedChecker(const SendTabToSelfUrlOpenedChecker&) = delete;
+  SendTabToSelfUrlOpenedChecker& operator=(
+      const SendTabToSelfUrlOpenedChecker&) = delete;
+
   ~SendTabToSelfUrlOpenedChecker() override;
 
   // StatusChangeChecker implementation.
-  bool IsExitConditionSatisfied() override;
-  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 
   // SendTabToSelfModelObserver implementation.
   void SendTabToSelfModelLoaded() override;
@@ -81,9 +87,7 @@ class SendTabToSelfUrlOpenedChecker
 
  private:
   const GURL url_;
-  send_tab_to_self::SendTabToSelfSyncService* const service_;
-
-  DISALLOW_COPY_AND_ASSIGN(SendTabToSelfUrlOpenedChecker);
+  const raw_ptr<send_tab_to_self::SendTabToSelfSyncService> service_;
 };
 
 // Class that allows waiting the number of entries in until |service0|
@@ -97,11 +101,16 @@ class SendTabToSelfModelEqualityChecker
   SendTabToSelfModelEqualityChecker(
       send_tab_to_self::SendTabToSelfSyncService* service0,
       send_tab_to_self::SendTabToSelfSyncService* service1);
+
+  SendTabToSelfModelEqualityChecker(const SendTabToSelfModelEqualityChecker&) =
+      delete;
+  SendTabToSelfModelEqualityChecker& operator=(
+      const SendTabToSelfModelEqualityChecker&) = delete;
+
   ~SendTabToSelfModelEqualityChecker() override;
 
   // StatusChangeChecker implementation.
-  bool IsExitConditionSatisfied() override;
-  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 
   // SendTabToSelfModelObserver implementation.
   void SendTabToSelfModelLoaded() override;
@@ -112,10 +121,8 @@ class SendTabToSelfModelEqualityChecker
       const std::vector<std::string>& guids_removed) override;
 
  private:
-  send_tab_to_self::SendTabToSelfSyncService* const service0_;
-  send_tab_to_self::SendTabToSelfSyncService* const service1_;
-
-  DISALLOW_COPY_AND_ASSIGN(SendTabToSelfModelEqualityChecker);
+  const raw_ptr<send_tab_to_self::SendTabToSelfSyncService> service0_;
+  const raw_ptr<send_tab_to_self::SendTabToSelfSyncService> service1_;
 };
 
 // Class that allows waiting until the bridge is ready.
@@ -127,11 +134,15 @@ class SendTabToSelfActiveChecker
   // object.
   explicit SendTabToSelfActiveChecker(
       send_tab_to_self::SendTabToSelfSyncService* service);
+
+  SendTabToSelfActiveChecker(const SendTabToSelfActiveChecker&) = delete;
+  SendTabToSelfActiveChecker& operator=(const SendTabToSelfActiveChecker&) =
+      delete;
+
   ~SendTabToSelfActiveChecker() override;
 
   // StatusChangeChecker implementation.
-  bool IsExitConditionSatisfied() override;
-  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 
   // SendTabToSelfModelObserver implementation.
   void SendTabToSelfModelLoaded() override;
@@ -142,8 +153,7 @@ class SendTabToSelfActiveChecker
       const std::vector<std::string>& guids_removed) override;
 
  private:
-  send_tab_to_self::SendTabToSelfSyncService* const service_;
-  DISALLOW_COPY_AND_ASSIGN(SendTabToSelfActiveChecker);
+  const raw_ptr<send_tab_to_self::SendTabToSelfSyncService> service_;
 };
 
 // Class that allows waiting until two devices are ready.
@@ -153,18 +163,42 @@ class SendTabToSelfMultiDeviceActiveChecker
  public:
   explicit SendTabToSelfMultiDeviceActiveChecker(
       syncer::DeviceInfoTracker* tracker);
+
+  SendTabToSelfMultiDeviceActiveChecker(
+      const SendTabToSelfMultiDeviceActiveChecker&) = delete;
+  SendTabToSelfMultiDeviceActiveChecker& operator=(
+      const SendTabToSelfMultiDeviceActiveChecker&) = delete;
+
   ~SendTabToSelfMultiDeviceActiveChecker() override;
 
   // StatusChangeChecker implementation.
-  bool IsExitConditionSatisfied() override;
-  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 
   // DeviceInfoTracker::Observer implementation.
   void OnDeviceInfoChange() override;
 
  private:
-  syncer::DeviceInfoTracker* const tracker_;
-  DISALLOW_COPY_AND_ASSIGN(SendTabToSelfMultiDeviceActiveChecker);
+  const raw_ptr<syncer::DeviceInfoTracker> tracker_;
+};
+
+// Class that allows waiting until device has send_tab_to_self disabled.
+class SendTabToSelfDeviceDisabledChecker
+    : public StatusChangeChecker,
+      public syncer::DeviceInfoTracker::Observer {
+ public:
+  SendTabToSelfDeviceDisabledChecker(syncer::DeviceInfoTracker* tracker,
+                                     const std::string& device_guid);
+  ~SendTabToSelfDeviceDisabledChecker() override;
+
+  // StatusChangeChecker implementation.
+  bool IsExitConditionSatisfied(std::ostream* os) override;
+
+  // DeviceInfoTracker::Observer implementation.
+  void OnDeviceInfoChange() override;
+
+ private:
+  const raw_ptr<syncer::DeviceInfoTracker> tracker_;
+  std::string device_guid_;
 };
 
 class SendTabToSelfUrlDeletedChecker
@@ -176,11 +210,16 @@ class SendTabToSelfUrlDeletedChecker
   SendTabToSelfUrlDeletedChecker(
       send_tab_to_self::SendTabToSelfSyncService* service,
       const GURL& url);
+
+  SendTabToSelfUrlDeletedChecker(const SendTabToSelfUrlDeletedChecker&) =
+      delete;
+  SendTabToSelfUrlDeletedChecker& operator=(
+      const SendTabToSelfUrlDeletedChecker&) = delete;
+
   ~SendTabToSelfUrlDeletedChecker() override;
 
   // StatusChangeChecker implementation.
-  bool IsExitConditionSatisfied() override;
-  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied(std::ostream* os) override;
 
   // SendTabToSelfModelObserver implementation.
   void SendTabToSelfModelLoaded() override;
@@ -192,9 +231,7 @@ class SendTabToSelfUrlDeletedChecker
 
  private:
   const GURL url_;
-  send_tab_to_self::SendTabToSelfSyncService* const service_;
-
-  DISALLOW_COPY_AND_ASSIGN(SendTabToSelfUrlDeletedChecker);
+  const raw_ptr<send_tab_to_self::SendTabToSelfSyncService> service_;
 };
 
 }  // namespace send_tab_to_self_helper

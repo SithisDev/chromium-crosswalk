@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,6 +74,41 @@
         "id": "WebGlStatus",
         "type": "string",
         "enum": ["webgl_allowed", "webgl_blocked"]
+      },
+      {
+        "id": "ExtensionInstallStatus",
+        "type": "string",
+        "enum" : [{
+          "name": "can_request",
+          "description": "The extension install request feature is enabled and the extension can be requested."
+        }, {
+          "name": "request_pending",
+          "description": "The extension install request has been sent and is waiting to be reviewed."
+        }, {
+          "name": "blocked_by_policy",
+          "description": "The extension cannot be installed due to enterprise policy."
+        }, {
+          "name": "installable",
+          "description": "The extension can be installed."
+        }, {
+          "name": "enabled",
+          "description": "The extension has been installed already and it's enabled."
+        }, {
+          "name": "disabled",
+          "description": "The extension has been installed already but it's disabled."
+        }, {
+          "name": "terminated",
+          "description": "The extension has been installed already but it's terminated."
+        }, {
+          "name": "blacklisted",
+          "description": "The extension has been blacklisted."
+        }, {
+          "name": "custodian_approval_required",
+          "description": "The extension cannot be enabled due to lack of custodian approval for child users."
+        }, {
+          "name": "force_installed",
+          "description": "The extension is force installed or recommended by policy."
+        }]
       }
     ],
     "functions": [
@@ -143,6 +178,11 @@
                 "type": "string",
                 "optional": true,
                 "description": "The authuser index to be included with CRX download requests in multi-login sessions."
+              },
+              "esbAllowlist": {
+                "type": "boolean",
+                "optional": true,
+                "description": "A flag to specify if the extension is included in the ESB allowlist."
               }
             },
             "additionalProperties": { "type": "any" }
@@ -199,7 +239,6 @@
           {
             "name": "callback",
             "type": "function",
-            "optional": false,
             "parameters": [
               {
                 "name": "info",
@@ -219,7 +258,6 @@
           {
             "name": "callback",
             "type": "function",
-            "optional": false,
             "parameters": [
               { "name": "login", "type": "string" }
             ]
@@ -246,7 +284,6 @@
           {
             "name": "callback",
             "type": "function",
-            "optional": false,
             "parameters": [
               {
                 "name": "webgl_status",
@@ -263,7 +300,6 @@
           {
             "name": "callback",
             "type": "function",
-            "optional": false,
             "parameters": [
               { "name": "is_enabled", "type": "boolean" }
             ]
@@ -277,7 +313,6 @@
           {
             "name": "callback",
             "type": "function",
-            "optional": false,
             "parameters": [
               { "name": "is_incognito", "type": "boolean" }
             ]
@@ -291,7 +326,6 @@
           {
             "name": "callback",
             "type": "function",
-            "optional": false,
             "parameters": [
               { "name": "is_enabled", "type": "boolean" }
             ]
@@ -333,7 +367,6 @@
           {
             "name": "callback",
             "type": "function",
-            "optional": false,
             "parameters": [
               { "name": "is_pending_approval", "type": "boolean" }
             ]
@@ -349,6 +382,29 @@
             "type": "function",
             "parameters": [
               { "name": "referrerChain", "type": "string" }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "getExtensionStatus",
+        "description": "Returns the install status of the extension.",
+        "parameters": [
+          {
+            "name": "id",
+            "type": "string",
+            "description": "The id of the extension"
+          }, {
+            "name": "manifest",
+            "type": "string",
+            "optional": true,
+            "description": "The manifest of the extension"
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": [
+              { "name": "status", "$ref": "ExtensionInstallStatus" }
             ]
           }
         ]

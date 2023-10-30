@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,35 +12,29 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/font_pref_change_notifier_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_font_webkit_names.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/notification_source.h"
 
 // Identifies the user data on the profile.
 const char kFontFamilyCacheKey[] = "FontFamilyCacheKey";
 
 FontFamilyCache::FontFamilyCache(Profile* profile)
     : prefs_(profile->GetPrefs()) {
-  notification_registrar_.Add(this,
-                              chrome::NOTIFICATION_PROFILE_DESTROYED,
-                              content::Source<Profile>(profile));
-
-  // Safe to use Unretained here since the registrar is scoped to this class.
   font_change_registrar_.Register(
       FontPrefChangeNotifierFactory::GetForProfile(profile),
-      base::Bind(&FontFamilyCache::OnPrefsChanged, base::Unretained(this)));
+      base::BindRepeating(&FontFamilyCache::OnPrefsChanged,
+                          base::Unretained(this)));
 }
 
-FontFamilyCache::~FontFamilyCache() {
-}
+FontFamilyCache::~FontFamilyCache() = default;
 
-void FontFamilyCache::FillFontFamilyMap(Profile* profile,
-                                        const char* map_name,
-                                        content::ScriptFontFamilyMap* map) {
+void FontFamilyCache::FillFontFamilyMap(
+    Profile* profile,
+    const char* map_name,
+    blink::web_pref::ScriptFontFamilyMap* map) {
   FontFamilyCache* cache =
       static_cast<FontFamilyCache*>(profile->GetUserData(&kFontFamilyCacheKey));
   if (!cache) {
@@ -51,23 +45,24 @@ void FontFamilyCache::FillFontFamilyMap(Profile* profile,
   cache->FillFontFamilyMap(map_name, map);
 }
 
-void FontFamilyCache::FillFontFamilyMap(const char* map_name,
-                                        content::ScriptFontFamilyMap* map) {
+void FontFamilyCache::FillFontFamilyMap(
+    const char* map_name,
+    blink::web_pref::ScriptFontFamilyMap* map) {
   // TODO(falken): Get rid of the brute-force scan over possible
   // (font family / script) combinations - see http://crbug.com/308095.
   for (size_t i = 0; i < prefs::kWebKitScriptsForFontFamilyMapsLength; ++i) {
     const char* script = prefs::kWebKitScriptsForFontFamilyMaps[i];
-    base::string16 result = FetchAndCacheFont(script, map_name);
+    std::u16string result = FetchAndCacheFont(script, map_name);
     if (!result.empty())
       (*map)[script] = result;
   }
 }
 
-base::string16 FontFamilyCache::FetchFont(const char* script,
+std::u16string FontFamilyCache::FetchFont(const char* script,
                                           const char* map_name) {
   std::string pref_name = base::StringPrintf("%s.%s", map_name, script);
   std::string font = prefs_->GetString(pref_name.c_str());
-  base::string16 font16 = base::UTF8ToUTF16(font);
+  std::u16string font16 = base::UTF8ToUTF16(font);
 
   // Lazily constructs the map if it doesn't already exist.
   ScriptFontMap& map = font_family_map_[map_name];
@@ -75,7 +70,7 @@ base::string16 FontFamilyCache::FetchFont(const char* script,
   return font16;
 }
 
-base::string16 FontFamilyCache::FetchAndCacheFont(const char* script,
+std::u16string FontFamilyCache::FetchAndCacheFont(const char* script,
                                                   const char* map_name) {
   FontFamilyMap::const_iterator it = font_family_map_.find(map_name);
   if (it != font_family_map_.end()) {
@@ -124,11 +119,4 @@ void FontFamilyCache::OnPrefsChanged(const std::string& pref_name) {
       break;
     }
   }
-}
-
-void FontFamilyCache::Observe(int type,
-                              const content::NotificationSource& source,
-                              const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_PROFILE_DESTROYED, type);
-  font_change_registrar_.Unregister();
 }

@@ -1,21 +1,22 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.directactions;
 
-import android.annotation.TargetApi;
 import android.os.Bundle;
-import android.support.annotation.NonNull;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
 
 import org.chromium.base.Callback;
-import org.chromium.base.metrics.CachedMetrics;
+import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.base.supplier.Supplier;
 
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 /**
  * Reports available direct actions and executes them.
@@ -24,17 +25,8 @@ import java.util.function.Supplier;
  * aware of them to make use of them. For this to work, if you add a new action here, please list it
  * and document it in http://go.ext.google.com/chrome-direct-action-list
  */
-@TargetApi(29)
+@RequiresApi(29)
 public abstract class DirectActionCoordinator {
-    /**
-     * Tracks calls to {@link #onGetDirectActions}.
-     *
-     * <p>This corresponds to a user triggering the assist app while a Chrome activity is in the
-     * foreground.
-     */
-    private static final CachedMetrics.ActionEvent LIST_ACTION_EVENT =
-            new CachedMetrics.ActionEvent("Android.DirectAction.List");
-
     private final Set<DirectActionHandler> mHandlers = new LinkedHashSet<>();
 
     /**
@@ -63,7 +55,7 @@ public abstract class DirectActionCoordinator {
             }
         }
         reporter.report();
-        LIST_ACTION_EVENT.record();
+        RecordUserAction.record("Android.DirectAction.List");
     }
 
     /** Performs an action and reports the result to the callback. */

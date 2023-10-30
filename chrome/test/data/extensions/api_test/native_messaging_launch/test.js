@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,15 @@ chrome.runtime.onConnectNative.addListener(port => {
           chrome.test.assertEq(messagesToSend[currentMessage], message.echo);
           chrome.test.assertEq(
               message.caller_url, window.location.origin + '/');
+
+          chrome.test.assertTrue(!!message.args);
+          chrome.test.assertTrue(message.args.includes(
+              '--native-messaging-connect-extension=' +
+              document.location.host));
+          chrome.test.assertTrue(message.args.includes(
+              '--native-messaging-connect-host=' + appName));
+          chrome.test.assertEq('test-connect-id', message.connect_id);
+
           currentMessage++;
 
           if (currentMessage == messagesToSend.length) {

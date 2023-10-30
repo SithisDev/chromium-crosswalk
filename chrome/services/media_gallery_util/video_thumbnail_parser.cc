@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/optional.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "chrome/services/media_gallery_util/ipc_data_source.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/video_codecs.h"
@@ -18,7 +17,7 @@
 #include "media/filters/android/video_frame_extractor.h"
 #include "media/filters/vpx_video_decoder.h"
 #include "media/media_buildflags.h"
-#include "media/mojo/common/mojo_shared_buffer_video_frame.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace {
 
@@ -32,16 +31,14 @@ void OnSoftwareVideoFrameDecoded(
   DCHECK(video_frame_callback);
 
   if (!frame) {
-    std::move(video_frame_callback)
-        .Run(false, chrome::mojom::VideoFrameData::New(), base::nullopt);
+    std::move(video_frame_callback).Run(nullptr);
     return;
   }
 
   std::move(video_frame_callback)
-      .Run(true,
-           chrome::mojom::VideoFrameData::NewDecodedFrame(
-               media::MojoSharedBufferVideoFrame::CreateFromYUVFrame(*frame)),
-           config);
+      .Run(chrome::mojom::ExtractVideoFrameResult::New(
+          chrome::mojom::VideoFrameData::NewDecodedFrame(std::move(frame)),
+          config));
 }
 
 void OnEncodedVideoFrameExtracted(
@@ -51,8 +48,7 @@ void OnEncodedVideoFrameExtracted(
     std::vector<uint8_t> data,
     const media::VideoDecoderConfig& config) {
   if (!success || data.empty()) {
-    std::move(video_frame_callback)
-        .Run(false, chrome::mojom::VideoFrameData::New(), base::nullopt);
+    std::move(video_frame_callback).Run(nullptr);
     return;
   }
 
@@ -60,19 +56,19 @@ void OnEncodedVideoFrameExtracted(
     !BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
   // H264 currently needs to be decoded in GPU process when no software decoder
   // is provided.
-  if (config.codec() == media::VideoCodec::kCodecH264) {
+  if (config.codec() == media::VideoCodec::kH264) {
     std::move(video_frame_callback)
-        .Run(success,
-             chrome::mojom::VideoFrameData::NewEncodedData(std::move(data)),
-             config);
+        .Run(chrome::mojom::ExtractVideoFrameResult::New(
+
+            chrome::mojom::VideoFrameData::NewEncodedData(std::move(data)),
+            config));
     return;
   }
 #endif
 
-  if (config.codec() != media::VideoCodec::kCodecVP8 &&
-      config.codec() != media::VideoCodec::kCodecVP9) {
-    std::move(video_frame_callback)
-        .Run(false, chrome::mojom::VideoFrameData::New(), base::nullopt);
+  if (config.codec() != media::VideoCodec::kVP8 &&
+      config.codec() != media::VideoCodec::kVP9) {
+    std::move(video_frame_callback).Run(nullptr);
     return;
   }
 
@@ -80,7 +76,8 @@ void OnEncodedVideoFrameExtracted(
   auto thumbnail_decoder = std::make_unique<media::VideoThumbnailDecoder>(
       std::make_unique<media::VpxVideoDecoder>(), config, std::move(data));
 
-  thumbnail_decoder->Start(
+  auto* const thumbnail_decoder_ptr = thumbnail_decoder.get();
+  thumbnail_decoder_ptr->Start(
       base::BindOnce(&OnSoftwareVideoFrameDecoded, std::move(thumbnail_decoder),
                      std::move(video_frame_callback), config));
 }
@@ -89,9 +86,10 @@ void ExtractVideoFrameOnMediaThread(
     media::DataSource* data_source,
     MediaParser::ExtractVideoFrameCallback video_frame_callback) {
   auto extractor = std::make_unique<media::VideoFrameExtractor>(data_source);
-  extractor->Start(base::BindOnce(&OnEncodedVideoFrameExtracted,
-                                  std::move(extractor),
-                                  std::move(video_frame_callback)));
+  auto* const extractor_ptr = extractor.get();
+  extractor_ptr->Start(base::BindOnce(&OnEncodedVideoFrameExtracted,
+                                      std::move(extractor),
+                                      std::move(video_frame_callback)));
 }
 
 }  // namespace
@@ -100,7 +98,7 @@ VideoThumbnailParser::VideoThumbnailParser(
     std::unique_ptr<media::DataSource> source)
     : data_source_(std::move(source)),
       media_task_runner_(
-          base::CreateSequencedTaskRunnerWithTraits({base::MayBlock()})) {}
+          base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()})) {}
 
 VideoThumbnailParser::~VideoThumbnailParser() = default;
 

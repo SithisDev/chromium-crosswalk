@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,6 @@
 
 #include <string>
 #include <utility>
-
-#include "base/macros.h"
 
 namespace notifications {
 
@@ -21,16 +19,12 @@ struct IconEntry {
   using IconData = std::string;
 
   IconEntry();
+  IconEntry(const IconEntry&) = delete;
+  IconEntry& operator=(const IconEntry&) = delete;
   IconEntry(IconEntry&& other);
-
-  // Unique identifier for the icon database entry.
-  std::string uuid;
 
   // Raw data of the icon.
   IconData data;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(IconEntry);
 };
 
 }  // namespace notifications

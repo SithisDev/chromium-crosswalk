@@ -1,10 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/apps/platform_apps/api/browser/browser_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/test/result_catcher.h"
 #include "extensions/test/test_extension_dir.h"
@@ -18,6 +19,8 @@ namespace {
 class AppsBrowserApiTest : public extensions::ExtensionApiTest {
  public:
   AppsBrowserApiTest() = default;
+  AppsBrowserApiTest(const AppsBrowserApiTest&) = delete;
+  AppsBrowserApiTest& operator=(const AppsBrowserApiTest&) = delete;
   ~AppsBrowserApiTest() override = default;
 
   // extensions::ExtensionApiTest:
@@ -26,9 +29,6 @@ class AppsBrowserApiTest : public extensions::ExtensionApiTest {
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(StartEmbeddedTestServer());
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AppsBrowserApiTest);
 };
 
 }  // namespace

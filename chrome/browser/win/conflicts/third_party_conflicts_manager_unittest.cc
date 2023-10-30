@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,9 @@
 
 #include "base/base_paths.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/optional.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
@@ -22,14 +21,20 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class ThirdPartyConflictsManagerTest : public testing::Test,
                                        public ModuleDatabaseEventSource {
  public:
   ThirdPartyConflictsManagerTest()
       : scoped_testing_local_state_(TestingBrowserProcess::GetGlobal()) {}
+
+  ThirdPartyConflictsManagerTest(const ThirdPartyConflictsManagerTest&) =
+      delete;
+  ThirdPartyConflictsManagerTest& operator=(
+      const ThirdPartyConflictsManagerTest&) = delete;
 
   void SetUp() override {
     ASSERT_TRUE(scoped_temp_dir_.CreateUniqueTempDir());
@@ -50,9 +55,9 @@ class ThirdPartyConflictsManagerTest : public testing::Test,
   // Writes an empty serialized ModuleList proto to |GetModuleListPath()|.
   void CreateModuleList() {
     chrome::conflicts::ModuleList module_list;
-    // Include an empty blacklist and whitelist.
-    module_list.mutable_blacklist();
-    module_list.mutable_whitelist();
+    // Include an empty blocklist and allowlist.
+    module_list.mutable_blocklist();
+    module_list.mutable_allowlist();
 
     std::string contents;
     ASSERT_TRUE(module_list.SerializeToString(&contents));
@@ -62,13 +67,13 @@ class ThirdPartyConflictsManagerTest : public testing::Test,
   }
 
   void OnManagerInitializationComplete(
-      base::Closure quit_closure,
+      base::OnceClosure quit_closure,
       ThirdPartyConflictsManager::State final_state) {
     final_state_ = final_state;
     std::move(quit_closure).Run();
   }
 
-  const base::Optional<ThirdPartyConflictsManager::State>& final_state() {
+  const absl::optional<ThirdPartyConflictsManager::State>& final_state() {
     return final_state_;
   }
 
@@ -77,7 +82,7 @@ class ThirdPartyConflictsManagerTest : public testing::Test,
   void RemoveObserver(ModuleDatabaseObserver* observer) override {}
 
  private:
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   ScopedTestingLocalState scoped_testing_local_state_;
 
   // Temp directory used to host module list.
@@ -85,9 +90,7 @@ class ThirdPartyConflictsManagerTest : public testing::Test,
 
   base::test::ScopedFeatureList scoped_feature_list_;
 
-  base::Optional<ThirdPartyConflictsManager::State> final_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThirdPartyConflictsManagerTest);
+  absl::optional<ThirdPartyConflictsManager::State> final_state_;
 };
 
 std::pair<ModuleInfoKey, ModuleInfoData> CreateExeModuleInfo() {
@@ -100,7 +103,7 @@ std::pair<ModuleInfoKey, ModuleInfoData> CreateExeModuleInfo() {
       std::forward_as_tuple());
 
   module_info.second.inspection_result =
-      base::make_optional<ModuleInspectionResult>();
+      absl::make_optional<ModuleInspectionResult>();
 
   return module_info;
 }

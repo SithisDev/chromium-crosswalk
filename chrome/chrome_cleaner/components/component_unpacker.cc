@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 // Stolen from chrome/browser/component_updater/component_unpacker.cc
@@ -22,9 +22,10 @@ bool ComponentUnpacker::Unpack(const base::FilePath& ouput_folder) {
 }
 
 bool ComponentUnpacker::Verify() {
-  return crx_file::Verify(path_, crx_file::VerifierFormat::CRX2_OR_CRX3,
-                          {pk_hash_}, std::vector<uint8_t>(), nullptr,
-                          nullptr) == crx_file::VerifierResult::OK_FULL;
+  return crx_file::Verify(path_, crx_file::VerifierFormat::CRX3, {pk_hash_},
+                          std::vector<uint8_t>(), nullptr, nullptr,
+                          /*compressed_verified_contents=*/nullptr) ==
+         crx_file::VerifierResult::OK_FULL;
 }
 
 ComponentUnpacker::~ComponentUnpacker() {}

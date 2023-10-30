@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,20 +29,18 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
-import org.robolectric.shadows.multidex.ShadowMultiDex;
 
 import org.chromium.base.Callback;
-import org.chromium.base.library_loader.ProcessInitException;
-import org.chromium.base.metrics.test.ShadowRecordHistogram;
+import org.chromium.base.metrics.UmaRecorderHolder;
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.chrome.browser.DeviceConditions;
-import org.chromium.chrome.browser.ShadowDeviceConditions;
-import org.chromium.chrome.browser.background_task_scheduler.NativeBackgroundTask;
+import org.chromium.chrome.browser.device.DeviceConditions;
+import org.chromium.chrome.browser.device.ShadowDeviceConditions;
 import org.chromium.chrome.browser.init.BrowserParts;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.background_task_scheduler.BackgroundTaskScheduler;
 import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerFactory;
+import org.chromium.components.background_task_scheduler.NativeBackgroundTask;
 import org.chromium.components.background_task_scheduler.TaskIds;
 import org.chromium.components.background_task_scheduler.TaskInfo;
 import org.chromium.components.background_task_scheduler.TaskParameters;
@@ -55,7 +53,7 @@ import java.util.concurrent.TimeUnit;
 /** Unit tests for {@link ExploreSitesBackgroundTask}. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE,
-        shadows = {ShadowMultiDex.class, ShadowDeviceConditions.class, ShadowRecordHistogram.class,
+        shadows = {ShadowDeviceConditions.class,
                 ExploreSitesBackgroundTaskUnitTest.ShadowExploreSitesBridge.class})
 public class ExploreSitesBackgroundTaskUnitTest {
     /** Implementation of ExploreSitesBridge which does not rely on native. */
@@ -99,6 +97,11 @@ public class ExploreSitesBackgroundTaskUnitTest {
         }
 
         @Override
+        public boolean isScheduled(Context context, int taskId) {
+            return (mTaskInfos.get(taskId) != null);
+        }
+
+        @Override
         public void checkForOSUpgrade(Context context) {}
 
         @Override
@@ -114,9 +117,10 @@ public class ExploreSitesBackgroundTaskUnitTest {
         boolean powerSaveModeOn = true;
         int highBatteryLevel = 75;
         boolean metered = true;
+        boolean screenOnAndUnlocked = true;
 
-        DeviceConditions deviceConditions = new DeviceConditions(
-                !powerConnected, highBatteryLevel, connectionType, !powerSaveModeOn, !metered);
+        DeviceConditions deviceConditions = new DeviceConditions(!powerConnected, highBatteryLevel,
+                connectionType, !powerSaveModeOn, !metered, screenOnAndUnlocked);
         ShadowDeviceConditions.setCurrentConditions(deviceConditions);
     }
 
@@ -135,19 +139,17 @@ public class ExploreSitesBackgroundTaskUnitTest {
 
     @Before
     public void setUp() {
-        ShadowRecordHistogram.reset();
+        UmaRecorderHolder.resetForTesting();
         MockitoAnnotations.initMocks(this);
-        doNothing().when(mChromeBrowserInitializer).handlePreNativeStartup(any(BrowserParts.class));
-        try {
-            doAnswer((InvocationOnMock invocation) -> {
-                mBrowserParts.getValue().finishNativeInitialization();
-                return null;
-            })
-                    .when(mChromeBrowserInitializer)
-                    .handlePostNativeStartup(eq(true), mBrowserParts.capture());
-        } catch (ProcessInitException ex) {
-            fail("Unexpected exception while initializing mock of ChromeBrowserInitializer.");
-        }
+        doNothing()
+                .when(mChromeBrowserInitializer)
+                .handlePreNativeStartupAndLoadLibraries(any(BrowserParts.class));
+        doAnswer((InvocationOnMock invocation) -> {
+            mBrowserParts.getValue().finishNativeInitialization();
+            return null;
+        })
+                .when(mChromeBrowserInitializer)
+                .handlePostNativeStartup(eq(true), mBrowserParts.capture());
 
         ChromeBrowserInitializer.setForTesting(mChromeBrowserInitializer);
 
@@ -188,7 +190,7 @@ public class ExploreSitesBackgroundTaskUnitTest {
     }
 
     @Test
-    public void testNoNetwork() throws Exception {
+    public void testNoNetwork() {
         initDeviceConditions(ConnectionType.CONNECTION_NONE);
         TaskParameters params = TaskParameters.create(TaskIds.EXPLORE_SITES_REFRESH_JOB_ID).build();
 
@@ -200,11 +202,10 @@ public class ExploreSitesBackgroundTaskUnitTest {
     }
 
     @Test
-    public void testRemovesDeprecatedJobId() throws Exception {
+    public void testRemovesDeprecatedJobId() {
         TaskInfo.Builder deprecatedTaskInfoBuilder =
                 TaskInfo.createPeriodicTask(TaskIds.DEPRECATED_EXPLORE_SITES_REFRESH_JOB_ID,
-                                ExploreSitesBackgroundTask.class, TimeUnit.HOURS.toMillis(4),
-                                TimeUnit.HOURS.toMillis(1))
+                                TimeUnit.HOURS.toMillis(4), TimeUnit.HOURS.toMillis(1))
                         .setRequiredNetworkType(TaskInfo.NetworkType.ANY)
                         .setIsPersisted(true)
                         .setUpdateCurrent(false);
@@ -225,13 +226,12 @@ public class ExploreSitesBackgroundTaskUnitTest {
     }
 
     @Test
-    public void testRemovesTaskIfFeatureIsDisabled() throws Exception {
+    public void testRemovesTaskIfFeatureIsDisabled() {
         disableExploreSites();
 
         TaskInfo.Builder taskInfoBuilder =
                 TaskInfo.createPeriodicTask(TaskIds.EXPLORE_SITES_REFRESH_JOB_ID,
-                                ExploreSitesBackgroundTask.class, TimeUnit.HOURS.toMillis(4),
-                                TimeUnit.HOURS.toMillis(1))
+                                TimeUnit.HOURS.toMillis(4), TimeUnit.HOURS.toMillis(1))
                         .setRequiredNetworkType(TaskInfo.NetworkType.ANY)
                         .setIsPersisted(true)
                         .setUpdateCurrent(false);
@@ -251,11 +251,10 @@ public class ExploreSitesBackgroundTaskUnitTest {
     }
 
     @Test
-    public void testDoesNotRemoveTaskIfFeatureIsEnabled() throws Exception {
+    public void testDoesNotRemoveTaskIfFeatureIsEnabled() {
         TaskInfo.Builder taskInfoBuilder =
                 TaskInfo.createPeriodicTask(TaskIds.EXPLORE_SITES_REFRESH_JOB_ID,
-                                ExploreSitesBackgroundTask.class, TimeUnit.HOURS.toMillis(4),
-                                TimeUnit.HOURS.toMillis(1))
+                                TimeUnit.HOURS.toMillis(4), TimeUnit.HOURS.toMillis(1))
                         .setRequiredNetworkType(TaskInfo.NetworkType.ANY)
                         .setIsPersisted(true)
                         .setUpdateCurrent(false);

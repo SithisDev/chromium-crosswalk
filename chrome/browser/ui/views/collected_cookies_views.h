@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,10 @@
 
 #include <memory>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/content_settings/core/common/content_settings.h"
-#include "content/public/browser/web_contents_user_data.h"
-#include "ui/views/controls/button/button.h"
+#include "ui/base/interaction/element_identifier.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane_listener.h"
 #include "ui/views/controls/tree/tree_view_controller.h"
 #include "ui/views/window/dialog_delegate.h"
@@ -37,30 +36,39 @@ class TreeView;
 // cookies of the current tab contents. To display the dialog, invoke
 // ShowCollectedCookiesDialog() on the delegate of the WebContents's
 // content settings tab helper.
-class CollectedCookiesViews
-    : public views::DialogDelegateView,
-      public views::ButtonListener,
-      public views::TabbedPaneListener,
-      public views::TreeViewController,
-      public content::WebContentsUserData<CollectedCookiesViews> {
+class CollectedCookiesViews : public views::DialogDelegateView,
+                              public views::TabbedPaneListener,
+                              public views::TreeViewController {
  public:
+  // Used for UMA histogram to record types of actions done by the user in
+  // the "Cookies in use" dialog. These values are persisted to logs.
+  // Entries should not be renumbered and numeric values should never be reused.
+  enum class CookiesInUseDialogAction {
+    kDialogOpened = 0,
+    kSingleCookieDeleted = 1,
+    kCookiesFolderDeleted = 2,
+    kFolderDeleted = 3,
+    kSiteDeleted = 4,
+    kSiteBlocked = 5,
+    kSiteAllowed = 6,
+    kSiteClearedOnExit = 7,
+    kMaxValue = kSiteClearedOnExit,
+  };
+
+  METADATA_HEADER(CollectedCookiesViews);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kTabbedPaneElementId);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kBlockedCookiesTreeElementId);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kAllowedCookiesTreeElementId);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kBlockButtonId);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kAllowButtonId);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kRemoveButtonId);
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kClearOnExitButtonId);
+
+  CollectedCookiesViews(const CollectedCookiesViews&) = delete;
+  CollectedCookiesViews& operator=(const CollectedCookiesViews&) = delete;
   ~CollectedCookiesViews() override;
 
-  // Use BrowserWindow::ShowCollectedCookiesDialog to show.
-  static void CreateAndShowForWebContents(content::WebContents* web_contents);
-
-  // views::DialogDelegate:
-  base::string16 GetWindowTitle() const override;
-  int GetDialogButtons() const override;
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
-  bool Accept() override;
-  ui::ModalType GetModalType() const override;
-  bool ShouldShowCloseButton() const override;
-  void DeleteDelegate() override;
-  std::unique_ptr<views::View> CreateExtraView() override;
-
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
+  void set_status_changed_for_testing() { status_changed_ = true; }
 
   // views::TabbedPaneListener:
   void TabSelectedAt(int index) override;
@@ -70,19 +78,15 @@ class CollectedCookiesViews
 
   // views::View:
   gfx::Size GetMinimumSize() const override;
-  void ViewHierarchyChanged(
-      const views::ViewHierarchyChangedDetails& details) override;
 
  private:
-  friend class CollectedCookiesViewsTest;
-  friend class content::WebContentsUserData<CollectedCookiesViews>;
+  friend class PageSpecificSiteDataDialogController;
 
   explicit CollectedCookiesViews(content::WebContents* web_contents);
 
-  void Init();
+  void OnDialogClosed();
 
   std::unique_ptr<views::View> CreateAllowedPane();
-
   std::unique_ptr<views::View> CreateBlockedPane();
 
   // Creates and returns the "buttons pane", which is the view in the
@@ -100,52 +104,43 @@ class CollectedCookiesViews
 
   void AddContentException(views::TreeView* tree_view, ContentSetting setting);
 
+  void DeleteSelectedCookieNode();
+
+  static void RecordDialogAction(CookiesInUseDialogAction action);
+
   // The web contents.
-  content::WebContents* web_contents_;
+  base::WeakPtr<content::WebContents> web_contents_;
 
   // Assorted views.
-  views::Label* allowed_label_ = nullptr;
-  views::Label* blocked_label_ = nullptr;
+  raw_ptr<views::Label> allowed_label_ = nullptr;
+  raw_ptr<views::Label> blocked_label_ = nullptr;
 
-  views::TreeView* allowed_cookies_tree_ = nullptr;
-  views::TreeView* blocked_cookies_tree_ = nullptr;
+  raw_ptr<views::TreeView> allowed_cookies_tree_ = nullptr;
+  raw_ptr<views::TreeView> blocked_cookies_tree_ = nullptr;
 
-  views::LabelButton* block_allowed_button_ = nullptr;
-  views::LabelButton* delete_allowed_button_ = nullptr;
-  views::LabelButton* allow_blocked_button_ = nullptr;
-  views::LabelButton* for_session_blocked_button_ = nullptr;
+  raw_ptr<views::LabelButton> block_allowed_button_ = nullptr;
+  raw_ptr<views::LabelButton> delete_allowed_button_ = nullptr;
+  raw_ptr<views::LabelButton> allow_blocked_button_ = nullptr;
+  raw_ptr<views::LabelButton> for_session_blocked_button_ = nullptr;
 
   std::unique_ptr<CookiesTreeModel> allowed_cookies_tree_model_;
   std::unique_ptr<CookiesTreeModel> blocked_cookies_tree_model_;
 
-  CookiesTreeViewDrawingProvider* allowed_cookies_drawing_provider_ = nullptr;
-  CookiesTreeViewDrawingProvider* blocked_cookies_drawing_provider_ = nullptr;
+  raw_ptr<CookiesTreeViewDrawingProvider> allowed_cookies_drawing_provider_ =
+      nullptr;
+  raw_ptr<CookiesTreeViewDrawingProvider> blocked_cookies_drawing_provider_ =
+      nullptr;
 
-  CookieInfoView* cookie_info_view_ = nullptr;
+  raw_ptr<CookieInfoView> cookie_info_view_ = nullptr;
 
-  InfobarView* infobar_ = nullptr;
-
-  // The buttons pane is owned by this class until the containing
-  // DialogClientView requests it via |CreateExtraView|, at which point
-  // ownership is handed off and this pointer becomes null.
-  std::unique_ptr<views::View> buttons_pane_;
+  raw_ptr<InfobarView> infobar_ = nullptr;
 
   // Weak pointers to the allowed and blocked panes so that they can be
   // shown/hidden as needed.
-  views::View* allowed_buttons_pane_ = nullptr;
-  views::View* blocked_buttons_pane_ = nullptr;
+  raw_ptr<views::View> allowed_buttons_pane_ = nullptr;
+  raw_ptr<views::View> blocked_buttons_pane_ = nullptr;
 
   bool status_changed_ = false;
-
-  // This bit is set to true when the widget is shutting down or when |this|'s
-  // destructor has been called. Either the Widget or the WebContents may be the
-  // first to shut down, and this prevents double-destruction of this or
-  // double-closing of the widget.
-  bool destroying_ = false;
-
-  WEB_CONTENTS_USER_DATA_KEY_DECL();
-
-  DISALLOW_COPY_AND_ASSIGN(CollectedCookiesViews);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_COLLECTED_COOKIES_VIEWS_H_

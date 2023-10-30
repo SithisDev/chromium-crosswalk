@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include "base/callback_forward.h"
 #include "base/files/file_path.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_system_url.h"
 
 namespace storage {
 class FileSystemContext;
@@ -81,7 +81,7 @@ bool DeserializeSyncableFileSystemURL(const std::string& serialized_url,
 base::FilePath GetSyncFileSystemDir(const base::FilePath& profile_base_dir);
 
 // Posts |callback| to the current thread.
-void RunSoon(const base::Location& from_here, const base::Closure& callback);
+void RunSoon(const base::Location& from_here, base::OnceClosure callback);
 
 }  // namespace sync_file_system
 

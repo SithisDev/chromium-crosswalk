@@ -1,22 +1,20 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_SYSTEM_OBSERVER_H_
 #define CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_SYSTEM_OBSERVER_H_
 
-#include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/callback_list.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_multi_source_observation.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 
 namespace content {
 class BrowserContext;
-}
-
-namespace extensions {
-class ExtensionRegistry;
 }
 
 class NotificationUIManager;
@@ -28,9 +26,14 @@ class NotificationSystemObserver : public content::NotificationObserver,
                                    extensions::ExtensionRegistryObserver {
  public:
   explicit NotificationSystemObserver(NotificationUIManager* ui_manager);
+  NotificationSystemObserver(const NotificationSystemObserver&) = delete;
+  NotificationSystemObserver& operator=(const NotificationSystemObserver&) =
+      delete;
   ~NotificationSystemObserver() override;
 
  protected:
+  void OnAppTerminating();
+
   // content::NotificationObserver override.
   void Observe(int type,
                const content::NotificationSource& source,
@@ -45,13 +48,12 @@ class NotificationSystemObserver : public content::NotificationObserver,
  private:
   // Registrar for the other kind of notifications (event signaling).
   content::NotificationRegistrar registrar_;
-  NotificationUIManager* ui_manager_;
+  base::CallbackListSubscription on_app_terminating_subscription_;
+  raw_ptr<NotificationUIManager> ui_manager_;
 
-  ScopedObserver<extensions::ExtensionRegistry,
-                 extensions::ExtensionRegistryObserver>
-      extension_registry_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(NotificationSystemObserver);
+  base::ScopedMultiSourceObservation<extensions::ExtensionRegistry,
+                                     extensions::ExtensionRegistryObserver>
+      extension_registry_observations_{this};
 };
 
 #endif  // CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_SYSTEM_OBSERVER_H_

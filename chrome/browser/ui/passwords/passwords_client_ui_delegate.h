@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/strings/string16.h"
-#include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/leak_detection_dialog_utils.h"
+#include "components/password_manager/core/browser/password_form.h"
 
 namespace content {
 class WebContents;
@@ -21,12 +21,16 @@ namespace password_manager {
 class PasswordFormManagerForUI;
 }
 
+namespace url {
+class Origin;
+}
+
 // An interface for ChromePasswordManagerClient implemented by
 // ManagePasswordsUIController. Allows to push a new state for the tab.
 class PasswordsClientUIDelegate {
  public:
   // Called when the user submits a form containing login information, so the
-  // later requests to save or blacklist can be handled.
+  // later requests to save or blocklist can be handled.
   // This stores the provided object and triggers the UI to prompt the user
   // about whether they would like to save the password.
   virtual void OnPasswordSubmitted(
@@ -59,15 +63,17 @@ class PasswordsClientUIDelegate {
   // a decision. If the UI isn't shown the method returns false and doesn't call
   // |callback|.
   virtual bool OnChooseCredentials(
-      std::vector<std::unique_ptr<autofill::PasswordForm>> local_credentials,
-      const GURL& origin,
-      const base::Callback<void(const autofill::PasswordForm*)>& callback) = 0;
+      std::vector<std::unique_ptr<password_manager::PasswordForm>>
+          local_credentials,
+      const url::Origin& origin,
+      base::OnceCallback<void(const password_manager::PasswordForm*)>
+          callback) = 0;
 
   // Called when user is auto signed in to the site. |local_forms[0]| contains
   // the credential returned to the site. |origin| is a URL of the site.
   virtual void OnAutoSignin(
-      std::vector<std::unique_ptr<autofill::PasswordForm>> local_forms,
-      const GURL& origin) = 0;
+      std::vector<std::unique_ptr<password_manager::PasswordForm>> local_forms,
+      const url::Origin& origin) = 0;
 
   // Called when it's the right time to enable autosign-in explicitly.
   virtual void OnPromptEnableAutoSignin() = 0;
@@ -80,14 +86,26 @@ class PasswordsClientUIDelegate {
 
   // Called when a form is autofilled with login information, so we can manage
   // password credentials for the current site which are stored in
-  // |password_form_map|. This stores a copy of |password_form_map| and shows
+  // |password_forms|. This stores a copy of |password_forms| and shows
   // the manage password icon. |federated_matches| contain the matching stored
   // federated credentials to display in the UI.
   virtual void OnPasswordAutofilled(
-      const std::map<base::string16, const autofill::PasswordForm*>&
-          password_form_map,
-      const GURL& origin,
-      const std::vector<const autofill::PasswordForm*>* federated_matches) = 0;
+      const std::vector<const password_manager::PasswordForm*>& password_forms,
+      const url::Origin& origin,
+      const std::vector<const password_manager::PasswordForm*>*
+          federated_matches) = 0;
+
+  // Called when user credentials were leaked. This triggers the UI to prompt
+  // the user whether they would like to check their passwords.
+  virtual void OnCredentialLeak(password_manager::CredentialLeakType leak_type,
+                                const GURL& url,
+                                const std::u16string& username) = 0;
+
+  // Called after a form was submitted. This triggers a bubble that allows to
+  // move the just used profile credential in |form| to the user's account.
+  virtual void OnShowMoveToAccountBubble(
+      std::unique_ptr<password_manager::PasswordFormManagerForUI>
+          form_to_move) = 0;
 
  protected:
   virtual ~PasswordsClientUIDelegate() = default;

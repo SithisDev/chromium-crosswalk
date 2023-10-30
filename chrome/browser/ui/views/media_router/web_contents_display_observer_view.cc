@@ -1,11 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/ui/views/media_router/web_contents_display_observer_view.h"
+
 #include <memory>
 #include <utility>
-
-#include "chrome/browser/ui/views/media_router/web_contents_display_observer_view.h"
 
 #include "chrome/browser/ui/browser_list.h"
 #include "content/public/browser/web_contents.h"
@@ -25,7 +25,8 @@ std::unique_ptr<WebContentsDisplayObserver> WebContentsDisplayObserver::Create(
 WebContentsDisplayObserverView::WebContentsDisplayObserverView(
     content::WebContents* web_contents,
     base::RepeatingClosure callback)
-    : web_contents_(web_contents),
+    : WebContentsObserver(web_contents),
+      web_contents_(web_contents),
       widget_(views::Widget::GetWidgetForNativeWindow(
           web_contents->GetTopLevelNativeWindow())),
       callback_(std::move(callback)) {
@@ -34,13 +35,14 @@ WebContentsDisplayObserverView::WebContentsDisplayObserverView(
     display_ = GetDisplayNearestWidget();
     widget_->AddObserver(this);
   }
-  BrowserList::GetInstance()->AddObserver(this);
+  BrowserList::AddObserver(this);
 }
 
 WebContentsDisplayObserverView::~WebContentsDisplayObserverView() {
   if (widget_)
     widget_->RemoveObserver(this);
-  BrowserList::GetInstance()->RemoveObserver(this);
+  BrowserList::RemoveObserver(this);
+  CHECK(!IsInObserverList());
 }
 
 void WebContentsDisplayObserverView::OnBrowserSetLastActive(Browser* browser) {
@@ -63,7 +65,7 @@ void WebContentsDisplayObserverView::OnBrowserSetLastActive(Browser* browser) {
   }
 }
 
-void WebContentsDisplayObserverView::OnWidgetClosing(views::Widget* widget) {
+void WebContentsDisplayObserverView::OnWidgetDestroying(views::Widget* widget) {
   if (widget_)
     widget_->RemoveObserver(this);
   widget_ = nullptr;

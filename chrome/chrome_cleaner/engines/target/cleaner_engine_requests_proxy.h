@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,11 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/process/process_handle.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "chrome/chrome_cleaner/engines/target/sandbox_request_helper.h"
 #include "chrome/chrome_cleaner/mojom/cleaner_engine_requests.mojom.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 
 namespace chrome_cleaner {
 
@@ -17,30 +19,33 @@ class CleanerEngineRequestsProxy
     : public base::RefCountedThreadSafe<CleanerEngineRequestsProxy> {
  public:
   CleanerEngineRequestsProxy(
-      mojom::CleanerEngineRequestsAssociatedPtr requests_ptr,
+      mojo::PendingAssociatedRemote<mojom::CleanerEngineRequests> requests,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   // Implements synchronous callbacks to be called on arbitrary threads from the
   // engine.
   virtual bool DeleteFile(const base::FilePath& file_name);
   virtual bool DeleteFilePostReboot(const base::FilePath& file_name);
-  virtual bool NtDeleteRegistryKey(const String16EmbeddedNulls& key);
-  virtual bool NtDeleteRegistryValue(const String16EmbeddedNulls& key,
-                                     const String16EmbeddedNulls& value_name);
-  virtual bool NtChangeRegistryValue(const String16EmbeddedNulls& key,
-                                     const String16EmbeddedNulls& value_name,
-                                     const String16EmbeddedNulls& new_value);
-  virtual bool DeleteService(const base::string16& name);
-  virtual bool DeleteTask(const base::string16& name);
+  virtual bool NtDeleteRegistryKey(const WStringEmbeddedNulls& key);
+  virtual bool NtDeleteRegistryValue(const WStringEmbeddedNulls& key,
+                                     const WStringEmbeddedNulls& value_name);
+  virtual bool NtChangeRegistryValue(const WStringEmbeddedNulls& key,
+                                     const WStringEmbeddedNulls& value_name,
+                                     const WStringEmbeddedNulls& new_value);
+  virtual bool DeleteService(const std::wstring& name);
+  virtual bool DeleteTask(const std::wstring& name);
   virtual bool TerminateProcess(base::ProcessId process_id);
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner() const {
     return task_runner_;
   }
 
-  void UnbindRequestsPtr();
+  void UnbindRequestsRemote();
 
  protected:
+  // Tests can subclass this create a proxy that's not bound to anything.
+  CleanerEngineRequestsProxy();
+
   virtual ~CleanerEngineRequestsProxy();
 
  private:
@@ -55,26 +60,26 @@ class CleanerEngineRequestsProxy
       mojom::CleanerEngineRequests::SandboxDeleteFilePostRebootCallback
           result_callback);
   MojoCallStatus SandboxNtDeleteRegistryKey(
-      const String16EmbeddedNulls& key,
+      const WStringEmbeddedNulls& key,
       mojom::CleanerEngineRequests::SandboxNtDeleteRegistryKeyCallback
           result_callback);
   MojoCallStatus SandboxNtDeleteRegistryValue(
-      const String16EmbeddedNulls& key,
-      const String16EmbeddedNulls& value_name,
+      const WStringEmbeddedNulls& key,
+      const WStringEmbeddedNulls& value_name,
       mojom::CleanerEngineRequests::SandboxNtDeleteRegistryValueCallback
           result_callback);
   MojoCallStatus SandboxNtChangeRegistryValue(
-      const String16EmbeddedNulls& key,
-      const String16EmbeddedNulls& value_name,
-      const String16EmbeddedNulls& new_value,
+      const WStringEmbeddedNulls& key,
+      const WStringEmbeddedNulls& value_name,
+      const WStringEmbeddedNulls& new_value,
       mojom::CleanerEngineRequests::SandboxNtChangeRegistryValueCallback
           result_callback);
   MojoCallStatus SandboxDeleteService(
-      const base::string16& name,
+      const std::wstring& name,
       mojom::CleanerEngineRequests::SandboxDeleteServiceCallback
           result_callback);
   MojoCallStatus SandboxDeleteTask(
-      const base::string16& name,
+      const std::wstring& name,
       mojom::CleanerEngineRequests::SandboxDeleteTaskCallback result_callback);
   MojoCallStatus SandboxTerminateProcess(
       uint32_t process_id,
@@ -83,7 +88,7 @@ class CleanerEngineRequestsProxy
 
   // A CleanerEngineRequests that will send the requests over the Mojo
   // connection.
-  mojom::CleanerEngineRequestsAssociatedPtr requests_ptr_;
+  mojo::AssociatedRemote<mojom::CleanerEngineRequests> requests_;
 
   // A task runner for the IPC thread.
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;

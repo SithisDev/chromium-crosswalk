@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,11 @@ package org.chromium.chrome.browser.invalidation;
 
 import android.text.format.DateUtils;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.ntp.ForeignSessionHelper;
 import org.chromium.chrome.browser.profiles.Profile;
 
@@ -28,14 +29,6 @@ public class SessionsInvalidationManager implements ApplicationStatus.Applicatio
      */
     static final int REGISTER_FOR_SESSION_SYNC_INVALIDATIONS_DELAY_MS =
             (int) DateUtils.SECOND_IN_MILLIS * 20;
-
-    /**
-     * The amount of time after the RecentTabsPage is closed to unregister for session sync
-     * invalidations. The delay is long to avoid registering and unregistering a lot if the user
-     * visits the RecentTabsPage a lot.
-     */
-    static final int UNREGISTER_FOR_SESSION_SYNC_INVALIDATIONS_DELAY_MS =
-            (int) DateUtils.HOUR_IN_MILLIS;
 
     /**
      * Used to schedule tasks to enable and disable session sync invalidations.
@@ -96,8 +89,7 @@ public class SessionsInvalidationManager implements ApplicationStatus.Applicatio
     public void onRecentTabsPageClosed() {
         --mNumRecentTabPages;
         if (mNumRecentTabPages == 0) {
-            setSessionInvalidationsEnabled(
-                    false, UNREGISTER_FOR_SESSION_SYNC_INVALIDATIONS_DELAY_MS);
+            setSessionInvalidationsEnabled(false, 0);
         }
     }
 

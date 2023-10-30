@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include "chrome/browser/vr/ui_scene.h"
 #include "chrome/browser/vr/ui_scene_constants.h"
 #include "chrome/browser/vr/vector_icons/vector_icons.h"
-#include "chrome/browser/vr/vr_gl_util.h"
+#include "device/vr/vr_gl_util.h"
 
 namespace vr {
 
@@ -173,9 +173,7 @@ gfx::Transform Reticle::LocalTransform() const {
   gfx::Quaternion rotate_to_expected_right(right, expected_right);
   mat.ConcatTransform(gfx::Transform(rotate_to_expected_right));
 
-  mat.matrix().postTranslate(model_->reticle.target_point.x(),
-                             model_->reticle.target_point.y(),
-                             model_->reticle.target_point.z());
+  mat.PostTranslate3d(model_->reticle.target_point.OffsetFromOrigin());
   return mat;
 }
 

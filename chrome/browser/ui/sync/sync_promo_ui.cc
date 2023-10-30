@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_promo_util.h"
+#include "chrome/browser/sync/sync_service_factory.h"
 #include "components/sync/base/sync_prefs.h"
 
 bool SyncPromoUI::ShouldShowSyncPromo(Profile* profile) {
@@ -16,8 +17,10 @@ bool SyncPromoUI::ShouldShowSyncPromo(Profile* profile) {
 
   syncer::SyncPrefs prefs(profile->GetPrefs());
   // Don't show if sync is not allowed to start or is running in local mode.
-  if (!profile->IsSyncAllowed() || prefs.IsLocalSyncEnabled())
+  if (!SyncServiceFactory::IsSyncAllowed(profile) ||
+      prefs.IsLocalSyncEnabled()) {
     return false;
+  }
 
   return true;
 }

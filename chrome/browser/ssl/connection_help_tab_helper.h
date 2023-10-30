@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,14 +23,8 @@ class ConnectionHelpTabHelper
     : public content::WebContentsObserver,
       public content::WebContentsUserData<ConnectionHelpTabHelper> {
  public:
-  // Used to record the SSL.CertificateErrorLearnMoreLinkClicked histogram,
-  // do not reorder. Exposed for testing.
-  enum LearnMoreClickResult {
-    kSucceeded = 0,
-    kFailedWithInterstitial = 1,
-    kFailedOther = 2,
-    kLearnMoreResultCount = kFailedOther
-  };
+  ConnectionHelpTabHelper(const ConnectionHelpTabHelper&) = delete;
+  ConnectionHelpTabHelper& operator=(const ConnectionHelpTabHelper&) = delete;
 
   ~ConnectionHelpTabHelper() override;
 
@@ -50,7 +44,5 @@ class ConnectionHelpTabHelper
 
   GURL testing_url_;
   WEB_CONTENTS_USER_DATA_KEY_DECL();
-
-  DISALLOW_COPY_AND_ASSIGN(ConnectionHelpTabHelper);
 };
 #endif  // CHROME_BROWSER_SSL_CONNECTION_HELP_TAB_HELPER_H_

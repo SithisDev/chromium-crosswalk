@@ -1,130 +1,8 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/**
- * Test fixture for generated tests.
- * @extends {testing.Test}
- */
-function CertificateViewerUITest() {}
-
-CertificateViewerUITest.prototype = {
-  __proto__: testing.Test.prototype,
-
-  /**
-   * Define the C++ fixture class and include it.
-   * @type {?string}
-   * @override
-   */
-  typedefCppFixture: 'CertificateViewerUITest',
-
-  /**
-   * Show the certificate viewer dialog.
-   */
-  testGenPreamble: function() {
-    GEN('ShowCertificateViewer();');
-  },
-
-  /**
-   * Tests that the dialog opened to the correct URL.
-   */
-  testDialogUrl: function() {
-    assertEquals(chrome.getVariableValue('expectedUrl'), window.location.href);
-  },
-
-  /**
-   * Tests for the correct common name in the test certificate.
-   */
-  testCN: function() {
-    assertEquals('www.google.com', $('issued-cn').textContent);
-  },
-
-  testDetails: function() {
-    var certHierarchy = $('hierarchy');
-    var certFields = $('cert-fields');
-    var certFieldVal = $('cert-field-value');
-
-    // Select the second tab, causing its data to be loaded if needed.
-    $('tabbox').selectedIndex = 1;
-
-    // There must be at least one certificate in the hierarchy.
-    assertLT(0, certHierarchy.childNodes.length);
-
-    // Select the first certificate on the chain and ensure the details show up.
-    // Override the receive certificate function to catch when fields are
-    // loaded.
-    var getCertificateFields = cert_viewer.getCertificateFields;
-    cert_viewer.getCertificateFields =
-        this.continueTest(WhenTestDone.ALWAYS, function(certFieldDetails) {
-          getCertificateFields(certFieldDetails);
-          cert_viewer.getCertificateFields = getCertificateFields;
-          assertLT(0, certFields.childNodes.length);
-
-          // Test that a field can be selected to see the details for that
-          // field.
-          var item = getElementWithValue(certFields);
-          assertNotEquals(null, item);
-          certFields.selectedItem = item;
-          assertEquals(item.detail.payload.val, certFieldVal.textContent);
-
-          // Test that selecting an item without a value empties the field.
-          certFields.selectedItem = certFields.childNodes[0];
-          assertEquals('', certFieldVal.textContent);
-        });
-    certHierarchy.selectedItem = certHierarchy.childNodes[0];
-  }
-};
-
-
-/**
- * Test fixture for asynchronous tests.
- * @extends {CertificateViewerUITest}
- */
-function CertificateViewerUITestAsync() {}
-
-CertificateViewerUITestAsync.prototype = {
-  __proto__: CertificateViewerUITest.prototype,
-
-  /** @inheritDoc */
-  isAsync: true,
-};
-
-
-// Include the bulk of c++ code.
-// Certificate viewer UI tests are disabled on platforms with native certificate
-// viewers.
-GEN('#include "chrome/test/data/webui/certificate_viewer_ui_test-inl.h"');
-GEN('');
-
-// Constructors and destructors must be provided in .cc to prevent clang errors.
-GEN('CertificateViewerUITest::CertificateViewerUITest() {}');
-GEN('CertificateViewerUITest::~CertificateViewerUITest() {}');
-
-/**
- * Tests that the dialog opened to the correct URL.
- */
-TEST_F('CertificateViewerUITest', 'testDialogURL', function() {
-  this.testDialogUrl();
-});
-
-/**
- * Tests for the correct common name in the test certificate.
- */
-TEST_F('CertificateViewerUITest', 'testCN', function() {
-  this.testCN();
-});
-
-/**
- * Test the details pane of the certificate viewer. This verifies that a
- * certificate in the chain can be selected to view the fields. And that fields
- * can be selected to view their values.
- */
-TEST_F('CertificateViewerUITestAsync', 'testDetails', function() {
-  this.testDetails();
-});
-
-////////////////////////////////////////////////////////////////////////////////
-// Support functions
+import {eventToPromise} from 'chrome://test/test_util.js';
 
 /**
  * Find the first tree item (in the certificate fields tree) with a value.
@@ -132,8 +10,8 @@ TEST_F('CertificateViewerUITestAsync', 'testDetails', function() {
  * @return {?Element} The first found element with a value, null if not found.
  */
 function getElementWithValue(tree) {
-  for (var i = 0; i < tree.childNodes.length; i++) {
-    var element = tree.childNodes[i];
+  for (let i = 0; i < tree.items.length; i++) {
+    let element = tree.items[i];
     if (element.detail && element.detail.payload &&
         element.detail.payload.val) {
       return element;
@@ -144,3 +22,65 @@ function getElementWithValue(tree) {
   }
   return null;
 }
+
+suite('CertificateViewer', function() {
+  // Tests that the dialog opened to the correct URL.
+  test('DialogURL', function() {
+    assertEquals(chrome.getVariableValue('expectedUrl'), window.location.href);
+  });
+
+  // Tests for the correct common name in the test certificate.
+  test('CommonName', function() {
+    assertTrue(document.querySelector('#general-error').hidden);
+    assertFalse(document.querySelector('#general-fields').hidden);
+
+    assertEquals(
+        'www.google.com', document.querySelector('#issued-cn').textContent);
+  });
+
+  test('Details', async function() {
+    const certHierarchy = document.querySelector('#hierarchy');
+    const certFields = document.querySelector('#cert-fields');
+    const certFieldVal = document.querySelector('#cert-field-value');
+
+    // Select the second tab, causing its data to be loaded if needed.
+    document.querySelector('cr-tab-box').setAttribute('selected-index', '1');
+
+    // There must be at least one certificate in the hierarchy.
+    assertLT(0, certHierarchy.items.length);
+
+    // Wait for the '-for-testing' event to fire only if |certFields| is not
+    // populated yet, otherwise don't wait, the event has already fired.
+    const whenLoaded = certFields.items.length === 0 ?
+        eventToPromise(
+            'certificate-fields-updated-for-testing', document.body) :
+        Promise.resolve();
+
+    // Select the first certificate on the chain and ensure the details show up.
+    await whenLoaded;
+    assertLT(0, certFields.items.length);
+
+    // Test that a field can be selected to see the details for that
+    // field.
+    const item = getElementWithValue(certFields);
+    assertNotEquals(null, item);
+    certFields.selectedItem = item;
+    assertEquals(item.detail.payload.val, certFieldVal.textContent);
+
+    // Test that selecting an item without a value empties the field.
+    certFields.selectedItem = certFields.items[0];
+    assertEquals('', certFieldVal.textContent);
+  });
+
+  test('InvalidCert', async function() {
+    // Error should be shown instead of cert fields.
+    assertFalse(document.querySelector('#general-error').hidden);
+    assertTrue(document.querySelector('#general-fields').hidden);
+
+    // Cert hash should still be shown.
+    assertEquals(
+        '78 71 88 FF A5 CC A4 82 12 ED 29 1E 62 CB 03 E1\n' +
+            '1C 1F 82 79 DF 07 FE B1 D2 B0 E0 2E 0E 4A A9 E4',
+        document.querySelector('#sha256').textContent);
+  });
+});

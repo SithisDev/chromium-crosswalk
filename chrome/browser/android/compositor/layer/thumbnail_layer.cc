@@ -1,12 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/android/compositor/layer/thumbnail_layer.h"
 
 #include "cc/layers/ui_resource_layer.h"
-#include "chrome/browser/android/thumbnail/thumbnail.h"
-#include "content/public/browser/android/compositor.h"
+#include "chrome/browser/thumbnail/cc/thumbnail.h"
 #include "ui/gfx/geometry/size_conversions.h"
 
 namespace android {

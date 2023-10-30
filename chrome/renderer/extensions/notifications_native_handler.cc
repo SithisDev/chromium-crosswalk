@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/logging.h"
 #include "base/values.h"
 #include "chrome/common/extensions/api/notifications/notification_style.h"
 #include "extensions/renderer/script_context.h"
@@ -32,8 +31,8 @@ void NotificationsNativeHandler::GetNotificationImageSizes(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   NotificationBitmapSizes bitmap_sizes = GetNotificationBitmapSizes();
 
-  float scale_factor =
-      ui::GetScaleForScaleFactor(ui::GetSupportedScaleFactors().back());
+  float scale_factor = ui::GetScaleForResourceScaleFactor(
+      ui::GetSupportedResourceScaleFactors().back());
 
   v8::Isolate* isolate = GetIsolate();
   v8::HandleScope handle_scope(isolate);

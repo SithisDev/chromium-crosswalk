@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include <stdint.h>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/scoped_nsobject.h"
 #include "content/public/browser/browser_thread.h"
@@ -37,9 +37,9 @@ constexpr int64_t kUpdateFrequencyMs = 200;
 // A view that draws our dock tile.
 @interface DockTileView : NSView {
  @private
-  int downloads_;
-  BOOL indeterminate_;
-  float progress_;
+  int _downloads;
+  BOOL _indeterminate;
+  float _progress;
 }
 
 // Indicates how many downloads are in progress.
@@ -56,9 +56,9 @@ constexpr int64_t kUpdateFrequencyMs = 200;
 
 @implementation DockTileView
 
-@synthesize downloads = downloads_;
-@synthesize indeterminate = indeterminate_;
-@synthesize progress = progress_;
+@synthesize downloads = _downloads;
+@synthesize indeterminate = _indeterminate;
+@synthesize progress = _progress;
 
 - (void)drawRect:(NSRect)dirtyRect {
   // Not -[NSApplication applicationIconImage]; that fails to return a pasted
@@ -67,10 +67,10 @@ constexpr int64_t kUpdateFrequencyMs = 200;
   NSImage* appIcon = [[NSWorkspace sharedWorkspace] iconForFile:appPath];
   [appIcon drawInRect:[self bounds]
              fromRect:NSZeroRect
-            operation:NSCompositeSourceOver
+            operation:NSCompositingOperationSourceOver
              fraction:1.0];
 
-  if (downloads_ == 0)
+  if (_downloads == 0)
     return;
 
   const CGFloat badgeSize = NSWidth(self.bounds) * kBadgeFraction;
@@ -102,12 +102,12 @@ constexpr int64_t kUpdateFrequencyMs = 200;
   [backgroundPath fill];
 
   // Stroke
-  if (!indeterminate_) {
+  if (!_indeterminate) {
     NSBezierPath* strokePath;
-    if (progress_ >= 1.0) {
+    if (_progress >= 1.0) {
       strokePath = [NSBezierPath bezierPathWithOvalInRect:badgeRect];
     } else {
-      CGFloat endAngle = 90.0 - 360.0 * progress_;
+      CGFloat endAngle = 90.0 - 360.0 * _progress;
       if (endAngle < 0.0)
         endAngle += 360.0;
       strokePath = [NSBezierPath bezierPath];
@@ -129,22 +129,14 @@ constexpr int64_t kUpdateFrequencyMs = 200;
   // Download count
   base::scoped_nsobject<NSNumberFormatter> formatter(
       [[NSNumberFormatter alloc] init]);
-  NSString* countString =
-      [formatter stringFromNumber:[NSNumber numberWithInt:downloads_]];
+  NSString* countString = [formatter stringFromNumber:@(_downloads)];
 
   CGFloat countFontSize = 24;
   NSSize countSize = NSZeroSize;
   base::scoped_nsobject<NSAttributedString> countAttrString;
   while (1) {
-    NSFont* countFont;
-    if (@available(macOS 10.11, *)) {
-      countFont =
-          [NSFont systemFontOfSize:countFontSize weight:NSFontWeightMedium];
-    } else {
-      countFont = [[NSFontManager sharedFontManager]
-          convertWeight:YES
-                 ofFont:[NSFont systemFontOfSize:countFontSize]];
-    }
+    NSFont* countFont = [NSFont systemFontOfSize:countFontSize
+                                          weight:NSFontWeightMedium];
 
     // This will generally be plain Helvetica.
     if (!countFont)
@@ -199,15 +191,15 @@ constexpr int64_t kUpdateFrequencyMs = 200;
 - (void)updateIcon {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   static base::TimeDelta updateFrequency =
-      base::TimeDelta::FromMilliseconds(kUpdateFrequencyMs);
+      base::Milliseconds(kUpdateFrequencyMs);
 
   base::TimeTicks now = base::TimeTicks::Now();
-  base::TimeDelta timeSinceLastUpdate = now - lastUpdate_;
-  if (!forceUpdate_ && timeSinceLastUpdate < updateFrequency)
+  base::TimeDelta timeSinceLastUpdate = now - _lastUpdate;
+  if (!_forceUpdate && timeSinceLastUpdate < updateFrequency)
     return;
 
-  lastUpdate_ = now;
-  forceUpdate_ = NO;
+  _lastUpdate = now;
+  _forceUpdate = NO;
 
   NSDockTile* dockTile = [[NSApplication sharedApplication] dockTile];
 
@@ -221,7 +213,7 @@ constexpr int64_t kUpdateFrequencyMs = 200;
 
   if (downloads != [dockTileView downloads]) {
     [dockTileView setDownloads:downloads];
-    forceUpdate_ = YES;
+    _forceUpdate = YES;
   }
 }
 
@@ -232,7 +224,7 @@ constexpr int64_t kUpdateFrequencyMs = 200;
 
   if (indeterminate != [dockTileView indeterminate]) {
     [dockTileView setIndeterminate:indeterminate];
-    forceUpdate_ = YES;
+    _forceUpdate = YES;
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <ostream>
 
 #include "base/metrics/histogram_macros.h"
+#include "chrome/common/pref_names.h"
 
 namespace safe_browsing {
 
@@ -24,13 +25,15 @@ std::ostream& operator<<(std::ostream& out, UserResponse response) {
   return out << "Resp" << static_cast<int>(response);
 }
 
-void RecordCleanupStartedHistogram(CleanupStartedHistogramValue value) {
-  UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.CleanupStarted", value,
-                            CLEANUP_STARTED_MAX);
-}
-
 ChromeCleanerController::ChromeCleanerController() = default;
 
 ChromeCleanerController::~ChromeCleanerController() = default;
+
+// static
+void RegisterChromeCleanerScanCompletionTimePref(PrefRegistrySimple* registry) {
+  DCHECK(registry);
+  registry->RegisterTimePref(prefs::kChromeCleanerScanCompletionTime,
+                             base::Time());
+}
 
 }  // namespace safe_browsing

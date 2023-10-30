@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chrome/browser/devtools/devtools_file_watcher.h"
@@ -34,7 +34,7 @@ class DevToolsFileWatcherTest : public testing::Test {
 
   base::ScopedTempDir temp_dir_;
   base::FilePath base_path_;
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   bool done_flag_ = false;
 
   std::set<std::string> expected_changed_paths_;
@@ -44,12 +44,13 @@ class DevToolsFileWatcherTest : public testing::Test {
 
 TEST_F(DevToolsFileWatcherTest, BasicUsage) {
   std::unique_ptr<DevToolsFileWatcher, DevToolsFileWatcher::Deleter> watcher(
-      new DevToolsFileWatcher(base::Bind(&DevToolsFileWatcherTest::Callback,
-                                         base::Unretained(this)),
-                              base::SequencedTaskRunnerHandle::Get()));
+      new DevToolsFileWatcher(
+          base::BindRepeating(&DevToolsFileWatcherTest::Callback,
+                              base::Unretained(this)),
+          base::SequencedTaskRunnerHandle::Get()));
 
   base::FilePath changed_path = base_path_.Append(FILE_PATH_LITERAL("file1"));
-  base::WriteFile(changed_path, "test", 4);
+  base::WriteFile(changed_path, "test");
 
   watcher->AddWatch(base_path_);
   expected_changed_paths_.insert(changed_path.AsUTF8Unsafe());
@@ -59,19 +60,19 @@ TEST_F(DevToolsFileWatcherTest, BasicUsage) {
     base::PlatformThread::Sleep(TestTimeouts::tiny_timeout());
     // Just for the first operation, repeat it until we get the callback, as
     // watcher may take some time to start on another thread.
-    base::WriteFile(changed_path, "test", 4);
+    base::WriteFile(changed_path, "test");
   }
 
   base::FilePath added_path = base_path_.Append(FILE_PATH_LITERAL("file2"));
   expected_added_paths_.insert(added_path.AsUTF8Unsafe());
-  base::WriteFile(added_path, "test", 4);
+  base::WriteFile(added_path, "test");
   while (!expected_added_paths_.empty()) {
     task_environment_.RunUntilIdle();
     base::PlatformThread::Sleep(TestTimeouts::tiny_timeout());
   }
 
   expected_removed_paths_.insert(added_path.AsUTF8Unsafe());
-  base::DeleteFile(added_path, false);
+  base::DeleteFile(added_path);
   while (!expected_removed_paths_.empty()) {
     task_environment_.RunUntilIdle();
     base::PlatformThread::Sleep(TestTimeouts::tiny_timeout());

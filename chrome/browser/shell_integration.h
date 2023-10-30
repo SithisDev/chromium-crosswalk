@@ -1,17 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SHELL_INTEGRATION_H_
 #define CHROME_BROWSER_SHELL_INTEGRATION_H_
 
+#include <map>
 #include <string>
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "ui/gfx/image/image_family.h"
 #include "url/gurl.h"
@@ -62,7 +61,7 @@ bool IsElevationNeededForSettingDefaultProtocolClient();
 // protocol of the requested url. This string may be a name or a path, but
 // neither is guaranteed and it should only be used as a display string.
 // Returns an empty string on failure.
-base::string16 GetApplicationNameForProtocol(const GURL& url);
+std::u16string GetApplicationNameForProtocol(const GURL& url);
 
 // Chrome's default web client state as a browser as a protocol client. If the
 // current install mode is not default, the brand's other modes are
@@ -92,6 +91,19 @@ DefaultWebClientState GetDefaultBrowser();
 // user. This method is very fast so it can be invoked in the UI thread.
 bool IsFirefoxDefaultBrowser();
 
+#if BUILDFLAG(IS_WIN)
+// Returns true if IE is likely to be the default browser for the current
+// user. This method is very fast so it can be invoked in the UI thread.
+bool IsIEDefaultBrowser();
+
+// Returns the install id of the installation set as default browser. If no
+// installation of Firefox is set as the default browser, returns an empty
+// string.
+// TODO(crbug/1011830): This should return the install id of the stable
+// version if no version of Firefox is set as default browser.
+std::string GetFirefoxProgIdSuffix();
+#endif
+
 // Attempt to determine if this instance of Chrome is the default client
 // application for the given protocol and return the appropriate state.
 DefaultWebClientState IsDefaultProtocolClient(const std::string& protocol);
@@ -112,7 +124,8 @@ bool IsRunningInAppMode();
 base::CommandLine CommandLineArgsForLauncher(
     const GURL& url,
     const std::string& extension_app_id,
-    const base::FilePath& profile_path);
+    const base::FilePath& profile_path,
+    const std::string& run_on_os_login_mode);
 
 // Append command line arguments for launching a new chrome.exe process
 // based on the current process.
@@ -121,16 +134,16 @@ base::CommandLine CommandLineArgsForLauncher(
 void AppendProfileArgs(const base::FilePath& profile_path,
                        base::CommandLine* command_line);
 
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
 // Gets the name of the Chrome Apps menu folder in which to place app
 // shortcuts. This is needed for Mac and Linux.
-base::string16 GetAppShortcutsSubdirName();
+std::u16string GetAppShortcutsSubdirName();
 #endif
 
 // The type of callback used to communicate processing state to consumers of
 // DefaultBrowserWorker and DefaultProtocolClientWorker.
 using DefaultWebClientWorkerCallback =
-    base::Callback<void(DefaultWebClientState)>;
+    base::OnceCallback<void(DefaultWebClientState)>;
 
 //  Helper objects that handle checking if Chrome is the default browser
 //  or application for a url protocol on Windows and Linux, and also setting
@@ -144,6 +157,9 @@ using DefaultWebClientWorkerCallback =
 class DefaultWebClientWorker
     : public base::RefCountedThreadSafe<DefaultWebClientWorker> {
  public:
+  DefaultWebClientWorker(const DefaultWebClientWorker&) = delete;
+  DefaultWebClientWorker& operator=(const DefaultWebClientWorker&) = delete;
+
   // Controls whether the worker can use user interaction to set the default
   // web client. If false, the set-as-default operation will fail on OS where
   // it is required.
@@ -152,27 +168,27 @@ class DefaultWebClientWorker
   }
 
   // Checks to see if Chrome is the default web client application. The
-  // instance's callback will be run to communicate the default state to the
+  // provided callback will be run to communicate the default state to the
   // caller.
-  void StartCheckIsDefault();
+  void StartCheckIsDefault(DefaultWebClientWorkerCallback callback);
 
   // Sets Chrome as the default web client application. Once done, it will
   // trigger a check for the default state using StartCheckIsDefault() to return
   // the default state to the caller.
-  void StartSetAsDefault();
+  void StartSetAsDefault(DefaultWebClientWorkerCallback callback);
 
  protected:
   friend class base::RefCountedThreadSafe<DefaultWebClientWorker>;
 
-  DefaultWebClientWorker(const DefaultWebClientWorkerCallback& callback,
-                         const char* worker_name);
+  explicit DefaultWebClientWorker(const char* worker_name);
   virtual ~DefaultWebClientWorker();
 
-  // Communicates the result via the |callback_|. When
+  // Communicates the result via |callback|. When
   // |is_following_set_as_default| is true, |state| will be reported to UMA as
   // the result of the set-as-default operation.
   void OnCheckIsDefaultComplete(DefaultWebClientState state,
-                                bool is_following_set_as_default);
+                                bool is_following_set_as_default,
+                                DefaultWebClientWorkerCallback callback);
 
   // When false, the operation to set as default will fail for interactive
   // flows.
@@ -183,11 +199,12 @@ class DefaultWebClientWorker
   // blocking sequence. When |is_following_set_as_default| is true, The default
   // state will be reported to UMA as the result of the set-as-default
   // operation.
-  void CheckIsDefault(bool is_following_set_as_default);
+  void CheckIsDefault(bool is_following_set_as_default,
+                      DefaultWebClientWorkerCallback callback);
 
   // Sets Chrome as the default web client. Always called on a blocking
   // sequence.
-  void SetAsDefault();
+  void SetAsDefault(DefaultWebClientWorkerCallback callback);
 
   // Implementation of CheckIsDefault() and SetAsDefault() for subclasses.
   virtual DefaultWebClientState CheckIsDefaultImpl() = 0;
@@ -195,30 +212,24 @@ class DefaultWebClientWorker
   // The callback may be run synchronously or at an arbitrary time later on this
   // thread.
   // Note: Subclasses MUST make sure |on_finished_callback| is executed.
-  virtual void SetAsDefaultImpl(const base::Closure& on_finished_callback) = 0;
+  virtual void SetAsDefaultImpl(base::OnceClosure on_finished_callback) = 0;
 
   // Reports the result for the set-as-default operation.
   void ReportSetDefaultResult(DefaultWebClientState state);
-
-  // Updates the UI in our associated view with the current default web
-  // client state.
-  void UpdateUI(DefaultWebClientState state);
-
-  // Called with the default state after the worker is done.
-  DefaultWebClientWorkerCallback callback_;
 
   // Used to differentiate UMA metrics for setting the default browser and
   // setting the default protocol client. The pointer must be valid for the
   // lifetime of the worker.
   const char* worker_name_;
-
-  DISALLOW_COPY_AND_ASSIGN(DefaultWebClientWorker);
 };
 
 // Worker for checking and setting the default browser.
 class DefaultBrowserWorker : public DefaultWebClientWorker {
  public:
-  explicit DefaultBrowserWorker(const DefaultWebClientWorkerCallback& callback);
+  DefaultBrowserWorker();
+
+  DefaultBrowserWorker(const DefaultBrowserWorker&) = delete;
+  DefaultBrowserWorker& operator=(const DefaultBrowserWorker&) = delete;
 
  protected:
   ~DefaultBrowserWorker() override;
@@ -228,9 +239,7 @@ class DefaultBrowserWorker : public DefaultWebClientWorker {
   DefaultWebClientState CheckIsDefaultImpl() override;
 
   // Set Chrome as the default browser.
-  void SetAsDefaultImpl(const base::Closure& on_finished_callback) override;
-
-  DISALLOW_COPY_AND_ASSIGN(DefaultBrowserWorker);
+  void SetAsDefaultImpl(base::OnceClosure on_finished_callback) override;
 };
 
 // Worker for checking and setting the default client application
@@ -239,8 +248,11 @@ class DefaultBrowserWorker : public DefaultWebClientWorker {
 // multiple protocols you should use multiple worker objects.
 class DefaultProtocolClientWorker : public DefaultWebClientWorker {
  public:
-  DefaultProtocolClientWorker(const DefaultWebClientWorkerCallback& callback,
-                              const std::string& protocol);
+  explicit DefaultProtocolClientWorker(const std::string& protocol);
+
+  DefaultProtocolClientWorker(const DefaultProtocolClientWorker&) = delete;
+  DefaultProtocolClientWorker& operator=(const DefaultProtocolClientWorker&) =
+      delete;
 
   const std::string& protocol() const { return protocol_; }
 
@@ -252,11 +264,9 @@ class DefaultProtocolClientWorker : public DefaultWebClientWorker {
   DefaultWebClientState CheckIsDefaultImpl() override;
 
   // Set Chrome as the default handler for this protocol.
-  void SetAsDefaultImpl(const base::Closure& on_finished_callback) override;
+  void SetAsDefaultImpl(base::OnceClosure on_finished_callback) override;
 
   std::string protocol_;
-
-  DISALLOW_COPY_AND_ASSIGN(DefaultProtocolClientWorker);
 };
 
 }  // namespace shell_integration

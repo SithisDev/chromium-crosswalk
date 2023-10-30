@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/metrics/histogram_functions.h"
 #include "base/path_service.h"
-#include "base/task/post_task.h"
-#include "base/task_runner_util.h"
+#include "base/task/task_runner_util.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/win/conflicts/module_info_util.h"
@@ -22,7 +21,7 @@ namespace {
 
 // The maximum amount of time a stale entry is kept in the cache before it is
 // deleted.
-constexpr base::TimeDelta kMaxEntryAge = base::TimeDelta::FromDays(30);
+constexpr base::TimeDelta kMaxEntryAge = base::Days(30);
 
 constexpr int kConnectionErrorRetryCount = 10;
 
@@ -39,42 +38,27 @@ StringMapping GetPathMapping() {
   });
 }
 
-void ReportConnectionError(bool value) {
-  base::UmaHistogramBoolean("Windows.InspectModule.ConnectionError", value);
-}
-
-// Reads the inspection results cache and records the result in UMA.
+// Reads the inspection results cache.
 InspectionResultsCache ReadInspectionResultsCacheOnBackgroundSequence(
     const base::FilePath& file_path) {
   InspectionResultsCache inspection_results_cache;
 
   uint32_t min_time_stamp =
       CalculateTimeStamp(base::Time::Now() - kMaxEntryAge);
-  ReadCacheResult read_result = ReadInspectionResultsCache(
-      file_path, min_time_stamp, &inspection_results_cache);
-  base::UmaHistogramEnumeration("Windows.ModuleInspector.ReadCacheResult",
-                                read_result);
+  ReadInspectionResultsCache(file_path, min_time_stamp,
+                             &inspection_results_cache);
 
   return inspection_results_cache;
 }
 
-// Writes the inspection results cache to disk and records the result in UMA.
+// Writes the inspection results cache to disk.
 void WriteInspectionResultCacheOnBackgroundSequence(
     const base::FilePath& file_path,
     const InspectionResultsCache& inspection_results_cache) {
-  bool succeeded =
-      WriteInspectionResultsCache(file_path, inspection_results_cache);
-  base::UmaHistogramBoolean("Windows.ModuleInspector.WriteCacheResult",
-                            succeeded);
+  WriteInspectionResultsCache(file_path, inspection_results_cache);
 }
 
 }  // namespace
-
-// static
-constexpr base::Feature ModuleInspector::kDisableBackgroundModuleInspection;
-
-// static
-constexpr base::Feature ModuleInspector::kWinOOPInspectModuleFeature;
 
 // static
 constexpr base::TimeDelta ModuleInspector::kFlushInspectionResultsTimerTimeout;
@@ -83,13 +67,12 @@ ModuleInspector::ModuleInspector(
     const OnModuleInspectedCallback& on_module_inspected_callback)
     : on_module_inspected_callback_(on_module_inspected_callback),
       is_after_startup_(false),
-      inspection_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+      util_win_factory_callback_(
+          base::BindRepeating(&LaunchUtilWinServiceInstance)),
+      path_mapping_(GetPathMapping()),
+      cache_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})),
-      path_mapping_(GetPathMapping()),
-      cache_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-           base::TaskShutdownBehavior::BLOCK_SHUTDOWN})),
       inspection_results_cache_read_(false),
       flush_inspection_results_timer_(
           FROM_HERE,
@@ -99,9 +82,7 @@ ModuleInspector::ModuleInspector(
               base::Unretained(this))),
       has_new_inspection_results_(false),
       connection_error_retry_count_(kConnectionErrorRetryCount),
-      background_inspection_disabled_(
-          base::FeatureList::IsEnabled(kDisableBackgroundModuleInspection)),
-      weak_ptr_factory_(this) {
+      is_waiting_on_util_win_service_(false) {
   // Use BEST_EFFORT as those will only run after startup is finished.
   content::BrowserThread::PostBestEffortTask(
       FROM_HERE, base::SequencedTaskRunnerHandle::Get(),
@@ -124,31 +105,19 @@ void ModuleInspector::AddModule(const ModuleInfoKey& module_key) {
     StartInspectingModule();
 }
 
-void ModuleInspector::IncreaseInspectionPriority() {
+void ModuleInspector::ForceStartInspection() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  // Create a task runner with higher priority so that future inspections are
-  // done faster.
-  inspection_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
-       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
-
   // Assume startup is finished to immediately begin inspecting modules.
   OnStartupFinished();
-
-  // Special case where this instance could be ready to start inspecting but
-  // wasn't because background inspection was disabled.
-  if (background_inspection_disabled_ && inspection_results_cache_read_ &&
-      !queue_.empty()) {
-    background_inspection_disabled_ = false;
-    StartInspectingModule();
-  }
 }
 
 bool ModuleInspector::IsIdle() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return queue_.empty();
 }
 
 void ModuleInspector::OnModuleDatabaseIdle() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   MaybeUpdateInspectionResultsCache();
 }
 
@@ -161,35 +130,26 @@ base::FilePath ModuleInspector::GetInspectionResultsCachePath() {
   return user_data_dir.Append(L"Module Info Cache");
 }
 
-void ModuleInspector::SetModuleInspectionResultForTesting(
-    const ModuleInfoKey& module_key,
-    ModuleInspectionResult inspection_result) {
-  AddInspectionResultToCache(module_key, inspection_result,
-                             &inspection_results_cache_);
+void ModuleInspector::SetUtilWinFactoryCallbackForTesting(
+    UtilWinFactoryCallback util_win_factory_callback) {
+  util_win_factory_callback_ = std::move(util_win_factory_callback);
 }
 
 void ModuleInspector::EnsureUtilWinServiceBound() {
-  DCHECK(base::FeatureList::IsEnabled(kWinOOPInspectModuleFeature));
-
   if (remote_util_win_)
     return;
 
-  remote_util_win_ = LaunchUtilWinServiceInstance();
-  remote_util_win_.reset_on_idle_timeout(base::TimeDelta::FromSeconds(5));
+  remote_util_win_ = util_win_factory_callback_.Run();
+  remote_util_win_.reset_on_idle_timeout(base::Seconds(5));
   remote_util_win_.set_disconnect_handler(
       base::BindOnce(&ModuleInspector::OnUtilWinServiceConnectionError,
                      base::Unretained(this)));
-
-  // Emit a false value to the connection error histogram to serve as a
-  // baseline.
-  ReportConnectionError(false);
 }
 
 void ModuleInspector::OnStartupFinished() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  // This function will be invoked twice if IncreaseInspectionPriority() is
-  // called.
+  // This function will be invoked twice if ForceStartInspection() is called.
   if (is_after_startup_)
     return;
 
@@ -206,6 +166,7 @@ void ModuleInspector::OnStartupFinished() {
 
 void ModuleInspector::OnInspectionResultsCacheRead(
     InspectionResultsCache inspection_results_cache) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(is_after_startup_);
   DCHECK(!inspection_results_cache_read_);
 
@@ -219,23 +180,27 @@ void ModuleInspector::OnInspectionResultsCacheRead(
 void ModuleInspector::OnUtilWinServiceConnectionError() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  ReportConnectionError(true);
-
   // Disconnect from the service.
   remote_util_win_.reset();
 
-  // Restart inspection for the current module, only if the retry limit wasn't
-  // reached.
-  if (connection_error_retry_count_--)
+  // If the retry limit was reached, give up.
+  if (connection_error_retry_count_ == 0)
+    return;
+  --connection_error_retry_count_;
+
+  bool was_waiting_on_util_win_service = is_waiting_on_util_win_service_;
+  is_waiting_on_util_win_service_ = false;
+
+  // If this connection error happened while the ModuleInspector was waiting on
+  // the service, restart the inspection process.
+  if (was_waiting_on_util_win_service)
     StartInspectingModule();
 }
 
 void ModuleInspector::StartInspectingModule() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(inspection_results_cache_read_);
   DCHECK(!queue_.empty());
-
-  if (background_inspection_disabled_)
-    return;
 
   const ModuleInfoKey& module_key = queue_.front();
 
@@ -251,36 +216,21 @@ void ModuleInspector::StartInspectingModule() {
     return;
   }
 
-  if (base::FeatureList::IsEnabled(kWinOOPInspectModuleFeature)) {
-    EnsureUtilWinServiceBound();
-    remote_util_win_->InspectModule(
-        module_key.module_path,
-        base::BindOnce(&ModuleInspector::OnModuleNewlyInspected,
-                       weak_ptr_factory_.GetWeakPtr(), module_key));
-  } else {
-    // There is a small priority inversion that happens when
-    // IncreaseInspectionPriority() is called while a module is currently being
-    // inspected.
-    //
-    // This is because all the subsequent tasks on |inspection_task_runner_|
-    // will be posted at a higher priority, but they are waiting on the current
-    // task that is currently running at a lower priority.
-    //
-    // In practice, this is not an issue because the only caller of
-    // IncreaseInspectionPriority() (chrome://conflicts) does not depend on the
-    // inspection to finish synchronously and is not blocking anything else.
-    base::PostTaskAndReplyWithResult(
-        inspection_task_runner_.get(), FROM_HERE,
-        base::BindOnce(&InspectModule, module_key.module_path),
-        base::BindOnce(&ModuleInspector::OnModuleNewlyInspected,
-                       weak_ptr_factory_.GetWeakPtr(), module_key));
-  }
+  EnsureUtilWinServiceBound();
+
+  is_waiting_on_util_win_service_ = true;
+  remote_util_win_->InspectModule(
+      module_key.module_path,
+      base::BindOnce(&ModuleInspector::OnModuleNewlyInspected,
+                     weak_ptr_factory_.GetWeakPtr(), module_key));
 }
 
 void ModuleInspector::OnModuleNewlyInspected(
     const ModuleInfoKey& module_key,
     ModuleInspectionResult inspection_result) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  is_waiting_on_util_win_service_ = false;
 
   // Convert the prefix of known Windows directories to their environment
   // variable mappings (ie, %systemroot$). This makes i18n localized paths
@@ -301,18 +251,14 @@ void ModuleInspector::OnInspectionFinished(
     ModuleInspectionResult inspection_result) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  DCHECK(!queue_.empty());
+  DCHECK(queue_.front() == module_key);
+
   // Pop first, because the callback may want to know if there is any work left
   // to be done, which is caracterized by a non-empty queue.
   queue_.pop();
 
   on_module_inspected_callback_.Run(module_key, std::move(inspection_result));
-
-  // Disconnect from the UtilWin service to clean up the service process. While
-  // this code is only ever needed in the case the WinOOPInspectModule feature
-  // is enabled, it's faster to check the Remote's bound state than to check the
-  // feature status.
-  if (queue_.empty() && remote_util_win_)
-    remote_util_win_.reset();
 
   // Continue the work.
   if (!queue_.empty())

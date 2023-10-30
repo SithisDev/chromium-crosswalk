@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,8 @@ namespace chrome_apps {
 class ChromeAppsAPIProvider : public extensions::ExtensionsAPIProvider {
  public:
   ChromeAppsAPIProvider();
+  ChromeAppsAPIProvider(const ChromeAppsAPIProvider&) = delete;
+  ChromeAppsAPIProvider& operator=(const ChromeAppsAPIProvider&) = delete;
   ~ChromeAppsAPIProvider() override;
 
   // ExtensionsAPIProvider:
@@ -26,9 +28,6 @@ class ChromeAppsAPIProvider : public extensions::ExtensionsAPIProvider {
   void RegisterPermissions(
       extensions::PermissionsInfo* permissions_info) override;
   void RegisterManifestHandlers() override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ChromeAppsAPIProvider);
 };
 
 }  // namespace chrome_apps

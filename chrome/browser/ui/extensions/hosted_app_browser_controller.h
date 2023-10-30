@@ -1,18 +1,17 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_EXTENSIONS_HOSTED_APP_BROWSER_CONTROLLER_H_
 #define CHROME_BROWSER_UI_EXTENSIONS_HOSTED_APP_BROWSER_CONTROLLER_H_
 
+#include <memory>
 #include <string>
 
-#include "base/macros.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
+#include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
-#include "third_party/skia/include/core/SkColor.h"
+#include "components/services/app_service/public/cpp/icon_types.h"
 
 class Browser;
 
@@ -24,73 +23,40 @@ namespace extensions {
 
 class Extension;
 
-// Class to encapsulate logic to control the browser UI for extension based web
-// apps.
-class HostedAppBrowserController : public web_app::AppBrowserController {
+// Class to encapsulate logic to control the browser UI for extension based
+// Chrome Apps (platform apps and legacy packaged apps).
+class HostedAppBrowserController : public web_app::AppBrowserController,
+                                   public ExtensionUninstallDialog::Delegate {
  public:
-  // Functions to set preferences that are unique to app windows.
-  static void SetAppPrefsForWebContents(
-      web_app::AppBrowserController* controller,
-      content::WebContents* web_contents);
-
-  // Clear preferences that are unique to app windows.
-  static void ClearAppPrefsForWebContents(content::WebContents* web_contents);
-
   explicit HostedAppBrowserController(Browser* browser);
+
+  HostedAppBrowserController(const HostedAppBrowserController&) = delete;
+  HostedAppBrowserController& operator=(const HostedAppBrowserController&) =
+      delete;
+
   ~HostedAppBrowserController() override;
 
-  base::Optional<std::string> GetAppId() const override;
-
-  // Returns true if the associated Hosted App is for a PWA.
-  bool CreatedForInstalledPwa() const override;
-
-  // Whether the browser being controlled should be currently showing the
-  // toolbar.
-  bool ShouldShowToolbar() const override;
-
-  // Returns true if the hosted app buttons should be shown in the frame for
-  // this BrowserView.
-  bool ShouldShowHostedAppButtonContainer() const override;
-
-  // Returns the app icon for the window to use in the task list.
-  gfx::ImageSkia GetWindowAppIcon() const override;
-
-  // Returns the icon to be displayed in the window title bar.
-  gfx::ImageSkia GetWindowIcon() const override;
-
-  // Returns the color of the title bar.
-  base::Optional<SkColor> GetThemeColor() const override;
-
-  // Returns the title to be displayed in the window title bar.
-  base::string16 GetTitle() const override;
-
-  // Gets the short name of the app.
-  std::string GetAppShortName() const override;
-
-  // Gets the origin of the app start url suitable for display (e.g
-  // example.com.au).
-  base::string16 GetFormattedUrlOrigin() const override;
-
-  // Gets the launch url for the app.
-  GURL GetAppLaunchURL() const override;
-
+  // web_app::AppBrowserController:
+  bool HasMinimalUiButtons() const override;
+  ui::ImageModel GetWindowAppIcon() const override;
+  ui::ImageModel GetWindowIcon() const override;
+  std::u16string GetTitle() const override;
+  std::u16string GetAppShortName() const override;
+  std::u16string GetFormattedUrlOrigin() const override;
+  GURL GetAppStartUrl() const override;
   bool IsUrlInAppScope(const GURL& url) const override;
-
-  // Gets the extension for this controller.
-  const Extension* GetExtensionForTesting() const;
-
-  bool CanUninstall() const override;
-
-  void Uninstall() override;
-
-  // Returns whether the app is installed (uninstallation may complete within
-  // the lifetime of HostedAppBrowserController).
+  bool CanUserUninstall() const override;
+  void Uninstall(
+      webapps::WebappUninstallSource webapp_uninstall_source) override;
   bool IsInstalled() const override;
-
   bool IsHostedApp() const override;
 
  protected:
-  void OnReceivedInitialURL() override;
+  // ExtensionUninstallDialog::Delegate:
+  void OnExtensionUninstallDialogClosed(bool success,
+                                        const std::u16string& error) override;
+
+  // web_app::AppBrowserController:
   void OnTabInserted(content::WebContents* contents) override;
   void OnTabRemoved(content::WebContents* contents) override;
 
@@ -98,10 +64,16 @@ class HostedAppBrowserController : public web_app::AppBrowserController {
   // Will return nullptr if the extension has been uninstalled.
   const Extension* GetExtension() const;
 
-  const std::string extension_id_;
-  const bool created_for_installed_pwa_;
+  // Helper function to call AppServiceProxy to load icon.
+  void LoadAppIcon(bool allow_placeholder_icon) const;
+  // Invoked when the icon is loaded.
+  void OnLoadIcon(apps::IconValuePtr icon_value);
 
-  DISALLOW_COPY_AND_ASSIGN(HostedAppBrowserController);
+  gfx::ImageSkia app_icon_;
+
+  std::unique_ptr<ExtensionUninstallDialog> uninstall_dialog_;
+
+  base::WeakPtrFactory<HostedAppBrowserController> weak_ptr_factory_{this};
 };
 
 }  // namespace extensions

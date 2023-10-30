@@ -1,10 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <algorithm>
 
 #include "base/test/test_reg_util_win.h"
+#include "build/branding_buildflags.h"
 #include "chrome/chrome_elf/nt_registry/nt_registry.h"
 #include "chrome/install_static/install_details.h"
 #include "chrome/install_static/user_data_dir.h"
@@ -19,7 +20,7 @@ inline bool EndsWith(const std::wstring& value, const std::wstring& ending) {
   return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
 }
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 const wchar_t kPolicyRegistryKey[] = L"SOFTWARE\\Policies\\Google\\Chrome";
 const wchar_t kUserDataDirNameSuffix[] = L"\\Google\\Chrome\\User Data";
 #else
@@ -39,7 +40,7 @@ class ScopedNTRegistryTestingOverride {
     EXPECT_TRUE(nt::SetTestingOverride(root_, path));
   }
   ~ScopedNTRegistryTestingOverride() {
-    nt::SetTestingOverride(root_, base::string16());
+    nt::SetTestingOverride(root_, std::wstring());
   }
 
  private:
@@ -70,7 +71,7 @@ TEST(UserDataDir, RegistrySettingsInHKLMOverrides) {
   // Override the registry to say one value in HKLM, and confirm it takes
   // precedence over the command line in both implementations.
   registry_util::RegistryOverrideManager override_manager;
-  base::string16 temp;
+  std::wstring temp;
   ASSERT_NO_FATAL_FAILURE(
       override_manager.OverrideRegistry(HKEY_LOCAL_MACHINE, &temp));
   ScopedNTRegistryTestingOverride nt_override(nt::HKLM, temp);
@@ -92,7 +93,7 @@ TEST(UserDataDir, RegistrySettingsInHKCUOverrides) {
   // Override the registry to say one value in HKCU, and confirm it takes
   // precedence over the command line in both implementations.
   registry_util::RegistryOverrideManager override_manager;
-  base::string16 temp;
+  std::wstring temp;
   ASSERT_NO_FATAL_FAILURE(
       override_manager.OverrideRegistry(HKEY_CURRENT_USER, &temp));
   ScopedNTRegistryTestingOverride nt_override(nt::HKCU, temp);
@@ -114,7 +115,7 @@ TEST(UserDataDir, RegistrySettingsInHKLMTakesPrecedenceOverHKCU) {
   // Override the registry in both HKLM and HKCU, and confirm HKLM takes
   // precedence.
   registry_util::RegistryOverrideManager override_manager;
-  base::string16 temp;
+  std::wstring temp;
   ASSERT_NO_FATAL_FAILURE(
       override_manager.OverrideRegistry(HKEY_LOCAL_MACHINE, &temp));
   ScopedNTRegistryTestingOverride nt_override(nt::HKLM, temp);
@@ -141,7 +142,7 @@ TEST(UserDataDir, RegistrySettingWithPathExpansionHKCU) {
   std::wstring result, invalid;
 
   registry_util::RegistryOverrideManager override_manager;
-  base::string16 temp;
+  std::wstring temp;
   ASSERT_NO_FATAL_FAILURE(
       override_manager.OverrideRegistry(HKEY_CURRENT_USER, &temp));
   ScopedNTRegistryTestingOverride nt_override(nt::HKCU, temp);

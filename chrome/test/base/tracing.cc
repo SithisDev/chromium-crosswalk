@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/base/tracing.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/strings/string_util.h"
 #include "base/timer/timer.h"
@@ -27,8 +28,12 @@ using content::BrowserThread;
 class StringTraceEndpoint
     : public content::TracingController::TraceDataEndpoint {
  public:
-  StringTraceEndpoint(std::string* result, const base::Closure& callback)
+  StringTraceEndpoint(std::string* result,
+                      const base::RepeatingClosure& callback)
       : result_(result), completion_callback_(callback) {}
+
+  StringTraceEndpoint(const StringTraceEndpoint&) = delete;
+  StringTraceEndpoint& operator=(const StringTraceEndpoint&) = delete;
 
   void ReceiveTraceChunk(std::unique_ptr<std::string> chunk) override {
     *result_ += result_->empty() ? "[" : "";
@@ -36,8 +41,7 @@ class StringTraceEndpoint
     *result_ += *chunk;
   }
 
-  void ReceiveTraceFinalContents(
-      std::unique_ptr<const base::DictionaryValue> metadata) override {
+  void ReceivedTraceFinalContents() override {
     if (!result_->empty())
       *result_ += "]";
     completion_callback_.Run();
@@ -46,10 +50,8 @@ class StringTraceEndpoint
  private:
   ~StringTraceEndpoint() override {}
 
-  std::string* result_;
-  base::Closure completion_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(StringTraceEndpoint);
+  raw_ptr<std::string> result_;
+  base::RepeatingClosure completion_callback_;
 };
 
 class InProcessTraceController {
@@ -58,26 +60,27 @@ class InProcessTraceController {
     return base::Singleton<InProcessTraceController>::get();
   }
 
-  InProcessTraceController() {}
-  virtual ~InProcessTraceController() {}
+  InProcessTraceController() = default;
+  InProcessTraceController(const InProcessTraceController&) = delete;
+  InProcessTraceController& operator=(const InProcessTraceController&) = delete;
+  virtual ~InProcessTraceController() = default;
 
   bool BeginTracing(
       const base::trace_event::TraceConfig& trace_config,
       tracing::StartTracingDoneCallback start_tracing_done_callback) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     return content::TracingController::GetInstance()->StartTracing(
-        trace_config, start_tracing_done_callback);
+        trace_config, std::move(start_tracing_done_callback));
   }
 
   bool EndTracing(std::string* json_trace_output) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
-    using namespace base::debug;
-
     if (!content::TracingController::GetInstance()->StopTracing(
             new StringTraceEndpoint(
                 json_trace_output,
-                base::Bind(&InProcessTraceController::OnTracingComplete,
-                           base::Unretained(this))),
+                base::BindRepeating(
+                    &InProcessTraceController::OnTracingComplete,
+                    base::Unretained(this))),
             tracing::mojom::kChromeTraceEventLabel)) {
       return false;
     }
@@ -100,8 +103,6 @@ class InProcessTraceController {
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
 
   base::OneShotTimer timer_;
-
-  DISALLOW_COPY_AND_ASSIGN(InProcessTraceController);
 };
 
 }  // namespace
@@ -124,7 +125,7 @@ bool BeginTracingWithTraceConfig(
     const base::trace_event::TraceConfig& trace_config,
     tracing::StartTracingDoneCallback start_tracing_done_callback) {
   return InProcessTraceController::GetInstance()->BeginTracing(
-      trace_config, start_tracing_done_callback);
+      trace_config, std::move(start_tracing_done_callback));
 }
 
 bool EndTracing(std::string* json_trace_output) {

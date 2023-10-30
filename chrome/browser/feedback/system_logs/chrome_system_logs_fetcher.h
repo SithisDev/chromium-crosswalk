@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,9 @@ namespace system_logs {
 class SystemLogsFetcher;
 
 // Creates a SystemLogsFetcher to aggregate the scrubbed logs for sending with
-// feedback reports. The fetcher deletes itself once it finishes fetching data.
-SystemLogsFetcher* BuildChromeSystemLogsFetcher();
+// feedback reports. If |scrub_data| is true then the logs are scrubbed of PII.
+// The fetcher deletes itself once it finishes fetching data.
+SystemLogsFetcher* BuildChromeSystemLogsFetcher(bool scrub_data);
 
 }  // namespace system_logs
 

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,15 @@
 
 #include "chrome/elevation_service/service_main.h"
 
-#include <type_traits>
-
 #include <atlsecurity.h>
 #include <sddl.h>
 #include <wrl/module.h>
 
+#include <type_traits>
+
 #include "base/command_line.h"
-#include "base/stl_util.h"
+#include "base/logging.h"
+#include "base/no_destructor.h"
 #include "base/win/scoped_com_initializer.h"
 #include "chrome/elevation_service/elevated_recovery_impl.h"
 #include "chrome/elevation_service/elevator.h"
@@ -31,7 +32,7 @@ namespace {
 // Command line switch "--console" runs the service interactively for
 // debugging purposes.
 constexpr char kConsoleSwitchName[] = "console";
-constexpr base::char16 kWindowsServiceName[] = L"ChromeElevationService";
+constexpr wchar_t kWindowsServiceName[] = L"ChromeElevationService";
 
 }  // namespace
 
@@ -59,12 +60,15 @@ int ServiceMain::Start() {
   return (this->*run_routine_)();
 }
 
+void ServiceMain::CreateWRLModule() {
+  Microsoft::WRL::Module<Microsoft::WRL::OutOfProc>::Create(
+      this, &ServiceMain::SignalExit);
+}
+
 // When _ServiceMain gets called, it initializes COM, and then calls Run().
 // Run() initializes security, then calls RegisterClassObject().
 HRESULT ServiceMain::RegisterClassObject() {
-  // Create an out-of-proc COM module with caching disabled.
-  auto& module = Microsoft::WRL::Module<Microsoft::WRL::OutOfProc>::Create(
-      this, &ServiceMain::SignalExit);
+  auto& module = Microsoft::WRL::Module<Microsoft::WRL::OutOfProc>::GetModule();
 
   // We hand-register a unique CLSID for each Chrome channel.
   Microsoft::WRL::ComPtr<IUnknown> factory;
@@ -87,17 +91,21 @@ HRESULT ServiceMain::RegisterClassObject() {
 
   // The pointer in this array is unowned. Do not release it.
   IClassFactory* class_factories[] = {class_factory.Get()};
-  static_assert(
-      std::extent<decltype(cookies_)>() == base::size(class_factories),
-      "Arrays cookies_ and class_factories must be the same size.");
+  static_assert(std::extent<decltype(cookies_)>() == std::size(class_factories),
+                "Arrays cookies_ and class_factories must be the same size.");
 
   IID class_ids[] = {install_static::GetElevatorClsid()};
-  DCHECK_EQ(base::size(cookies_), base::size(class_ids));
-  static_assert(std::extent<decltype(cookies_)>() == base::size(class_ids),
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kElevatorClsIdForTestingSwitch)) {
+    class_ids[0] = {kTestElevatorClsid};
+  }
+
+  DCHECK_EQ(std::size(cookies_), std::size(class_ids));
+  static_assert(std::extent<decltype(cookies_)>() == std::size(class_ids),
                 "Arrays cookies_ and class_ids must be the same size.");
 
   hr = module.RegisterCOMObject(nullptr, class_ids, class_factories, cookies_,
-                                base::size(cookies_));
+                                std::size(cookies_));
   if (FAILED(hr)) {
     LOG(ERROR) << "RegisterCOMObject failed; hr: " << hr;
     return hr;
@@ -109,13 +117,17 @@ HRESULT ServiceMain::RegisterClassObject() {
 void ServiceMain::UnregisterClassObject() {
   auto& module = Microsoft::WRL::Module<Microsoft::WRL::OutOfProc>::GetModule();
   const HRESULT hr =
-      module.UnregisterCOMObject(nullptr, cookies_, base::size(cookies_));
+      module.UnregisterCOMObject(nullptr, cookies_, std::size(cookies_));
   if (FAILED(hr))
     LOG(ERROR) << "UnregisterCOMObject failed; hr: " << hr;
 }
 
 bool ServiceMain::IsExitSignaled() {
   return exit_signal_.IsSignaled();
+}
+
+void ServiceMain::ResetExitSignaled() {
+  exit_signal_.Reset();
 }
 
 ServiceMain::ServiceMain()
@@ -196,7 +208,7 @@ void ServiceMain::ServiceControlHandler(DWORD control) {
 }
 
 // static
-void WINAPI ServiceMain::ServiceMainEntry(DWORD argc, base::char16* argv[]) {
+void WINAPI ServiceMain::ServiceMainEntry(DWORD argc, wchar_t* argv[]) {
   ServiceMain::GetInstance()->ServiceMainImpl();
 }
 
@@ -212,6 +224,7 @@ HRESULT ServiceMain::Run() {
   if (FAILED(hr))
     return hr;
 
+  CreateWRLModule();
   hr = RegisterClassObject();
   if (SUCCEEDED(hr)) {
     WaitForExitSignal();

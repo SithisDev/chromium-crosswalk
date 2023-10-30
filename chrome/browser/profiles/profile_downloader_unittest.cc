@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/profiles/profile_downloader_delegate.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
@@ -17,7 +17,6 @@
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
-#include "net/url_request/test_url_fetcher_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -54,7 +53,6 @@ class ProfileDownloaderTest
   network::mojom::URLLoaderFactory* GetURLLoaderFactory() override {
     return &test_url_loader_factory_;
   }
-  bool IsPreSignin() const override { return false; }
   void OnProfileDownloadSuccess(ProfileDownloader* downloader) override {
 
   }
@@ -73,7 +71,7 @@ class ProfileDownloaderTest
   // IdentityManager::DiagnosticsObserver:
   void OnAccessTokenRequested(const CoreAccountId& account_id,
                               const std::string& consumer_id,
-                              const identity::ScopeSet& scopes) override {
+                              const signin::ScopeSet& scopes) override {
     // This flow should be invoked only when a test has explicitly set up
     // preconditions so that ProfileDownloader will request access tokens.
     DCHECK(!on_access_token_request_callback_.is_null());
@@ -87,13 +85,13 @@ class ProfileDownloaderTest
     on_access_token_request_callback_ = std::move(callback);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   network::TestURLLoaderFactory test_url_loader_factory_;
   signin::IdentityTestEnvironment identity_test_env_;
   ProfileDownloader profile_downloader_;
 
   base::OnceClosure on_access_token_request_callback_;
-  std::string account_id_for_access_token_request_;
+  CoreAccountId account_id_for_access_token_request_;
 };
 
 TEST_F(ProfileDownloaderTest, FetchAccessToken) {

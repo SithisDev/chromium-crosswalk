@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,7 @@ void InitClipboardAndroidFromLocalState(PrefService* local_state) {
       base::Time::FromInternalValue(
           local_state->GetInt64(prefs::kClipboardLastModifiedTime)));
   clipboard->SetModifiedCallback(
-      base::Bind(&HandleClipboardModified, local_state));
+      base::BindRepeating(&HandleClipboardModified, local_state));
 }
 
 }  // namespace android

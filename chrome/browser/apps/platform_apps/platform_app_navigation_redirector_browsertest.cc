@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,13 @@
 #include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/embedder_support/switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_base.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/fenced_frame_test_util.h"
+#include "content/public/test/prerender_test_util.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/base/page_transition_types.h"
@@ -116,7 +119,7 @@ class PlatformAppNavigationRedirectorBrowserTest
 void PlatformAppNavigationRedirectorBrowserTest::SetUpCommandLine(
     base::CommandLine* command_line) {
   PlatformAppBrowserTest::SetUpCommandLine(command_line);
-  command_line->AppendSwitch(::switches::kDisablePopupBlocking);
+  command_line->AppendSwitch(embedder_support::kDisablePopupBlocking);
 }
 
 // TODO(sergeygs): Factor out common functionality from TestXyz,
@@ -133,11 +136,11 @@ void PlatformAppNavigationRedirectorBrowserTest::TestNavigationInTab(
 
   InstallPlatformApp(handler);
 
-  ExtensionTestMessageListener handler_listener(handler_start_message, false);
+  ExtensionTestMessageListener handler_listener(handler_start_message);
 
-  ui_test_utils::NavigateToURL(
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL(base::StringPrintf(
-                     "/extensions/platform_apps/%s", launcher_page)));
+                     "/extensions/platform_apps/%s", launcher_page))));
 
   ASSERT_TRUE(handler_listener.WaitUntilSatisfied());
 
@@ -152,14 +155,14 @@ void PlatformAppNavigationRedirectorBrowserTest::TestMismatchingNavigationInTab(
 
   InstallPlatformApp(handler);
 
-  const base::string16 success_title = base::ASCIIToUTF16(success_tab_title);
+  const std::u16string success_title = base::ASCIIToUTF16(success_tab_title);
   content::WebContents* tab =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::TitleWatcher title_watcher(tab, success_title);
 
-  ui_test_utils::NavigateToURL(
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL(base::StringPrintf(
-                     "/extensions/platform_apps/%s", launcher_page)));
+                     "/extensions/platform_apps/%s", launcher_page))));
 
   ASSERT_EQ(success_title, title_watcher.WaitAndGetTitle());
   ASSERT_EQ(1, browser()->tab_strip_model()->count());
@@ -175,16 +178,16 @@ void PlatformAppNavigationRedirectorBrowserTest::TestNegativeXhrInTab(
 
   InstallPlatformApp(handler);
 
-  const base::string16 success_title = base::ASCIIToUTF16(success_tab_title);
-  const base::string16 failure_title = base::ASCIIToUTF16(failure_tab_title);
+  const std::u16string success_title = base::ASCIIToUTF16(success_tab_title);
+  const std::u16string failure_title = base::ASCIIToUTF16(failure_tab_title);
   content::WebContents* tab =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::TitleWatcher title_watcher(tab, success_title);
   title_watcher.AlsoWaitForTitle(failure_title);
 
-  ui_test_utils::NavigateToURL(
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL(base::StringPrintf(
-                     "/extensions/platform_apps/%s", launcher_page)));
+                     "/extensions/platform_apps/%s", launcher_page))));
 
   ASSERT_EQ(success_title, title_watcher.WaitAndGetTitle());
   ASSERT_EQ(1, browser()->tab_strip_model()->count());
@@ -200,7 +203,7 @@ void PlatformAppNavigationRedirectorBrowserTest::TestNavigationInApp(
 
   InstallPlatformApp(handler);
 
-  ExtensionTestMessageListener handler_listener(handler_start_message, false);
+  ExtensionTestMessageListener handler_listener(handler_start_message);
 
   LoadAndLaunchPlatformApp(launcher, launcher_done_message);
 
@@ -253,7 +256,7 @@ void PlatformAppNavigationRedirectorBrowserTest::TestNavigationInBrowser(
 
   InstallPlatformApp(handler);
 
-  ExtensionTestMessageListener handler_listener(handler_start_message, false);
+  ExtensionTestMessageListener handler_listener(handler_start_message);
 
   NavigateParams params(
       browser(),
@@ -276,7 +279,7 @@ void PlatformAppNavigationRedirectorBrowserTest::
 
   InstallPlatformApp(handler);
 
-  const base::string16 success_title = base::ASCIIToUTF16(success_tab_title);
+  const std::u16string success_title = base::ASCIIToUTF16(success_tab_title);
   content::WebContents* tab =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::TitleWatcher title_watcher(tab, success_title);
@@ -422,6 +425,116 @@ IN_PROC_BROWSER_TEST_F(PlatformAppNavigationRedirectorBrowserTest,
                        XhrInTabNotIntercepted) {
   TestNegativeXhrInTab("url_handlers/xhr_downloader/main.html", "XHR succeeded",
                        "XHR failed", "url_handlers/handlers/steal_xhr_target");
+}
+
+class PlatformAppNavigationRedirectorPrerenderingBrowserTest
+    : public PlatformAppNavigationRedirectorBrowserTest {
+ public:
+  PlatformAppNavigationRedirectorPrerenderingBrowserTest()
+      : prerender_helper_(base::BindRepeating(
+            &PlatformAppNavigationRedirectorPrerenderingBrowserTest::
+                GetWebContents,
+            base::Unretained(this))) {}
+  ~PlatformAppNavigationRedirectorPrerenderingBrowserTest() override = default;
+
+  content::WebContents* GetWebContents() {
+    return browser()->tab_strip_model()->GetActiveWebContents();
+  }
+
+  content::test::PrerenderTestHelper& prerender_helper() {
+    return prerender_helper_;
+  }
+
+ private:
+  content::test::PrerenderTestHelper prerender_helper_;
+};
+
+// Test that prerendering doesn't launch an app but aborts the navigation.
+IN_PROC_BROWSER_TEST_F(PlatformAppNavigationRedirectorPrerenderingBrowserTest,
+                       DoNotLaunchAppInPrerendering) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  const char* handler = "url_handlers/handlers/simple";
+  InstallPlatformApp(handler);
+
+  const auto initial_url = embedded_test_server()->GetURL("/empty.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  EXPECT_EQ(initial_url, GetWebContents()->GetLastCommittedURL());
+
+  const auto prerender_url = embedded_test_server()->GetURL(
+      "/extensions/platform_apps/url_handlers/common/target.html");
+
+  // Loading an app URL in prerendering cancels prerendering.
+  prerender_helper().AddPrerenderAsync(prerender_url);
+  content::test::PrerenderHostObserver host_observer(*GetWebContents(),
+                                                     prerender_url);
+  // Wait until PrerenderHost is destroyed by canceling prerendering.
+  host_observer.WaitForDestroyed();
+
+  // The primary page doesn't have any change.
+  EXPECT_EQ(initial_url, GetWebContents()->GetLastCommittedURL());
+  EXPECT_EQ(1, browser()->tab_strip_model()->count());
+  EXPECT_EQ(0U, GetAppWindowCount());
+}
+
+class PlatformAppNavigationRedirectorFencedFrameBrowserTest
+    : public PlatformAppNavigationRedirectorBrowserTest {
+ public:
+  PlatformAppNavigationRedirectorFencedFrameBrowserTest() = default;
+  ~PlatformAppNavigationRedirectorFencedFrameBrowserTest() override = default;
+
+  content::WebContents* GetWebContents() {
+    return browser()->tab_strip_model()->GetActiveWebContents();
+  }
+
+  content::test::FencedFrameTestHelper& fenced_frame_test_helper() {
+    return fenced_frame_test_helper_;
+  }
+
+ private:
+  content::test::FencedFrameTestHelper fenced_frame_test_helper_;
+};
+
+// Test that PlatformAppNavigationRedirector doesn't apply to fenced frames.
+IN_PROC_BROWSER_TEST_F(PlatformAppNavigationRedirectorFencedFrameBrowserTest,
+                       DoNotLaunchAppInFencedFrames) {
+  // Set a response for a fenced frame.
+  embedded_test_server()->RegisterRequestHandler(
+      base::BindRepeating([](const net::test_server::HttpRequest& request) {
+        const char kFencedFramePage[] = "target.html";
+        if (request.GetURL().ExtractFileName() == kFencedFramePage) {
+          auto response =
+              std::make_unique<net::test_server::BasicHttpResponse>();
+          response->set_content_type("text/html");
+          response->AddCustomHeader("Supports-Loading-Mode", "fenced-frame");
+          return static_cast<std::unique_ptr<net::test_server::HttpResponse>>(
+              std::move(response));
+        } else {
+          return std::unique_ptr<net::test_server::HttpResponse>();
+        }
+      }));
+
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  const char* handler = "url_handlers/handlers/simple";
+  InstallPlatformApp(handler);
+
+  const GURL initial_url = embedded_test_server()->GetURL("/empty.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  EXPECT_EQ(initial_url, GetWebContents()->GetLastCommittedURL());
+
+  // Load an app URL in a fenced frame.
+  const GURL fenced_frame_url = embedded_test_server()->GetURL(
+      "/extensions/platform_apps/url_handlers/common/target.html");
+  content::RenderFrameHost* fenced_frame_rfh =
+      fenced_frame_test_helper().CreateFencedFrame(
+          GetWebContents()->GetPrimaryMainFrame(), fenced_frame_url);
+
+  // Ensure that a fenced frame doesn't launch an app and the page is opened
+  // in a fenced frame.
+  EXPECT_EQ(1, browser()->tab_strip_model()->count());
+  EXPECT_EQ(fenced_frame_rfh->GetLastCommittedURL(), fenced_frame_url);
+  EXPECT_EQ(fenced_frame_rfh->GetParentOrOuterDocument(),
+            GetWebContents()->GetPrimaryMainFrame());
+  EXPECT_EQ(0U, GetAppWindowCount());
 }
 
 }  // namespace extensions

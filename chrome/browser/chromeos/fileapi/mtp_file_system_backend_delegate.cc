@@ -1,12 +1,12 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/fileapi/mtp_file_system_backend_delegate.h"
 #include "chrome/browser/media_galleries/fileapi/device_media_async_file_util.h"
-#include "storage/browser/fileapi/file_stream_reader.h"
-#include "storage/browser/fileapi/file_stream_writer.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_stream_reader.h"
+#include "storage/browser/file_system/file_stream_writer.h"
+#include "storage/browser/file_system/file_system_url.h"
 
 namespace chromeos {
 
@@ -50,7 +50,7 @@ MTPFileSystemBackendDelegate::CreateFileStreamWriter(
   DCHECK_EQ(storage::kFileSystemTypeDeviceMediaAsFileStorage, url.type());
 
   // TODO(kinaba): support writing.
-  return std::unique_ptr<storage::FileStreamWriter>();
+  return nullptr;
 }
 
 storage::WatcherManager* MTPFileSystemBackendDelegate::GetWatcherManager(
@@ -61,10 +61,10 @@ storage::WatcherManager* MTPFileSystemBackendDelegate::GetWatcherManager(
 
 void MTPFileSystemBackendDelegate::GetRedirectURLForContents(
     const storage::FileSystemURL& url,
-    const storage::URLCallback& callback) {
+    storage::URLCallback callback) {
   DCHECK_EQ(storage::kFileSystemTypeDeviceMediaAsFileStorage, url.type());
 
-  callback.Run(GURL());
+  std::move(callback).Run(GURL());
 }
 
 }  // namespace chromeos

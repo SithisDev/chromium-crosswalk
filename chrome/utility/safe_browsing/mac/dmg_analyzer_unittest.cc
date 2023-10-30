@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,7 +49,7 @@ class MockDMGIterator : public DMGIterator {
 
   bool Next() override { return ++index_ < entries_.size(); }
 
-  base::string16 GetPath() override {
+  std::u16string GetPath() override {
     EXPECT_LT(index_, entries_.size());
     return base::UTF8ToUTF16(entries_[index_].path);
   }
@@ -59,6 +59,8 @@ class MockDMGIterator : public DMGIterator {
     const std::vector<uint8_t>& data = entries_[index_].data;
     return std::make_unique<MemoryReadStream>(data.data(), data.size());
   }
+
+  bool IsEmpty() override { return entries_.empty(); }
 
  private:
   bool open_ok_;
@@ -83,7 +85,7 @@ TEST(DMGAnalyzerTest, EmptyDMG) {
   safe_browsing::ArchiveAnalyzerResults results;
   AnalyzeDMGFile(&iterator, &results);
 
-  EXPECT_TRUE(results.success);
+  EXPECT_FALSE(results.success);
   EXPECT_FALSE(results.has_archive);
   EXPECT_FALSE(results.has_executable);
   EXPECT_TRUE(results.archived_binary.empty());

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include <stddef.h>
 
-#include <memory>
+#include <string>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
@@ -17,8 +17,6 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/plugins/plugin_finder.h"
-#include "chrome/browser/plugins/plugin_metadata.h"
 #include "chrome/browser/plugins/plugin_prefs_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
@@ -35,11 +33,12 @@ using content::BrowserThread;
 
 namespace {
 
-bool IsPDFViewerPlugin(const base::string16& plugin_name) {
-  return (plugin_name ==
-          base::ASCIIToUTF16(ChromeContentClient::kPDFExtensionPluginName)) ||
-         (plugin_name ==
-          base::ASCIIToUTF16(ChromeContentClient::kPDFInternalPluginName));
+bool IsPDFViewerPlugin(const std::u16string& plugin_name) {
+  // This should only match the external PDF plugin, not the internal PDF
+  // plugin, which is also used for Print Preview. Note that only the PDF viewer
+  // and Print Preview can create the internal PDF plugin in the first place.
+  return plugin_name ==
+         base::ASCIIToUTF16(ChromeContentClient::kPDFExtensionPluginName);
 }
 
 }  // namespace
@@ -60,33 +59,8 @@ scoped_refptr<PluginPrefs> PluginPrefs::GetForTestingProfile(
           .get());
 }
 
-PluginPrefs::PolicyStatus PluginPrefs::PolicyStatusForPlugin(
-    const base::string16& name) const {
-
-  // Special handling for PDF based on its specific policy.
-  if (IsPDFViewerPlugin(name) && always_open_pdf_externally_)
-    return POLICY_DISABLED;
-
-  return NO_POLICY;
-}
-
 bool PluginPrefs::IsPluginEnabled(const content::WebPluginInfo& plugin) const {
-  std::unique_ptr<PluginMetadata> plugin_metadata(
-      PluginFinder::GetInstance()->GetPluginMetadata(plugin));
-  base::string16 group_name = plugin_metadata->name();
-
-  // Check if the plugin or its group is enabled by policy.
-  PolicyStatus plugin_status = PolicyStatusForPlugin(plugin.name);
-  PolicyStatus group_status = PolicyStatusForPlugin(group_name);
-  if (plugin_status == POLICY_ENABLED || group_status == POLICY_ENABLED)
-    return true;
-
-  // Check if the plugin or its group is disabled by policy.
-  if (plugin_status == POLICY_DISABLED || group_status == POLICY_DISABLED)
-    return false;
-
-  // Default to enabled.
-  return true;
+  return !IsPDFViewerPlugin(plugin.name) || !always_open_pdf_externally_;
 }
 
 void PluginPrefs::UpdatePdfPolicy(const std::string& pref_name) {
@@ -94,10 +68,9 @@ void PluginPrefs::UpdatePdfPolicy(const std::string& pref_name) {
       prefs_->GetBoolean(prefs::kPluginsAlwaysOpenPdfExternally);
 
   content::PluginService::GetInstance()->PurgePluginListCache(profile_, false);
-  if (profile_->HasOffTheRecordProfile()) {
-    content::PluginService::GetInstance()->PurgePluginListCache(
-        profile_->GetOffTheRecordProfile(), false);
-  }
+  std::vector<Profile*> otr_profiles = profile_->GetAllOffTheRecordProfiles();
+  for (Profile* otr : otr_profiles)
+    content::PluginService::GetInstance()->PurgePluginListCache(otr, false);
 }
 
 void PluginPrefs::SetPrefs(PrefService* prefs) {
@@ -115,21 +88,20 @@ void PluginPrefs::SetPrefs(PrefService* prefs) {
 
   {  // Scoped update of prefs::kPluginsPluginsList.
     ListPrefUpdate update(prefs_, prefs::kPluginsPluginsList);
-    base::ListValue* saved_plugins_list = update.Get();
-    if (saved_plugins_list && !saved_plugins_list->empty()) {
-      for (auto& plugin_value : *saved_plugins_list) {
-        base::DictionaryValue* plugin;
-        if (!plugin_value.GetAsDictionary(&plugin)) {
+    base::Value* saved_plugins_list = update.Get();
+    if (saved_plugins_list) {
+      for (auto& plugin_value : saved_plugins_list->GetList()) {
+        if (!plugin_value.is_dict()) {
           LOG(WARNING) << "Invalid entry in " << prefs::kPluginsPluginsList;
           continue;  // Oops, don't know what to do with this item.
         }
+        base::Value::Dict& plugin = plugin_value.GetDict();
 
-        base::FilePath::StringType path;
-        // The plugin list constains all the plugin files in addition to the
+        // The plugin list contains all the plugin files in addition to the
         // plugin groups.
-        if (plugin->GetString("path", &path)) {
+        if (const std::string* path = plugin.FindString("path")) {
           // Files have a path attribute, groups don't.
-          base::FilePath plugin_path(path);
+          base::FilePath plugin_path = base::FilePath::FromUTF8Unsafe(*path);
 
           // The path to the internal plugin directory changes everytime Chrome
           // is auto-updated, since it contains the current version number. For
@@ -165,8 +137,8 @@ void PluginPrefs::SetPrefs(PrefService* prefs) {
             // |last_internal_dir|. We don't need to update it.
             if (!relative_path.empty()) {
               plugin_path = cur_internal_dir.Append(relative_path);
-              path = plugin_path.value();
-              plugin->SetString("path", path);
+              std::string updated_path = plugin_path.AsUTF8Unsafe();
+              plugin.Set("path", updated_path);
             }
           }
         }
@@ -177,8 +149,8 @@ void PluginPrefs::SetPrefs(PrefService* prefs) {
   UpdatePdfPolicy(prefs::kPluginsAlwaysOpenPdfExternally);
   registrar_.Init(prefs_);
   registrar_.Add(prefs::kPluginsAlwaysOpenPdfExternally,
-                 base::Bind(&PluginPrefs::UpdatePdfPolicy,
-                 base::Unretained(this)));
+                 base::BindRepeating(&PluginPrefs::UpdatePdfPolicy,
+                                     base::Unretained(this)));
 }
 
 void PluginPrefs::ShutdownOnUIThread() {

@@ -1,8 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-onload = async function() {
+const scriptUrl = '_test_resources/api_test/webnavigation/framework.js';
+let loadScript = chrome.test.loadScript(scriptUrl);
+
+loadScript.then(async function() {
   let tab = await promise(chrome.tabs.create, {"url": "about:blank"});
   let config = await promise(chrome.test.getConfig);
   let port = config.testServer.port;
@@ -18,152 +21,267 @@ onload = async function() {
     // Navigates from an extension page to a HTTP page which causes a
     // process switch.
     function crossProcess() {
-      expect([
-        { label: "a-onBeforeNavigate",
-          event: "onBeforeNavigate",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: -1,
-                     tabId: 0,
-                     timeStamp: 0,
-                     url: getURL('a.html') }},
-        { label: "a-onCommitted",
-          event: "onCommitted",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: 0,
-                     tabId: 0,
-                     timeStamp: 0,
-                     transitionQualifiers: [],
-                     transitionType: "link",
-                     url: getURL('a.html') }},
-        { label: "a-onDOMContentLoaded",
-          event: "onDOMContentLoaded",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: 0,
-                     tabId: 0,
-                     timeStamp: 0,
-                     url: getURL('a.html') }},
-        { label: "a-onCompleted",
-          event: "onCompleted",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: 0,
-                     tabId: 0,
-                     timeStamp: 0,
-                     url: getURL('a.html') }},
-        { label: "b-onBeforeNavigate",
-          event: "onBeforeNavigate",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: -1,
-                     tabId: 0,
-                     timeStamp: 0,
-                     url: URL_REGULAR }},
-        { label: "b-onCommitted",
-          event: "onCommitted",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: 1,
-                     tabId: 0,
-                     timeStamp: 0,
-                     transitionQualifiers: [],
-                     transitionType: "link",
-                     url: URL_REGULAR }},
-        { label: "b-onDOMContentLoaded",
-          event: "onDOMContentLoaded",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: 1,
-                     tabId: 0,
-                     timeStamp: 0,
-                     url: URL_REGULAR }},
-        { label: "b-onCompleted",
-          event: "onCompleted",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: 1,
-                     tabId: 0,
-                     timeStamp: 0,
-                     url: URL_REGULAR }}],
-        [ navigationOrder("a-"), navigationOrder("b-") ]);
+      expect(
+          [
+            {
+              label: 'a-onBeforeNavigate',
+              event: 'onBeforeNavigate',
+              details: {
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: -1,
+                tabId: 0,
+                timeStamp: 0,
+                url: getURL('a.html')
+              }
+            },
+            {
+              label: 'a-onCommitted',
+              event: 'onCommitted',
+              details: {
+                documentId: 1,
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: 0,
+                tabId: 0,
+                timeStamp: 0,
+                transitionQualifiers: [],
+                transitionType: 'link',
+                url: getURL('a.html')
+              }
+            },
+            {
+              label: 'a-onDOMContentLoaded',
+              event: 'onDOMContentLoaded',
+              details: {
+                documentId: 1,
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: 0,
+                tabId: 0,
+                timeStamp: 0,
+                url: getURL('a.html')
+              }
+            },
+            {
+              label: 'a-onCompleted',
+              event: 'onCompleted',
+              details: {
+                documentId: 1,
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: 0,
+                tabId: 0,
+                timeStamp: 0,
+                url: getURL('a.html')
+              }
+            },
+            {
+              label: 'b-onBeforeNavigate',
+              event: 'onBeforeNavigate',
+              details: {
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: -1,
+                tabId: 0,
+                timeStamp: 0,
+                url: URL_REGULAR
+              }
+            },
+            {
+              label: 'b-onCommitted',
+              event: 'onCommitted',
+              details: {
+                documentId: 2,
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: 1,
+                tabId: 0,
+                timeStamp: 0,
+                transitionQualifiers: [],
+                transitionType: 'link',
+                url: URL_REGULAR
+              }
+            },
+            {
+              label: 'b-onDOMContentLoaded',
+              event: 'onDOMContentLoaded',
+              details: {
+                documentId: 2,
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: 1,
+                tabId: 0,
+                timeStamp: 0,
+                url: URL_REGULAR
+              }
+            },
+            {
+              label: 'b-onCompleted',
+              event: 'onCompleted',
+              details: {
+                documentId: 2,
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: 1,
+                tabId: 0,
+                timeStamp: 0,
+                url: URL_REGULAR
+              }
+            }
+          ],
+          [navigationOrder('a-'), navigationOrder('b-')]);
 
       chrome.tabs.update(tab.id, {url: getURL('a.html?' + port)});
     },
 
     // Redirects through an app extent, should cause two process switches.
     function crossProcessRedirect() {
-      expect([
-        { label: "a-onBeforeNavigate",
-          event: "onBeforeNavigate",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: -1,
-                     tabId: 0,
-                     timeStamp: 0,
-                     url: getURL('c.html') }},
-        { label: "a-onCommitted",
-          event: "onCommitted",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: 0,
-                     tabId: 0,
-                     timeStamp: 0,
-                     transitionQualifiers: [],
-                     transitionType: "link",
-                     url: getURL('c.html') }},
-        { label: "a-onDOMContentLoaded",
-          event: "onDOMContentLoaded",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: 0,
-                     tabId: 0,
-                     timeStamp: 0,
-                     url: getURL('c.html') }},
-        { label: "a-onCompleted",
-          event: "onCompleted",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: 0,
-                     tabId: 0,
-                     timeStamp: 0,
-                     url: getURL('c.html') }},
-        { label: "c-onBeforeNavigate",
-          event: "onBeforeNavigate",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: -1,
-                     tabId: 0,
-                     timeStamp: 0,
-                     url: URL_REDIRECT }},
-        { label: "c-onCommitted",
-          event: "onCommitted",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: 1,
-                     tabId: 0,
-                     timeStamp: 0,
-                     transitionQualifiers: ["server_redirect"],
-                     transitionType: "link",
-                     url: URL_REGULAR }},
-        { label: "c-onDOMContentLoaded",
-          event: "onDOMContentLoaded",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: 1,
-                     tabId: 0,
-                     timeStamp: 0,
-                     url: URL_REGULAR }},
-        { label: "c-onCompleted",
-          event: "onCompleted",
-          details: { frameId: 0,
-                     parentFrameId: -1,
-                     processId: 1,
-                     tabId: 0,
-                     timeStamp: 0,
-                     url: URL_REGULAR }}],
-        [ navigationOrder("a-"), navigationOrder("c-"), ]);
+      expect(
+          [
+            {
+              label: 'a-onBeforeNavigate',
+              event: 'onBeforeNavigate',
+              details: {
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: -1,
+                tabId: 0,
+                timeStamp: 0,
+                url: getURL('c.html')
+              }
+            },
+            {
+              label: 'a-onCommitted',
+              event: 'onCommitted',
+              details: {
+                documentId: 1,
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: 0,
+                tabId: 0,
+                timeStamp: 0,
+                transitionQualifiers: [],
+                transitionType: 'link',
+                url: getURL('c.html')
+              }
+            },
+            {
+              label: 'a-onDOMContentLoaded',
+              event: 'onDOMContentLoaded',
+              details: {
+                documentId: 1,
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: 0,
+                tabId: 0,
+                timeStamp: 0,
+                url: getURL('c.html')
+              }
+            },
+            {
+              label: 'a-onCompleted',
+              event: 'onCompleted',
+              details: {
+                documentId: 1,
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: 0,
+                tabId: 0,
+                timeStamp: 0,
+                url: getURL('c.html')
+              }
+            },
+            {
+              label: 'c-onBeforeNavigate',
+              event: 'onBeforeNavigate',
+              details: {
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: -1,
+                tabId: 0,
+                timeStamp: 0,
+                url: URL_REDIRECT
+              }
+            },
+            {
+              label: 'c-onCommitted',
+              event: 'onCommitted',
+              details: {
+                documentId: 2,
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: 1,
+                tabId: 0,
+                timeStamp: 0,
+                transitionQualifiers: ['server_redirect'],
+                transitionType: 'link',
+                url: URL_REGULAR
+              }
+            },
+            {
+              label: 'c-onDOMContentLoaded',
+              event: 'onDOMContentLoaded',
+              details: {
+                documentId: 2,
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: 1,
+                tabId: 0,
+                timeStamp: 0,
+                url: URL_REGULAR
+              }
+            },
+            {
+              label: 'c-onCompleted',
+              event: 'onCompleted',
+              details: {
+                documentId: 2,
+                documentLifecycle: "active",
+                frameId: 0,
+                frameType: "outermost_frame",
+                parentFrameId: -1,
+                processId: 1,
+                tabId: 0,
+                timeStamp: 0,
+                url: URL_REGULAR
+              }
+            }
+          ],
+          [
+            navigationOrder('a-'),
+            navigationOrder('c-'),
+          ]);
 
       chrome.tabs.update(tab.id, {url: getURL('c.html?' + port)});
     },
@@ -260,7 +378,7 @@ onload = async function() {
                      processId: 0,
                      tabId: 0,
                      timeStamp: 0,
-                     transitionQualifiers: ["client_redirect"],
+                     transitionQualifiers: [],
                      transitionType: "link",
                      url: getURL('empty.html') }},
         { label: "c-onDOMContentLoaded",
@@ -302,7 +420,9 @@ onload = async function() {
       expect([
         { label: "a-onBeforeNavigate",
           event: "onBeforeNavigate",
-          details: { frameId: 0,
+          details: { documentLifecycle: "active",
+                     frameId: 0,
+                     frameType: "outermost_frame",
                      parentFrameId: -1,
                      processId: -1,
                      tabId: 0,
@@ -310,7 +430,10 @@ onload = async function() {
                      url: getURL('d.html') }},
         { label: "a-onCommitted",
           event: "onCommitted",
-          details: { frameId: 0,
+          details: { documentId: 1,
+                     documentLifecycle: "active",
+                     frameId: 0,
+                     frameType: "outermost_frame",
                      parentFrameId: -1,
                      processId: 0,
                      tabId: 0,
@@ -320,7 +443,10 @@ onload = async function() {
                      url: getURL('d.html') }},
         { label: "a-onDOMContentLoaded",
           event: "onDOMContentLoaded",
-          details: { frameId: 0,
+          details: { documentId: 1,
+                     documentLifecycle: "active",
+                     frameId: 0,
+                     frameType: "outermost_frame",
                      parentFrameId: -1,
                      processId: 0,
                      tabId: 0,
@@ -328,7 +454,10 @@ onload = async function() {
                      url: getURL('d.html') }},
         { label: "a-onCompleted",
           event: "onCompleted",
-          details: { frameId: 0,
+          details: { documentId: 1,
+                     documentLifecycle: "active",
+                     frameId: 0,
+                     frameType: "outermost_frame",
                      parentFrameId: -1,
                      processId: 0,
                      tabId: 0,
@@ -336,7 +465,9 @@ onload = async function() {
                      url: getURL('d.html') }},
         { label: "b-onBeforeNavigate",
           event: "onBeforeNavigate",
-          details: { frameId: 0,
+          details: { documentLifecycle: "active",
+                     frameId: 0,
+                     frameType: "outermost_frame",
                      parentFrameId: -1,
                      processId: -1,
                      tabId: 0,
@@ -345,7 +476,10 @@ onload = async function() {
         { label: "b-onErrorOccurred",
           event: "onErrorOccurred",
           details: { error: "net::ERR_ABORTED",
+                     documentId: 2,
+                     documentLifecycle: "active",
                      frameId: 0,
+                     frameType: "outermost_frame",
                      parentFrameId: -1,
                      processId: -1,
                      tabId: 0,
@@ -353,7 +487,9 @@ onload = async function() {
                      url: URL_TEST + "2" }},
         { label: "c-onBeforeNavigate",
           event: "onBeforeNavigate",
-          details: { frameId: 0,
+          details: { documentLifecycle: "active",
+                     frameId: 0,
+                     frameType: "outermost_frame",
                      parentFrameId: -1,
                      processId: -1,
                      tabId: 0,
@@ -361,17 +497,23 @@ onload = async function() {
                      url: getURL('empty.html') }},
         { label: "c-onCommitted",
           event: "onCommitted",
-          details: { frameId: 0,
+          details: { documentId: 3,
+                     documentLifecycle: "active",
+                     frameId: 0,
+                     frameType: "outermost_frame",
                      parentFrameId: -1,
                      processId: 0,
                      tabId: 0,
                      timeStamp: 0,
-                     transitionQualifiers: ["client_redirect"],
+                     transitionQualifiers: [],
                      transitionType: "link",
                      url: getURL('empty.html') }},
         { label: "c-onDOMContentLoaded",
           event: "onDOMContentLoaded",
-          details: { frameId: 0,
+          details: { documentId: 3,
+                     documentLifecycle: "active",
+                     frameId: 0,
+                     frameType: "outermost_frame",
                      parentFrameId: -1,
                      processId: 0,
                      tabId: 0,
@@ -379,7 +521,10 @@ onload = async function() {
                      url: getURL('empty.html') }},
         { label: "c-onCompleted",
           event: "onCompleted",
-          details: { frameId: 0,
+          details: { documentId: 3,
+                     documentLifecycle: "active",
+                     frameId: 0,
+                     frameType: "outermost_frame",
                      parentFrameId: -1,
                      processId: 0,
                      tabId: 0,
@@ -395,4 +540,4 @@ onload = async function() {
       chrome.tabs.update(tab.id, {url: getURL('d.html?' + port + "/test2")});
     },
   ]);
-};
+});

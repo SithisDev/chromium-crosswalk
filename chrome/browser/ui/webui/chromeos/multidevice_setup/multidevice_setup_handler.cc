@@ -1,15 +1,16 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/chromeos/multidevice_setup/multidevice_setup_handler.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "base/callback_helpers.h"
+#include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "chrome/browser/ui/webui/chromeos/user_image_source.h"
+#include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/user_manager/user.h"
 #include "ui/base/webui/web_ui_util.h"
@@ -35,33 +36,33 @@ void MultideviceSetupHandler::RegisterMessages() {
 }
 
 void MultideviceSetupHandler::HandleGetProfileInfo(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
 
-  std::string callback_id;
-  bool result = args->GetString(0, &callback_id);
-  DCHECK(result);
+  DCHECK(!args.empty());
+  std::string callback_id = args[0].GetString();
 
   const user_manager::User* user =
       chromeos::ProfileHelper::Get()->GetUserByProfile(
           Profile::FromWebUI(web_ui()));
 
-  base::DictionaryValue response;
-  response.SetString("email", user->GetDisplayEmail());
+  base::Value::Dict response;
+  response.Set("email", user->GetDisplayEmail());
 
   scoped_refptr<base::RefCountedMemory> image =
       chromeos::UserImageSource::GetUserImage(user->GetAccountId());
-  response.SetString("profilePhotoUrl",
-                     webui::GetPngDataUrl(image->front(), image->size()));
+  response.Set("profilePhotoUrl",
+               webui::GetPngDataUrl(image->front(), image->size()));
 
   ResolveJavascriptCallback(base::Value(callback_id), response);
 }
 
 void MultideviceSetupHandler::HandleOpenMultiDeviceSettings(
-    const base::ListValue* args) {
-  DCHECK(args->empty());
+    const base::Value::List& args) {
+  DCHECK(args.empty());
   chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
-      Profile::FromWebUI(web_ui()), chrome::kConnectedDevicesSubPage);
+      Profile::FromWebUI(web_ui()),
+      chromeos::settings::mojom::kMultiDeviceFeaturesSubpagePath);
 }
 
 }  // namespace multidevice_setup

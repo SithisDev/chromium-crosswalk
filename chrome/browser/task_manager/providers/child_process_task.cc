@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/process_resource_usage.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -28,6 +28,8 @@
 #include "content/public/common/process_type.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension_set.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -35,9 +37,10 @@ namespace task_manager {
 
 namespace {
 
-base::string16 GetLocalizedTitle(const base::string16& title,
-                                 int process_type) {
-  base::string16 result_title = title;
+std::u16string GetLocalizedTitle(const std::u16string& title,
+                                 int process_type,
+                                 ChildProcessTask::ProcessSubtype subtype) {
+  std::u16string result_title = title;
   if (result_title.empty()) {
     switch (process_type) {
       case content::PROCESS_TYPE_PPAPI_PLUGIN:
@@ -92,12 +95,17 @@ base::string16 GetLocalizedTitle(const base::string16& title,
                                         result_title);
     }
     case content::PROCESS_TYPE_RENDERER: {
-      if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-              switches::kTaskManagerShowExtraRenderers)) {
-        return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_RENDERER_PREFIX,
-                                          result_title);
+      switch (subtype) {
+        case ChildProcessTask::ProcessSubtype::kSpareRenderProcess:
+          return l10n_util::GetStringUTF16(
+              IDS_TASK_MANAGER_SPARE_RENDERER_PREFIX);
+        case ChildProcessTask::ProcessSubtype::kUnknownRenderProcess:
+          return l10n_util::GetStringUTF16(
+              IDS_TASK_MANAGER_UNKNOWN_RENDERER_PREFIX);
+        default:
+          break;
       }
-      FALLTHROUGH;
+      [[fallthrough]];
     }
     // These types don't need display names or get them from elsewhere.
     case content::PROCESS_TYPE_BROWSER:
@@ -112,31 +120,18 @@ base::string16 GetLocalizedTitle(const base::string16& title,
   return result_title;
 }
 
-// Connects the |resource_reporter| to the InterfaceRegistry of the
-// BrowserChildProcessHost whose unique ID is |unique_child_process_id|.
-void ConnectResourceReporterOnIOThread(
-    int unique_child_process_id,
-    content::mojom::ResourceUsageReporterRequest resource_reporter) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-
-  content::BrowserChildProcessHost* host =
-      content::BrowserChildProcessHost::FromID(unique_child_process_id);
-  if (!host)
-    return;
-
-  BindInterface(host->GetHost(), std::move(resource_reporter));
-}
-
 // Creates the Mojo service wrapper that will be used to sample the V8 memory
 // usage of the browser child process whose unique ID is
 // |unique_child_process_id|.
 ProcessResourceUsage* CreateProcessResourcesSampler(
     int unique_child_process_id) {
-  content::mojom::ResourceUsageReporterPtr usage_reporter;
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::IO},
-                           base::BindOnce(&ConnectResourceReporterOnIOThread,
-                                          unique_child_process_id,
-                                          mojo::MakeRequest(&usage_reporter)));
+  mojo::PendingRemote<content::mojom::ResourceUsageReporter> usage_reporter;
+  content::BrowserChildProcessHost* host =
+      content::BrowserChildProcessHost::FromID(unique_child_process_id);
+  auto receiver = usage_reporter.InitWithNewPipeAndPassReceiver();
+  if (host)
+    host->GetHost()->BindReceiver(std::move(receiver));
+
   return new ProcessResourceUsage(std::move(usage_reporter));
 }
 
@@ -156,9 +151,9 @@ bool UsesV8Memory(int process_type) {
 
 gfx::ImageSkia* ChildProcessTask::s_icon_ = nullptr;
 
-ChildProcessTask::ChildProcessTask(const content::ChildProcessData& data)
-    : Task(GetLocalizedTitle(data.name, data.process_type),
-           base::UTF16ToUTF8(data.name),
+ChildProcessTask::ChildProcessTask(const content::ChildProcessData& data,
+                                   ProcessSubtype subtype)
+    : Task(GetLocalizedTitle(data.name, data.process_type, subtype),
            FetchIcon(IDR_PLUGINS_FAVICON, &s_icon_),
            data.GetProcess().Handle()),
       process_resources_sampler_(CreateProcessResourcesSampler(data.id)),
@@ -185,7 +180,7 @@ void ChildProcessTask::Refresh(const base::TimeDelta& update_interval,
   // invoke it and record the current values (which might be invalid at the
   // moment. We can safely ignore that and count on future refresh cycles
   // potentially having valid values).
-  process_resources_sampler_->Refresh(base::Closure());
+  process_resources_sampler_->Refresh(base::DoNothing());
 
   v8_memory_allocated_ = base::saturated_cast<int64_t>(
       process_resources_sampler_->GetV8MemoryAllocated());
@@ -219,10 +214,6 @@ Task::Type ChildProcessTask::GetType() const {
 
 int ChildProcessTask::GetChildProcessUniqueID() const {
   return unique_child_process_id_;
-}
-
-bool ChildProcessTask::ReportsV8Memory() const {
-  return uses_v8_memory_ && process_resources_sampler_->ReportsV8MemoryStats();
 }
 
 int64_t ChildProcessTask::GetV8MemoryAllocated() const {

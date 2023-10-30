@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -86,15 +86,15 @@ ElisionParameters GetElisionParameters(const GURL& gurl,
   return result;
 }
 
-TextFormatting CreateUrlFormatting(const base::string16& formatted_url,
+TextFormatting CreateUrlFormatting(const std::u16string& formatted_url,
                                    const url::Parsed& parsed,
                                    SkColor emphasized_color,
                                    SkColor deemphasized_color) {
   const url::Component& scheme = parsed.scheme;
   const url::Component& host = parsed.host;
 
-  const base::string16 url_scheme =
-      formatted_url.substr(scheme.begin, scheme.len);
+  const base::StringPiece16 url_scheme =
+      base::StringPiece16(formatted_url).substr(scheme.begin, scheme.len);
 
   // Data URLs are rarely human-readable and can be used for spoofing, so draw
   // attention to the scheme to emphasize "this is just a bunch of data".  For
@@ -105,7 +105,7 @@ TextFormatting CreateUrlFormatting(const base::string16& formatted_url,
     ALL_BUT_HOST,
     NOTHING,
   } deemphasize_mode = NOTHING;
-  if (url_scheme == base::UTF8ToUTF16(url::kDataScheme))
+  if (url_scheme == url::kDataScheme16)
     deemphasize_mode = ALL_BUT_SCHEME;
   else if (host.is_nonempty())
     deemphasize_mode = ALL_BUT_HOST;

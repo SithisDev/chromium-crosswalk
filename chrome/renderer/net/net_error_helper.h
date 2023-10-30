@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,36 +9,33 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
-#include "chrome/common/navigation_corrector.mojom.h"
+#include "chrome/common/net/net_error_page_support.mojom.h"
 #include "chrome/common/network_diagnostics.mojom.h"
 #include "chrome/common/network_easter_egg.mojom.h"
-#include "chrome/common/supervised_user_commands.mojom.h"
 #include "chrome/renderer/net/net_error_helper_core.h"
 #include "chrome/renderer/net/net_error_page_controller.h"
-#include "chrome/renderer/security_interstitials/security_interstitial_page_controller.h"
-#include "chrome/renderer/supervised_user/supervised_user_error_page_controller.h"
-#include "chrome/renderer/supervised_user/supervised_user_error_page_controller_delegate.h"
 #include "components/error_page/common/localized_error.h"
 #include "components/error_page/common/net_error_info.h"
+#include "components/security_interstitials/content/renderer/security_interstitial_page_controller.h"
 #include "components/security_interstitials/core/controller_client.h"
+#include "content/public/common/alternative_error_page_override_info.mojom-forward.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_frame_observer_tracker.h"
-#include "content/public/renderer/render_thread_observer.h"
-#include "mojo/public/cpp/bindings/associated_binding_set.h"
-#include "net/base/net_errors.h"
+#include "mojo/public/cpp/bindings/associated_receiver_set.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 class GURL;
 
 namespace error_page {
 class Error;
-struct ErrorPageParams;
 }
 
 namespace network {
-class SimpleURLLoader;
+struct ResourceRequest;
 }
 
 // Listens for NetErrorInfo messages from the NetErrorTabHelper on the
@@ -49,20 +46,17 @@ class SimpleURLLoader;
 class NetErrorHelper
     : public content::RenderFrameObserver,
       public content::RenderFrameObserverTracker<NetErrorHelper>,
-      public content::RenderThreadObserver,
       public NetErrorHelperCore::Delegate,
       public NetErrorPageController::Delegate,
-      public SecurityInterstitialPageController::Delegate,
-      public SupervisedUserErrorPageControllerDelegate,
-      public chrome::mojom::NetworkDiagnosticsClient,
-      public chrome::mojom::NavigationCorrector {
+      public chrome::mojom::NetworkDiagnosticsClient {
  public:
   explicit NetErrorHelper(content::RenderFrame* render_frame);
+  NetErrorHelper(const NetErrorHelper&) = delete;
+  NetErrorHelper& operator=(const NetErrorHelper&) = delete;
   ~NetErrorHelper() override;
 
   // NetErrorPageController::Delegate implementation
   void ButtonPressed(NetErrorHelperCore::Button button) override;
-  void TrackClick(int tracking_id) override;
   void LaunchOfflineItem(const std::string& id,
                          const std::string& name_space) override;
   void LaunchDownloadsPage() override;
@@ -72,29 +66,10 @@ class NetErrorHelper
   void UpdateEasterEggHighScore(int high_score) override;
   void ResetEasterEggHighScore() override;
 
-  // SecurityInterstitialPageController::Delegate implementation
-  void SendCommand(
-      security_interstitials::SecurityInterstitialCommand command) override;
-
-  // SupervisedUserErrorPageControllerDelegate implementation
-  void GoBack() override;
-  void RequestPermission(base::OnceCallback<void(bool)> callback) override;
-  void Feedback() override;
-
   // RenderFrameObserver implementation.
-  void DidStartNavigation(
-      const GURL& url,
-      base::Optional<blink::WebNavigationType> navigation_type) override;
-  void DidCommitProvisionalLoad(bool is_same_document_navigation,
-                                ui::PageTransition transition) override;
+  void DidCommitProvisionalLoad(ui::PageTransition transition) override;
   void DidFinishLoad() override;
-  void OnStop() override;
-  void WasShown() override;
-  void WasHidden() override;
   void OnDestruct() override;
-
-  // RenderThreadObserver implementation.
-  void NetworkStateChanged(bool online) override;
 
   // Sets values in |pending_error_page_info_|. If |error_html| is not null, it
   // initializes |error_html| with the HTML of an error page in response to
@@ -102,12 +77,9 @@ class NetErrorHelper
   // loaded immediately.
   void PrepareErrorPage(const error_page::Error& error,
                         bool is_failed_post,
-                        bool is_ignoring_cache,
+                        content::mojom::AlternativeErrorPageOverrideInfoPtr
+                            alternative_error_page_info,
                         std::string* error_html);
-
-  // Returns whether a load for |url| in the |frame| the NetErrorHelper is
-  // attached to should have its error page suppressed.
-  bool ShouldSuppressErrorPage(const GURL& url);
 
  private:
   // Returns ResourceRequest filled with |url|. It has request_initiator from
@@ -116,15 +88,16 @@ class NetErrorHelper
       const GURL& url) const;
   chrome::mojom::NetworkDiagnostics* GetRemoteNetworkDiagnostics();
   chrome::mojom::NetworkEasterEgg* GetRemoteNetworkEasterEgg();
+  chrome::mojom::NetErrorPageSupport* GetRemoteNetErrorPageSupport();
 
   // NetErrorHelperCore::Delegate implementation:
   error_page::LocalizedError::PageState GenerateLocalizedErrorPage(
       const error_page::Error& error,
       bool is_failed_post,
       bool can_use_local_diagnostics_service,
-      std::unique_ptr<error_page::ErrorPageParams> params,
+      content::mojom::AlternativeErrorPageOverrideInfoPtr
+          alternative_error_page_info,
       std::string* html) const override;
-  void LoadErrorPage(const std::string& html, const GURL& failed_url) override;
 
   void EnablePageHelperFunctions() override;
   error_page::LocalizedError::PageState UpdateErrorPage(
@@ -133,13 +106,7 @@ class NetErrorHelper
       bool can_use_local_diagnostics_service) override;
   void InitializeErrorPageEasterEggHighScore(int high_score) override;
   void RequestEasterEggHighScore() override;
-  void FetchNavigationCorrections(
-      const GURL& navigation_correction_url,
-      const std::string& navigation_correction_request_body) override;
-  void CancelFetchNavigationCorrections() override;
-  void SendTrackingRequest(const GURL& tracking_url,
-                           const std::string& tracking_request_body) override;
-  void ReloadPage(bool bypass_cache) override;
+  void ReloadFrame() override;
   void DiagnoseError(const GURL& page_url) override;
   void DownloadPageLater() override;
   void SetIsShowingDownloadButton(bool show) override;
@@ -148,66 +115,35 @@ class NetErrorHelper
       const std::string& offline_content_json) override;
   content::RenderFrame* GetRenderFrame() override;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   void SetAutoFetchState(
       chrome::mojom::OfflinePageAutoFetcherScheduleResult state) override;
 #endif
 
-  void OnSetNavigationCorrectionInfo(const GURL& navigation_correction_url,
-                                     const std::string& language,
-                                     const std::string& country_code,
-                                     const std::string& api_key,
-                                     const GURL& search_url);
-
-  void OnNavigationCorrectionsFetched(
-      std::unique_ptr<std::string> response_body);
-
-  void OnTrackingRequestComplete(std::unique_ptr<std::string> response_body);
-
   void OnNetworkDiagnosticsClientRequest(
-      chrome::mojom::NetworkDiagnosticsClientAssociatedRequest request);
-  void OnNavigationCorrectorRequest(
-      chrome::mojom::NavigationCorrectorAssociatedRequest request);
+      mojo::PendingAssociatedReceiver<chrome::mojom::NetworkDiagnosticsClient>
+          receiver);
 
   // chrome::mojom::NetworkDiagnosticsClient:
   void SetCanShowNetworkDiagnosticsDialog(bool can_show) override;
   void DNSProbeStatus(int32_t) override;
 
-  // chrome::mojom::NavigationCorrector:
-  void SetNavigationCorrectionInfo(const GURL& navigation_correction_url,
-                                   const std::string& language,
-                                   const std::string& country_code,
-                                   const std::string& api_key,
-                                   const GURL& search_url) override;
-
-  std::unique_ptr<network::SimpleURLLoader> correction_loader_;
-  std::unique_ptr<network::SimpleURLLoader> tracking_loader_;
-
   std::unique_ptr<NetErrorHelperCore> core_;
 
-  mojo::AssociatedBindingSet<chrome::mojom::NetworkDiagnosticsClient>
-      network_diagnostics_client_bindings_;
-  chrome::mojom::NetworkDiagnosticsAssociatedPtr remote_network_diagnostics_;
-  mojo::AssociatedBindingSet<chrome::mojom::NavigationCorrector>
-      navigation_corrector_bindings_;
-  chrome::mojom::NetworkEasterEggAssociatedPtr remote_network_easter_egg_;
-
-  supervised_user::mojom::SupervisedUserCommandsAssociatedPtr
-      supervised_user_interface_;
+  mojo::AssociatedReceiverSet<chrome::mojom::NetworkDiagnosticsClient>
+      network_diagnostics_client_receivers_;
+  mojo::AssociatedRemote<chrome::mojom::NetworkDiagnostics>
+      remote_network_diagnostics_;
+  mojo::AssociatedRemote<chrome::mojom::NetworkEasterEgg>
+      remote_network_easter_egg_;
+  mojo::AssociatedRemote<chrome::mojom::NetErrorPageSupport>
+      remote_net_error_page_support_;
 
   // Weak factories for vending weak pointers to PageControllers. Weak
   // pointers are invalidated on each commit, to prevent getting messages from
   // Controllers used for the previous commit that haven't yet been cleaned up.
   base::WeakPtrFactory<NetErrorPageController::Delegate>
       weak_controller_delegate_factory_{this};
-
-  base::WeakPtrFactory<SecurityInterstitialPageController::Delegate>
-      weak_security_interstitial_controller_delegate_factory_{this};
-
-  base::WeakPtrFactory<SupervisedUserErrorPageControllerDelegate>
-      weak_supervised_user_error_controller_delegate_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(NetErrorHelper);
 };
 
 #endif  // CHROME_RENDERER_NET_NET_ERROR_HELPER_H_

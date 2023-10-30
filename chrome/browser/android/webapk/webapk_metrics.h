@@ -1,13 +1,14 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_ANDROID_WEBAPK_WEBAPK_METRICS_H_
 #define CHROME_BROWSER_ANDROID_WEBAPK_WEBAPK_METRICS_H_
 
-namespace base {
-class TimeDelta;
-}
+#include <string>
+
+#include "base/time/time.h"
+#include "components/webapps/browser/android/webapk/webapk_types.h"
 
 namespace webapk {
 
@@ -15,22 +16,21 @@ namespace webapk {
 // Events for WebAPKs installation flow. The sum of InstallEvent histogram
 // is the total number of times that a WebAPK infobar was triggered.
 enum InstallEvent {
-  // The user did not interact with the infobar.
-  INFOBAR_IGNORED,
-  // The infobar with the "Add-to-Homescreen" button is dismissed before the
-  // installation started. "Dismiss" means the user closes the infobar by
-  // clicking the "X" button.
-  INFOBAR_DISMISSED_BEFORE_INSTALLATION,
-  // The infobar with the "Adding" button is dismissed during installation.
-  INFOBAR_DISMISSED_DURING_INSTALLATION,
-  INSTALL_COMPLETED,
-  INSTALL_FAILED,
-  INSTALL_EVENT_MAX,
+  // Deprecated: INFOBAR_IGNORED = 0,
+  // The add-to-homescreen dialog is dismissed without the user initiating a
+  // WebAPK install.
+  ADD_TO_HOMESCREEN_DIALOG_DISMISSED_BEFORE_INSTALLATION = 1,
+  // Deprecated: INFOBAR_DISMISSED_DURING_INSTALLATION = 2,
+  INSTALL_COMPLETED = 3,
+  INSTALL_FAILED = 4,
+  INSTALL_EVENT_MAX = 5,
 };
 
-void TrackRequestTokenDuration(base::TimeDelta delta);
+void TrackRequestTokenDuration(base::TimeDelta delta,
+                               const std::string& webapk_package);
 void TrackInstallDuration(base::TimeDelta delta);
 void TrackInstallEvent(InstallEvent event);
+void TrackInstallResult(webapps::WebApkInstallResult result);
 
 }  // namespace webapk
 

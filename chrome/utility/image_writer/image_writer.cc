@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,14 @@
 
 #include "base/location.h"
 #include "base/memory/aligned_memory.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
-#include "chrome/utility/image_writer/error_messages.h"
+#include "chrome/utility/image_writer/error_message_strings.h"
 #include "chrome/utility/image_writer/image_writer_handler.h"
 #include "content/public/utility/utility_thread.h"
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 #include "chrome/utility/image_writer/disk_unmounter_mac.h"
 #endif
 
@@ -36,7 +36,7 @@ ImageWriter::ImageWriter(ImageWriterHandler* handler,
       handler_(handler) {}
 
 ImageWriter::~ImageWriter() {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   for (std::vector<HANDLE>::const_iterator it = volume_handles_.begin();
        it != volume_handles_.end();
        ++it) {
@@ -51,7 +51,7 @@ void ImageWriter::Write() {
   }
 
   PostProgress(0);
-  PostTask(base::Bind(&ImageWriter::WriteChunk, AsWeakPtr()));
+  PostTask(base::BindOnce(&ImageWriter::WriteChunk, AsWeakPtr()));
 }
 
 void ImageWriter::Verify() {
@@ -60,7 +60,7 @@ void ImageWriter::Verify() {
   }
 
   PostProgress(0);
-  PostTask(base::Bind(&ImageWriter::VerifyChunk, AsWeakPtr()));
+  PostTask(base::BindOnce(&ImageWriter::VerifyChunk, AsWeakPtr()));
 }
 
 void ImageWriter::Cancel() {
@@ -74,8 +74,8 @@ const base::FilePath& ImageWriter::GetImagePath() { return image_path_; }
 
 const base::FilePath& ImageWriter::GetDevicePath() { return device_path_; }
 
-void ImageWriter::PostTask(const base::Closure& task) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, task);
+void ImageWriter::PostTask(base::OnceClosure task) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, std::move(task));
 }
 
 void ImageWriter::PostProgress(int64_t progress) {
@@ -91,7 +91,7 @@ bool ImageWriter::InitializeFiles() {
   if (!image_file_.IsValid()) {
     image_file_.Initialize(image_path_,
                            base::File::FLAG_OPEN | base::File::FLAG_READ |
-                               base::File::FLAG_EXCLUSIVE_READ);
+                               base::File::FLAG_WIN_EXCLUSIVE_READ);
 
     if (!image_file_.IsValid()) {
       DLOG(ERROR) << "Unable to open file for read: " << image_path_.value();
@@ -143,7 +143,7 @@ void ImageWriter::WriteChunk() {
     bytes_processed_ += bytes_read;
     PostProgress(bytes_processed_);
 
-    PostTask(base::Bind(&ImageWriter::WriteChunk, AsWeakPtr()));
+    PostTask(base::BindOnce(&ImageWriter::WriteChunk, AsWeakPtr()));
   } else if (bytes_read == 0) {
     // End of file.
     device_file_.Flush();
@@ -189,7 +189,7 @@ void ImageWriter::VerifyChunk() {
     bytes_processed_ += bytes_read;
     PostProgress(bytes_processed_);
 
-    PostTask(base::Bind(&ImageWriter::VerifyChunk, AsWeakPtr()));
+    PostTask(base::BindOnce(&ImageWriter::VerifyChunk, AsWeakPtr()));
   } else if (bytes_read == 0) {
     // End of file.
     handler_->SendSucceeded();

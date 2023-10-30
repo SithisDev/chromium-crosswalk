@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,9 @@ using base::win::RegKey;
 
 namespace installer {
 
-AppCommands::AppCommands() {
-}
+AppCommands::AppCommands() {}
 
-AppCommands::~AppCommands() {
-}
+AppCommands::~AppCommands() {}
 
 bool AppCommands::Initialize(const base::win::RegKey& key, REGSAM wow64access) {
   if (!key.Valid()) {
@@ -39,10 +37,9 @@ bool AppCommands::Initialize(const base::win::RegKey& key, REGSAM wow64access) {
   RegKey cmd_key;
   LONG result;
   AppCommand command;
-  for (RegistryKeyIterator key_iterator(
-           key.Handle(), kEmptyString, wow64access);
-       key_iterator.Valid();
-       ++key_iterator) {
+  for (RegistryKeyIterator key_iterator(key.Handle(), kEmptyString,
+                                        wow64access);
+       key_iterator.Valid(); ++key_iterator) {
     const wchar_t* name = key_iterator.Name();
     result = cmd_key.Open(key.Handle(), name, KEY_QUERY_VALUE);
     if (result != ERROR_SUCCESS) {

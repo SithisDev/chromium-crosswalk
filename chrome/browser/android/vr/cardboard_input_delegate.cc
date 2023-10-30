@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,7 +63,7 @@ CardboardInputDelegate::GetInputSourceState() {
 
   // It's a gaze-cursor-based device.
   state->description->target_ray_mode = device::mojom::XRTargetRayMode::GAZING;
-  state->description->emulated_position = true;
+  state->emulated_position = true;
 
   // No implicit handedness
   state->description->handedness = device::mojom::XRHandedness::NONE;

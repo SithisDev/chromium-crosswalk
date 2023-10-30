@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,12 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/cocoa/test/cocoa_profile_test.h"
 #import "chrome/browser/ui/cocoa/test/cocoa_test_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "content/public/test/browser_test.h"
 #include "net/base/mac/url_conversions.h"
 #include "testing/gtest_mac.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -36,7 +36,7 @@
 // don't appear to be present when inheriting from vanilla
 // |NSSharingService|.
 @synthesize subject;
-@synthesize sharedItem = sharedItem_;
+@synthesize sharedItem = _sharedItem;
 
 - (void)performWithItems:(NSArray*)items {
   [self setSharedItem:[items firstObject]];
@@ -66,7 +66,7 @@ class ShareMenuControllerTest : public InProcessBrowserTest {
     ASSERT_TRUE(embedded_test_server()->Start());
 
     url_ = embedded_test_server()->GetURL("/title2.html");
-    AddTabAtIndex(0, url_, ui::PAGE_TRANSITION_TYPED);
+    ASSERT_TRUE(AddTabAtIndex(0, url_, ui::PAGE_TRANSITION_TYPED));
     controller_.reset([[ShareMenuController alloc] init]);
   }
 
@@ -187,7 +187,7 @@ IN_PROC_BROWSER_TEST_F(ShareMenuControllerTest, SharingDelegate) {
 
 IN_PROC_BROWSER_TEST_F(ShareMenuControllerTest, Histograms) {
   base::HistogramTester tester;
-  const std::string histogram_name = "OSX.NativeShare";
+  const std::string histogram_name = "Mac.FileMenuNativeShare";
 
   tester.ExpectTotalCount(histogram_name, 0);
 
@@ -220,7 +220,8 @@ IN_PROC_BROWSER_TEST_F(ShareMenuControllerTest, MenuHasKeyEquivalent) {
   base::scoped_nsobject<NSMenu> menu([[NSMenu alloc] initWithTitle:@"Share"]);
   EXPECT_EQ([menu numberOfItems], 0);
   NSEvent* event = cocoa_test_event_utils::KeyEventWithKeyCode(
-      'i', 'i', NSKeyDown, NSCommandKeyMask | NSShiftKeyMask);
+      'i', 'i', NSEventTypeKeyDown,
+      NSEventModifierFlagCommand | NSEventModifierFlagShift);
   id ignored_target;
   SEL ignored_action;
   EXPECT_FALSE([controller_ menuHasKeyEquivalent:menu

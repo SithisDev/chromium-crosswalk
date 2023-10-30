@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,13 @@
 #include "chrome/browser/ui/webui/sync_file_system_internals/extension_statuses_handler.h"
 #include "chrome/browser/ui/webui/sync_file_system_internals/file_metadata_handler.h"
 #include "chrome/browser/ui/webui/sync_file_system_internals/sync_file_system_internals_handler.h"
+#include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/sync_file_system_internals_resources.h"
+#include "chrome/grit/sync_file_system_internals_resources_map.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "services/network/public/mojom/content_security_policy.mojom.h"
 
 namespace {
 
@@ -22,22 +25,14 @@ content::WebUIDataSource* CreateSyncFileSystemInternalsHTMLSource() {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(
           chrome::kChromeUISyncFileSystemInternalsHost);
-  source->SetJsonPath("strings.js");
-  source->AddResourcePath(
-      "utils.js",
-      IDR_SYNC_FILE_SYSTEM_INTERNALS_UTILS_JS);
-  source->AddResourcePath(
-      "extension_statuses.js",
-      IDR_SYNC_FILE_SYSTEM_INTERNALS_EXTENSION_STATUSES_JS);
-  source->AddResourcePath(
-      "file_metadata.js", IDR_SYNC_FILE_SYSTEM_INTERNALS_FILE_METADATA_JS);
-  source->AddResourcePath(
-      "sync_service.js", IDR_SYNC_FILE_SYSTEM_INTERNALS_SYNC_SERVICE_JS);
-  source->AddResourcePath(
-      "task_log.js", IDR_SYNC_FILE_SYSTEM_INTERNALS_TASK_LOG_JS);
-  source->AddResourcePath(
-      "dump_database.js", IDR_SYNC_FILE_SYSTEM_INTERNALS_DUMP_DATABASE_JS);
+  source->UseStringsJs();
+  source->AddResourcePaths(
+      base::make_span(kSyncFileSystemInternalsResources,
+                      kSyncFileSystemInternalsResourcesSize));
   source->SetDefaultResource(IDR_SYNC_FILE_SYSTEM_INTERNALS_MAIN_HTML);
+  source->OverrideContentSecurityPolicy(
+      network::mojom::CSPDirectiveName::TrustedTypes,
+      "trusted-types static-types;");
   return source;
 }
 

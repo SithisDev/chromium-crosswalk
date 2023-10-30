@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 
 namespace explore_sites {
 
-// Takes a URL that the user has asked us to remove, and adds it to a blacklist
+// Takes a URL that the user has asked us to remove, and adds it to a blocklist
 // of sites we will stop showing in Explore on Sites.
 class MostVisitedClient
     : public ntp_tiles::MostVisitedSites::ExploreSitesClient {
@@ -20,7 +20,7 @@ class MostVisitedClient
   ~MostVisitedClient() override;
 
   GURL GetExploreSitesUrl() const override;
-  base::string16 GetExploreSitesTitle() const override;
+  std::u16string GetExploreSitesTitle() const override;
 
  private:
   MostVisitedClient();

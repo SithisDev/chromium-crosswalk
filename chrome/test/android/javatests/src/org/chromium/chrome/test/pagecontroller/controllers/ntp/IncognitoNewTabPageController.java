@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@ import org.chromium.chrome.test.pagecontroller.utils.Ui2Locators;
  */
 public class IncognitoNewTabPageController extends PageController {
     private static final IUi2Locator LOCATOR_INCOGNITO_PAGE =
-            Ui2Locators.withResEntries(R.id.new_tab_incognito_container);
+            Ui2Locators.withAnyResEntry(R.id.new_tab_incognito_container);
 
     private static final IncognitoNewTabPageController sInstance =
             new IncognitoNewTabPageController();
@@ -24,7 +24,8 @@ public class IncognitoNewTabPageController extends PageController {
     }
 
     @Override
-    public boolean isCurrentPageThis() {
-        return mLocatorHelper.isOnScreen(LOCATOR_INCOGNITO_PAGE);
+    public IncognitoNewTabPageController verifyActive() {
+        mLocatorHelper.verifyOnScreen(LOCATOR_INCOGNITO_PAGE);
+        return this;
     }
 }

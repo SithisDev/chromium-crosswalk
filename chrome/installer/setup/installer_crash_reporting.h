@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,7 @@ void SetCrashKeysFromCommandLine(const base::CommandLine& command_line);
 
 // Sets a crash key recording the version of the product which was present
 // before the installer was run.
-void SetCurrentVersionCrashKey(const base::Version* current_version);
+void SetCurrentVersionCrashKey(const base::Version& current_version);
 
 }  // namespace installer
 

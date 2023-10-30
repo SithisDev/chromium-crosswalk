@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,7 @@
 #include <memory>
 
 #include "base/callback.h"
-#include "base/macros.h"
-#include "chrome/browser/notifications/scheduler/public/impression_detail.h"
+#include "chrome/browser/notifications/scheduler/public/client_overview.h"
 #include "chrome/browser/notifications/scheduler/public/notification_background_task_scheduler.h"
 #include "chrome/browser/notifications/scheduler/public/user_action_handler.h"
 
@@ -29,6 +28,8 @@ class NotificationScheduler
       std::unique_ptr<NotificationSchedulerContext> context);
 
   NotificationScheduler();
+  NotificationScheduler(const NotificationScheduler&) = delete;
+  NotificationScheduler& operator=(const NotificationScheduler&) = delete;
   ~NotificationScheduler() override;
 
   // Initializes the scheduler.
@@ -39,16 +40,14 @@ class NotificationScheduler
   virtual void Schedule(
       std::unique_ptr<NotificationParams> notification_params) = 0;
 
-  // Queries impression detail for a given |SchedulerClientType|.
-  virtual void GetImpressionDetail(
+  // Queries an overview of client information for a given
+  // |SchedulerClientType| including impression details.
+  virtual void GetClientOverview(
       SchedulerClientType type,
-      ImpressionDetail::ImpressionDetailCallback callback) = 0;
+      ClientOverview::ClientOverviewCallback callback) = 0;
 
   // Deletes all notifications of a given |SchedulerClientType|.
   virtual void DeleteAllNotifications(SchedulerClientType type) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NotificationScheduler);
 };
 
 }  // namespace notifications

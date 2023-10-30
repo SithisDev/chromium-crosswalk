@@ -1,24 +1,18 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sharing/sharing_constants.h"
 
-const char kFCMScope[] = "GCM";
-
 const char kSharingFCMAppID[] = "com.google.chrome.sharing.fcm";
 
-const constexpr base::TimeDelta kAckTimeToLive =
-    base::TimeDelta::FromMinutes(30);
+const char kSharingSenderID[] = "379932496580";
 
-const constexpr base::TimeDelta kDeviceExpiration =
-    base::TimeDelta::FromDays(2);
+const constexpr base::TimeDelta kSharingDeviceExpiration = base::Days(2);
 
-const constexpr base::TimeDelta kRegistrationExpiration =
-    base::TimeDelta::FromDays(1);
+const constexpr base::TimeDelta kSharingMessageTTL = base::Seconds(16);
 
-const constexpr base::TimeDelta kSendMessageTimeout =
-    base::TimeDelta::FromSeconds(15);
+const constexpr base::TimeDelta kSharingAckMessageTTL = base::Seconds(8);
 
 const constexpr net::BackoffEntry::Policy kRetryBackoffPolicy = {
     // Number of initial errors (in sequence) to ignore before applying
@@ -51,3 +45,10 @@ const constexpr net::BackoffEntry::Policy kRetryBackoffPolicy = {
     // is the first delay once we start exponential backoff.
     false,
 };
+
+constexpr int kMaxDevicesShown = 10;
+
+constexpr int kSubMenuFirstDeviceCommandId = 2150;
+
+constexpr int kSubMenuLastDeviceCommandId =
+    kSubMenuFirstDeviceCommandId + kMaxDevicesShown - 1;

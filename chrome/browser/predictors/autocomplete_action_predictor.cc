@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,32 +9,34 @@
 #include <queue>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/guid.h"
 #include "base/i18n/case_conversion.h"
-#include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/observer_list.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
 #include "chrome/browser/predictors/predictor_database.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"
-#include "chrome/browser/prerender/prerender_field_trial.h"
-#include "chrome/browser/prerender/prerender_handle.h"
-#include "chrome/browser/prerender/prerender_manager.h"
-#include "chrome/browser/prerender/prerender_manager_factory.h"
+#include "chrome/browser/prefetch/prefetch_prefs.h"
+#include "chrome/browser/preloading/chrome_preloading.h"
+#include "chrome/browser/preloading/prefetch/no_state_prefetch/no_state_prefetch_manager_factory.h"
+#include "chrome/browser/preloading/prerender/prerender_manager.h"
+#include "chrome/browser/preloading/prerender/prerender_utils.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/history/core/browser/history_service.h"
+#include "chrome/common/chrome_features.h"
 #include "components/history/core/browser/in_memory_database.h"
+#include "components/no_state_prefetch/browser/no_state_prefetch_handle.h"
+#include "components/no_state_prefetch/browser/no_state_prefetch_manager.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_result.h"
+#include "components/omnibox/browser/base_search_provider.h"
 #include "components/omnibox/browser/omnibox_log.h"
-#include "components/omnibox/browser/omnibox_popup_model.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
+#include "content/public/browser/preloading_data.h"
+#include "content/public/browser/web_contents_delegate.h"
 
 namespace {
 
@@ -43,7 +45,7 @@ const float kConfidenceCutoff[] = {
   0.5f
 };
 
-static_assert(base::size(kConfidenceCutoff) ==
+static_assert(std::size(kConfidenceCutoff) ==
                   predictors::AutocompleteActionPredictor::LAST_PREDICT_ACTION,
               "kConfidenceCutoff count should match LAST_PREDICT_ACTION");
 
@@ -54,12 +56,34 @@ const size_t kMaximumTransitionalMatchesSize = 1024 * 1024;  // 1 MB.
 // the database.
 const size_t kMaximumCacheSize = 2000;
 
-enum DatabaseAction {
-  DATABASE_ACTION_ADD,
-  DATABASE_ACTION_UPDATE,
-  DATABASE_ACTION_DELETE_SOME,
-  DATABASE_ACTION_DELETE_ALL,
-  DATABASE_ACTION_COUNT
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class DatabaseAction {
+  kAdd = 0,
+  kUpdate = 1,
+  kDeleteSome = 2,
+  kDeleteAll = 3,
+  kMaxValue = kDeleteAll,
+};
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class PredictionStatus {
+  // The no state prefetch was not started at all for this omnibox interaction.
+  kNotStarted = 0,
+  // The no state prefetch was cancelled because the user did not select a URL
+  // in the omnibox.
+  kCancelled = 1,
+  // The no state prefetch was unused because the user navigated to a different
+  // URL.
+  kUnused = 2,
+  // The no state prefetch was used and had time to finish before the user
+  // selected a URL.
+  kHitFinished = 3,
+  // The no state prefetch was used but had not completed before the user
+  // selected a URL.
+  kHitUnfinished = 4,
+  kMaxValue = kHitUnfinished,
 };
 
 }  // namespace
@@ -72,10 +96,9 @@ const size_t AutocompleteActionPredictor::kMaximumStringLength = 1024;
 
 AutocompleteActionPredictor::AutocompleteActionPredictor(Profile* profile)
     : profile_(profile),
-      main_profile_predictor_(NULL),
-      incognito_predictor_(NULL),
-      initialized_(false),
-      history_service_observer_(this) {
+      main_profile_predictor_(nullptr),
+      incognito_predictor_(nullptr),
+      initialized_(false) {
   if (profile_->IsOffTheRecord()) {
     main_profile_predictor_ = AutocompleteActionPredictorFactory::GetForProfile(
         profile_->GetOriginalProfile());
@@ -95,32 +118,38 @@ AutocompleteActionPredictor::AutocompleteActionPredictor(Profile* profile)
     table_ =
         PredictorDatabaseFactory::GetForProfile(profile_)->autocomplete_table();
 
-    // Observe all main frame loads so we can wait for the first to complete
-    // before accessing DB sequence of the AutocompleteActionPredictorTable and
-    // IO thread to build the local cache.
-    notification_registrar_.Add(this,
-                                content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-                                content::NotificationService::AllSources());
+    // Create local caches using the database as loaded. We will garbage collect
+    // rows from the caches and the database once the history service is
+    // available.
+    auto rows =
+        std::make_unique<std::vector<AutocompleteActionPredictorTable::Row>>();
+    auto* rows_ptr = rows.get();
+    table_->GetTaskRunner()->PostTaskAndReply(
+        FROM_HERE,
+        base::BindOnce(&AutocompleteActionPredictorTable::GetAllRows, table_,
+                       rows_ptr),
+        base::BindOnce(&AutocompleteActionPredictor::CreateCaches, AsWeakPtr(),
+                       std::move(rows)));
   }
 }
 
 AutocompleteActionPredictor::~AutocompleteActionPredictor() {
   if (main_profile_predictor_)
-    main_profile_predictor_->incognito_predictor_ = NULL;
+    main_profile_predictor_->incognito_predictor_ = nullptr;
   else if (incognito_predictor_)
-    incognito_predictor_->main_profile_predictor_ = NULL;
-  if (prerender_handle_.get())
-    prerender_handle_->OnCancel();
+    incognito_predictor_->main_profile_predictor_ = nullptr;
+  if (no_state_prefetch_handle_.get())
+    no_state_prefetch_handle_->OnCancel();
 }
 
 void AutocompleteActionPredictor::RegisterTransitionalMatches(
-    const base::string16& user_text,
+    const std::u16string& user_text,
     const AutocompleteResult& result) {
   if (user_text.length() < kMinimumUserTextLength ||
       user_text.length() > kMaximumStringLength) {
     return;
   }
-  const base::string16 lower_user_text(base::i18n::ToLower(user_text));
+  const std::u16string lower_user_text(base::i18n::ToLower(user_text));
 
   // Merge this in to an existing match if we already saw |user_text|
   auto match_it = std::find(transitional_matches_.begin(),
@@ -153,48 +182,82 @@ void AutocompleteActionPredictor::ClearTransitionalMatches() {
 }
 
 void AutocompleteActionPredictor::CancelPrerender() {
-  // If the prerender has already been abandoned, leave it to its own timeout;
+  // If the prefetch has already been abandoned, leave it to its own timeout;
   // this normally gets called immediately after OnOmniboxOpenedUrl.
-  if (prerender_handle_ && !prerender_handle_->IsAbandoned()) {
-    prerender_handle_->OnCancel();
-    prerender_handle_.reset();
+  if (no_state_prefetch_handle_ && !no_state_prefetch_handle_->IsAbandoned()) {
+    no_state_prefetch_handle_->OnCancel();
+    no_state_prefetch_handle_.reset();
   }
 }
 
 void AutocompleteActionPredictor::StartPrerendering(
     const GURL& url,
-    content::SessionStorageNamespace* session_storage_namespace,
+    content::WebContents& web_contents,
     const gfx::Size& size) {
-  // Only cancel the old prerender after starting the new one, so if the URLs
-  // are the same, the underlying prerender will be reused.
-  std::unique_ptr<prerender::PrerenderHandle> old_prerender_handle =
-      std::move(prerender_handle_);
-  prerender::PrerenderManager* prerender_manager =
-      prerender::PrerenderManagerFactory::GetForBrowserContext(profile_);
-  if (prerender_manager) {
-    prerender_handle_ = prerender_manager->AddPrerenderFromOmnibox(
-        url, session_storage_namespace, size);
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (prerender_utils::IsDirectUrlInputPrerenderEnabled()) {
+    auto* preloading_data =
+        content::PreloadingData::GetOrCreateForWebContents(&web_contents);
+
+    content::PreloadingURLMatchCallback same_url_matcher =
+        content::PreloadingData::GetSameURLMatcher(url);
+
+    // Create new PreloadingAttempt and pass all the values corresponding to
+    // this prerendering attempt.
+    content::PreloadingAttempt* preloading_attempt =
+        preloading_data->AddPreloadingAttempt(
+            ToPreloadingPredictor(
+                ChromePreloadingPredictor::kOmniboxDirectURLInput),
+            content::PreloadingType::kPrerender, std::move(same_url_matcher));
+
+    PrerenderManager::CreateForWebContents(&web_contents);
+    auto* prerender_manager = PrerenderManager::FromWebContents(&web_contents);
+    direct_url_input_prerender_handle_ =
+        prerender_manager->StartPrerenderDirectUrlInput(url,
+                                                        *preloading_attempt);
+  } else if (base::FeatureList::IsEnabled(
+                 features::kOmniboxTriggerForNoStatePrefetch)) {
+    content::SessionStorageNamespace* session_storage_namespace =
+        web_contents.GetController().GetDefaultSessionStorageNamespace();
+    if (no_state_prefetch_handle_) {
+      if (no_state_prefetch_handle_->prerender_url() == url) {
+        // We've already started a prefetch for the target URL. Nothing to do.
+        return;
+      }
+      // `url` does not match with previously prefetched url. Reset the
+      // handle to trigger cancellation.
+      base::UmaHistogramEnumeration(
+          "AutocompleteActionPredictor.NoStatePrefetchStatus",
+          PredictionStatus::kCancelled);
+      no_state_prefetch_handle_->OnCancel();
+      no_state_prefetch_handle_.reset();
+    }
+    prerender::NoStatePrefetchManager* no_state_prefetch_manager =
+        prerender::NoStatePrefetchManagerFactory::GetForBrowserContext(
+            profile_);
+    if (no_state_prefetch_manager) {
+      no_state_prefetch_handle_ =
+          no_state_prefetch_manager->StartPrefetchingFromOmnibox(
+              url, session_storage_namespace, size);
+    }
   }
-  if (old_prerender_handle)
-    old_prerender_handle->OnCancel();
 }
 
 AutocompleteActionPredictor::Action
-    AutocompleteActionPredictor::RecommendAction(
-        const base::string16& user_text,
-        const AutocompleteMatch& match) const {
+AutocompleteActionPredictor::RecommendAction(
+    const std::u16string& user_text,
+    const AutocompleteMatch& match,
+    content::WebContents* web_contents) const {
   bool is_in_db = false;
   const double confidence = CalculateConfidence(user_text, match, &is_in_db);
   DCHECK(confidence >= 0.0 && confidence <= 1.0);
 
-  UMA_HISTOGRAM_BOOLEAN("AutocompleteActionPredictor.MatchIsInDb", is_in_db);
+  base::UmaHistogramBoolean("AutocompleteActionPredictor.MatchIsInDb",
+                            is_in_db);
 
   if (is_in_db) {
-    // Multiple enties with the same URL are fine as the confidence may be
-    // different.
-    tracked_urls_.push_back(std::make_pair(match.destination_url, confidence));
-    UMA_HISTOGRAM_COUNTS_100("AutocompleteActionPredictor.Confidence",
-                             confidence * 100);
+    base::UmaHistogramCounts100("AutocompleteActionPredictor.Confidence",
+                                confidence * 100);
   }
 
   // Map the confidence to an action.
@@ -206,12 +269,27 @@ AutocompleteActionPredictor::Action
     }
   }
 
-  // Downgrade prerender to preconnect if this is a search match or if
-  // nostate-prefetch is disabled.
-  if (action == ACTION_PRERENDER &&
-      (AutocompleteMatch::IsSearchType(match.type) ||
-       !prerender::IsNoStatePrefetchEnabled())) {
+  // Downgrade prefetch to preconnect if this is a search match.
+  if (action == ACTION_PRERENDER && AutocompleteMatch::IsSearchType(match.type))
     action = ACTION_PRECONNECT;
+
+  // During startup/shutdown it could be possible that the Omnibox doesn't have
+  // an attached WebContents yet. In that case, don't create PreloadingData and
+  // don't add PreloadingPrediction.
+  if (web_contents) {
+    // Create new PreloadingPrediction class and pass all the fields.
+    content::PreloadingURLMatchCallback same_url_matcher =
+        content::PreloadingData::GetSameURLMatcher(match.destination_url);
+
+    auto* preloading_data =
+        content::PreloadingData::GetOrCreateForWebContents(web_contents);
+
+    // We multiply confidence by 100 to pass the percentage and cast it into int
+    // for logs.
+    preloading_data->AddPreloadingPrediction(
+        ToPreloadingPredictor(
+            ChromePreloadingPredictor::kOmniboxDirectURLInput),
+        static_cast<int64_t>(confidence * 100), std::move(same_url_matcher));
   }
 
   return action;
@@ -221,10 +299,6 @@ AutocompleteActionPredictor::Action
 bool AutocompleteActionPredictor::IsPreconnectable(
     const AutocompleteMatch& match) {
   return AutocompleteMatch::IsSearchType(match.type);
-}
-
-bool AutocompleteActionPredictor::IsPrerenderAbandonedForTesting() {
-  return prerender_handle_ && prerender_handle_->IsAbandoned();
 }
 
 void AutocompleteActionPredictor::OnOmniboxOpenedUrl(const OmniboxLog& log) {
@@ -249,39 +323,65 @@ void AutocompleteActionPredictor::OnOmniboxOpenedUrl(const OmniboxLog& log) {
   if (!log.is_popup_open || log.is_paste_and_go)
     return;
 
-  // Abandon the current prerender. If it is to be used, it will be used very
-  // soon, so use the lower timeout.
-  if (prerender_handle_) {
-    prerender_handle_->OnNavigateAway();
-    // Don't release |prerender_handle_| so it is canceled if it survives to the
-    // next StartPrerendering call.
-  }
-
-  UMA_HISTOGRAM_BOOLEAN("Prerender.OmniboxNavigationsCouldPrerender",
-                        prerender::IsNoStatePrefetchEnabled());
-
   const AutocompleteMatch& match = log.result.match_at(log.selected_index);
   const GURL& opened_url = match.destination_url;
-  const base::string16 lower_user_text(base::i18n::ToLower(log.text));
 
-  // Traverse transitional matches for those that have a user_text that is a
-  // prefix of |lower_user_text|.
+  // Abandon the current prefetch. If it is to be used, it will be used very
+  // soon, so use the lower timeout.
+  if (no_state_prefetch_handle_) {
+    if (no_state_prefetch_handle_->prerender_url() == opened_url) {
+      if (no_state_prefetch_handle_->IsFinishedLoading()
+          // If the handle doesn't have its contents anymore we don't know if it
+          // complete successfully or not, but we know it's no longer active, so
+          // we log this as kHitFinished.
+          || !no_state_prefetch_handle_->contents()) {
+        base::UmaHistogramEnumeration(
+            "AutocompleteActionPredictor.NoStatePrefetchStatus",
+            PredictionStatus::kHitFinished);
+      } else {
+        base::UmaHistogramEnumeration(
+            "AutocompleteActionPredictor.NoStatePrefetchStatus",
+            PredictionStatus::kHitUnfinished);
+      }
+    } else {
+      base::UmaHistogramEnumeration(
+          "AutocompleteActionPredictor.NoStatePrefetchStatus",
+          PredictionStatus::kUnused);
+    }
+    no_state_prefetch_handle_->OnNavigateAway();
+    // Don't release |no_state_prefetch_handle_| so it is canceled if it
+    // survives to the next StartPrerendering call.
+  } else {
+    base::UmaHistogramEnumeration(
+        "AutocompleteActionPredictor.NoStatePrefetchStatus",
+        PredictionStatus::kNotStarted);
+  }
+
+  // Record the value if prerender for direct url input was not started. Other
+  // values (kHitFinished, kUnused, kCancelled) are recorded in
+  // PrerenderManager.
+  if (!direct_url_input_prerender_handle_) {
+    base::UmaHistogramEnumeration(
+        internal::kHistogramPrerenderPredictionStatusDirectUrlInput,
+        PrerenderPredictionStatus::kNotStarted);
+  }
+
+  UpdateDatabaseFromTransitionalMatches(opened_url);
+}
+
+void AutocompleteActionPredictor::UpdateDatabaseFromTransitionalMatches(
+    const GURL& opened_url) {
   std::vector<AutocompleteActionPredictorTable::Row> rows_to_add;
   std::vector<AutocompleteActionPredictorTable::Row> rows_to_update;
-
-  for (const TransitionalMatch& match : transitional_matches_) {
-    if (!base::StartsWith(lower_user_text, match.user_text,
-                          base::CompareCase::SENSITIVE))
-      continue;
-
-    DCHECK_GE(match.user_text.length(), kMinimumUserTextLength);
-    DCHECK_LE(match.user_text.length(), kMaximumStringLength);
+  for (const TransitionalMatch& transitional_match : transitional_matches_) {
+    DCHECK_GE(transitional_match.user_text.length(), kMinimumUserTextLength);
+    DCHECK_LE(transitional_match.user_text.length(), kMaximumStringLength);
     // Add entries to the database for those matches.
-    for (const GURL& url : match.urls) {
+    for (const GURL& url : transitional_match.urls) {
       DCHECK_LE(url.spec().length(), kMaximumStringLength);
 
-      const DBCacheKey key = {match.user_text, url};
-      const bool is_hit = (url == opened_url);
+      const DBCacheKey key = {transitional_match.user_text, url};
+      const bool is_hit = !opened_url.is_empty() && (url == opened_url);
 
       AutocompleteActionPredictorTable::Row row;
       row.user_text = key.user_text;
@@ -320,42 +420,6 @@ void AutocompleteActionPredictor::OnOmniboxOpenedUrl(const OmniboxLog& log) {
   }
 
   ClearTransitionalMatches();
-
-  // Check against tracked urls and log accuracy for the confidence we
-  // predicted.
-  for (const auto& url_and_confidence : tracked_urls_) {
-    if (opened_url == url_and_confidence.first) {
-      UMA_HISTOGRAM_COUNTS_100("AutocompleteActionPredictor.AccurateCount",
-                               url_and_confidence.second * 100);
-    }
-  }
-  tracked_urls_.clear();
-}
-
-void AutocompleteActionPredictor::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK_EQ(content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME, type);
-  CreateLocalCachesFromDatabase();
-  notification_registrar_.Remove(
-      this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-      content::NotificationService::AllSources());
-}
-
-void AutocompleteActionPredictor::CreateLocalCachesFromDatabase() {
-  // Create local caches using the database as loaded. We will garbage collect
-  // rows from the caches and the database once the history service is
-  // available.
-  auto rows =
-      std::make_unique<std::vector<AutocompleteActionPredictorTable::Row>>();
-  auto* rows_ptr = rows.get();
-  table_->GetTaskRunner()->PostTaskAndReply(
-      FROM_HERE,
-      base::BindOnce(&AutocompleteActionPredictorTable::GetAllRows, table_,
-                     rows_ptr),
-      base::BindOnce(&AutocompleteActionPredictor::CreateCaches, AsWeakPtr(),
-                     std::move(rows)));
 }
 
 void AutocompleteActionPredictor::DeleteAllRows() {
@@ -371,8 +435,8 @@ void AutocompleteActionPredictor::DeleteAllRows() {
                        table_));
   }
 
-  UMA_HISTOGRAM_ENUMERATION("AutocompleteActionPredictor.DatabaseAction",
-                            DATABASE_ACTION_DELETE_ALL, DATABASE_ACTION_COUNT);
+  base::UmaHistogramEnumeration("AutocompleteActionPredictor.DatabaseAction",
+                                DatabaseAction::kDeleteAll);
 }
 
 void AutocompleteActionPredictor::DeleteRowsFromCaches(
@@ -410,8 +474,8 @@ void AutocompleteActionPredictor::AddAndUpdateRows(
 
     db_cache_[key] = value;
     db_id_cache_[key] = it->id;
-    UMA_HISTOGRAM_ENUMERATION("AutocompleteActionPredictor.DatabaseAction",
-                              DATABASE_ACTION_ADD, DATABASE_ACTION_COUNT);
+    base::UmaHistogramEnumeration("AutocompleteActionPredictor.DatabaseAction",
+                                  DatabaseAction::kAdd);
   }
   for (auto it = rows_to_update.begin(); it != rows_to_update.end(); ++it) {
     const DBCacheKey key = { it->user_text, it->url };
@@ -422,8 +486,8 @@ void AutocompleteActionPredictor::AddAndUpdateRows(
 
     db_it->second.number_of_hits = it->number_of_hits;
     db_it->second.number_of_misses = it->number_of_misses;
-    UMA_HISTOGRAM_ENUMERATION("AutocompleteActionPredictor.DatabaseAction",
-                              DATABASE_ACTION_UPDATE, DATABASE_ACTION_COUNT);
+    base::UmaHistogramEnumeration("AutocompleteActionPredictor.DatabaseAction",
+                                  DatabaseAction::kUpdate);
   }
 
   if (table_.get()) {
@@ -456,7 +520,7 @@ void AutocompleteActionPredictor::CreateCaches(
                                            ServiceAccessType::EXPLICIT_ACCESS);
   if (history_service) {
     TryDeleteOldEntries(history_service);
-    history_service_observer_.Add(history_service);
+    history_service_observation_.Observe(history_service);
   }
 }
 
@@ -589,10 +653,12 @@ void AutocompleteActionPredictor::FinishInitialization() {
   CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   DCHECK(!initialized_);
   initialized_ = true;
+  for (Observer& obs : observers_)
+    obs.OnInitialized();
 }
 
 double AutocompleteActionPredictor::CalculateConfidence(
-    const base::string16& user_text,
+    const std::u16string& user_text,
     const AutocompleteMatch& match,
     bool* is_in_db) const {
   const DBCacheKey key = { user_text, match.destination_url };
@@ -620,7 +686,7 @@ double AutocompleteActionPredictor::CalculateConfidenceForDbEntry(
 }
 
 void AutocompleteActionPredictor::Shutdown() {
-  history_service_observer_.RemoveAll();
+  history_service_observation_.Reset();
 }
 
 void AutocompleteActionPredictor::OnURLsDeleted(
@@ -648,8 +714,8 @@ void AutocompleteActionPredictor::OnURLsDeleted(
                                   table_, std::move(id_list)));
   }
 
-  UMA_HISTOGRAM_ENUMERATION("AutocompleteActionPredictor.DatabaseAction",
-                            DATABASE_ACTION_DELETE_SOME, DATABASE_ACTION_COUNT);
+  base::UmaHistogramEnumeration("AutocompleteActionPredictor.DatabaseAction",
+                                DatabaseAction::kDeleteSome);
 }
 
 void AutocompleteActionPredictor::OnHistoryServiceLoaded(
@@ -658,11 +724,18 @@ void AutocompleteActionPredictor::OnHistoryServiceLoaded(
     TryDeleteOldEntries(history_service);
 }
 
-AutocompleteActionPredictor::TransitionalMatch::TransitionalMatch() {
+void AutocompleteActionPredictor::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
 }
 
+void AutocompleteActionPredictor::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
+AutocompleteActionPredictor::TransitionalMatch::TransitionalMatch() = default;
+
 AutocompleteActionPredictor::TransitionalMatch::TransitionalMatch(
-    const base::string16 in_user_text)
+    const std::u16string in_user_text)
     : user_text(in_user_text) {}
 
 AutocompleteActionPredictor::TransitionalMatch::TransitionalMatch(

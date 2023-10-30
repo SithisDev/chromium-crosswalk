@@ -1,17 +1,20 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_CREDENTIAL_PROVIDER_TEST_COM_FAKES_H_
 #define CHROME_CREDENTIAL_PROVIDER_TEST_COM_FAKES_H_
 
+#include "base/win/atl.h"
+
 #include <atlcomcli.h>
 #include <credentialprovider.h>
 #include <propkey.h>
 
+#include <string>
+#include <unordered_map>
 #include <vector>
 
-#include "base/strings/string16.h"
 #include "chrome/credential_provider/gaiacp/gaia_credential_provider.h"
 #include "chrome/credential_provider/gaiacp/gaia_credential_provider_i.h"
 #include "chrome/credential_provider/test/test_credential_provider.h"
@@ -44,8 +47,8 @@ class FakeCredentialProviderUser : public ICredentialProviderUser {
   HRESULT STDMETHODCALLTYPE GetValue(REFPROPERTYKEY key,
                                      PROPVARIANT* value) override;
 
-  base::string16 sid_;
-  base::string16 username_;
+  std::wstring sid_;
+  std::wstring username_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -94,6 +97,62 @@ class FakeCredentialProviderEvents : public ICredentialProviderEvents {
 
  private:
   bool did_change_ = false;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+
+// Fake OS imlpementation of ICredentialProviderEvents.
+class FakeCredentialProviderCredentialEvents
+    : public ICredentialProviderCredentialEvents {
+ public:
+  FakeCredentialProviderCredentialEvents();
+  virtual ~FakeCredentialProviderCredentialEvents();
+
+  // ICredentialProviderCredentialEvents
+  DECLARE_IUNKOWN_NOQI_WITH_REF()
+  IFACEMETHODIMP AppendFieldComboBoxItem(ICredentialProviderCredential* pcpc,
+                                         DWORD dwFieldID,
+                                         LPCWSTR pszItem) override;
+  IFACEMETHODIMP DeleteFieldComboBoxItem(ICredentialProviderCredential* pcpc,
+                                         DWORD dwFieldID,
+                                         DWORD dwItem) override;
+  IFACEMETHODIMP OnCreatingWindow(HWND* phwndOwner) override;
+  IFACEMETHODIMP SetFieldBitmap(ICredentialProviderCredential* pcpc,
+                                DWORD dwFieldID,
+                                HBITMAP hbmp) override;
+  IFACEMETHODIMP SetFieldCheckbox(ICredentialProviderCredential* pcpc,
+                                  DWORD dwFieldID,
+                                  BOOL bChecked,
+                                  LPCWSTR pszLabel) override;
+  IFACEMETHODIMP SetFieldComboBoxSelectedItem(
+      ICredentialProviderCredential* pcpc,
+      DWORD dwFieldID,
+      DWORD dwSelectedItem) override;
+  IFACEMETHODIMP SetFieldInteractiveState(
+      ICredentialProviderCredential* pcpc,
+      DWORD dwFieldID,
+      CREDENTIAL_PROVIDER_FIELD_INTERACTIVE_STATE cpfis) override;
+  IFACEMETHODIMP SetFieldState(ICredentialProviderCredential* pcpc,
+                               DWORD dwFieldID,
+                               CREDENTIAL_PROVIDER_FIELD_STATE cpfs) override;
+  IFACEMETHODIMP SetFieldString(ICredentialProviderCredential* pcpc,
+                                DWORD dwFieldID,
+                                LPCWSTR psz) override;
+  IFACEMETHODIMP SetFieldSubmitButton(ICredentialProviderCredential* pcpc,
+                                      DWORD dwFieldID,
+                                      DWORD dwAdjacentTo) override;
+  CREDENTIAL_PROVIDER_FIELD_STATE GetFieldState(
+      ICredentialProviderCredential* pcpc,
+      DWORD dwFieldID);
+  LPCWSTR GetFieldString(ICredentialProviderCredential* pcpc, DWORD dwFieldID);
+
+ private:
+  std::unordered_map<ICredentialProviderCredential*,
+                     std::unordered_map<DWORD, CREDENTIAL_PROVIDER_FIELD_STATE>>
+      field_states_;
+  std::unordered_map<ICredentialProviderCredential*,
+                     std::unordered_map<DWORD, std::wstring>>
+      field_string_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

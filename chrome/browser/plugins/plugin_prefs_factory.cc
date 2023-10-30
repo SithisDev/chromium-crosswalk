@@ -1,16 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/plugins/plugin_prefs_factory.h"
 
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
-#include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
-#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
@@ -35,9 +34,9 @@ PluginPrefsFactory::CreateForTestingProfile(content::BrowserContext* profile) {
 }
 
 PluginPrefsFactory::PluginPrefsFactory()
-    : RefcountedBrowserContextKeyedServiceFactory(
-          "PluginPrefs", BrowserContextDependencyManager::GetInstance()) {
-}
+    : RefcountedProfileKeyedServiceFactory(
+          "PluginPrefs",
+          ProfileSelections::BuildRedirectedInIncognito()) {}
 
 PluginPrefsFactory::~PluginPrefsFactory() {}
 
@@ -58,16 +57,9 @@ void PluginPrefsFactory::RegisterProfilePrefs(
   registry->RegisterFilePathPref(prefs::kPluginsLastInternalDirectory,
                                  internal_dir);
   registry->RegisterListPref(prefs::kPluginsPluginsList);
-  registry->RegisterListPref(prefs::kPluginsDisabledPlugins);
-  registry->RegisterListPref(prefs::kPluginsDisabledPluginsExceptions);
-  registry->RegisterListPref(prefs::kPluginsEnabledPlugins);
-  registry->RegisterBooleanPref(prefs::kPluginsAlwaysOpenPdfExternally, false, 
-                                user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-}
-
-content::BrowserContext* PluginPrefsFactory::GetBrowserContextToUse(
-    content::BrowserContext* context) const {
-  return chrome::GetBrowserContextRedirectedInIncognito(context);
+  registry->RegisterBooleanPref(
+      prefs::kPluginsAlwaysOpenPdfExternally, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 bool PluginPrefsFactory::ServiceIsNULLWhileTesting() const {

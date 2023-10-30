@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,19 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/developer_private/developer_private_api.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/web_contents_sizer.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -25,6 +27,7 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_dialog_auto_confirm.h"
@@ -37,10 +40,9 @@ using extensions::TestManagementPolicyProvider;
 ExtensionSettingsUIBrowserTest::ExtensionSettingsUIBrowserTest()
     : policy_provider_(TestManagementPolicyProvider::PROHIBIT_MODIFY_STATUS |
                        TestManagementPolicyProvider::MUST_REMAIN_ENABLED |
-                       TestManagementPolicyProvider::MUST_REMAIN_INSTALLED) {
-  CHECK(base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir_));
-  test_data_dir_ = test_data_dir_.AppendASCII("extensions");
-}
+                       TestManagementPolicyProvider::MUST_REMAIN_INSTALLED),
+      test_data_dir_(base::PathService::CheckedGet(chrome::DIR_TEST_DATA)
+                         .AppendASCII("extensions")) {}
 
 ExtensionSettingsUIBrowserTest::~ExtensionSettingsUIBrowserTest() {}
 
@@ -91,13 +93,9 @@ void ExtensionSettingsUIBrowserTest::AddManagedPolicyProvider() {
 }
 
 void ExtensionSettingsUIBrowserTest::SetAutoConfirmUninstall() {
-  uninstall_auto_confirm_.reset(new extensions::ScopedTestDialogAutoConfirm(
-      extensions::ScopedTestDialogAutoConfirm::ACCEPT));
-}
-
-void ExtensionSettingsUIBrowserTest::EnableErrorConsole() {
-  error_console_override_.reset(new extensions::FeatureSwitch::ScopedOverride(
-      extensions::FeatureSwitch::error_console(), true));
+  uninstall_auto_confirm_ =
+      std::make_unique<extensions::ScopedTestDialogAutoConfirm>(
+          extensions::ScopedTestDialogAutoConfirm::ACCEPT);
 }
 
 void ExtensionSettingsUIBrowserTest::SetDevModeEnabled(bool enabled) {
@@ -109,7 +107,13 @@ void ExtensionSettingsUIBrowserTest::ShrinkWebContentsView() {
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   CHECK(web_contents);
-  ResizeWebContents(web_contents, gfx::Rect(0, 0, 400, 400));
+  web_contents->Resize(gfx::Rect(0, 0, 400, 400));
+}
+
+void ExtensionSettingsUIBrowserTest::
+    SetSilenceDeprecatedManifestVersionWarnings(bool silence) {
+  Extension::set_silence_deprecated_manifest_version_warnings_for_testing(
+      silence);
 }
 
 const Extension* ExtensionSettingsUIBrowserTest::InstallExtension(
@@ -129,22 +133,22 @@ IN_PROC_BROWSER_TEST_F(ExtensionSettingsUIBrowserTest, ViewSource) {
   content::WebContents* options_contents = nullptr;
   {
     content::WebContentsAddedObserver options_contents_added_observer;
-    ui_test_utils::NavigateToURL(browser(), options_url);
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), options_url));
     options_contents = options_contents_added_observer.GetWebContents();
   }
   ASSERT_TRUE(options_contents);
-  content::WaitForLoadStop(options_contents);
+  EXPECT_TRUE(content::WaitForLoadStop(options_contents));
   EXPECT_EQ(extension->GetResourceURL("options.html"),
             options_contents->GetLastCommittedURL());
 
   // Open the view-source of the options page.
   int old_tabs_count = browser()->tab_strip_model()->count();
   content::WebContentsAddedObserver view_source_contents_added_observer;
-  options_contents->GetMainFrame()->ViewSource();
+  options_contents->GetPrimaryMainFrame()->ViewSource();
   content::WebContents* view_source_contents =
       view_source_contents_added_observer.GetWebContents();
   ASSERT_TRUE(view_source_contents);
-  content::WaitForLoadStop(view_source_contents);
+  EXPECT_TRUE(content::WaitForLoadStop(view_source_contents));
 
   // Verify that the view-source is present in the tab-strip.
   int new_tabs_count = browser()->tab_strip_model()->count();
@@ -201,7 +205,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSettingsUIBrowserTest, ListenerRegistration) {
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), GURL("chrome://extensions"),
       WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
 
   {
     SCOPED_TRACE("With page loaded");
@@ -210,7 +214,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSettingsUIBrowserTest, ListenerRegistration) {
 
   TabStripModel* tab_strip = browser()->tab_strip_model();
   tab_strip->CloseWebContentsAt(tab_strip->active_index(),
-                                TabStripModel::CLOSE_NONE);
+                                TabCloseTypes::CLOSE_NONE);
   base::RunLoop().RunUntilIdle();
   content::RunAllTasksUntilIdle();
 
@@ -222,10 +226,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionSettingsUIBrowserTest, ListenerRegistration) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionSettingsUIBrowserTest,
                        ActivityLogInactiveWithoutSwitch) {
-  // Navigate to chrome://extensions which is a whitelisted URL for the
+  // Navigate to chrome://extensions which is a allowlisted URL for the
   // chrome.activityLogPrivate API.
   GURL extensions_url("chrome://extensions");
-  ui_test_utils::NavigateToURL(browser(), extensions_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), extensions_url));
   content::WebContents* page_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(page_contents);
@@ -239,7 +243,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSettingsUIBrowserTest,
     )"));
 
   // Activity log will be inactive as the command line switch is not present and
-  // no whitelisted extensions for activityLogPrivate are enabled.
+  // no allowlisted extensions for activityLogPrivate are enabled.
   extensions::ActivityLog* activity_log =
       extensions::ActivityLog::GetInstance(browser()->profile());
   ASSERT_FALSE(activity_log->is_active());
@@ -259,13 +263,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionsActivityLogTest, TestActivityLogVisible) {
   test_data_dir = test_data_dir.AppendASCII("extensions");
   extensions::ChromeTestExtensionLoader loader(browser()->profile());
 
-  ExtensionTestMessageListener listener("ready", false);
+  ExtensionTestMessageListener listener("ready");
   scoped_refptr<const extensions::Extension> extension = loader.LoadExtension(
       test_data_dir.AppendASCII("activity_log/simple_call"));
   ASSERT_TRUE(listener.WaitUntilSatisfied());
 
   GURL activity_log_url("chrome://extensions/?activity=" + extension->id());
-  ui_test_utils::NavigateToURL(browser(), activity_log_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), activity_log_url));
   content::WebContents* activity_log_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(activity_log_contents);
@@ -287,8 +291,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionsActivityLogTest, TestActivityLogVisible) {
              manager.shadowRoot.querySelector('extensions-activity-log');
          let activityLogHistory =
              activityLog.shadowRoot.querySelector('activity-log-history');
-         activityLogHistory.whenDataFetched().then(() => {
-             Polymer.dom.flush();
+         const polymerPath =
+             'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+         Promise.all([
+           activityLogHistory.whenDataFetched(),
+           import(polymerPath),
+         ]).then((results) => {
+             const polymerModule = results[1];
+             polymerModule.flush();
              let item = activityLogHistory.shadowRoot.querySelector(
                  'activity-log-history-item');
              let activityKey = item.shadowRoot.getElementById('activity-key');

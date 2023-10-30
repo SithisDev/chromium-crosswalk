@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,12 @@
 #include <utility>
 #include <vector>
 
+#include "base/check.h"
 #include "base/containers/span.h"
-#include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
-#include "net/third_party/quiche/src/quic/core/quic_constants.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_constants.h"
 
 namespace media_router {
 namespace {
@@ -71,11 +71,12 @@ quic::QuicByteCount NetworkServiceQuicPacketWriter::GetMaxPacketSize(
   return quic::kMaxOutgoingPacketSize;
 }
 
-char* NetworkServiceQuicPacketWriter::GetNextWriteLocation(
+quic::QuicPacketBuffer NetworkServiceQuicPacketWriter::GetNextWriteLocation(
     const quic::QuicIpAddress& self_address,
     const quic::QuicSocketAddress& peer_address) {
-  // In PassThrough mode, this method isn't used and should return nullptr.
-  return nullptr;
+  // In PassThrough mode, this method isn't used and should return
+  // a null QuicPacketBuffer.
+  return {nullptr, nullptr};
 }
 
 void NetworkServiceQuicPacketWriter::SetWritable() {
@@ -86,6 +87,11 @@ void NetworkServiceQuicPacketWriter::SetWritable() {
 
   writable_ = true;
   UpdateIsWriteBlocked();
+}
+
+absl::optional<int> NetworkServiceQuicPacketWriter::MessageTooBigErrorCode()
+    const {
+  return net::ERR_MSG_TOO_BIG;
 }
 
 bool NetworkServiceQuicPacketWriter::SupportsReleaseTime() const {

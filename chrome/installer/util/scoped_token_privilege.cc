@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@ ScopedTokenPrivilege::ScopedTokenPrivilege(const wchar_t* privilege_name)
   token_.Set(temp_handle);
 
   LUID privilege_luid;
-  if (!::LookupPrivilegeValue(NULL, privilege_name, &privilege_luid)) {
+  if (!::LookupPrivilegeValue(nullptr, privilege_name, &privilege_luid)) {
     token_.Close();
     return;
   }
@@ -43,7 +43,7 @@ ScopedTokenPrivilege::ScopedTokenPrivilege(const wchar_t* privilege_name)
 ScopedTokenPrivilege::~ScopedTokenPrivilege() {
   if (is_enabled_ && previous_privileges_.PrivilegeCount != 0) {
     ::AdjustTokenPrivileges(token_.Get(), FALSE, &previous_privileges_,
-                            sizeof(TOKEN_PRIVILEGES), NULL, NULL);
+                            sizeof(TOKEN_PRIVILEGES), nullptr, nullptr);
   }
 }
 

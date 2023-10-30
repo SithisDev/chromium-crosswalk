@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,23 +6,27 @@ package org.chromium.chrome.browser.offlinepages;
 
 import android.app.Activity;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ActivityStateListener;
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.snackbar.SnackbarManager;
-import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.Tab.TabHidingType;
+import org.chromium.chrome.browser.tab.TabHidingType;
+import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.tabmodel.TabModelSelectorSupplier;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabModelObserver;
-import org.chromium.chrome.browser.tabmodel.TabSelectionType;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarController;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManagerProvider;
 import org.chromium.net.NetworkChangeNotifier;
+import org.chromium.ui.base.WindowAndroid;
+import org.chromium.url.GURL;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -73,13 +77,15 @@ public class OfflinePageTabObserver
     /** Current tab, kept track of for the network change notification. */
     private Tab mCurrentTab;
 
-    static OfflinePageTabObserver getObserverForActivity(ChromeActivity activity) {
+    private static OfflinePageTabObserver getObserverForWindowAndroid(WindowAndroid windowAndroid) {
         ensureObserverMapInitialized();
+        Activity activity = windowAndroid.getActivity().get();
         OfflinePageTabObserver observer = sObservers.get(activity);
         if (observer == null) {
-            observer = new OfflinePageTabObserver(activity.getTabModelSelector(),
-                    activity.getSnackbarManager(),
-                    createReloadSnackbarController(activity.getTabModelSelector()));
+            TabModelSelector tabModelSelector = TabModelSelectorSupplier.from(windowAndroid).get();
+            observer = new OfflinePageTabObserver(tabModelSelector,
+                    SnackbarManagerProvider.from(windowAndroid),
+                    createReloadSnackbarController(tabModelSelector));
             sObservers.put(activity, observer);
         }
         return observer;
@@ -110,7 +116,7 @@ public class OfflinePageTabObserver
      * @param tab The tab we are adding an observer for.
      */
     public static void addObserverForTab(Tab tab) {
-        OfflinePageTabObserver observer = getObserverForActivity(tab.getActivity());
+        OfflinePageTabObserver observer = getObserverForWindowAndroid(tab.getWindowAndroid());
         observer.startObservingTab(tab);
         observer.maybeShowReloadSnackbar(tab, false);
     }
@@ -140,7 +146,7 @@ public class OfflinePageTabObserver
 
     // Methods from EmptyTabObserver
     @Override
-    public void onPageLoadFinished(Tab tab, String url) {
+    public void onPageLoadFinished(Tab tab, GURL url) {
         Log.d(TAG, "onPageLoadFinished");
         if (isObservingTab(tab)) {
             mObservedTabs.get(tab.getId()).isLoaded = true;
@@ -293,7 +299,7 @@ public class OfflinePageTabObserver
     @VisibleForTesting
     void showReloadSnackbar(Tab tab) {
         OfflinePageUtils.showReloadSnackbar(
-                tab.getActivity(), mSnackbarManager, mSnackbarController, tab.getId());
+                tab.getContext(), mSnackbarManager, mSnackbarController, tab.getId());
     }
 
     @VisibleForTesting
@@ -327,7 +333,7 @@ public class OfflinePageTabObserver
                 RecordUserAction.record("OfflinePages.ReloadButtonClicked");
                 Tab foundTab = tabModelSelector.getTabById(tabId);
                 if (foundTab == null) return;
-                if (!OfflinePageUtils.isShowingTrustedOfflinePage(foundTab)) {
+                if (!OfflinePageUtils.isShowingTrustedOfflinePage(foundTab.getWebContents())) {
                     RecordUserAction.record("OfflinePages.ReloadButtonClickedViewingUntrustedPage");
                 }
                 // Delegates to Tab to reload the page. Tab will send the correct header in order to

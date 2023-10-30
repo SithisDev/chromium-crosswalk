@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include "base/callback.h"
 #include "base/mac/foundation_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 
 namespace image_writer {
@@ -34,8 +34,8 @@ class DiskUnmounterMac {
   // the |continuation| when complete.  This can be called from any thread.
   // The continuation will be run on the thread this object was created on.
   void Unmount(const std::string& device_path,
-               const base::Closure& success_continuation,
-               const base::Closure& failure_continuation);
+               base::OnceClosure success_continuation,
+               base::OnceClosure failure_continuation);
 
  private:
   // Handles disk-claimed callbacks.
@@ -56,8 +56,8 @@ class DiskUnmounterMac {
   void Error();
 
   scoped_refptr<base::SingleThreadTaskRunner> original_thread_;
-  base::Closure success_continuation_;
-  base::Closure failure_continuation_;
+  base::OnceClosure success_continuation_;
+  base::OnceClosure failure_continuation_;
 
   base::ScopedCFTypeRef<DADiskRef> disk_;
   base::ScopedCFTypeRef<DASessionRef> session_;

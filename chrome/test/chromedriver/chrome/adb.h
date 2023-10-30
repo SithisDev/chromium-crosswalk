@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,8 @@ class Adb {
   virtual Status ForwardPort(const std::string& device_serial,
                              const std::string& remote_abstract,
                              int* local_port_output) = 0;
+  virtual Status KillForwardPort(const std::string& device_serial,
+                                 int port) = 0;
   virtual Status SetCommandLineFile(const std::string& device_serial,
                                     const std::string& command_line_file,
                                     const std::string& exec_name,

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/observer_list.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/profiles/profile.h"
@@ -13,6 +14,8 @@
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper_observer.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/sad_tab.h"
+#include "chrome/browser/ui/webui/new_tab_page/new_tab_page_ui.h"
+#include "chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
@@ -31,9 +34,13 @@ bool IsNTP(content::WebContents* web_contents) {
   // the page does.
   content::NavigationEntry* entry =
       web_contents->GetController().GetLastCommittedEntry();
-  if (!entry)
+  if (!entry || entry->IsInitialEntry())
     entry = web_contents->GetController().GetVisibleEntry();
-  return (entry && NewTabUI::IsNewTab(entry->GetURL())) ||
+  if (!entry)
+    return false;
+  const GURL& url = entry->GetURL();
+  return NewTabUI::IsNewTab(url) || NewTabPageUI::IsNewTabPageOrigin(url) ||
+         NewTabPageThirdPartyUI::IsNewTabPageOrigin(url) ||
          search::NavEntryIsInstantNTP(web_contents, entry);
 }
 
@@ -45,9 +52,6 @@ BookmarkTabHelper::~BookmarkTabHelper() {
 }
 
 bool BookmarkTabHelper::ShouldShowBookmarkBar() const {
-  if (web_contents()->ShowingInterstitialPage())
-    return false;
-
   if (SadTab::ShouldShow(web_contents()->GetCrashedStatus()))
     return false;
 
@@ -57,7 +61,7 @@ bool BookmarkTabHelper::ShouldShowBookmarkBar() const {
   Profile* profile =
       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
   if (profile->IsGuestSession())
     return false;
 #endif
@@ -87,9 +91,10 @@ bool BookmarkTabHelper::HasObserver(BookmarkTabHelperObserver* observer) const {
 
 BookmarkTabHelper::BookmarkTabHelper(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
+      content::WebContentsUserData<BookmarkTabHelper>(*web_contents),
       is_starred_(false),
-      bookmark_model_(NULL),
-      bookmark_drag_(NULL) {
+      bookmark_model_(nullptr),
+      bookmark_drag_(nullptr) {
   bookmark_model_ = BookmarkModelFactory::GetForBrowserContext(
       web_contents->GetBrowserContext());
   if (bookmark_model_)
@@ -118,7 +123,8 @@ void BookmarkTabHelper::BookmarkModelLoaded(BookmarkModel* model,
 
 void BookmarkTabHelper::BookmarkNodeAdded(BookmarkModel* model,
                                           const BookmarkNode* parent,
-                                          size_t index) {
+                                          size_t index,
+                                          bool added_by_user) {
   UpdateStarredStateForCurrentURL();
 }
 
@@ -144,7 +150,7 @@ void BookmarkTabHelper::BookmarkNodeChanged(BookmarkModel* model,
 
 void BookmarkTabHelper::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (!navigation_handle->IsInMainFrame() ||
+  if (!navigation_handle->IsInPrimaryMainFrame() ||
       navigation_handle->IsSameDocument())
     return;
   UpdateStarredStateForCurrentURL();
@@ -152,20 +158,9 @@ void BookmarkTabHelper::DidStartNavigation(
 
 void BookmarkTabHelper::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (!navigation_handle->IsInMainFrame() || !navigation_handle->HasCommitted())
+  if (!navigation_handle->IsInPrimaryMainFrame())
     return;
   UpdateStarredStateForCurrentURL();
 }
 
-void BookmarkTabHelper::DidAttachInterstitialPage() {
-  // Interstitials are not necessarily starred just because the page that
-  // created them is, so star state has to track interstitial attach/detach if
-  // necessary.
-  UpdateStarredStateForCurrentURL();
-}
-
-void BookmarkTabHelper::DidDetachInterstitialPage() {
-  UpdateStarredStateForCurrentURL();
-}
-
-WEB_CONTENTS_USER_DATA_KEY_IMPL(BookmarkTabHelper)
+WEB_CONTENTS_USER_DATA_KEY_IMPL(BookmarkTabHelper);

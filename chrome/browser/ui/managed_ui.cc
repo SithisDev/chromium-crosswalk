@@ -1,107 +1,187 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/managed_ui.h"
 
+#include "base/feature_list.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+#include "chrome/browser/browser_features.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_process_platform_part.h"
+#include "chrome/browser/enterprise/browser_management/management_service_factory.h"
+#include "chrome/browser/enterprise/util/managed_browser_utils.h"
 #include "chrome/browser/policy/chrome_browser_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/management_ui_handler.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
+#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/webui/management/management_ui_handler.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/policy/core/browser/webui/policy_data_utils.h"
+#include "components/policy/core/common/cloud/machine_level_user_cloud_policy_manager.h"
+#include "components/policy/core/common/management/management_service.h"
+#include "components/policy/proto/device_management_backend.pb.h"
+#include "components/signin/public/identity_manager/account_info.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/demo_mode/demo_session.h"
-#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "components/user_manager/user_manager.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/login/demo_mode/demo_session.h"
+#include "chrome/browser/ash/policy/core/browser_policy_connector_ash.h"
+#include "chrome/browser/ash/policy/core/user_cloud_policy_manager_ash.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "ui/chromeos/devicetype_utils.h"
+#else
+#include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "components/policy/core/common/policy_loader_lacros.h"
 #endif
 
 namespace chrome {
 
-bool ShouldDisplayManagedUi(Profile* profile) {
-#if defined(OS_CHROMEOS)
-  // Don't show the UI in demo mode.
-  if (chromeos::DemoSession::IsDeviceInDemoMode())
-    return false;
+namespace {
 
-  // Don't show the UI for Unicorn accounts.
-  if (profile->IsSupervised())
-    return false;
-#endif
-
-  // This profile may have policies configured.
-  auto* profile_connector = profile->GetProfilePolicyConnector();
-  if (profile_connector->IsManaged())
-    return true;
-
-#if defined(OS_CHROMEOS)
-  // This session's primary user may also have policies, and those policies may
-  // not have per-profile support.
-  auto* primary_user = user_manager::UserManager::Get()->GetPrimaryUser();
-  if (primary_user) {
-    auto* primary_profile =
-        chromeos::ProfileHelper::Get()->GetProfileByUser(primary_user);
-    if (primary_profile) {
-      auto* primary_profile_connector =
-          primary_profile->GetProfilePolicyConnector();
-      if (primary_profile_connector->IsManaged())
-        return true;
-    }
-  }
-
-  // The machine may be enrolled, via Google Cloud or Active Directory.
-  auto* browser_connector =
-      g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  if (browser_connector->IsEnterpriseManaged())
-    return true;
+const policy::CloudPolicyManager* GetUserCloudPolicyManager(Profile* profile) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  return profile->GetUserCloudPolicyManagerAsh();
 #else
-  // There may be policies set in a platform-specific way (e.g. Windows
-  // Registry), or with machine level user cloud policies.
-  auto* browser_connector = g_browser_process->browser_policy_connector();
-  if (browser_connector->HasMachineLevelPolicies())
-    return true;
-#endif
-
-  return false;
+  return profile->GetUserCloudPolicyManager();
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
-base::string16 GetManagedUiMenuItemLabel(Profile* profile) {
-  std::string management_domain =
-      ManagementUIHandler::GetAccountDomain(profile);
+absl::optional<std::string> GetEnterpriseAccountDomain(Profile* profile) {
+  if (g_browser_process->profile_manager()) {
+    ProfileAttributesEntry* entry =
+        g_browser_process->profile_manager()
+            ->GetProfileAttributesStorage()
+            .GetProfileAttributesWithPath(profile->GetPath());
+    if (entry && !entry->GetHostedDomain().empty() &&
+        entry->GetHostedDomain() != kNoHostedDomainFound)
+      return entry->GetHostedDomain();
+  }
+
+  const std::string domain =
+      enterprise_util::GetDomainFromEmail(profile->GetProfileUserName());
+  // Heuristic for most common consumer Google domains -- these are not managed.
+  if (domain.empty() || domain == "gmail.com" || domain == "googlemail.com")
+    return absl::nullopt;
+  return domain;
+}
+
+}  // namespace
+
+bool ShouldDisplayManagedUi(Profile* profile) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Don't show the UI in demo mode.
+  if (ash::DemoSession::IsDeviceInDemoMode())
+    return false;
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  // Don't show the UI for Family Link accounts.
+  if (profile->IsChild())
+    return false;
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+
+  return enterprise_util::IsBrowserManaged(profile);
+}
+
+#if !BUILDFLAG(IS_ANDROID)
+std::u16string GetManagedUiMenuItemLabel(Profile* profile) {
+  absl::optional<std::string> manager = GetAccountManagerIdentity(profile);
+  if (!manager &&
+      base::FeatureList::IsEnabled(features::kFlexOrgManagementDisclosure)) {
+    manager = GetDeviceManagerIdentity();
+  }
 
   int string_id = IDS_MANAGED;
-  std::vector<base::string16> replacements;
-  if (!management_domain.empty()) {
+  std::vector<std::u16string> replacements;
+
+  if (manager) {
     string_id = IDS_MANAGED_BY;
-    replacements.push_back(base::UTF8ToUTF16(management_domain));
+    replacements.push_back(base::UTF8ToUTF16(*manager));
   }
 
   return l10n_util::GetStringFUTF16(string_id, replacements, nullptr);
 }
 
-base::string16 GetManagedUiWebUILabel(Profile* profile) {
-  std::string management_domain =
-      ManagementUIHandler::GetAccountDomain(profile);
+std::u16string GetManagedUiWebUILabel(Profile* profile) {
+  absl::optional<std::string> manager = GetAccountManagerIdentity(profile);
+  if (!manager &&
+      base::FeatureList::IsEnabled(features::kFlexOrgManagementDisclosure)) {
+    manager = GetDeviceManagerIdentity();
+  }
 
   int string_id = IDS_MANAGED_WITH_HYPERLINK;
-
-  std::vector<base::string16> replacements;
+  std::vector<std::u16string> replacements;
   replacements.push_back(base::UTF8ToUTF16(chrome::kChromeUIManagementURL));
-#if defined(OS_CHROMEOS)
-  replacements.push_back(ui::GetChromeOSDeviceName());
-#endif
-  if (!management_domain.empty()) {
+  if (manager) {
     string_id = IDS_MANAGED_BY_WITH_HYPERLINK;
-    replacements.push_back(base::UTF8ToUTF16(management_domain));
+    replacements.push_back(base::UTF8ToUTF16(*manager));
   }
 
   return l10n_util::GetStringFUTF16(string_id, replacements, nullptr);
+}
+#endif  // !BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+std::u16string GetDeviceManagedUiWebUILabel() {
+  int string_id = IDS_DEVICE_MANAGED_WITH_HYPERLINK;
+  std::vector<std::u16string> replacements;
+  replacements.push_back(base::UTF8ToUTF16(chrome::kChromeUIManagementURL));
+  replacements.push_back(ui::GetChromeOSDeviceName());
+
+  const absl::optional<std::string> device_manager = GetDeviceManagerIdentity();
+  if (device_manager && !device_manager->empty()) {
+    string_id = IDS_DEVICE_MANAGED_BY_WITH_HYPERLINK;
+    replacements.push_back(base::UTF8ToUTF16(*device_manager));
+  }
+
+  return l10n_util::GetStringFUTF16(string_id, replacements, nullptr);
+}
+#endif
+
+absl::optional<std::string> GetDeviceManagerIdentity() {
+  if (!policy::ManagementServiceFactory::GetForPlatform()->IsManaged())
+    return absl::nullopt;
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  policy::BrowserPolicyConnectorAsh* connector =
+      g_browser_process->platform_part()->browser_policy_connector_ash();
+  return connector->IsActiveDirectoryManaged()
+             ? connector->GetRealm()
+             : connector->GetEnterpriseDomainManager();
+#else
+  return policy::GetManagedBy(g_browser_process->browser_policy_connector()
+                                  ->machine_level_user_cloud_policy_manager());
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+}
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+absl::optional<std::string> GetSessionManagerIdentity() {
+  if (!policy::PolicyLoaderLacros::IsMainUserManaged())
+    return absl::nullopt;
+  return policy::PolicyLoaderLacros::main_user_policy_data()->managed_by();
+}
+#endif
+
+absl::optional<std::string> GetAccountManagerIdentity(Profile* profile) {
+  if (!policy::ManagementServiceFactory::GetForProfile(profile)
+           ->HasManagementAuthority(
+               policy::EnterpriseManagementAuthority::CLOUD))
+    return absl::nullopt;
+
+  const absl::optional<std::string> managed_by =
+      policy::GetManagedBy(GetUserCloudPolicyManager(profile));
+  if (managed_by)
+    return *managed_by;
+
+  return GetEnterpriseAccountDomain(profile);
 }
 
 }  // namespace chrome

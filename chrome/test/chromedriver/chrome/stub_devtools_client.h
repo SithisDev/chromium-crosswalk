@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,10 @@
 #include <memory>
 #include <string>
 
-#include "base/compiler_specific.h"
 #include "chrome/test/chromedriver/chrome/devtools_client.h"
 
 namespace base {
+class Value;
 class DictionaryValue;
 }
 
@@ -26,11 +26,15 @@ class StubDevToolsClient : public DevToolsClient {
 
   // Overridden from DevToolsClient:
   const std::string& GetId() override;
+  bool IsNull() const override;
   bool WasCrashed() override;
   Status ConnectIfNecessary() override;
   Status SendCommand(
       const std::string& method,
       const base::DictionaryValue& params) override;
+  Status SendCommandFromWebSocket(const std::string& method,
+                                  const base::DictionaryValue& params,
+                                  const int client_command_id) override;
   Status SendCommandWithTimeout(
       const std::string& method,
       const base::DictionaryValue& params,
@@ -38,15 +42,13 @@ class StubDevToolsClient : public DevToolsClient {
   Status SendAsyncCommand(
       const std::string& method,
       const base::DictionaryValue& params) override;
-  Status SendCommandAndGetResult(
-      const std::string& method,
-      const base::DictionaryValue& params,
-      std::unique_ptr<base::DictionaryValue>* result) override;
-  Status SendCommandAndGetResultWithTimeout(
-      const std::string& method,
-      const base::DictionaryValue& params,
-      const Timeout* timeout,
-      std::unique_ptr<base::DictionaryValue>* result) override;
+  Status SendCommandAndGetResult(const std::string& method,
+                                 const base::DictionaryValue& params,
+                                 base::Value* result) override;
+  Status SendCommandAndGetResultWithTimeout(const std::string& method,
+                                            const base::DictionaryValue& params,
+                                            const Timeout* timeout,
+                                            base::Value* result) override;
   Status SendCommandAndIgnoreResponse(
       const std::string& method,
       const base::DictionaryValue& params) override;
@@ -56,6 +58,10 @@ class StubDevToolsClient : public DevToolsClient {
   Status HandleReceivedEvents() override;
   void SetDetached() override;
   void SetOwner(WebViewImpl* owner) override;
+  WebViewImpl* GetOwner() const override;
+  DevToolsClient* GetRootClient() override;
+  DevToolsClient* GetParentClient() const override;
+  bool IsMainPage() const override;
 
  protected:
   const std::string id_;

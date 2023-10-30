@@ -10,41 +10,7 @@
   <link rel="stylesheet" href="chrome://resources/css/spinner.css">
   <link rel="stylesheet" href="bluetooth_internals.css">
 
-  <link rel="import" href="chrome://resources/html/action_link.html">
-  <link rel="import" href="chrome://resources/html/cr/ui.html">
-  <link rel="import" href="chrome://resources/html/cr/event_target.html">
-  <link rel="import" href="chrome://resources/html/cr/ui/array_data_model.html">
-  <link rel="import" href="chrome://resources/html/cr/ui/focus_outline_manager.html">
-  <link rel="import" href="chrome://resources/html/cr/ui/list_selection_controller.html">
-  <link rel="import" href="chrome://resources/html/cr/ui/list_selection_model.html">
-  <link rel="import" href="chrome://resources/html/cr/ui/list_item.html">
-  <link rel="import" href="chrome://resources/html/cr/ui/list.html">
-  <link rel="import" href="chrome://resources/html/cr/ui/overlay.html">
-  <link rel="import" href="chrome://resources/html/cr/ui/page_manager/page_manager.html">
-  <link rel="import" href="chrome://resources/html/cr/ui/page_manager/page.html">
-  <link rel="import" href="chrome://resources/html/util.html">
-  <link rel="import" href="chrome://resources/mojo/mojo/public/js/mojo_bindings_lite.html">
-
-  <script src="uuid.mojom-lite.js"></script>
-  <script src="device.mojom-lite.js"></script>
-  <script src="adapter.mojom-lite.js"></script>
-  <script src="bluetooth_internals.mojom-lite.js"></script>
-  <script src="snackbar.js"></script>
-  <script src="adapter_broker.js"></script>
-  <script src="device_broker.js"></script>
-  <script src="object_fieldset.js"></script>
-  <script src="value_control.js"></script>
-  <script src="expandable_list.js"></script>
-  <script src="characteristic_list.js"></script>
-  <script src="service_list.js"></script>
-  <script src="descriptor_list.js"></script>
-  <script src="adapter_page.js"></script>
-  <script src="device_collection.js"></script>
-  <script src="device_details_page.js"></script>
-  <script src="device_table.js"></script>
-  <script src="devices_page.js"></script>
-  <script src="sidebar.js"></script>
-  <script src="bluetooth_internals.js"></script>
+  <script type="module" src="main.js"></script>
 </head>
 
 <body>
@@ -63,6 +29,9 @@
         <button id="scan-btn">Start Scan</button>
       </div>
     </section>
+    <section id="debug" hidden>
+      <div class="header-extras" id="debug-container"></div>
+    </section>
   </div>
   <div id="snackbar-container"></div>
   <aside id="sidebar">
@@ -79,6 +48,9 @@
           <li data-page-name="devices">
             <button class="custom-appearance">Devices</button>
           </li>
+          <li data-page-name="debug" data-page-name="debug">
+            <button class="custom-appearance">Debug Logs</button>
+          </li>
         </ul>
       </nav>
     </section>
@@ -92,7 +64,8 @@
         <th data-field="nameForDisplay">Name</th>
         <th data-field="address">Address</th>
         <th data-field="rssi.value">Latest RSSI</th>
-        <th data-field="services.length">Services</th>
+        <th data-field="serviceUuids">Services</th>
+        <th data-field="manufacturerDataMap">Manufacturer Data</th>
         <th data-field="isGattConnected">GATT Connection State</th>
         <th></th>
       </tr>

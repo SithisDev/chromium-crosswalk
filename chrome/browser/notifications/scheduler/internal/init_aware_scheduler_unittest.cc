@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind_helpers.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/notifications/scheduler/public/notification_params.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -23,28 +24,29 @@ namespace {
 class MockNotificationScheduler : public NotificationScheduler {
  public:
   MockNotificationScheduler() = default;
+  MockNotificationScheduler(const MockNotificationScheduler&) = delete;
+  MockNotificationScheduler& operator=(const MockNotificationScheduler&) =
+      delete;
   ~MockNotificationScheduler() override = default;
 
   MOCK_METHOD1(Init, void(InitCallback));
   MOCK_METHOD1(Schedule, void(std::unique_ptr<NotificationParams>));
   MOCK_METHOD1(DeleteAllNotifications, void(SchedulerClientType type));
-  MOCK_METHOD2(GetImpressionDetail,
+  MOCK_METHOD2(GetClientOverview,
                void(SchedulerClientType type,
-                    ImpressionDetail::ImpressionDetailCallback callback));
-  MOCK_METHOD2(OnStartTask, void(SchedulerTaskTime, TaskFinishedCallback));
-  MOCK_METHOD1(OnStopTask, void(SchedulerTaskTime));
-  MOCK_METHOD2(OnClick, void(SchedulerClientType, const std::string&));
-  MOCK_METHOD3(OnActionClick,
-               void(SchedulerClientType, const std::string&, ActionButtonType));
-  MOCK_METHOD2(OnDismiss, void(SchedulerClientType, const std::string&));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockNotificationScheduler);
+                    ClientOverview::ClientOverviewCallback callback));
+  MOCK_METHOD1(OnStartTask, void(TaskFinishedCallback));
+  MOCK_METHOD0(OnStopTask, void());
+  MOCK_METHOD1(OnUserAction, void(const UserActionData&));
 };
 
 class InitAwareNotificationSchedulerTest : public testing::Test {
  public:
   InitAwareNotificationSchedulerTest() : scheduler_impl_(nullptr) {}
+  InitAwareNotificationSchedulerTest(
+      const InitAwareNotificationSchedulerTest&) = delete;
+  InitAwareNotificationSchedulerTest& operator=(
+      const InitAwareNotificationSchedulerTest&) = delete;
   ~InitAwareNotificationSchedulerTest() override = default;
 
   void SetUp() override {
@@ -67,11 +69,9 @@ class InitAwareNotificationSchedulerTest : public testing::Test {
   MockNotificationScheduler* scheduler_impl() { return scheduler_impl_; }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-  MockNotificationScheduler* scheduler_impl_;
+  base::test::TaskEnvironment task_environment_;
+  raw_ptr<MockNotificationScheduler> scheduler_impl_;
   std::unique_ptr<NotificationScheduler> init_aware_scheduler_;
-
-  DISALLOW_COPY_AND_ASSIGN(InitAwareNotificationSchedulerTest);
 };
 
 // Checks std::unique_ptr<NotificationParams> has specific guid.

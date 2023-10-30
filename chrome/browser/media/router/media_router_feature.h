@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,9 @@
 #define CHROME_BROWSER_MEDIA_ROUTER_MEDIA_ROUTER_FEATURE_H_
 
 #include "base/feature_list.h"
+#include "base/time/time.h"
+#include "build/build_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class PrefRegistrySimple;
 class PrefService;
@@ -19,27 +22,37 @@ namespace media_router {
 // Returns true if Media Router is enabled for |context|.
 bool MediaRouterEnabled(content::BrowserContext* context);
 
-#if !defined(OS_ANDROID)
+// Clears stored prefs so they don't leak between tests running in the same
+// process.
+void ClearMediaRouterStoredPrefsForTesting();
 
-extern const base::Feature kDialMediaRouteProvider;
-// TODO(crbug.com/969091): This feature is now enabled by default, and the flag
-// should be removed.
-extern const base::Feature kEnableCastDiscovery;
-extern const base::Feature kCastMediaRouteProvider;
+#if !BUILDFLAG(IS_ANDROID)
+
+// Enables the media router. Can be disabled in tests unrelated to
+// Media Router where it interferes. Can also be useful to disable for local
+// development on Mac because DIAL local discovery opens a local port
+// and triggers a permission prompt.
+extern const base::Feature kMediaRouter;
+
 // If enabled, allows Media Router to connect to Cast devices on all IP
 // addresses, not just RFC1918/RFC4193 private addresses. Workaround for
 // https://crbug.com/813974.
 extern const base::Feature kCastAllowAllIPsFeature;
 
-namespace prefs {
-// Pref name for the enterprise policy for allowing Cast devices on all IPs.
-constexpr char kMediaRouterCastAllowAllIPs[] =
-    "media_router.cast_allow_all_ips";
-// Pref name for the per-profile randomly generated token to include with the
-// hash when externalizing MediaSink IDs.
-constexpr char kMediaRouterReceiverIdHashToken[] =
-    "media_router.receiver_id_hash_token";
-}  // namespace prefs
+// Determine whether global media controls are used to start and stop casting.
+extern const base::Feature kGlobalMediaControlsCastStartStop;
+
+// If enabled, allows all websites to request to start mirroring via
+// Presentation API. If disabled, only the allowlisted sites can do so.
+extern const base::Feature kAllowAllSitesToInitiateMirroring;
+
+// If enabled, HTTP requests for DIAL can only be made to URLs that contain the
+// target device IP address.
+// TODO(crbug.com/1270509): Remove this base::Feature once fully launched.
+extern const base::Feature kDialEnforceUrlIPAddress;
+
+// If enabled, users can request Media Remoting without fullscreen-in-tab.
+extern const base::Feature kMediaRemotingWithoutFullscreen;
 
 // Registers |kMediaRouterCastAllowAllIPs| with local state pref |registry|.
 void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
@@ -56,26 +69,15 @@ bool GetCastAllowAllIPsPref(PrefService* pref_service);
 // randomly generated string and stored in |pref_service|.
 std::string GetReceiverIdHashToken(PrefService* pref_service);
 
-// Returns true if browser side DIAL Media Route Provider is enabled.
+// Returns true if support for DIAL devices is enabled.  Disabling DIAL support
+// also disables SSDP-based discovery for Cast devices.
 bool DialMediaRouteProviderEnabled();
 
-// Returns true if browser side Cast discovery is enabled.
-bool CastDiscoveryEnabled();
+// Returns true if global media controls are used to start and stop casting and
+// Media Router is enabled for |context|.
+bool GlobalMediaControlsCastStartStopEnabled(content::BrowserContext* context);
 
-// Returns true if browser side Cast Media Route Provider and sink query are
-// enabled.
-bool CastMediaRouteProviderEnabled();
-
-// Returns true if the Views implementation of the Cast dialog should be used.
-// Returns false if the WebUI implementation should be used.
-// TODO(crbug.com/969098): The feature is now enabled by default. Remove this
-// function.
-bool ShouldUseViewsDialog();
-
-// Returns true if Mirroring Service should be used for mirroring.
-bool ShouldUseMirroringService();
-
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace media_router
 

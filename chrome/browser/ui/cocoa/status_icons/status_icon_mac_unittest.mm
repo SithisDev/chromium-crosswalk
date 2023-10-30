@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@ TEST_F(StatusIconMacTest, Create) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   gfx::ImageSkia* image = rb.GetImageSkiaNamed(IDR_STATUS_TRAY_ICON);
   icon->SetImage(*image);
-  icon->SetToolTip(base::ASCIIToUTF16("tool tip"));
+  icon->SetToolTip(u"tool tip");
 }
 
 TEST_F(StatusIconMacTest, CreateMenu) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,6 @@
 
 #include <CoreServices/CoreServices.h>
 
-#include "base/files/file_path.h"
-#include "base/strings/string16.h"
 #include "base/strings/stringize_macros.h"
 
 #ifdef __OBJC__
@@ -43,24 +41,23 @@ constexpr mach_msg_id_t kBootstrapMsgId = 'apps';
 // of the full profile directory path.
 extern const char kAppShimBootstrapNameFragment[];
 
-// TODO(rsesek): Delete this after ensuring the file has been cleaned up.
-// The name of a file placed in the profile directory to indicate that app
-// shims should connect over Mach IPC rather than a UNIX domain socket. If
-// a file named this does not exist, app shims will fall back to the UNIX
-// domain socket.
-extern const char kMojoChannelMacSignalFile[];
-
 // A symlink used to store the version string of the currently running Chrome.
 // The shim will read this to determine which version of the framework to load.
 extern const char kRunningChromeVersionSymlinkName[];
-
-// Special app mode id used for the App Launcher.
-extern const char kAppListModeId[];
 
 // The process ID of the Chrome process that launched the app shim.
 // The presence of this switch instructs the app shim to send LaunchApp with
 // launch_now = false. This associates the shim without launching the app.
 extern const char kLaunchedByChromeProcessId[];
+
+// The main bundle path of the Chrome process that launched the app shim.
+extern const char kLaunchedByChromeBundlePath[];
+
+// The framework bundle path of the Chrome process that launched the app shim.
+extern const char kLaunchedByChromeFrameworkBundlePath[];
+
+// The framework dylib path of the Chrome process that launched the app shim.
+extern const char kLaunchedByChromeFrameworkDylibPath[];
 
 // Indicates to the shim that it was launched for a test, so don't attempt to
 // launch Chrome.
@@ -81,6 +78,9 @@ extern NSString* const kCFBundleTypeIconFileKey;
 extern NSString* const kCFBundleTypeNameKey;
 extern NSString* const kCFBundleTypeMIMETypesKey;
 extern NSString* const kCFBundleTypeRoleKey;
+extern NSString* const kCFBundleURLNameKey;
+extern NSString* const kCFBundleURLSchemesKey;
+extern NSString* const kCFBundleURLTypesKey;
 extern NSString* const kBundleTypeRoleViewer;
 
 // The display name of the bundle as shown in Finder and the Dock. For localized

@@ -1,14 +1,16 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.password_manager;
 
 import android.content.Context;
-import android.support.annotation.Nullable;
+import android.text.InputType;
 import android.util.AttributeSet;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.chrome.R;
 
@@ -37,6 +39,9 @@ public class PasswordGenerationDialogCustomView extends LinearLayout {
 
     public void setGeneratedPassword(String generatedPassword) {
         mGeneratedPasswordTextView.setText(generatedPassword);
+        mGeneratedPasswordTextView.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
     }
 
     public void setSaveExplanationText(String saveExplanationText) {

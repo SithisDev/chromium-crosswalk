@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,17 +90,13 @@ void AddStatusCode(ThirdPartyStatus code) {
 // Public defines & functions
 //------------------------------------------------------------------------------
 
-bool IsThirdPartyInitialized() {
-  return g_third_party_initialized;
-}
-
 bool Init() {
   // Debug check: Init should not be called more than once.
   assert(!g_third_party_initialized);
 
   // Sanity check: third_party_dlls should only be enabled in the browser
   // process at this time.
-  if (install_static::IsNonBrowserProcess())
+  if (!install_static::IsBrowserProcess())
     return false;
 
   // Zero tolerance for unsupported versions of Windows.  Third-party control
@@ -155,3 +151,7 @@ void AddStatusCodeForTesting(ThirdPartyStatus code) {
 }
 
 }  // namespace third_party_dlls
+
+bool IsThirdPartyInitialized() {
+  return third_party_dlls::g_third_party_initialized;
+}

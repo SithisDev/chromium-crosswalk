@@ -1,11 +1,11 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_GLOW_HOVER_CONTROLLER_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_GLOW_HOVER_CONTROLLER_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/tabs/tab_style.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/views/animation/animation_delegate_views.h"
@@ -29,6 +29,8 @@ class View;
 class GlowHoverController : public views::AnimationDelegateViews {
  public:
   explicit GlowHoverController(views::View* view);
+  GlowHoverController(const GlowHoverController&) = delete;
+  GlowHoverController& operator=(const GlowHoverController&) = delete;
   ~GlowHoverController() override;
 
   // Sets the AnimationContainer used by the animation.
@@ -64,7 +66,7 @@ class GlowHoverController : public views::AnimationDelegateViews {
 
  private:
   // View we're drawing to.
-  views::View* view_;
+  raw_ptr<views::View> view_;
 
   // Opacity of the glow ramps up over time.
   gfx::SlideAnimation animation_;
@@ -73,8 +75,6 @@ class GlowHoverController : public views::AnimationDelegateViews {
   gfx::Point location_;
   double opacity_scale_;
   double subtle_opacity_scale_;
-
-  DISALLOW_COPY_AND_ASSIGN(GlowHoverController);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TABS_GLOW_HOVER_CONTROLLER_H_

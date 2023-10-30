@@ -1,11 +1,14 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/notifications/web_page_notifier_controller.h"
 
+#include <memory>
+
 #include "ash/public/cpp/notifier_metadata.h"
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -13,6 +16,7 @@
 #include "chrome/browser/notifications/notification_permission_context.h"
 #include "chrome/browser/notifications/notifier_state_tracker.h"
 #include "chrome/browser/notifications/notifier_state_tracker_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/favicon/core/favicon_service.h"
@@ -28,13 +32,12 @@ std::vector<ash::NotifierMetadata> WebPageNotifierController::GetNotifierList(
 
   ContentSettingsForOneType settings;
   HostContentSettingsMapFactory::GetForProfile(profile)->GetSettingsForOneType(
-      CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
-      content_settings::ResourceIdentifier(), &settings);
+      ContentSettingsType::NOTIFICATIONS, &settings);
 
   favicon::FaviconService* const favicon_service =
       FaviconServiceFactory::GetForProfile(profile,
                                            ServiceAccessType::EXPLICIT_ACCESS);
-  favicon_tracker_.reset(new base::CancelableTaskTracker());
+  favicon_tracker_ = std::make_unique<base::CancelableTaskTracker>();
   patterns_.clear();
   for (ContentSettingsForOneType::const_iterator iter = settings.begin();
        iter != settings.end(); ++iter) {
@@ -45,14 +48,14 @@ std::vector<ash::NotifierMetadata> WebPageNotifierController::GetNotifierList(
     }
 
     std::string url_pattern = iter->primary_pattern.ToString();
-    base::string16 name = base::UTF8ToUTF16(url_pattern);
+    std::u16string name = base::UTF8ToUTF16(url_pattern);
     GURL url(url_pattern);
     message_center::NotifierId notifier_id(url);
     NotifierStateTracker* const notifier_state_tracker =
         NotifierStateTrackerFactory::GetForProfile(profile);
     content_settings::SettingInfo info;
     HostContentSettingsMapFactory::GetForProfile(profile)->GetWebsiteSetting(
-        url, GURL(), CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string(), &info);
+        url, GURL(), ContentSettingsType::NOTIFICATIONS, &info);
     notifiers.emplace_back(
         notifier_id, name,
         notifier_state_tracker->IsNotifierEnabled(notifier_id),
@@ -64,8 +67,8 @@ std::vector<ash::NotifierMetadata> WebPageNotifierController::GetNotifierList(
     // that URL.
     favicon_service->GetFaviconImageForPageURL(
         url,
-        base::Bind(&WebPageNotifierController::OnFaviconLoaded,
-                   base::Unretained(this), url),
+        base::BindOnce(&WebPageNotifierController::OnFaviconLoaded,
+                       base::Unretained(this), url),
         favicon_tracker_.get());
   }
 
@@ -81,7 +84,8 @@ void WebPageNotifierController::SetNotifierEnabled(
   // TODO(mukai): fix this.
   ContentSetting default_setting =
       HostContentSettingsMapFactory::GetForProfile(profile)
-          ->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_NOTIFICATIONS, NULL);
+          ->GetDefaultContentSetting(ContentSettingsType::NOTIFICATIONS,
+                                     nullptr);
 
   DCHECK(default_setting == CONTENT_SETTING_ALLOW ||
          default_setting == CONTENT_SETTING_BLOCK ||
@@ -124,8 +128,7 @@ void WebPageNotifierController::SetNotifierEnabled(
       HostContentSettingsMapFactory::GetForProfile(profile)
           ->SetContentSettingCustomScope(
               pattern, ContentSettingsPattern::Wildcard(),
-              CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
-              content_settings::ResourceIdentifier(), CONTENT_SETTING_DEFAULT);
+              ContentSettingsType::NOTIFICATIONS, CONTENT_SETTING_DEFAULT);
     }
   }
 

@@ -1,10 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/test/integration/migration_waiter.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "chrome/browser/sync/test/integration/migration_watcher.h"
 
 MigrationWaiter::MigrationWaiter(syncer::ModelTypeSet expected_types,
@@ -20,15 +20,12 @@ MigrationWaiter::~MigrationWaiter() {
 
 // Returns true when sync reports that there is no pending migration, and
 // migration is complete for all data types in |expected_types_|.
-bool MigrationWaiter::IsExitConditionSatisfied() {
+bool MigrationWaiter::IsExitConditionSatisfied(std::ostream* os) {
+  *os << "Waiting to migrate (" + ModelTypeSetToDebugString(expected_types_) +
+             "); " + "Currently migrated: (" +
+             ModelTypeSetToDebugString(watcher_->GetMigratedTypes()) + ")";
   return watcher_->GetMigratedTypes().HasAll(expected_types_) &&
          !watcher_->HasPendingBackendMigration();
-}
-
-std::string MigrationWaiter::GetDebugMessage() const {
-  return "Waiting to migrate (" + ModelTypeSetToString(expected_types_) +
-         "); " + "Currently migrated: (" +
-         ModelTypeSetToString(watcher_->GetMigratedTypes()) + ")";
 }
 
 void MigrationWaiter::OnMigrationStateChange() {

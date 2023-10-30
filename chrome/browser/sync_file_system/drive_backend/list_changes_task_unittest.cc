@@ -1,17 +1,18 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync_file_system/drive_backend/list_changes_task.h"
 
 #include <stddef.h>
+
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_constants.h"
@@ -22,8 +23,9 @@
 #include "chrome/browser/sync_file_system/drive_backend/sync_engine_initializer.h"
 #include "chrome/browser/sync_file_system/drive_backend/sync_task_manager.h"
 #include "chrome/browser/sync_file_system/sync_file_system_test_util.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "google_apis/drive/drive_api_parser.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/leveldb_chrome.h"
 
@@ -40,7 +42,11 @@ const char kUnregisteredAppID[] = "app_id unregistered";
 class ListChangesTaskTest : public testing::Test {
  public:
   ListChangesTaskTest()
-      : browser_threads_(content::TestBrowserThreadBundle::IO_MAINLOOP) {}
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP) {}
+
+  ListChangesTaskTest(const ListChangesTaskTest&) = delete;
+  ListChangesTaskTest& operator=(const ListChangesTaskTest&) = delete;
+
   ~ListChangesTaskTest() override {}
 
   void SetUp() override {
@@ -52,22 +58,21 @@ class ListChangesTaskTest : public testing::Test {
 
     std::unique_ptr<drive::DriveUploaderInterface> drive_uploader(
         new drive::DriveUploader(fake_drive_service.get(),
-                                 base::ThreadTaskRunnerHandle::Get(), nullptr));
+                                 base::ThreadTaskRunnerHandle::Get(),
+                                 mojo::NullRemote()));
 
-    fake_drive_service_helper_.reset(
-        new FakeDriveServiceHelper(fake_drive_service.get(),
-                                   drive_uploader.get(),
-                                   kSyncRootFolderTitle));
+    fake_drive_service_helper_ = std::make_unique<FakeDriveServiceHelper>(
+        fake_drive_service.get(), drive_uploader.get(), kSyncRootFolderTitle);
 
-    sync_task_manager_.reset(new SyncTaskManager(
+    sync_task_manager_ = std::make_unique<SyncTaskManager>(
         base::WeakPtr<SyncTaskManager::Client>(),
-        10 /* maximum_background_task */, base::ThreadTaskRunnerHandle::Get()));
+        10 /* maximum_background_task */, base::ThreadTaskRunnerHandle::Get());
     sync_task_manager_->Initialize(SYNC_STATUS_OK);
 
-    context_.reset(new SyncEngineContext(
+    context_ = std::make_unique<SyncEngineContext>(
         std::move(fake_drive_service), std::move(drive_uploader),
         nullptr /* task_logger */, base::ThreadTaskRunnerHandle::Get(),
-        base::ThreadTaskRunnerHandle::Get()));
+        base::ThreadTaskRunnerHandle::Get());
 
     SetUpRemoteFolders();
 
@@ -172,8 +177,8 @@ class ListChangesTaskTest : public testing::Test {
     sync_task_manager_->ScheduleSyncTask(
         FROM_HERE, std::unique_ptr<SyncTask>(initializer),
         SyncTaskManager::PRIORITY_MED,
-        base::Bind(&ListChangesTaskTest::DidInitializeMetadataDatabase,
-                   base::Unretained(this), initializer, &status));
+        base::BindOnce(&ListChangesTaskTest::DidInitializeMetadataDatabase,
+                       base::Unretained(this), initializer, &status));
 
     base::RunLoop().RunUntilIdle();
 
@@ -199,15 +204,13 @@ class ListChangesTaskTest : public testing::Test {
   std::string app_root_folder_id_;
   std::string unregistered_app_root_folder_id_;
 
-  content::TestBrowserThreadBundle browser_threads_;
+  content::BrowserTaskEnvironment task_environment_;
   base::ScopedTempDir database_dir_;
 
   std::unique_ptr<SyncEngineContext> context_;
   std::unique_ptr<FakeDriveServiceHelper> fake_drive_service_helper_;
 
   std::unique_ptr<SyncTaskManager> sync_task_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(ListChangesTaskTest);
 };
 
 TEST_F(ListChangesTaskTest, NoChange) {

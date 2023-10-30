@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 'use strict';
@@ -14,7 +14,7 @@ IMEBase.prototype = {
   onFocus: function(context) {},
   onBlur: function(contextID) {},
   onInputContextUpdate: function(context) {},
-  onKeyEvent: function(context, engine, keyData) { return false; },
+  onKeyEvent: function(context, engine, keyData, requestID) { return false; },
   onCandidateClicked: function(candidateID, button) {},
   onMenuItemActivated: function(name) {},
   onSurroundingTextChanged: function(text, focus, anchor, offset) {},
@@ -39,9 +39,11 @@ ToUpperIME.prototype = new IMEBase();
  * @param {Object} context A context object passed from input.ime.onFocus.
  * @param {string} engine An engine ID.
  * @param {Object} keyData A keyevent object passed from input.ime.onKeyEvent.
+ * @param {string} requestID A unique ID for this key event.
  * @return {boolean} True on the key event is consumed.
  **/
-ToUpperIME.prototype.onKeyEvent = function(context, engine, keyData) {
+ToUpperIME.prototype.onKeyEvent = function(context, engine, keyData, requestID)
+{
   if (keyData.type == 'keydown' && /^[a-zA-Z]$/.test(keyData.key)) {
     chrome.input.ime.commitText({
       contextID: context.contextID,
@@ -58,25 +60,38 @@ ToUpperIME.prototype.onKeyEvent = function(context, engine, keyData) {
  */
 var APIArgumentIME = function() {};
 APIArgumentIME.prototype = new IMEBase();
+APIArgumentIME.prototype.nextRequestID_ = 1;
 
 /**
  * @param {Object} context A context object passed from input.ime.onFocus.
  * @param {string} engine An engine ID.
  * @param {Object} keyData A keyevent object passed from input.ime.onKeyEvent.
+ * @param {string} requestID A unique ID for this key event.
  * @return {boolean} True on the key event is consumed.
  **/
-APIArgumentIME.prototype.onKeyEvent = function(context, engine, keyData) {
+APIArgumentIME.prototype.onKeyEvent = function(context, engine, keyData,
+    requestID)
+{
   chrome.test.sendMessage('onKeyEvent:' +
                           (keyData.extensionId || '') + ':' +
+                          (requestID === String(this.nextRequestID_)) + ':' +
                           keyData.type + ':' +
                           keyData.key + ':' +
                           keyData.code + ':' +
                           keyData.ctrlKey + ':' +
                           keyData.altKey + ':' +
+                          keyData.altgrKey + ':' +
                           keyData.shiftKey + ':' +
                           keyData.capsLock);
+  this.nextRequestID_++;
   return false;
 };
+
+chrome.input.ime.onAssistiveWindowButtonClicked.addListener(
+    function(details) {
+      chrome.test.sendMessage(
+        `${details.buttonID} button in ${details.windowType} window clicked`);
+    });
 
 /**
  * This class listens the event from chrome.input.ime and forwards it to the
@@ -177,11 +192,11 @@ EngineBridge.prototype = {
    * @this EngineBridge
    * @return {boolean} True on the key event is consumed.
    **/
-  onKeyEvent_: function(engineID, keyData) {
+  onKeyEvent_: function(engineID, keyData, requestID) {
     chrome.test.sendMessage('onKeyEvent');
     if (this.engineInstance_[engineID])
       return this.engineInstance_[engineID].onKeyEvent(
-          this.focusedContext_, this.activeEngine_, keyData);
+          this.focusedContext_, this.activeEngine_, keyData, requestID);
     return false;
   },
 

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@ import android.content.Intent;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
+import org.chromium.base.CommandLine;
 import org.chromium.chrome.browser.vr.TestVrShellDelegate;
 import org.chromium.chrome.browser.vr.rules.XrActivityRestriction.SupportedActivity;
 import org.chromium.chrome.browser.vr.util.VrTestRuleUtils;
@@ -42,12 +43,7 @@ public class WebappActivityVrTestRule extends WebappActivityTestRule implements 
 
     @Override
     public boolean isDonEnabled() {
-        return mDonEnabled;
-    }
-
-    @Override
-    public void setDonEnabled(boolean isEnabled) {
-        mDonEnabled = isEnabled;
+        return CommandLine.getInstance().hasSwitch("vr-don-enabled");
     }
 
     @Override

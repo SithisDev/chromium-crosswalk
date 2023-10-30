@@ -1,10 +1,18 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import httplib
+import http.client
 import json
-from urlparse import urlparse
+import os
+import sys
+from urllib.parse import urlparse
+
+_THIS_DIR = os.path.abspath(os.path.dirname(__file__))
+_PARENT_DIR = os.path.join(_THIS_DIR, os.pardir)
+sys.path.insert(1, _PARENT_DIR)
+import util
+sys.path.remove(_PARENT_DIR)
 
 class _Method(object):
   GET = 'GET'
@@ -37,6 +45,8 @@ class Command(object):
   SCREENSHOT = (_Method.GET, '/session/:sessionId/screenshot')
   ELEMENT_SCREENSHOT = (
       _Method.GET, '/session/:sessionId/element/:id/screenshot')
+  FULL_PAGE_SCREENSHOT = (_Method.GET, '/session/:sessionId/screenshot/full')
+  PRINT = (_Method.POST, '/session/:sessionId/print')
   SET_BROWSER_VISIBLE = (_Method.POST, '/session/:sessionId/visible')
   IS_BROWSER_VISIBLE = (_Method.GET, '/session/:sessionId/visible')
   FIND_ELEMENT = (_Method.POST, '/session/:sessionId/element')
@@ -69,6 +79,16 @@ class Command(object):
       _Method.GET, '/session/:sessionId/element/:id/attribute/:name')
   GET_ELEMENT_PROPERTY = (
       _Method.GET, '/session/:sessionId/element/:id/property/:name')
+  GET_ELEMENT_COMPUTED_LABEL = (
+      _Method.GET, '/session/:sessionId/element/:id/computedlabel')
+  GET_ELEMENT_COMPUTED_ROLE = (
+      _Method.GET, '/session/:sessionId/element/:id/computedrole')
+  GET_ELEMENT_SHADOW_ROOT = (
+      _Method.GET, '/session/:sessionId/element/:id/shadow')
+  FIND_ELEMENT_FROM_SHADOW_ROOT = (
+      _Method.POST, '/session/:sessionId/shadow/:id/element')
+  FIND_ELEMENTS_FROM_SHADOW_ROOT = (
+      _Method.POST, '/session/:sessionId/shadow/:id/elements')
   ELEMENT_EQUALS = (
       _Method.GET, '/session/:sessionId/element/:id/equals/:other')
   GET_COOKIES = (_Method.GET, '/session/:sessionId/cookie')
@@ -168,11 +188,36 @@ class Command(object):
       _Method.POST, '/session/:sessionId/chromium/send_command_and_get_result')
   GENERATE_TEST_REPORT = (
       _Method.POST, '/session/:sessionId/reporting/generate_test_report')
+  SET_TIME_ZONE = (_Method.POST, '/session/:sessionId/time_zone')
   ADD_VIRTUAL_AUTHENTICATOR = (
       _Method.POST, '/session/:sessionId/webauthn/authenticator')
   REMOVE_VIRTUAL_AUTHENTICATOR = (
       _Method.DELETE,
       '/session/:sessionId/webauthn/authenticator/:authenticatorId')
+  ADD_CREDENTIAL = (
+      _Method.POST,
+      '/session/:sessionId/webauthn/authenticator/:authenticatorId/credential')
+  GET_CREDENTIALS = (
+      _Method.GET,
+      '/session/:sessionId/webauthn/authenticator/:authenticatorId/credentials')
+  REMOVE_CREDENTIAL = (
+      _Method.DELETE,
+      '/session/:sessionId/webauthn/authenticator/:authenticatorId/credentials/'
+      ':credentialId')
+  REMOVE_ALL_CREDENTIALS = (
+      _Method.DELETE,
+      '/session/:sessionId/webauthn/authenticator/:authenticatorId/credentials')
+  SET_USER_VERIFIED = (
+      _Method.POST,
+      '/session/:sessionId/webauthn/authenticator/:authenticatorId/uv')
+  SET_SPC_TRANSACTION_MODE = (
+      _Method.POST,
+      '/session/:sessionId/secure-payment-confirmation/set-mode')
+  SET_PERMISSION = (
+      _Method.POST, '/session/:sessionId/permissions')
+  GET_CAST_SINKS = (
+      _Method.GET,
+      '/session/:sessionId/:vendorId/cast/get_sinks')
 
   # Custom Chrome commands.
   IS_LOADING = (_Method.GET, '/session/:sessionId/is_loading')
@@ -181,11 +226,16 @@ class CommandExecutor(object):
   def __init__(self, server_url):
     self._server_url = server_url
     parsed_url = urlparse(server_url)
-    self._http_client = httplib.HTTPConnection(
-        parsed_url.hostname, parsed_url.port, timeout=30)
+    timeout = 10
+    # see https://crbug.com/1045241: short timeout seems to introduce flakiness
+    if util.IsMac() or util.IsWindows():
+      timeout = 30
+    self._http_client = http.client.HTTPConnection(
+      parsed_url.hostname, parsed_url.port, timeout=timeout)
 
-  def Execute(self, command, params):
-    url_parts = command[1].split('/')
+  @staticmethod
+  def CreatePath(template_url_path, params):
+    url_parts = template_url_path.split('/')
     substituted_parts = []
     for part in url_parts:
       if part.startswith(':'):
@@ -194,11 +244,14 @@ class CommandExecutor(object):
         del params[key]
       else:
         substituted_parts += [part]
+    return '/'.join(substituted_parts)
 
+  def Execute(self, command, params):
+    url_path = self.CreatePath(command[1], params)
     body = None
     if command[0] == _Method.POST:
       body = json.dumps(params)
-    self._http_client.request(command[0], '/'.join(substituted_parts), body)
+    self._http_client.request(command[0], url_path, body)
     response = self._http_client.getresponse()
 
     if response.status == 303:

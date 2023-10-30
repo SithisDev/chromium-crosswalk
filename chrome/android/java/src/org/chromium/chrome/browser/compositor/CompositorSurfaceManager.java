@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ public interface CompositorSurfaceManager {
         public void surfaceRedrawNeededAsync(Runnable drawingFinished);
         public void surfaceChanged(Surface surface, int format, int width, int height);
         public void surfaceCreated(Surface surface);
-        public void surfaceDestroyed(Surface surface);
+        public void surfaceDestroyed(Surface surface, boolean androidSurfaceDestroyed);
         public void unownedSurfaceDestroyed();
     }
 
@@ -39,6 +39,12 @@ public interface CompositorSurfaceManager {
      * recreated. Note that |format| must be either OPAQUE or TRANSLUCENT.
      */
     void requestSurface(int format);
+
+    /**
+     * Returns the PixelFormat of the currently owned surface if any (OPAQUE or TRANSLUCENT),
+     * or UNKNOWN if there is no owned surface or it isn't initialized yet.
+     */
+    int getFormatOfOwnedSurface();
 
     /**
      * Called to notify us that the client no longer needs the surface that it doesn't own. This

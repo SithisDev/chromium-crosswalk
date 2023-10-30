@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,23 +7,23 @@
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "components/metrics/metrics_pref_names.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/settings/device_settings_cache.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/settings/device_settings_cache.h"
 #include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 namespace {
 
-void SetMetricsReportingEnabledChromeOS(
-    bool is_enabled,
-    base::DictionaryValue* local_state_dict) {
+void SetMetricsReportingEnabledChromeOS(bool is_enabled,
+                                        base::Value& local_state_dict) {
   namespace em = enterprise_management;
   em::ChromeDeviceSettingsProto device_settings_proto;
   device_settings_proto.mutable_metrics_enabled()->set_metrics_enabled(
@@ -31,9 +31,9 @@ void SetMetricsReportingEnabledChromeOS(
   em::PolicyData policy_data;
   policy_data.set_policy_type("google/chromeos/device");
   policy_data.set_policy_value(device_settings_proto.SerializeAsString());
-  local_state_dict->SetString(
+  local_state_dict.SetStringKey(
       prefs::kDeviceSettingsCache,
-      chromeos::device_settings_cache::PolicyDataToString(policy_data));
+      ash::device_settings_cache::PolicyDataToString(policy_data));
 }
 
 }  // namespace
@@ -42,17 +42,17 @@ void SetMetricsReportingEnabledChromeOS(
 namespace metrics {
 
 base::FilePath SetUpUserDataDirectoryForTesting(bool is_enabled) {
-  base::DictionaryValue local_state_dict;
-  local_state_dict.SetBoolean(metrics::prefs::kMetricsReportingEnabled,
-                              is_enabled);
+  base::Value local_state_dict(base::Value::Type::DICTIONARY);
+  local_state_dict.SetBoolPath(metrics::prefs::kMetricsReportingEnabled,
+                               is_enabled);
 
   base::FilePath user_data_dir;
   if (!base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
     return base::FilePath();
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // ChromeOS checks a separate place for reporting enabled.
-  SetMetricsReportingEnabledChromeOS(is_enabled, &local_state_dict);
+  SetMetricsReportingEnabledChromeOS(is_enabled, local_state_dict);
 #endif
 
   base::FilePath local_state_path =

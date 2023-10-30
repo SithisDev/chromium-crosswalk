@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,6 @@
 #include "content/public/browser/web_contents.h"
 
 namespace {
-
-// The duration of the toolbar show/hide animation in ms.
-const NSTimeInterval kToolbarAnimationDuration = 200;
 
 // If the fullscreen toolbar is hidden, it is difficult for the user to see
 // changes in the tabstrip. As a result, if a tab is inserted or the current
@@ -32,13 +29,13 @@ FullscreenToolbarAnimationController::FullscreenToolbarAnimationController(
       animation_(this),
       hide_toolbar_timer_(
           FROM_HERE,
-          base::TimeDelta::FromMilliseconds(kTabStripChangesDelay),
-          base::Bind(&FullscreenToolbarAnimationController::
-                         AnimateToolbarOutIfPossible,
-                     base::Unretained(this))),
+          base::Milliseconds(kTabStripChangesDelay),
+          base::BindRepeating(&FullscreenToolbarAnimationController::
+                                  AnimateToolbarOutIfPossible,
+                              base::Unretained(this))),
       animation_start_value_(0),
       should_hide_toolbar_after_delay_(false) {
-  animation_.SetSlideDuration(kToolbarAnimationDuration);
+  animation_.SetSlideDuration(base::Milliseconds(200));
   animation_.SetTweenType(gfx::Tween::EASE_OUT);
 }
 
@@ -101,11 +98,6 @@ CGFloat FullscreenToolbarAnimationController::GetToolbarFractionFromProgress()
 
 bool FullscreenToolbarAnimationController::IsAnimationRunning() const {
   return animation_.is_animating();
-}
-
-void FullscreenToolbarAnimationController::SetAnimationDuration(
-    CGFloat duration) {
-  animation_.SetSlideDuration(duration);
 }
 
 //////////////////////////////////////////////////////////////////

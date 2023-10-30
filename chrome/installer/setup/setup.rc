@@ -14,6 +14,7 @@
 /////////////////////////////////////////////////////////////////////////////
 #undef APSTUDIO_READONLY_SYMBOLS
 
+#include "build/branding_buildflags.h"
 #include "chrome/installer/setup/buildflags.h"
 
 /////////////////////////////////////////////////////////////////////////////
@@ -58,7 +59,7 @@ IDI_SETUP               ICON                    "setup.ico"
 #endif    // English (U.S.) resources
 /////////////////////////////////////////////////////////////////////////////
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -94,11 +95,13 @@ IDR_OEMPG_HR.HTML       HTML   "eula\\oem_hr.html"
 IDR_OEMPG_HU.HTML       HTML   "eula\\oem_hu.html"
 IDR_OEMPG_ID.HTML       HTML   "eula\\oem_id.html"
 IDR_OEMPG_IT.HTML       HTML   "eula\\oem_it.html"
+IDR_OEMPG_IW.HTML       HTML   "eula\\oem_iw.html"
 IDR_OEMPG_JA.HTML       HTML   "eula\\oem_ja.html"
 IDR_OEMPG_KO.HTML       HTML   "eula\\oem_ko.html"
 IDR_OEMPG_LT.HTML       HTML   "eula\\oem_lt.html"
 IDR_OEMPG_LV.HTML       HTML   "eula\\oem_lv.html"
 IDR_OEMPG_NL.HTML       HTML   "eula\\oem_nl.html"
+IDR_OEMPG_NO.HTML       HTML   "eula\\oem_no.html"
 IDR_OEMPG_PL.HTML       HTML   "eula\\oem_pl.html"
 IDR_OEMPG_PT_BR.HTML    HTML   "eula\\oem_pt-BR.html"
 IDR_OEMPG_PT_PT.HTML    HTML   "eula\\oem_pt-PT.html"
@@ -115,7 +118,7 @@ IDR_OEMPG_VI.HTML       HTML   "eula\\oem_vi.html"
 IDR_OEMPG_ZH_CN.HTML    HTML   "eula\\oem_zh-CN.html"
 IDR_OEMPG_ZH_TW.HTML    HTML   "eula\\oem_zh-TW.html"
 
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 #ifndef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////

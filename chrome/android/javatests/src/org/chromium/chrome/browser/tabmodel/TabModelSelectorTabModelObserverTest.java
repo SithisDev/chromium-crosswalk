@@ -1,23 +1,23 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.tabmodel;
 
-import android.support.test.annotation.UiThreadTest;
-import android.support.test.filters.SmallTest;
-import android.support.test.rule.UiThreadTestRule;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
-import org.junit.Rule;
+import org.junit.ClassRule;
 import org.junit.Test;
-import org.junit.rules.RuleChain;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.UiThreadTest;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserverTestRule.TabModelSelectorTestTabModel;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
@@ -26,27 +26,26 @@ import java.util.List;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Tests for the TabModelSelectorTabModelObserver.
+ * Integration tests for the TabModelSelectorTabModelObserver.
+ * See TabModelSelectorTabModelObserverUnitTest.java for unit tests.
  */
 @RunWith(BaseJUnit4ClassRunner.class)
+@Batch(Batch.PER_CLASS)
 public class TabModelSelectorTabModelObserverTest {
-    // Do not add @Rule to this, it's already added to RuleChain
-    private final TabModelSelectorObserverTestRule mTestRule =
+    @ClassRule
+    public static final TabModelSelectorObserverTestRule sTestRule =
             new TabModelSelectorObserverTestRule();
-
-    @Rule
-    public final RuleChain mChain = RuleChain.outerRule(mTestRule).around(new UiThreadTestRule());
 
     private TabModelSelectorBase mSelector;
 
     @Before
     public void setUp() {
-        mSelector = mTestRule.getSelector();
+        mSelector = sTestRule.getSelector();
     }
 
     @Test
     @SmallTest
-    public void testAlreadyInitializedSelector() throws InterruptedException, TimeoutException {
+    public void testAlreadyInitializedSelector() throws TimeoutException {
         final CallbackHelper registrationCompleteCallback = new CallbackHelper();
         TabModelSelectorTabModelObserver observer =
                 TestThreadUtils.runOnUiThreadBlockingNoException(
@@ -63,8 +62,16 @@ public class TabModelSelectorTabModelObserverTest {
     @Test
     @UiThreadTest
     @SmallTest
-    public void testUninitializedSelector() throws InterruptedException, TimeoutException {
-        mSelector = new TabModelSelectorBase() {
+    public void testUninitializedSelector() throws TimeoutException {
+        mSelector = new TabModelSelectorBase(null, EmptyTabModelFilter::new, false) {
+            @Override
+            public void requestToShowTab(Tab tab, int type) {}
+
+            @Override
+            public boolean isSessionRestoreInProgress() {
+                return false;
+            }
+
             @Override
             public Tab openNewTab(LoadUrlParams loadUrlParams, @TabLaunchType int type, Tab parent,
                     boolean incognito) {
@@ -79,8 +86,7 @@ public class TabModelSelectorTabModelObserverTest {
                         registrationCompleteCallback.notifyCalled();
                     }
                 };
-        mSelector.initialize(
-                false, mTestRule.getNormalTabModel(), mTestRule.getIncognitoTabModel());
+        mSelector.initialize(sTestRule.getNormalTabModel(), sTestRule.getIncognitoTabModel());
         registrationCompleteCallback.waitForCallback(0);
         assertAllModelsHaveObserver(mSelector, observer);
     }

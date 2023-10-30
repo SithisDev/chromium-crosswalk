@@ -1,49 +1,48 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.explore_sites;
 
+import android.app.Activity;
 import android.content.Context;
-import android.net.Uri;
 import android.os.Parcel;
 import android.os.Parcelable;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
-import android.support.v7.widget.RecyclerView;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
 import android.util.Base64;
-import android.view.View;
+import android.view.ViewGroup;
 
-import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+import androidx.recyclerview.widget.RecyclerView;
+
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.gesturenav.HistoryNavigationLayout;
-import org.chromium.chrome.browser.native_page.BasicNativePage;
 import org.chromium.chrome.browser.native_page.ContextMenuManager;
-import org.chromium.chrome.browser.native_page.NativePageHost;
 import org.chromium.chrome.browser.native_page.NativePageNavigationDelegate;
 import org.chromium.chrome.browser.native_page.NativePageNavigationDelegateImpl;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.chrome.browser.util.UrlConstants;
-import org.chromium.chrome.browser.widget.RoundedIconGenerator;
+import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.ui.native_page.BasicNativePage;
+import org.chromium.chrome.browser.ui.native_page.NativePageHost;
+import org.chromium.components.browser_ui.widget.RoundedIconGenerator;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.ui.modelutil.ListModel;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.RecyclerViewAdapter;
+import org.chromium.url.GURL;
+import org.chromium.url.URI;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
-import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.List;
 
@@ -53,8 +52,7 @@ import java.util.List;
 public class ExploreSitesPage extends BasicNativePage {
     private static final long BACK_NAVIGATION_TIMEOUT_FOR_UMA = DateUtils.SECOND_IN_MILLIS * 30;
     private static final String CONTEXT_MENU_USER_ACTION_PREFIX = "ExploreSites";
-    private static final int INITIAL_SCROLL_POSITION = 3;
-    private static final int INITIAL_SCROLL_POSITION_PERSONALIZED = 0;
+    private static final int INITIAL_SCROLL_POSITION = 0;
     private static final String NAVIGATION_ENTRY_PAGE_STATE_KEY = "ExploreSitesPageState";
     // Constants that dictate sizes of rows and columns
     private static final int MAX_COLUMNS_DENSE_TITLE_BOTTOM = 5;
@@ -84,7 +82,8 @@ public class ExploreSitesPage extends BasicNativePage {
             new PropertyModel.ReadableIntPropertyKey();
     private static final int UNKNOWN_NAV_CATEGORY = -1;
 
-    @IntDef({CatalogLoadingState.LOADING, CatalogLoadingState.SUCCESS, CatalogLoadingState.ERROR})
+    @IntDef({CatalogLoadingState.LOADING, CatalogLoadingState.SUCCESS, CatalogLoadingState.ERROR,
+            CatalogLoadingState.LOADING_NET})
     @Retention(RetentionPolicy.SOURCE)
     public @interface CatalogLoadingState {
         int LOADING = 1; // Loading catalog info from disk.
@@ -97,7 +96,7 @@ public class ExploreSitesPage extends BasicNativePage {
     private Tab mTab;
     private TabObserver mTabObserver;
     private Profile mProfile;
-    private HistoryNavigationLayout mView;
+    private ViewGroup mView;
     private RecyclerView mRecyclerView;
     private StableScrollLayoutManager mLayoutManager;
     private String mTitle;
@@ -159,27 +158,6 @@ public class ExploreSitesPage extends BasicNativePage {
     }
 
     /**
-     * Create a new instance of the explore sites page.
-     */
-    public ExploreSitesPage(ChromeActivity activity, NativePageHost host) {
-        super(activity, host);
-    }
-
-    /**
-     * Returns whether the given URL should render the ExploreSitesPage native page.
-     * @param url The url to check.
-     * @return Whether or not this URL corresponds to the ExploreSitesPage.
-     */
-    public static boolean isExploreSitesUrl(String url) {
-        Uri uri = Uri.parse(url);
-        if (!UrlConstants.CHROME_NATIVE_SCHEME.equals(uri.getScheme())) {
-            return false;
-        }
-
-        return isExploreSitesHost(uri.getHost());
-    }
-
-    /**
      * Returns whether the given host is the ExploreSitesPage's host. Does not check the
      * scheme, which is required to fully validate a URL.
      * @param host The host to check
@@ -189,15 +167,20 @@ public class ExploreSitesPage extends BasicNativePage {
         return UrlConstants.EXPLORE_HOST.equals(host);
     }
 
-    @Override
-    protected void initialize(ChromeActivity activity, final NativePageHost host) {
+    /**
+     * Create a new instance of the explore sites page.
+     */
+    public ExploreSitesPage(
+            Activity activity, NativePageHost host, Tab tab, TabModelSelector tabModelSelector) {
+        super(host);
+
         mHost = host;
-        mTab = mHost.getActiveTab();
+        mTab = tab;
 
         mTitle = activity.getString(R.string.explore_sites_title);
-        mView = (HistoryNavigationLayout) activity.getLayoutInflater().inflate(
+        mView = (ViewGroup) activity.getLayoutInflater().inflate(
                 R.layout.explore_sites_page_layout, null);
-        mProfile = mHost.getActiveTab().getProfile();
+        mProfile = Profile.fromWebContents(mTab.getWebContents());
 
         mDenseVariation = ExploreSitesBridge.getDenseVariation();
         int maxRows;
@@ -244,28 +227,24 @@ public class ExploreSitesPage extends BasicNativePage {
             iconRadius = iconSizePx / 2;
         }
 
-        RoundedIconGenerator iconGenerator =
-                new RoundedIconGenerator(iconSizePx, iconSizePx, iconRadius,
-                        ApiCompatibilityUtils.getColor(
-                                context.getResources(), R.color.default_favicon_background_color),
-                        context.getResources().getDimensionPixelSize(textSizeDimensionResource));
+        RoundedIconGenerator iconGenerator = new RoundedIconGenerator(iconSizePx, iconSizePx,
+                iconRadius, context.getColor(R.color.default_favicon_background_color),
+                context.getResources().getDimensionPixelSize(textSizeDimensionResource));
 
         NativePageNavigationDelegateImpl navDelegate = new NativePageNavigationDelegateImpl(
-                activity, mProfile, host, activity.getTabModelSelector());
+                activity, mProfile, host, tabModelSelector, mTab);
 
-        // Don't direct reference activity because it might change if tab is reparented.
-        Runnable closeContextMenuCallback =
-                () -> host.getActiveTab().getActivity().closeContextMenu();
+        // ExploreSitePage is recreated upon reparenting. Safe to use |activity|.
+        Runnable closeContextMenuCallback = activity::closeContextMenu;
 
         mContextMenuManager = createContextMenuManager(
                 navDelegate, closeContextMenuCallback, CONTEXT_MENU_USER_ACTION_PREFIX);
 
-        host.getActiveTab().getWindowAndroid().addContextMenuCloseListener(mContextMenuManager);
+        mTab.getWindowAndroid().addContextMenuCloseListener(mContextMenuManager);
 
         CategoryCardAdapter adapterDelegate = new CategoryCardAdapter(
                 mModel, mLayoutManager, iconGenerator, mContextMenuManager, navDelegate, mProfile);
 
-        mView.setNavigationDelegate(host.createHistoryNavigationDelegate());
         mRecyclerView = mView.findViewById(R.id.explore_sites_category_recycler);
 
         CategoryCardViewHolderFactory factory = createCategoryCardViewHolderFactory();
@@ -288,17 +267,12 @@ public class ExploreSitesPage extends BasicNativePage {
             }
         });
 
-        // We don't want to scroll to the 4th category if personalized
-        // or integrated with Most Likely, or if we're on a touchless device.
-        int variation = ExploreSitesBridge.getVariation();
-        mInitialScrollPosition = variation == ExploreSitesVariation.PERSONALIZED
-                        || ExploreSitesBridge.isIntegratedWithMostLikely(variation)
-                        || FeatureUtilities.isNoTouchModeEnabled()
-                ? INITIAL_SCROLL_POSITION_PERSONALIZED
-                : INITIAL_SCROLL_POSITION;
+        mInitialScrollPosition = INITIAL_SCROLL_POSITION;
 
         ExploreSitesBridge.getCatalog(mProfile,
                 ExploreSitesCatalogUpdateRequestSource.EXPLORE_SITES_PAGE, this::translateToModel);
+
+        initWithView(mView);
 
         RecordUserAction.record("Android.ExploreSitesPage.Open");
     }
@@ -334,16 +308,12 @@ public class ExploreSitesPage extends BasicNativePage {
             // state, for making "back" work correctly.
             mTabObserver = new EmptyTabObserver() {
                 @Override
-                public void onPageLoadStarted(Tab tab, String url) {
-                    try {
-                        URI uri = new URI(url);
-                        if (UrlConstants.CHROME_NATIVE_SCHEME.equals(uri.getScheme())
-                                && UrlConstants.EXPLORE_HOST.equals(uri.getHost())) {
-                            return;
-                        }
-                        savePageState();
-                    } catch (URISyntaxException e) {
+                public void onPageLoadStarted(Tab tab, GURL url) {
+                    if (UrlConstants.CHROME_NATIVE_SCHEME.equals(url.getScheme())
+                            && UrlConstants.EXPLORE_HOST.equals(url.getHost())) {
+                        return;
                     }
+                    savePageState();
                 }
             };
             mTab.addObserver(mTabObserver);
@@ -457,11 +427,6 @@ public class ExploreSitesPage extends BasicNativePage {
     }
 
     @Override
-    public View getView() {
-        return mView;
-    }
-
-    @Override
     public String getTitle() {
         return mTitle;
     }
@@ -487,7 +452,7 @@ public class ExploreSitesPage extends BasicNativePage {
         if (mTabObserver != null) {
             mTab.removeObserver(mTabObserver);
         }
-        mHost.getActiveTab().getWindowAndroid().removeContextMenuCloseListener(mContextMenuManager);
+        mTab.getWindowAndroid().removeContextMenuCloseListener(mContextMenuManager);
         super.destroy();
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,9 +25,9 @@ bool SpellCheckMockPanelHost::SpellingPanelVisible() {
   return spelling_panel_visible_;
 }
 
-void SpellCheckMockPanelHost::SpellCheckPanelHostRequest(
-    spellcheck::mojom::SpellCheckPanelHostRequest request) {
-  bindings_.AddBinding(this, std::move(request));
+void SpellCheckMockPanelHost::BindReceiver(
+    mojo::PendingReceiver<spellcheck::mojom::SpellCheckPanelHost> receiver) {
+  receivers_.Add(this, std::move(receiver));
 }
 
 // spellcheck::mojom::SpellCheckPanelHost:
@@ -41,7 +41,7 @@ void SpellCheckMockPanelHost::ShowSpellingPanel(bool show) {
 }
 
 void SpellCheckMockPanelHost::UpdateSpellingPanelWithMisspelledWord(
-    const base::string16& word) {
+    const std::u16string& word) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 }
 }  // namespace spellcheck

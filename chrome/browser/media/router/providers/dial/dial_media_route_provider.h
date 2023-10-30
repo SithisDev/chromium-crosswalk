@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,23 +12,25 @@
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "chrome/browser/media/router/discovery/dial/dial_media_sink_service_impl.h"
 #include "chrome/browser/media/router/providers/common/buffered_message_sender.h"
 #include "chrome/browser/media/router/providers/dial/dial_activity_manager.h"
 #include "chrome/browser/media/router/providers/dial/dial_internal_message_util.h"
-#include "chrome/common/media_router/mojo/media_router.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "components/media_router/common/mojom/media_router.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/data_decoder/public/cpp/data_decoder.h"
 
 namespace url {
 class Origin;
 }
 
 namespace media_router {
-
-class DataDecoder;
 
 // MediaRouteProvider for DIAL sinks.
 // DialMediaRouteProvider supports custom DIAL launch, which is a
@@ -48,19 +50,21 @@ class DataDecoder;
 class DialMediaRouteProvider : public mojom::MediaRouteProvider,
                                public MediaSinkServiceBase::Observer {
  public:
-  // |request|: Request to bind to |this|.
-  // |media_router|: Pointer to MediaRouter.
+  // |receiver|: Mojo receiver to bind to |this|.
+  // |media_router|: Pending remote to MediaRouter.
   // |media_sink_service|: DIAL MediaSinkService providing information on sinks.
-  // |connector|: Connector object for accessing data_decoder services.
   // |hash_token|: A per-profile value used to hash sink IDs.
   // |task_runner|: The task runner on which |this| runs.
   DialMediaRouteProvider(
-      mojom::MediaRouteProviderRequest request,
-      mojom::MediaRouterPtrInfo media_router,
+      mojo::PendingReceiver<mojom::MediaRouteProvider> receiver,
+      mojo::PendingRemote<mojom::MediaRouter> media_router,
       DialMediaSinkServiceImpl* media_sink_service,
-      service_manager::Connector* connector,
       const std::string& hash_token,
       const scoped_refptr<base::SequencedTaskRunner>& task_runner);
+
+  DialMediaRouteProvider(const DialMediaRouteProvider&) = delete;
+  DialMediaRouteProvider& operator=(const DialMediaRouteProvider&) = delete;
+
   ~DialMediaRouteProvider() override;
 
   // mojom::MediaRouteProvider:
@@ -68,25 +72,17 @@ class DialMediaRouteProvider : public mojom::MediaRouteProvider,
                    const std::string& sink_id,
                    const std::string& presentation_id,
                    const url::Origin& origin,
-                   int32_t tab_id,
+                   int32_t frame_tree_node_id,
                    base::TimeDelta timeout,
                    bool incognito,
                    CreateRouteCallback callback) override;
   void JoinRoute(const std::string& media_source,
                  const std::string& presentation_id,
                  const url::Origin& origin,
-                 int32_t tab_id,
+                 int32_t frame_tree_node_id,
                  base::TimeDelta timeout,
                  bool incognito,
                  JoinRouteCallback callback) override;
-  void ConnectRouteByRouteId(const std::string& media_source,
-                             const std::string& route_id,
-                             const std::string& presentation_id,
-                             const url::Origin& origin,
-                             int32_t tab_id,
-                             base::TimeDelta timeout,
-                             bool incognito,
-                             ConnectRouteByRouteIdCallback callback) override;
   void TerminateRoute(const std::string& route_id,
                       TerminateRouteCallback callback) override;
   void SendRouteMessage(const std::string& media_route_id,
@@ -95,25 +91,18 @@ class DialMediaRouteProvider : public mojom::MediaRouteProvider,
                               const std::vector<uint8_t>& data) override;
   void StartObservingMediaSinks(const std::string& media_source) override;
   void StopObservingMediaSinks(const std::string& media_source) override;
-  void StartObservingMediaRoutes(const std::string& media_source) override;
-  void StopObservingMediaRoutes(const std::string& media_source) override;
+  void StartObservingMediaRoutes() override;
   void StartListeningForRouteMessages(const std::string& route_id) override;
   void StopListeningForRouteMessages(const std::string& route_id) override;
   void DetachRoute(const std::string& route_id) override;
   void EnableMdnsDiscovery() override;
   void UpdateMediaSinks(const std::string& media_source) override;
-  void SearchSinks(const std::string& sink_id,
-                   const std::string& media_source,
-                   mojom::SinkSearchCriteriaPtr search_criteria,
-                   SearchSinksCallback callback) override;
-  void ProvideSinks(
-      const std::string& provider_name,
-      const std::vector<media_router::MediaSinkInternal>& sinks) override;
   void CreateMediaRouteController(
       const std::string& route_id,
-      mojom::MediaControllerRequest media_controller,
-      mojom::MediaStatusObserverPtr observer,
+      mojo::PendingReceiver<mojom::MediaController> media_controller,
+      mojo::PendingRemote<mojom::MediaStatusObserver> observer,
       CreateMediaRouteControllerCallback callback) override;
+  void GetState(GetStateCallback callback) override;
 
   void SetActivityManagerForTest(
       std::unique_ptr<DialActivityManager> activity_manager);
@@ -130,21 +119,23 @@ class DialMediaRouteProvider : public mojom::MediaRouteProvider,
 
   struct MediaSinkQuery {
     MediaSinkQuery();
+
+    MediaSinkQuery(const MediaSinkQuery&) = delete;
+    MediaSinkQuery& operator=(const MediaSinkQuery&) = delete;
+
     ~MediaSinkQuery();
 
     // Set of registered media sources for current sink query.
     base::flat_set<MediaSource> media_sources;
-    DialMediaSinkServiceImpl::SinkQueryByAppSubscription subscription;
-
-    DISALLOW_COPY_AND_ASSIGN(MediaSinkQuery);
+    base::CallbackListSubscription subscription;
   };
 
   // MediaSinkServiceBase::Observer:
   void OnSinksDiscovered(const std::vector<MediaSinkInternal>& sinks) override;
 
-  // Binds the message pipes |request| and |media_router| to |this|.
-  void Init(mojom::MediaRouteProviderRequest request,
-            mojom::MediaRouterPtrInfo media_router);
+  // Binds the message pipes |receiver| and |media_router| to |this|.
+  void Init(mojo::PendingReceiver<mojom::MediaRouteProvider> receiver,
+            mojo::PendingRemote<mojom::MediaRouter> media_router);
 
   void OnAvailableSinksUpdated(const std::string& app_name);
 
@@ -153,39 +144,46 @@ class DialMediaRouteProvider : public mojom::MediaRouteProvider,
                              const std::vector<url::Origin>& origins);
 
   void HandleParsedRouteMessage(const MediaRoute::Id& route_id,
-                                base::Value message);
+                                data_decoder::DataDecoder::ValueOrError result);
   void HandleClientConnect(const DialActivity& activity,
                            const MediaSinkInternal& sink);
   void SendCustomDialLaunchMessage(const MediaRoute::Id& route_id,
                                    const MediaSink::Id& sink_id,
                                    const std::string& app_name,
                                    DialAppInfoResult result);
+  void SendDialAppInfoResponse(const MediaRoute::Id& route_id,
+                               int sequence_number,
+                               const MediaSink::Id& sink_id,
+                               const std::string& app_name,
+                               DialAppInfoResult result);
   void HandleCustomDialLaunchResponse(const DialActivity& activity,
                                       const DialInternalMessage& message);
+  void HandleDiapAppInfoRequest(const DialActivity& activity,
+                                const DialInternalMessage& message,
+                                const MediaSinkInternal& sink);
   void HandleAppLaunchResult(const MediaRoute::Id& route_id, bool success);
   void DoTerminateRoute(const DialActivity& activity,
                         const MediaSinkInternal& sink,
                         TerminateRouteCallback callback);
   void HandleStopAppResult(const MediaRoute::Id& route_id,
                            TerminateRouteCallback callback,
-                           const base::Optional<std::string>& message,
-                           RouteRequestResult::ResultCode result_code);
+                           const absl::optional<std::string>& message,
+                           mojom::RouteRequestResultCode result_code);
   void NotifyAllOnRoutesUpdated();
-  void NotifyOnRoutesUpdated(const MediaSource::Id& source_id,
-                             const std::vector<MediaRoute>& routes);
+  void NotifyOnRoutesUpdated(const std::vector<MediaRoute>& routes);
 
   // Returns a list of valid origins for |app_name|. Returns an empty list if
   // all origins are valid.
   std::vector<url::Origin> GetOrigins(const std::string& app_name);
 
-  // Binds |this| to the Mojo request passed into the ctor.
-  mojo::Binding<mojom::MediaRouteProvider> binding_;
+  // Binds |this| to the Mojo receiver passed into the ctor.
+  mojo::Receiver<mojom::MediaRouteProvider> receiver_{this};
 
-  // Mojo pointer to the Media Router.
-  mojom::MediaRouterPtr media_router_;
+  // Mojo remote to the Media Router.
+  mojo::Remote<mojom::MediaRouter> media_router_;
 
   // Non-owned pointer to the DialMediaSinkServiceImpl instance.
-  DialMediaSinkServiceImpl* const media_sink_service_;
+  const raw_ptr<DialMediaSinkServiceImpl> media_sink_service_;
 
   // Map of media sink queries, keyed by app name.
   base::flat_map<std::string, std::unique_ptr<MediaSinkQuery>>
@@ -201,14 +199,13 @@ class DialMediaRouteProvider : public mojom::MediaRouteProvider,
   std::unique_ptr<DialActivityManager> activity_manager_;
   std::unique_ptr<BufferedMessageSender> message_sender_;
 
-  // Used for parsing Custom DIAL launch JSON messages.
-  std::unique_ptr<DataDecoder> data_decoder_;
-
   DialInternalMessageUtil internal_message_util_;
+
+  // Mojo remote to the logger owned by the Media Router.
+  mojo::Remote<mojom::Logger> logger_;
 
   SEQUENCE_CHECKER(sequence_checker_);
   base::WeakPtrFactory<DialMediaRouteProvider> weak_ptr_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(DialMediaRouteProvider);
 };
 
 }  // namespace media_router

@@ -1,55 +1,45 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_SETTINGS_ACCESSIBILITY_MAIN_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_SETTINGS_ACCESSIBILITY_MAIN_HANDLER_H_
 
-#include "base/macros.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
-#include "ui/accessibility/ax_mode.h"
-#include "ui/accessibility/ax_mode_observer.h"
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
-#endif  // defined(OS_CHROMEOS)
 
-namespace base {
-class ListValue;
-}
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/accessibility/accessibility_manager.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace settings {
 
 // Settings handler for the main accessibility settings page,
 // chrome://settings/accessibility.
-class AccessibilityMainHandler : public ::settings::SettingsPageUIHandler,
-                                 public ui::AXModeObserver {
+class AccessibilityMainHandler : public ::settings::SettingsPageUIHandler {
  public:
   AccessibilityMainHandler();
   ~AccessibilityMainHandler() override;
+  AccessibilityMainHandler(const AccessibilityMainHandler&) = delete;
+  AccessibilityMainHandler& operator=(const AccessibilityMainHandler&) = delete;
 
   // SettingsPageUIHandler implementation.
   void RegisterMessages() override;
-  void OnJavascriptAllowed() override {}
-  void OnJavascriptDisallowed() override {}
+  void OnJavascriptAllowed() override;
+  void OnJavascriptDisallowed() override;
 
-  // AXModeObserver implementation.
-  void OnAXModeAdded(ui::AXMode mode) override;
-
-  void HandleGetScreenReaderState(const base::ListValue* args);
-  void HandleCheckAccessibilityImageLabels(const base::ListValue* args);
+  void HandleA11yPageReady(const base::Value::List& args);
+  void HandleCheckAccessibilityImageLabels(const base::Value::List& args);
 
  private:
-#if defined(OS_CHROMEOS)
+  void SendScreenReaderStateChanged();
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   void OnAccessibilityStatusChanged(
-      const chromeos::AccessibilityStatusEventDetails& details);
+      const ash::AccessibilityStatusEventDetails& details);
 
-  std::unique_ptr<chromeos::AccessibilityStatusSubscription>
-      accessibility_subscription_;
-#else
-
-#endif  // defined(OS_CHROMEOS)
-
-  DISALLOW_COPY_AND_ASSIGN(AccessibilityMainHandler);
+  base::CallbackListSubscription accessibility_subscription_;
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 };
 
 }  // namespace settings

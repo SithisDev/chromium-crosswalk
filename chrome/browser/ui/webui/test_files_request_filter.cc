@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,7 @@ bool ShouldHandleTestFileRequestCallback(const std::string& path) {
 
 void HandleTestFileRequestCallback(
     const std::string& path,
-    const content::WebUIDataSource::GotDataCallback& callback) {
+    content::WebUIDataSource::GotDataCallback callback) {
   DCHECK(ShouldHandleTestFileRequestCallback(path));
   base::ScopedAllowBlockingForTesting allow_blocking;
 
@@ -44,7 +44,7 @@ void HandleTestFileRequestCallback(
 
   base::RefCountedString* ref_contents = new base::RefCountedString();
   ref_contents->data() = contents;
-  callback.Run(ref_contents);
+  std::move(callback).Run(ref_contents);
 }
 
 }  // namespace
@@ -52,7 +52,7 @@ void HandleTestFileRequestCallback(
 namespace test {
 
 content::WebUIDataSource::HandleRequestCallback GetTestFilesRequestFilter() {
-  return base::Bind(&HandleTestFileRequestCallback);
+  return base::BindRepeating(&HandleTestFileRequestCallback);
 }
 
 content::WebUIDataSource::ShouldHandleRequestCallback

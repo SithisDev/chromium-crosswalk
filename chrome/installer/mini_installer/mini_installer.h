@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "chrome/installer/mini_installer/exit_code.h"
 #include "chrome/installer/mini_installer/mini_string.h"
+#include "chrome/installer/mini_installer/path_string.h"
 
 namespace mini_installer {
 
@@ -38,6 +39,11 @@ using CommandString = StackString<MAX_PATH * 4>;
 ProcessExitResult GetPreviousSetupExePath(const Configuration& configuration,
                                           wchar_t* path,
                                           size_t size);
+
+// Populates |directory| with the directory portion of the path to |module|.
+// Returns false in case of failure, in which case the contents of |directory|
+// are undefined and may have been modified.
+bool GetModuleDir(HMODULE module, PathString* directory);
 
 // Appends everything following the path to the executable in |command_line|
 // verbatim to |buffer|, including all whitespace, quoted arguments,

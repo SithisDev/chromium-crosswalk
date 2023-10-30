@@ -1,9 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/vr/gesture_detector.h"
 
+#include "base/check.h"
+#include "base/notreached.h"
 #include "base/numerics/math_constants.h"
 #include "chrome/browser/vr/input_event.h"
 #include "chrome/browser/vr/platform_controller.h"
@@ -35,8 +37,7 @@ constexpr float kSlopHorizontal = 0.15f;
 
 // Exceeding pressing the appbutton for longer than this threshold will result
 // in a long press.
-constexpr base::TimeDelta kLongPressThreshold =
-    base::TimeDelta::FromMilliseconds(900);
+constexpr base::TimeDelta kLongPressThreshold = base::Milliseconds(900);
 
 struct TouchPoint {
   gfx::Vector2dF position;

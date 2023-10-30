@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,10 +22,24 @@ class putHR {
   HRESULT hr_;
 };
 
+// COMPACT_GOOGLE_LOG_EX_VERBOSE is defined only for GCPW as INFO event log
+// category.
+#ifdef COMPACT_GOOGLE_LOG_EX_VERBOSE
+#undef COMPACT_GOOGLE_LOG_EX_VERBOSE
+#endif
+
+#define COMPACT_GOOGLE_LOG_EX_VERBOSE(ClassName, ...) \
+  ::logging::ClassName(__FILE__, __LINE__, ::logging::LOG_INFO, ##__VA_ARGS__)
+
+// A helper macro which checks if the message should be logged based on log
+// level.
+#define LOG_ENABLED(LEVEL) \
+  (::logging::LOGGING_##LEVEL >= logging::GetMinLogLevel())
+
 // A macro that puts the function name into the logging stream.  This is a
 // drop-in replacement for the LOG macro.
-
-#define LOGFN(LEVEL) SYSLOG(LEVEL) << __FUNCTION__ << ": "
+#define LOGFN(LEVEL) \
+  LAZY_STREAM((SYSLOG(LEVEL) << __FUNCTION__ << ": "), LOG_ENABLED(LEVEL))
 
 }  // namespace credential_provider
 

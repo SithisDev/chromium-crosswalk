@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_constants.h"
+#include "url/android/gurl_android.h"
 #include "url/gurl.h"
 
 using base::android::JavaParamRef;
@@ -51,19 +52,20 @@ void JNI_DomDistillerTabUtils_DistillAndView(
 ScopedJavaLocalRef<jstring>
 JNI_DomDistillerTabUtils_GetFormattedUrlFromOriginalDistillerUrl(
     JNIEnv* env,
-    const JavaParamRef<jstring>& j_url) {
-  GURL url(base::android::ConvertJavaStringToUTF8(env, j_url));
+    const JavaParamRef<jobject>& j_url) {
+  auto url = *url::GURLAndroid::ToNativeGURL(env, j_url);
 
   if (url.spec().length() > content::kMaxURLDisplayChars)
-    url = url.IsStandard() ? url.GetOrigin() : GURL(url.scheme() + ":");
+    url = url.IsStandard() ? url.DeprecatedGetOriginAsURL()
+                           : GURL(url.scheme() + ":");
 
   // Note that we can't unescape spaces here, because if the user copies this
   // and pastes it into another program, that program may think the URL ends at
   // the space.
   return base::android::ConvertUTF16ToJavaString(
       env, url_formatter::FormatUrl(url, url_formatter::kFormatUrlOmitDefaults,
-                                    net::UnescapeRule::NORMAL, nullptr, nullptr,
-                                    nullptr));
+                                    base::UnescapeRule::NORMAL, nullptr,
+                                    nullptr, nullptr));
 }
 
 jint JNI_DomDistillerTabUtils_GetDistillerHeuristics(JNIEnv* env) {

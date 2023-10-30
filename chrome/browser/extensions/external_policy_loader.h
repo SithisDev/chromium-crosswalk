@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,11 @@
 
 #include <string>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/external_loader.h"
+
+class Profile;
 
 namespace base {
 class DictionaryValue;
@@ -32,7 +33,12 @@ class ExternalPolicyLoader : public ExternalLoader,
     RECOMMENDED
   };
 
-  ExternalPolicyLoader(ExtensionManagement* settings, InstallationType type);
+  ExternalPolicyLoader(Profile* profile,
+                       ExtensionManagement* settings,
+                       InstallationType type);
+
+  ExternalPolicyLoader(const ExternalPolicyLoader&) = delete;
+  ExternalPolicyLoader& operator=(const ExternalPolicyLoader&) = delete;
 
   // ExtensionManagement::Observer implementation
   void OnExtensionManagementSettingsChanged() override;
@@ -50,10 +56,9 @@ class ExternalPolicyLoader : public ExternalLoader,
 
   ~ExternalPolicyLoader() override;
 
-  ExtensionManagement* settings_;
+  raw_ptr<Profile> profile_;
+  raw_ptr<ExtensionManagement> settings_;
   InstallationType type_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExternalPolicyLoader);
 };
 
 }  // namespace extensions

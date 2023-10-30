@@ -1,9 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/command_line.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "content/public/test/browser_test.h"
 
 namespace {
 // This should be consistent with
@@ -19,5 +20,7 @@ class CommandLinePrivateApiTest : public extensions::ExtensionApiTest {
 };
 
 IN_PROC_BROWSER_TEST_F(CommandLinePrivateApiTest, Basics) {
-  EXPECT_TRUE(RunComponentExtensionTest("command_line/basics")) << message_;
+  EXPECT_TRUE(
+      RunExtensionTest("command_line/basics", {}, {.load_as_component = true}))
+      << message_;
 }

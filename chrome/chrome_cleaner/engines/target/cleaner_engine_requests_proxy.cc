@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "base/location.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/chrome_cleaner/engines/target/engine_commands_impl.h"
-#include "chrome/chrome_cleaner/strings/string16_embedded_nulls.h"
+#include "chrome/chrome_cleaner/strings/wstring_embedded_nulls.h"
 
 namespace chrome_cleaner {
 
@@ -26,12 +26,12 @@ void SaveBoolCallback(bool* out_result,
 }  // namespace
 
 CleanerEngineRequestsProxy::CleanerEngineRequestsProxy(
-    mojom::CleanerEngineRequestsAssociatedPtr requests_ptr,
+    mojo::PendingAssociatedRemote<mojom::CleanerEngineRequests> requests,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
-    : requests_ptr_(std::move(requests_ptr)), task_runner_(task_runner) {}
+    : requests_(std::move(requests)), task_runner_(task_runner) {}
 
-void CleanerEngineRequestsProxy::UnbindRequestsPtr() {
-  requests_ptr_.reset();
+void CleanerEngineRequestsProxy::UnbindRequestsRemote() {
+  requests_.reset();
 }
 
 bool CleanerEngineRequestsProxy::DeleteFile(const base::FilePath& file_name) {
@@ -62,7 +62,7 @@ bool CleanerEngineRequestsProxy::DeleteFilePostReboot(
 }
 
 bool CleanerEngineRequestsProxy::NtDeleteRegistryKey(
-    const String16EmbeddedNulls& key) {
+    const WStringEmbeddedNulls& key) {
   bool result = false;
   MojoCallStatus call_status = SyncSandboxRequest(
       this,
@@ -76,8 +76,8 @@ bool CleanerEngineRequestsProxy::NtDeleteRegistryKey(
 }
 
 bool CleanerEngineRequestsProxy::NtDeleteRegistryValue(
-    const String16EmbeddedNulls& key,
-    const String16EmbeddedNulls& value_name) {
+    const WStringEmbeddedNulls& key,
+    const WStringEmbeddedNulls& value_name) {
   bool result = false;
   MojoCallStatus call_status = SyncSandboxRequest(
       this,
@@ -91,9 +91,9 @@ bool CleanerEngineRequestsProxy::NtDeleteRegistryValue(
 }
 
 bool CleanerEngineRequestsProxy::NtChangeRegistryValue(
-    const String16EmbeddedNulls& key,
-    const String16EmbeddedNulls& value_name,
-    const String16EmbeddedNulls& new_value) {
+    const WStringEmbeddedNulls& key,
+    const WStringEmbeddedNulls& value_name,
+    const WStringEmbeddedNulls& new_value) {
   bool result = false;
   MojoCallStatus call_status = SyncSandboxRequest(
       this,
@@ -106,7 +106,7 @@ bool CleanerEngineRequestsProxy::NtChangeRegistryValue(
   return result;
 }
 
-bool CleanerEngineRequestsProxy::DeleteService(const base::string16& name) {
+bool CleanerEngineRequestsProxy::DeleteService(const std::wstring& name) {
   bool result = false;
   MojoCallStatus call_status = SyncSandboxRequest(
       this,
@@ -119,7 +119,7 @@ bool CleanerEngineRequestsProxy::DeleteService(const base::string16& name) {
   return result;
 }
 
-bool CleanerEngineRequestsProxy::DeleteTask(const base::string16& name) {
+bool CleanerEngineRequestsProxy::DeleteTask(const std::wstring& name) {
   bool result = false;
   MojoCallStatus call_status = SyncSandboxRequest(
       this,
@@ -145,17 +145,19 @@ bool CleanerEngineRequestsProxy::TerminateProcess(base::ProcessId process_id) {
   return result;
 }
 
+CleanerEngineRequestsProxy::CleanerEngineRequestsProxy() = default;
+
 CleanerEngineRequestsProxy::~CleanerEngineRequestsProxy() = default;
 
 MojoCallStatus CleanerEngineRequestsProxy::SandboxDeleteFile(
     const base::FilePath& path,
     mojom::CleanerEngineRequests::SandboxDeleteFileCallback result_callback) {
-  if (!requests_ptr_.is_bound()) {
-    LOG(ERROR) << "SandboxDeleteFile called without bound pointer";
+  if (!requests_.is_bound()) {
+    LOG(ERROR) << "SandboxDeleteFile called without bound remote";
     return MojoCallStatus::Failure(SandboxErrorCode::INTERNAL_ERROR);
   }
 
-  requests_ptr_->SandboxDeleteFile(path, std::move(result_callback));
+  requests_->SandboxDeleteFile(path, std::move(result_callback));
   return MojoCallStatus::Success();
 }
 
@@ -163,82 +165,82 @@ MojoCallStatus CleanerEngineRequestsProxy::SandboxDeleteFilePostReboot(
     const base::FilePath& path,
     mojom::CleanerEngineRequests::SandboxDeleteFilePostRebootCallback
         result_callback) {
-  if (!requests_ptr_.is_bound()) {
-    LOG(ERROR) << "SandboxDeleteFilePostReboot called without bound pointer";
+  if (!requests_.is_bound()) {
+    LOG(ERROR) << "SandboxDeleteFilePostReboot called without bound remote";
     return MojoCallStatus::Failure(SandboxErrorCode::INTERNAL_ERROR);
   }
 
-  requests_ptr_->SandboxDeleteFilePostReboot(path, std::move(result_callback));
+  requests_->SandboxDeleteFilePostReboot(path, std::move(result_callback));
   return MojoCallStatus::Success();
 }
 
 MojoCallStatus CleanerEngineRequestsProxy::SandboxNtDeleteRegistryKey(
-    const String16EmbeddedNulls& key,
+    const WStringEmbeddedNulls& key,
     mojom::CleanerEngineRequests::SandboxNtDeleteRegistryKeyCallback
         result_callback) {
-  if (!requests_ptr_.is_bound()) {
-    LOG(ERROR) << "SandboxNtDeleteRegistryKey called without bound pointer";
+  if (!requests_.is_bound()) {
+    LOG(ERROR) << "SandboxNtDeleteRegistryKey called without bound remote";
     return MojoCallStatus::Failure(SandboxErrorCode::INTERNAL_ERROR);
   }
 
-  requests_ptr_->SandboxNtDeleteRegistryKey(key, std::move(result_callback));
+  requests_->SandboxNtDeleteRegistryKey(key, std::move(result_callback));
   return MojoCallStatus::Success();
 }
 
 MojoCallStatus CleanerEngineRequestsProxy::SandboxNtDeleteRegistryValue(
-    const String16EmbeddedNulls& key,
-    const String16EmbeddedNulls& value_name,
+    const WStringEmbeddedNulls& key,
+    const WStringEmbeddedNulls& value_name,
     mojom::CleanerEngineRequests::SandboxNtDeleteRegistryValueCallback
         result_callback) {
-  if (!requests_ptr_.is_bound()) {
-    LOG(ERROR) << "SandboxNtDeleteRegistryValue called without bound pointer";
+  if (!requests_.is_bound()) {
+    LOG(ERROR) << "SandboxNtDeleteRegistryValue called without bound remote";
     return MojoCallStatus::Failure(SandboxErrorCode::INTERNAL_ERROR);
   }
 
-  requests_ptr_->SandboxNtDeleteRegistryValue(key, value_name,
-                                              std::move(result_callback));
+  requests_->SandboxNtDeleteRegistryValue(key, value_name,
+                                          std::move(result_callback));
   return MojoCallStatus::Success();
 }
 
 MojoCallStatus CleanerEngineRequestsProxy::SandboxNtChangeRegistryValue(
-    const String16EmbeddedNulls& key,
-    const String16EmbeddedNulls& value_name,
-    const String16EmbeddedNulls& new_value,
+    const WStringEmbeddedNulls& key,
+    const WStringEmbeddedNulls& value_name,
+    const WStringEmbeddedNulls& new_value,
     mojom::CleanerEngineRequests::SandboxNtChangeRegistryValueCallback
         result_callback) {
-  if (!requests_ptr_.is_bound()) {
-    LOG(ERROR) << "SandboxNtChangeRegistryValue called without bound pointer";
+  if (!requests_.is_bound()) {
+    LOG(ERROR) << "SandboxNtChangeRegistryValue called without bound remote";
     return MojoCallStatus::Failure(SandboxErrorCode::INTERNAL_ERROR);
   }
 
-  requests_ptr_->SandboxNtChangeRegistryValue(key, value_name, new_value,
-                                              std::move(result_callback));
+  requests_->SandboxNtChangeRegistryValue(key, value_name, new_value,
+                                          std::move(result_callback));
 
   return MojoCallStatus::Success();
 }
 
 MojoCallStatus CleanerEngineRequestsProxy::SandboxDeleteService(
-    const base::string16& name,
+    const std::wstring& name,
     mojom::CleanerEngineRequests::SandboxDeleteServiceCallback
         result_callback) {
-  if (!requests_ptr_.is_bound()) {
-    LOG(ERROR) << "SandboxDeleteService called without bound pointer";
+  if (!requests_.is_bound()) {
+    LOG(ERROR) << "SandboxDeleteService called without bound remote";
     return MojoCallStatus::Failure(SandboxErrorCode::INTERNAL_ERROR);
   }
 
-  requests_ptr_->SandboxDeleteService(name, std::move(result_callback));
+  requests_->SandboxDeleteService(name, std::move(result_callback));
   return MojoCallStatus::Success();
 }
 
 MojoCallStatus CleanerEngineRequestsProxy::SandboxDeleteTask(
-    const base::string16& name,
+    const std::wstring& name,
     mojom::CleanerEngineRequests::SandboxDeleteTaskCallback result_callback) {
-  if (!requests_ptr_.is_bound()) {
-    LOG(ERROR) << "SandboxDeleteTask called without bound pointer";
+  if (!requests_.is_bound()) {
+    LOG(ERROR) << "SandboxDeleteTask called without bound remote";
     return MojoCallStatus::Failure(SandboxErrorCode::INTERNAL_ERROR);
   }
 
-  requests_ptr_->SandboxDeleteTask(name, std::move(result_callback));
+  requests_->SandboxDeleteTask(name, std::move(result_callback));
   return MojoCallStatus::Success();
 }
 
@@ -246,13 +248,12 @@ MojoCallStatus CleanerEngineRequestsProxy::SandboxTerminateProcess(
     uint32_t process_id,
     mojom::CleanerEngineRequests::SandboxTerminateProcessCallback
         result_callback) {
-  if (!requests_ptr_.is_bound()) {
-    LOG(ERROR) << "SandboxTerminateProcess called without bound pointer";
+  if (!requests_.is_bound()) {
+    LOG(ERROR) << "SandboxTerminateProcess called without bound remote";
     return MojoCallStatus::Failure(SandboxErrorCode::INTERNAL_ERROR);
   }
 
-  requests_ptr_->SandboxTerminateProcess(process_id,
-                                         std::move(result_callback));
+  requests_->SandboxTerminateProcess(process_id, std::move(result_callback));
 
   return MojoCallStatus::Success();
 }

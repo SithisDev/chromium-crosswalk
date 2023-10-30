@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <userenv.h>  // NOLINT
 
 #include <memory>
+#include <string>
 
 #include "base/base_paths.h"
 #include "base/base_switches.h"
@@ -18,11 +19,10 @@
 #include "base/compiler_specific.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/path_service.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -30,22 +30,19 @@
 #include "base/win/scoped_handle.h"
 #include "base/win/shlwapi.h"
 #include "base/win/windows_version.h"
-#include "chrome/app/chrome_watcher_client_win.h"
-#include "chrome/app/chrome_watcher_command_line_win.h"
-#include "chrome/app/file_pre_reader_win.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/active_use_util.h"
-#include "chrome/chrome_watcher/chrome_watcher_main_api.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/metrics_constants_util_win.h"
-#include "chrome/installer/util/google_update_settings.h"
+#include "chrome/installer/util/update_did_run_state.h"
 #include "chrome/installer/util/util_constants.h"
 #include "content/public/app/sandbox_helper_win.h"
 #include "content/public/common/content_switches.h"
+#include "sandbox/policy/mojom/sandbox.mojom.h"
+#include "sandbox/policy/sandbox_type.h"
 #include "sandbox/win/src/sandbox.h"
-#include "services/service_manager/sandbox/switches.h"
 
 namespace {
 // The entry point signature of chrome.dll.
@@ -53,22 +50,8 @@ typedef int (*DLL_MAIN)(HINSTANCE, sandbox::SandboxInterfaceInfo*, int64_t);
 
 typedef void (*RelaunchChromeBrowserWithNewCommandLineIfNeededFunc)();
 
-// Loads |module| after setting the CWD to |module|'s directory. Returns a
-// reference to the loaded module on success, or null on error.
-HMODULE LoadModuleWithDirectory(const base::FilePath& module) {
-  ::SetCurrentDirectoryW(module.DirName().value().c_str());
-  PreReadFile(module);
-  return ::LoadLibraryExW(module.value().c_str(), nullptr,
-                          LOAD_WITH_ALTERED_SEARCH_PATH);
-}
-
 void RecordDidRun(const base::FilePath& dll_path) {
-  GoogleUpdateSettings::UpdateDidRunState(true);
-}
-
-bool ProcessTypeUsesMainDll(const std::string& process_type) {
-  return process_type.empty() ||
-         process_type == switches::kCloudPrintServiceProcess;
+  installer::UpdateDidRunState(true);
 }
 
 // Indicates whether a file can be opened using the same flags that
@@ -82,7 +65,7 @@ bool ModuleCanBeRead(const base::FilePath& file_path) {
 // is in the current executable's directory) and proper installs (where
 // |module_name| is in a versioned sub-directory of the current executable's
 // directory) are suported. The identified file is not guaranteed to exist.
-base::FilePath GetModulePath(base::StringPiece16 module_name) {
+base::FilePath GetModulePath(base::WStringPiece module_name) {
   base::FilePath exe_dir;
   const bool has_path = base::PathService::Get(base::DIR_EXE, &exe_dir);
   DCHECK(has_path);
@@ -100,45 +83,41 @@ base::FilePath GetModulePath(base::StringPiece16 module_name) {
   return exe_dir.Append(module_name);
 }
 
+// Prefetches and loads |module| after setting the CWD to |module|'s
+// directory. Returns a handle to the loaded module on success, or nullptr on
+// failure.
+HMODULE LoadModuleWithDirectory(const base::FilePath& module) {
+  ::SetCurrentDirectoryW(module.DirName().value().c_str());
+  base::PreReadFile(module, /*is_executable=*/true);
+  HMODULE handle = ::LoadLibraryExW(module.value().c_str(), nullptr,
+                                    LOAD_WITH_ALTERED_SEARCH_PATH);
+  return handle;
+}
+
+// Prefetches and loads the appropriate DLL for the process type
+// |process_type_|. Populates |module| with the path of the loaded DLL.
+// Returns a handle to the loaded DLL, or nullptr on failure.
+HMODULE Load(base::FilePath* module) {
+  *module = GetModulePath(installer::kChromeDll);
+  if (module->empty()) {
+    PLOG(ERROR) << "Cannot find module " << installer::kChromeDll;
+    return nullptr;
+  }
+  HMODULE dll = LoadModuleWithDirectory(*module);
+  if (!dll)
+    PLOG(ERROR) << "Failed to load Chrome DLL from " << module->value();
+  return dll;
+}
+
 }  // namespace
 
 //=============================================================================
 
-MainDllLoader::MainDllLoader()
-    : dll_(nullptr) {
-}
+MainDllLoader::MainDllLoader() : dll_(nullptr) {}
 
-MainDllLoader::~MainDllLoader() {
-}
+MainDllLoader::~MainDllLoader() = default;
 
-HMODULE MainDllLoader::Load(base::FilePath* module) {
-  const base::char16* dll_name = nullptr;
-  if (ProcessTypeUsesMainDll(process_type_)) {
-    dll_name = installer::kChromeDll;
-  } else if (process_type_ == switches::kWatcherProcess) {
-    dll_name = kChromeWatcherDll;
-  } else {
-#if defined(CHROME_MULTIPLE_DLL)
-    dll_name = installer::kChromeChildDll;
-#else
-    dll_name = installer::kChromeDll;
-#endif
-  }
-
-  *module = GetModulePath(dll_name);
-  if (module->empty()) {
-    PLOG(ERROR) << "Cannot find module " << dll_name;
-    return nullptr;
-  }
-  HMODULE dll = LoadModuleWithDirectory(*module);
-  if (!dll) {
-    PLOG(ERROR) << "Failed to load Chrome DLL from " << module->value();
-    return nullptr;
-  }
-
-  DCHECK(dll);
-  return dll;
-}
+const int kNonBrowserShutdownPriority = 0x280;
 
 // Launching is a matter of loading the right dll and calling the entry point.
 // Derived classes can add custom code in the OnBeforeLaunch callback.
@@ -147,44 +126,14 @@ int MainDllLoader::Launch(HINSTANCE instance,
   const base::CommandLine& cmd_line = *base::CommandLine::ForCurrentProcess();
   process_type_ = cmd_line.GetSwitchValueASCII(switches::kProcessType);
 
-  base::FilePath file;
-
-  if (process_type_ == switches::kWatcherProcess) {
-    chrome::RegisterPathProvider();
-
-    base::win::ScopedHandle parent_process;
-    base::win::ScopedHandle on_initialized_event;
-    DWORD main_thread_id = 0;
-    if (!InterpretChromeWatcherCommandLine(cmd_line, &parent_process,
-                                           &main_thread_id,
-                                           &on_initialized_event)) {
-      return chrome::RESULT_CODE_UNSUPPORTED_PARAM;
-    }
-
-    base::FilePath watcher_data_directory;
-    if (!base::PathService::Get(chrome::DIR_WATCHER_DATA,
-                                &watcher_data_directory))
-      return chrome::RESULT_CODE_MISSING_DATA;
-
-    // Intentionally leaked.
-    HMODULE watcher_dll = Load(&file);
-    if (!watcher_dll)
-      return chrome::RESULT_CODE_MISSING_DATA;
-
-    ChromeWatcherMainFunction watcher_main =
-        reinterpret_cast<ChromeWatcherMainFunction>(
-            ::GetProcAddress(watcher_dll, kChromeWatcherDLLEntrypoint));
-    return watcher_main(chrome::GetBrowserExitCodesRegistryPath().c_str(),
-                        parent_process.Take(), main_thread_id,
-                        on_initialized_event.Take(),
-                        watcher_data_directory.value().c_str());
-  }
-
   // Initialize the sandbox services.
-  sandbox::SandboxInterfaceInfo sandbox_info = {0};
+  sandbox::SandboxInterfaceInfo sandbox_info = {nullptr};
   const bool is_browser = process_type_.empty();
+  // IsUnsandboxedSandboxType() can't be used here because its result can be
+  // gated behind a feature flag, which are not yet initialized.
   const bool is_sandboxed =
-      !cmd_line.HasSwitch(service_manager::switches::kNoSandbox);
+      sandbox::policy::SandboxTypeFromCommandLine(cmd_line) !=
+      sandbox::mojom::Sandbox::kNoSandbox;
   if (is_browser || is_sandboxed) {
     // For child processes that are running as --no-sandbox, don't initialize
     // the sandbox info, otherwise they'll be treated as brokers (as if they
@@ -192,34 +141,41 @@ int MainDllLoader::Launch(HINSTANCE instance,
     content::InitializeSandboxInfo(&sandbox_info);
   }
 
+  base::FilePath file;
   dll_ = Load(&file);
   if (!dll_)
     return chrome::RESULT_CODE_MISSING_DATA;
+
+  if (!is_browser) {
+    // Set non-browser processes up to be killed by the system after the
+    // browser goes away. The browser uses the default shutdown order, which
+    // is 0x280. Note that lower numbers here denote "kill later" and higher
+    // numbers mean "kill sooner". This gets rid of most of those unsightly
+    // sad tabs on logout and shutdown.
+    ::SetProcessShutdownParameters(kNonBrowserShutdownPriority - 1,
+                                   SHUTDOWN_NORETRY);
+  }
 
   OnBeforeLaunch(cmd_line, process_type_, file);
   DLL_MAIN chrome_main =
       reinterpret_cast<DLL_MAIN>(::GetProcAddress(dll_, "ChromeMain"));
   int rc = chrome_main(instance, &sandbox_info,
                        exe_entry_point_ticks.ToInternalValue());
-  OnBeforeExit(file);
   return rc;
 }
 
 void MainDllLoader::RelaunchChromeBrowserWithNewCommandLineIfNeeded() {
-  if (!dll_)
+  // The relaunch-if-needed behavior is a NOP for processes other than the
+  // browser process, so early out here.
+  if (!dll_ || !process_type_.empty())
     return;
 
   RelaunchChromeBrowserWithNewCommandLineIfNeededFunc relaunch_function =
       reinterpret_cast<RelaunchChromeBrowserWithNewCommandLineIfNeededFunc>(
           ::GetProcAddress(dll_,
                            "RelaunchChromeBrowserWithNewCommandLineIfNeeded"));
-  if (relaunch_function) {
-    relaunch_function();
-  } else if (ProcessTypeUsesMainDll(process_type_)) {
-    LOG(DFATAL) << "Could not find exported function "
-                << "RelaunchChromeBrowserWithNewCommandLineIfNeeded "
-                << "(" << process_type_ << " process)";
-  }
+  CHECK(relaunch_function);
+  relaunch_function();
 }
 
 //=============================================================================
@@ -230,10 +186,6 @@ class ChromeDllLoader : public MainDllLoader {
   void OnBeforeLaunch(const base::CommandLine& cmd_line,
                       const std::string& process_type,
                       const base::FilePath& dll_path) override;
-  void OnBeforeExit(const base::FilePath& dll_path) override;
-
- private:
-  std::unique_ptr<ChromeWatcherClient> chrome_watcher_client_;
 };
 
 void ChromeDllLoader::OnBeforeLaunch(const base::CommandLine& cmd_line,
@@ -242,26 +194,15 @@ void ChromeDllLoader::OnBeforeLaunch(const base::CommandLine& cmd_line,
   if (process_type.empty()) {
     if (ShouldRecordActiveUse(cmd_line))
       RecordDidRun(dll_path);
-
-    // Launch the watcher process.
-    base::FilePath exe_path;
-    if (base::PathService::Get(base::FILE_EXE, &exe_path)) {
-      chrome_watcher_client_.reset(new ChromeWatcherClient(
-          base::Bind(&GenerateChromeWatcherCommandLine, exe_path)));
-      chrome_watcher_client_->LaunchWatcher();
-    }
   } else {
     // Set non-browser processes up to be killed by the system after the browser
     // goes away. The browser uses the default shutdown order, which is 0x280.
     // Note that lower numbers here denote "kill later" and higher numbers mean
     // "kill sooner".
-    // This gets rid of most of those unsighly sad tabs on logout and shutdown.
-    ::SetProcessShutdownParameters(0x280 - 1, SHUTDOWN_NORETRY);
+    // This gets rid of most of those unsightly sad tabs on logout and shutdown.
+    ::SetProcessShutdownParameters(kNonBrowserShutdownPriority - 1,
+                                   SHUTDOWN_NORETRY);
   }
-}
-
-void ChromeDllLoader::OnBeforeExit(const base::FilePath& dll_path) {
-  chrome_watcher_client_.reset();
 }
 
 //=============================================================================
@@ -271,11 +212,10 @@ class ChromiumDllLoader : public MainDllLoader {
   void OnBeforeLaunch(const base::CommandLine& cmd_line,
                       const std::string& process_type,
                       const base::FilePath& dll_path) override {}
-  void OnBeforeExit(const base::FilePath& dll_path) override {}
 };
 
 MainDllLoader* MakeMainDllLoader() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   return new ChromeDllLoader();
 #else
   return new ChromiumDllLoader();

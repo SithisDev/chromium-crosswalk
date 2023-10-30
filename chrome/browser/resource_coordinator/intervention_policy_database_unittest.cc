@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/values.h"
 #include "chrome/browser/resource_coordinator/intervention_policy_database.pb.h"
 #include "chrome/browser/resource_coordinator/utils.h"
@@ -64,7 +64,7 @@ class InterventionPolicyDatabaseTest : public ::testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment test_env_;
+  base::test::TaskEnvironment test_env_;
   InterventionPolicyDatabase intervention_policy_database_;
 };
 
@@ -89,8 +89,8 @@ TEST_F(InterventionPolicyDatabaseTest, EndToEnd) {
                                                 OriginInterventions::DEFAULT));
   WriteProtoToFile(proto_path, policy_map);
 
-  GetDatabase()->InitializeDatabaseWithProtoFile(proto_path, base::Version(),
-                                                 nullptr);
+  GetDatabase()->InitializeDatabaseWithProtoFile(
+      proto_path, base::Version(), base::Value(base::Value::Type::DICTIONARY));
 
   WaitForDatabaseToBeInitialized();
 

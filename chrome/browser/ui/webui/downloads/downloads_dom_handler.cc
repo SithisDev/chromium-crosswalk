@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,18 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/supports_user_data.h"
+#include "base/task/current_thread.h"
 #include "base/threading/thread.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -30,22 +31,28 @@
 #include "chrome/browser/download/drag_download_item.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/downloads/downloads.mojom.h"
 #include "chrome/browser/ui/webui/fileicon_source.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/download/public/common/download_item.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "net/base/filename_util.h"
 #include "ui/base/l10n/time_format.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/image/image.h"
 
 using content::BrowserThread;
@@ -66,6 +73,8 @@ enum DownloadsDOMEvent {
   DOWNLOADS_DOM_EVENT_OPEN_FOLDER = 10,
   DOWNLOADS_DOM_EVENT_RESUME = 11,
   DOWNLOADS_DOM_EVENT_RETRY_DOWNLOAD = 12,
+  DOWNLOADS_DOM_EVENT_OPEN_DURING_SCANNING = 13,
+  DOWNLOADS_DOM_EVENT_REVIEW_DANGEROUS = 14,
   DOWNLOADS_DOM_EVENT_MAX
 };
 
@@ -78,13 +87,13 @@ void CountDownloadsDOMEvents(DownloadsDOMEvent event) {
 }  // namespace
 
 DownloadsDOMHandler::DownloadsDOMHandler(
-    downloads::mojom::PageHandlerRequest request,
-    downloads::mojom::PagePtr page,
+    mojo::PendingReceiver<downloads::mojom::PageHandler> receiver,
+    mojo::PendingRemote<downloads::mojom::Page> page,
     content::DownloadManager* download_manager,
     content::WebUI* web_ui)
     : list_tracker_(download_manager, std::move(page)),
       web_ui_(web_ui),
-      binding_(this, std::move(request)) {
+      receiver_(this, std::move(receiver)) {
   // Create our fileicon data source.
   content::URLDataSource::Add(
       Profile::FromBrowserContext(download_manager->GetBrowserContext()),
@@ -100,7 +109,8 @@ DownloadsDOMHandler::~DownloadsDOMHandler() {
   FinalizeRemovals();
 }
 
-void DownloadsDOMHandler::RenderProcessGone(base::TerminationStatus status) {
+void DownloadsDOMHandler::PrimaryMainFrameRenderProcessGone(
+    base::TerminationStatus status) {
   // TODO(dbeam): WebUI + WebUIMessageHandler should do this automatically.
   // http://crbug.com/610450
   render_process_gone_ = true;
@@ -143,13 +153,14 @@ void DownloadsDOMHandler::Drag(const std::string& id) {
 
   if (file->GetState() != download::DownloadItem::COMPLETE)
     return;
-
-  gfx::Image* icon = g_browser_process->icon_manager()->LookupIconFromFilepath(
-      file->GetTargetFilePath(), IconLoader::NORMAL);
+  const display::Screen* const screen = display::Screen::GetScreen();
   gfx::NativeView view = web_contents->GetNativeView();
+  gfx::Image* icon = g_browser_process->icon_manager()->LookupIconFromFilepath(
+      file->GetTargetFilePath(), IconLoader::NORMAL,
+      screen->GetDisplayNearestView(view).device_scale_factor());
   {
     // Enable nested tasks during DnD, while |DragDownload()| blocks.
-    base::MessageLoopCurrent::ScopedNestableTaskAllower allow;
+    base::CurrentThread::ScopedNestableTaskAllower allow;
     DragDownloadItem(file, icon, view);
   }
 }
@@ -179,7 +190,8 @@ void DownloadsDOMHandler::RetryDownload(const std::string& id) {
   if (!file)
     return;
   content::WebContents* web_contents = GetWebUIWebContents();
-  content::RenderFrameHost* render_frame_host = web_contents->GetMainFrame();
+  content::RenderFrameHost* render_frame_host =
+      web_contents->GetPrimaryMainFrame();
   const GURL url = file->GetURL();
 
   net::NetworkTrafficAnnotationTag traffic_annotation =
@@ -202,16 +214,19 @@ void DownloadsDOMHandler::RetryDownload(const std::string& id) {
           policy_exception_justification: "Not implemented."
         })");
 
+  // For "Retry", we want to use the network isolation key associated with the
+  // initial download request rather than treating it as initiated from the
+  // chrome://downloads/ page. Thus we get the NIK from |file|, not from
+  // |render_frame_host|.
   auto dl_params = std::make_unique<download::DownloadUrlParameters>(
       url, render_frame_host->GetProcess()->GetID(),
-      render_frame_host->GetRenderViewHost()->GetRoutingID(),
       render_frame_host->GetRoutingID(), traffic_annotation);
   dl_params->set_content_initiated(true);
   dl_params->set_initiator(url::Origin::Create(GURL("chrome://downloads")));
   dl_params->set_download_source(download::DownloadSource::RETRY);
 
-  content::BrowserContext::GetDownloadManager(web_contents->GetBrowserContext())
-      ->DownloadUrl(std::move(dl_params));
+  web_contents->GetBrowserContext()->GetDownloadManager()->DownloadUrl(
+      std::move(dl_params));
 }
 
 void DownloadsDOMHandler::Show(const std::string& id) {
@@ -307,7 +322,7 @@ void DownloadsDOMHandler::RemoveDownloads(const DownloadVector& to_remove) {
   IdSet ids;
 
   for (auto* download : to_remove) {
-    if (download->IsDangerous()) {
+    if (download->IsDangerous() || download->IsMixedContent()) {
       // Don't allow users to revive dangerous downloads; just nuke 'em.
       download->Remove();
       continue;
@@ -345,6 +360,40 @@ void DownloadsDOMHandler::OpenDownloadsFolderRequiringGesture() {
   }
 }
 
+void DownloadsDOMHandler::OpenDuringScanningRequiringGesture(
+    const std::string& id) {
+  if (!GetWebUIWebContents()->HasRecentInteractiveInputEvent()) {
+    LOG(ERROR) << "OpenDownloadsFolderRequiringGesture received without recent "
+                  "user interaction";
+    return;
+  }
+
+  CountDownloadsDOMEvents(DOWNLOADS_DOM_EVENT_OPEN_DURING_SCANNING);
+  download::DownloadItem* download = GetDownloadByStringId(id);
+  if (download) {
+    DownloadItemModel model(download);
+    model.SetOpenWhenComplete(true);
+#if BUILDFLAG(FULL_SAFE_BROWSING)
+    model.CompleteSafeBrowsingScan();
+#endif
+  }
+}
+
+void DownloadsDOMHandler::ReviewDangerousRequiringGesture(
+    const std::string& id) {
+  if (!GetWebUIWebContents()->HasRecentInteractiveInputEvent()) {
+    LOG(ERROR) << __func__ << " received without recent user interaction";
+    return;
+  }
+
+  CountDownloadsDOMEvents(DOWNLOADS_DOM_EVENT_REVIEW_DANGEROUS);
+  download::DownloadItem* download = GetDownloadByStringId(id);
+  if (download) {
+    DownloadItemModel model(download);
+    model.ReviewScanningVerdict(GetWebUIWebContents());
+  }
+}
+
 // DownloadsDOMHandler, private: --------------------------------------------
 
 content::DownloadManager* DownloadsDOMHandler::GetMainNotifierManager() const {
@@ -373,8 +422,8 @@ void DownloadsDOMHandler::ShowDangerPrompt(
     download::DownloadItem* dangerous_item) {
   DownloadDangerPrompt* danger_prompt = DownloadDangerPrompt::Create(
       dangerous_item, GetWebUIWebContents(), false,
-      base::Bind(&DownloadsDOMHandler::DangerPromptDone,
-                 weak_ptr_factory_.GetWeakPtr(), dangerous_item->GetId()));
+      base::BindOnce(&DownloadsDOMHandler::DangerPromptDone,
+                     weak_ptr_factory_.GetWeakPtr(), dangerous_item->GetId()));
   // danger_prompt will delete itself.
   DCHECK(danger_prompt);
 }
@@ -384,7 +433,7 @@ void DownloadsDOMHandler::DangerPromptDone(
     DownloadDangerPrompt::Action action) {
   if (action != DownloadDangerPrompt::ACCEPT)
     return;
-  download::DownloadItem* item = NULL;
+  download::DownloadItem* item = nullptr;
   if (GetMainNotifierManager())
     item = GetMainNotifierManager()->GetDownload(download_id);
   if (!item && GetOriginalNotifierManager())
@@ -392,6 +441,18 @@ void DownloadsDOMHandler::DangerPromptDone(
   if (!item || item->IsDone())
     return;
   CountDownloadsDOMEvents(DOWNLOADS_DOM_EVENT_SAVE_DANGEROUS);
+
+  // If a download is mixed content, validate that first. Is most cases, mixed
+  // content warnings will occur first, but in the worst case scenario, we show
+  // a dangerous warning twice. That's better than showing a mixed content
+  // warning, then dismissing the dangerous download warning. Since mixed
+  // content downloads triggering the UI are temporary and rare to begin with,
+  // this should very rarely occur.
+  if (item->IsMixedContent()) {
+    item->ValidateMixedContentDownload();
+    return;
+  }
+
   item->ValidateDangerousDownload();
 }
 
@@ -414,7 +475,7 @@ download::DownloadItem* DownloadsDOMHandler::GetDownloadByStringId(
 }
 
 download::DownloadItem* DownloadsDOMHandler::GetDownloadById(uint32_t id) {
-  download::DownloadItem* item = NULL;
+  download::DownloadItem* item = nullptr;
   if (GetMainNotifierManager())
     item = GetMainNotifierManager()->GetDownload(id);
   if (!item && GetOriginalNotifierManager())

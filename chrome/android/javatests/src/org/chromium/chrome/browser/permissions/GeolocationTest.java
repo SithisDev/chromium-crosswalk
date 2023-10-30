@@ -1,10 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.permissions;
 
-import android.support.test.filters.MediumTest;
+import androidx.test.filters.MediumTest;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -13,14 +13,12 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.Restriction;
-import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.permissions.PermissionTestRule.PermissionUpdateWaiter;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.device.geolocation.LocationProviderOverrider;
 import org.chromium.device.geolocation.MockLocationProvider;
 
@@ -33,7 +31,6 @@ import org.chromium.device.geolocation.MockLocationProvider;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
-@RetryOnFailure
 public class GeolocationTest {
     @Rule
     public PermissionTestRule mPermissionRule = new PermissionTestRule();
@@ -56,23 +53,10 @@ public class GeolocationTest {
         Tab tab = mPermissionRule.getActivity().getActivityTab();
         PermissionUpdateWaiter updateWaiter =
                 new PermissionUpdateWaiter("Count:", mPermissionRule.getActivity());
-        tab.addObserver(updateWaiter);
+        TestThreadUtils.runOnUiThreadBlocking(() -> tab.addObserver(updateWaiter));
         mPermissionRule.runAllowTest(
                 updateWaiter, TEST_FILE, javascript, nUpdates, withGesture, isDialog);
-        tab.removeObserver(updateWaiter);
-    }
-
-    /**
-     * Verify Geolocation creates an InfoBar and receives a mock location.
-     * @throws Exception
-     */
-    @Test
-    @MediumTest
-    @CommandLineFlags.Add("disable-features=" + PermissionTestRule.MODAL_FLAG)
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
-    @Feature({"Location", "Main"})
-    public void testGeolocationPlumbingAllowedInfoBar() throws Exception {
-        runTest("initiate_getCurrentPosition()", 1, false, false);
+        TestThreadUtils.runOnUiThreadBlocking(() -> tab.removeObserver(updateWaiter));
     }
 
     /**
@@ -81,7 +65,6 @@ public class GeolocationTest {
      */
     @Test
     @MediumTest
-    @CommandLineFlags.Add("enable-features=" + PermissionTestRule.MODAL_FLAG)
     @Feature({"Location", "Main"})
     public void testGeolocationPlumbingAllowedDialog() throws Exception {
         runTest("initiate_getCurrentPosition()", 1, true, true);
@@ -94,23 +77,9 @@ public class GeolocationTest {
      */
     @Test
     @MediumTest
-    @CommandLineFlags.Add("enable-features=" + PermissionTestRule.MODAL_FLAG)
     @Feature({"Location", "Main"})
     public void testGeolocationPlumbingAllowedDialogNoGesture() throws Exception {
         runTest("initiate_getCurrentPosition()", 1, false, true);
-    }
-
-    /**
-     * Verify Geolocation creates an InfoBar and receives multiple locations.
-     * @throws Exception
-     */
-    @Test
-    @MediumTest
-    @CommandLineFlags.Add("disable-features=" + PermissionTestRule.MODAL_FLAG)
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
-    @Feature({"Location"})
-    public void testGeolocationWatchInfoBar() throws Exception {
-        runTest("initiate_watchPosition()", 2, false, false);
     }
 
     /**
@@ -119,7 +88,6 @@ public class GeolocationTest {
      */
     @Test
     @MediumTest
-    @CommandLineFlags.Add("enable-features=" + PermissionTestRule.MODAL_FLAG)
     @Feature({"Location"})
     public void testGeolocationWatchDialog() throws Exception {
         runTest("initiate_watchPosition()", 2, true, true);

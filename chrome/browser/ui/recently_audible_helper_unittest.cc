@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,12 @@
 #include <list>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop_current.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
+#include "base/task/current_thread.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_web_contents_factory.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,10 +21,15 @@ class RecentlyAudibleHelperTest : public testing::Test {
  public:
   RecentlyAudibleHelperTest() = default;
 
+  RecentlyAudibleHelperTest(const RecentlyAudibleHelperTest&) = delete;
+  RecentlyAudibleHelperTest& operator=(const RecentlyAudibleHelperTest&) =
+      delete;
+
   ~RecentlyAudibleHelperTest() override {}
 
   void SetUp() override {
-    test_web_contents_factory_.reset(new content::TestWebContentsFactory);
+    test_web_contents_factory_ =
+        std::make_unique<content::TestWebContentsFactory>();
     contents_ =
         test_web_contents_factory_->CreateWebContents(&testing_profile_);
 
@@ -31,19 +37,19 @@ class RecentlyAudibleHelperTest : public testing::Test {
     scoped_context_ =
         std::make_unique<base::TestMockTimeTaskRunner::ScopedContext>(
             task_runner_);
-    base::MessageLoopCurrent::Get()->SetTaskRunner(task_runner_);
+    base::CurrentThread::Get()->SetTaskRunner(task_runner_);
 
     RecentlyAudibleHelper::CreateForWebContents(contents_);
     helper_ = RecentlyAudibleHelper::FromWebContents(contents_);
     helper_->SetTickClockForTesting(task_runner_->GetMockTickClock());
-    subscription_ = helper_->RegisterCallback(base::BindRepeating(
+    subscription_ = helper_->RegisterCallbackForTesting(base::BindRepeating(
         &RecentlyAudibleHelperTest::OnRecentlyAudibleCallback,
         base::Unretained(this)));
   }
 
   void TearDown() override {
     helper_->SetTickClockForTesting(nullptr);
-    subscription_.reset();
+    subscription_ = {};
     task_runner_->RunUntilIdle();
     EXPECT_TRUE(recently_audible_messages_.empty());
 
@@ -108,17 +114,15 @@ class RecentlyAudibleHelperTest : public testing::Test {
 
   // Environment for creating WebContents.
   std::unique_ptr<content::TestWebContentsFactory> test_web_contents_factory_;
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfile testing_profile_;
 
   // A test WebContents and its associated helper.
-  content::WebContents* contents_;
-  RecentlyAudibleHelper* helper_;
-  std::unique_ptr<RecentlyAudibleHelper::Subscription> subscription_;
+  raw_ptr<content::WebContents> contents_;
+  raw_ptr<RecentlyAudibleHelper> helper_;
+  base::CallbackListSubscription subscription_;
 
   std::list<bool> recently_audible_messages_;
-
-  DISALLOW_COPY_AND_ASSIGN(RecentlyAudibleHelperTest);
 };
 
 TEST_F(RecentlyAudibleHelperTest, AllStateTransitions) {
@@ -133,7 +137,7 @@ TEST_F(RecentlyAudibleHelperTest, AllStateTransitions) {
   VerifyAndClearExpectations();
 
   // Keep audio playing and don't expect any transitions.
-  AdvanceTime(base::TimeDelta::FromSeconds(30));
+  AdvanceTime(base::Seconds(30));
   ExpectCurrentlyAudible();
   VerifyAndClearExpectations();
 
@@ -153,7 +157,7 @@ TEST_F(RecentlyAudibleHelperTest, AllStateTransitions) {
   VerifyAndClearExpectations();
 
   // Advance time and stop audio, not expecting a transition.
-  AdvanceTime(base::TimeDelta::FromSeconds(30));
+  AdvanceTime(base::Seconds(30));
   SimulateAudioStops();
   ExpectRecentlyAudible();
   VerifyAndClearExpectations();

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,13 +21,14 @@ class MockEngineClient : public EngineClient {
   // cleanup code for tests.
   MockEngineClient();
 
-  // To test |PostBindEngineCommandsPtr|, mock the method
-  // |MockedPostBindEngineCommandsPtr|. This is needed because |pipe| is
+  // To test |PostBindEngineCommandsRemote|, mock the method
+  // |MockedPostBindEngineCommandsRemote|. This is needed because |pipe| is
   // move-only and gmock generates a call to the copy constructor.
-  void PostBindEngineCommandsPtr(mojo::ScopedMessagePipeHandle pipe) override {
-    MockedPostBindEngineCommandsPtr(&pipe);
+  void PostBindEngineCommandsRemote(
+      mojo::ScopedMessagePipeHandle pipe) override {
+    MockedPostBindEngineCommandsRemote(&pipe);
   }
-  MOCK_METHOD1(MockedPostBindEngineCommandsPtr,
+  MOCK_METHOD1(MockedPostBindEngineCommandsRemote,
                void(mojo::ScopedMessagePipeHandle* pipe));
 
   MOCK_CONST_METHOD0(GetEnabledUwS, std::vector<UwSId>());
@@ -60,7 +61,7 @@ class MockEngineClient : public EngineClient {
                uint32_t(const std::vector<UwSId>& enabled_uws,
                         DoneCallback* done_callback));
   uint32_t StartCleanup(const std::vector<UwSId>& enabled_uws,
-                        DoneCallback done_callback) {
+                        DoneCallback done_callback) override {
     return MockedStartCleanup(enabled_uws, &done_callback);
   }
 

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,6 @@
 #include <memory>
 #include <set>
 
-#include "base/macros.h"
-#include "chrome/browser/download/download_offline_content_provider.h"
 #include "components/download/content/public/all_download_item_notifier.h"
 
 // This class handles the task of observing a single DownloadManager for
@@ -27,6 +25,10 @@ class DownloadUIController
     // This method is invoked to notify the UI of the new download |item|. Note
     // that |item| may be in any state by the time this method is invoked.
     virtual void OnNewDownloadReady(download::DownloadItem* item) = 0;
+
+    // Notifies the controller that the main download button is clicked. Only
+    // invoked by the download bubble UI.
+    virtual void OnButtonClicked();
   };
 
   // |manager| is the download manager to observe for new downloads. If
@@ -37,10 +39,16 @@ class DownloadUIController
   //
   // Currently explicit delegates are only used for testing.
   DownloadUIController(content::DownloadManager* manager,
-                       std::unique_ptr<Delegate> delegate,
-                       DownloadOfflineContentProvider* provider);
+                       std::unique_ptr<Delegate> delegate);
+
+  DownloadUIController(const DownloadUIController&) = delete;
+  DownloadUIController& operator=(const DownloadUIController&) = delete;
 
   ~DownloadUIController() override;
+
+  // Notifies the controller that the main download button is clicked. Currently
+  // only invoked by the download bubble UI.
+  void OnButtonClicked();
 
  private:
   void OnDownloadCreated(content::DownloadManager* manager,
@@ -51,9 +59,6 @@ class DownloadUIController
   download::AllDownloadItemNotifier download_notifier_;
 
   std::unique_ptr<Delegate> delegate_;
-  DownloadOfflineContentProvider* download_provider_;
-
-  DISALLOW_COPY_AND_ASSIGN(DownloadUIController);
 };
 
 #endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_UI_CONTROLLER_H_

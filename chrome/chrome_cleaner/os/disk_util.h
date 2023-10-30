@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/strings/string16.h"
+#include "base/strings/string_piece.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/chrome_cleaner/os/disk_util_types.h"
 #include "chrome/chrome_cleaner/os/file_path_set.h"
@@ -47,17 +47,6 @@ base::FilePath GetX86ProgramFilesPath(const base::FilePath& input_path);
 void CollectMatchingPaths(const base::FilePath& root_path,
                           std::vector<base::FilePath>* matches);
 
-// Collect files and folders under |file_path| and add them to |paths|.
-// |max_files| limits the number of files to be added to |pup|. Returns false if
-// a file is bigger than |max_filesize| a file has a greater size than
-// |max_filesize| or if a folder is found when |allow_folders| is false. |paths|
-// is left unchanged when this function returns false.
-bool CollectPathsRecursivelyWithLimits(const base::FilePath& file_path,
-                                       size_t max_files,
-                                       size_t max_filesize,
-                                       bool allow_folders,
-                                       FilePathSet* paths);
-
 // Return true when a file path contains the wild-card characters '*' or '?'.
 bool PathContainsWildcards(const base::FilePath& file_path);
 
@@ -87,13 +76,13 @@ bool ExpandEnvPath(const base::FilePath& path, base::FilePath* expanded_path);
 // Replace an absolute file path by its WOW64 folder equivalent.
 void ExpandWow64Path(const base::FilePath& path, base::FilePath* expanded_path);
 
-// Return a string16 representation of |file_information|.
-base::string16 FileInformationToString(
+// Return a wstring representation of |file_information|.
+std::wstring FileInformationToString(
     const internal::FileInformation& file_information);
 
 // Returns true if the given |company_name| is on the list of companies whose
 // executables' details should not be reported.
-bool IsCompanyOnIgnoredReportingList(const base::string16& company_name);
+bool IsCompanyOnIgnoredReportingList(base::WStringPiece company_name);
 
 // Returns true if the given |path| refers to an executable whose details
 // should not be reported.
@@ -181,17 +170,17 @@ bool OverwriteZoneIdentifier(const base::FilePath& path);
 // Return a file path found in the content text, typically from a registry entry
 // that may have arguments, or be the argument of a rundll.
 base::FilePath ExtractExecutablePathFromRegistryContent(
-    const base::string16& content);
+    const std::wstring& content);
 
 // Perform environment variable expansion and wow64 path replacement.
 base::FilePath ExpandEnvPathAndWow64Path(const base::FilePath& path);
 
 // Return true if |name| contains wildcard characters '?' or '*'.
-bool NameContainsWildcards(const base::string16& name);
+bool NameContainsWildcards(const std::wstring& name);
 
-// See |String16WildcardMatchInsensitive|.
-bool NameMatchesPattern(const base::string16& name,
-                        const base::string16& pattern,
+// See |WStringWildcardMatchInsensitive|.
+bool NameMatchesPattern(const std::wstring& name,
+                        const std::wstring& pattern,
                         const wchar_t escape_char);
 
 // Retrieves basic path information for |expanded_path|.

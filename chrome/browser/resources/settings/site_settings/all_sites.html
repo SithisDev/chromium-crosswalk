@@ -1,24 +1,13 @@
-<link rel="import" href="chrome://resources/html/polymer.html">
+    <style include="settings-shared md-select clear-storage-dialog-shared">
+      cr-dialog div[slot=title] {
+          line-height: 20px;
+      }
 
-<link rel="import" href="chrome://resources/cr_elements/cr_button/cr_button.html">
-<link rel="import" href="chrome://resources/cr_elements/cr_search_field/cr_search_field.html">
-<link rel="import" href="chrome://resources/cr_elements/shared_vars_css.html">
-<link rel="import" href="chrome://resources/cr_elements/md_select_css.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-list/iron-list.html">
-<link rel="import" href="../global_scroll_target_behavior.html">
-<link rel="import" href="../route.html">
-<link rel="import" href="../settings_shared_css.html">
-<link rel="import" href="site_entry.html">
-<link rel="import" href="site_settings_behavior.html">
-
-<dom-module id="all-sites">
-  <template>
-    <style include="settings-shared md-select">
       #sort {
         align-items: center;
         display: flex;
         margin: 0 var(--cr-icon-button-margin-start);
-        margin-bottom: 50px;
+        margin-bottom: 8px;
         padding: 0 var(--cr-section-padding);
       }
 
@@ -29,6 +18,16 @@
       /* There is only one top-level heading for All Sites, so remove the
        * additional leading padding used for lists. */
       .list-frame.without-heading {
+        padding-inline-start: var(--cr-section-padding);
+      }
+
+      #clearAllContainer {
+        align-items: center;
+        display: flex;
+        height: var(--cr-section-two-line-min-height);
+        justify-content: space-between;
+        margin: 0 var(--cr-icon-button-margin-start);
+        padding-inline-end: var(--cr-section-padding);
         padding-inline-start: var(--cr-section-padding);
       }
     </style>
@@ -47,6 +46,16 @@
         </option>
       </select>
     </div>
+    <div id="clearAllContainer">
+      <div id="clearLabel">
+        [[getClearStorageDescription_(totalUsage_, filter)]]
+      </div>
+      <div id="clearAllButton">
+        <cr-button type="button" on-click="onConfirmClearAllData_">
+          [[getClearDataButtonString_(filter)]]
+        </cr-button>
+      </div>
+    </div>
     <div class="list-frame" hidden$="[[!siteGroupMapEmpty_(siteGroupMap)]]">
       <div class="list-item secondary">$i18n{emptyAllSitesPage}</div>
     </div>
@@ -60,6 +69,7 @@
         <template>
           <site-entry site-group="[[item]]" list-index="[[index]]"
               iron-list-tab-index="[[tabIndex]]"
+              focus-row-index="[[index]]"
               tabindex$="[[tabIndex]]"
               last-focused="{{lastFocused_}}"
               list-blurred="{{listBlurred_}}"
@@ -72,15 +82,28 @@
     <!-- Overflow menu. -->
     <cr-lazy-render id="menu">
       <template>
-        <cr-action-menu>
-          <button class="dropdown-item" role="menuitem"
-              on-click="onConfirmResetSettings_">
-            $i18n{siteSettingsSiteGroupReset}
-          </button>
-          <button class="dropdown-item" role="menuitem"
-              on-click="onConfirmClearData_">
-            $i18n{siteSettingsSiteGroupDelete}
-          </button>
+        <cr-action-menu role-description="$i18n{menu}">
+          <template is="dom-if" if="[[enableFirstPartySetsUI_]]">
+            <button class="dropdown-item" role="menuitem"
+                on-click="onShowRelatedSites_">
+                $i18n{firstPartySetsShowRelatedSitesButton}
+            </button>
+            <button class="dropdown-item" role="menuitem"
+                on-click="onRemove_">
+                $i18n{firstPartySetsSiteClearStorageButton}
+            </button>
+          </template>
+          <template is="dom-if" if="[[!enableFirstPartySetsUI_]]">
+            <button hidden$="[[actionMenuModel_.isPartitioned]]"
+                class="dropdown-item" role="menuitem"
+                on-click="onConfirmResetSettings_">
+              $i18n{siteSettingsSiteGroupReset}
+            </button>
+            <button class="dropdown-item" role="menuitem"
+                on-click="onConfirmClearData_">
+              $i18n{siteSettingsSiteGroupDelete}
+            </button>
+          </template>
         </cr-action-menu>
       </template>
     </cr-lazy-render>
@@ -93,9 +116,7 @@
             $i18n{siteSettingsSiteGroupResetDialogTitle}
           </div>
           <div slot="body">
-            [[getFormatString_(
-                '$i18nPolymer{siteSettingsSiteGroupResetConfirmation}',
-                actionMenuModel_.item.etldPlus1)]]
+            [[getResetPermissionsLabel_(actionMenuModel_)]]
           </div>
           <div slot="button-container">
             <cr-button class="cancel-button" on-click="onCloseDialog_">
@@ -117,9 +138,19 @@
             $i18n{siteSettingsSiteGroupDeleteDialogTitle}
           </div>
           <div slot="body">
-            [[getFormatString_(
-                '$i18nPolymer{siteSettingsSiteGroupDeleteConfirmation}',
-                actionMenuModel_.item.etldPlus1)]]
+            [[getClearDataLabel_(actionMenuModel_)]]
+            <div class="detail-list">
+              <div class="detail">
+                <iron-icon icon="all-sites:logout" aria-hidden="true"
+                  role="presentation"></iron-icon>
+                [[getLogoutLabel_()]]
+              </div>
+              <div class="detail">
+                <iron-icon icon="all-sites:offline" aria-hidden="true"
+                  role="presentation"></iron-icon>
+                $i18n{siteSettingsSiteGroupDeleteOfflineData}
+              </div>
+            </div>
           </div>
           <div slot="button-container">
             <cr-button class="cancel-button" on-click="onCloseDialog_">
@@ -132,6 +163,74 @@
         </cr-dialog>
       </template>
     </cr-lazy-render>
-  </template>
-  <script src="all_sites.js"></script>
-</dom-module>
+
+    <!-- Confirm remove site dialog. -->
+    <cr-lazy-render id="confirmRemoveSite">
+      <template>
+        <cr-dialog close-text="$i18n{close}">
+          <div id="removeSiteTitle" slot="title">
+            [[getRemoveSiteTitle_(actionMenuModel_)]]
+          </div>
+          <div slot="body">
+            <div id="logoutBulletPoint" class="detail">
+              <iron-icon icon="all-sites:logout" aria-hidden="true"
+                role="presentation"></iron-icon>
+              [[getRemoveSiteLogoutBulletPoint_(actionMenuModel_)]]
+            </div>
+            <div class="detail">
+              <iron-icon icon="all-sites:offline" aria-hidden="true"
+                role="presentation"></iron-icon>
+              $i18n{siteSettingsRemoveSiteOfflineData}
+            </div>
+            <div id="permissionsBulletPoint" class="detail"
+              hidden$="[[!showPermissionsBulletPoint_(actionMenuModel_)]]">
+              <iron-icon icon="settings:permissions"></iron-icon>
+              $i18n{siteSettingsRemoveSitePermissions}
+            </div>
+          </div>
+          <div slot="button-container">
+            <cr-button class="cancel-button" on-click="onCloseDialog_">
+              $i18n{cancel}
+            </cr-button>
+            <cr-button class="action-button" on-click="onConfirmRemoveSite_">
+              $i18n{siteSettingsRemoveSiteConfirm}
+            </cr-button>
+          </div>
+        </cr-dialog>
+      </template>
+    </cr-lazy-render>
+
+    <!-- Confirm clear all data dialog. -->
+    <cr-lazy-render id="confirmClearAllData">
+      <template>
+        <cr-dialog close-text="$i18n{close}">
+          <div slot="title">[[getClearAllStorageDialogTitle_(filter)]]</div>
+          <div slot="body">
+            <div id="clearAllStorageDialogDescription">
+              [[getClearAllStorageDialogDescription_(totalUsage_,
+                  filteredList_)]]
+            </div>
+            <div class="detail-list">
+              <div id="clearAllStorageDialogSignOutLabel" class="detail">
+                <iron-icon icon="all-sites:logout" aria-hidden="true"
+                  role="presentation"></iron-icon>
+                [[getClearAllStorageDialogSignOutLabel_(filter)]]
+              </div>
+              <div class="detail">
+                <iron-icon icon="all-sites:offline" aria-hidden="true"
+                  role="presentation"></iron-icon>
+                $i18n{siteSettingsSiteGroupDeleteOfflineData}
+              </div>
+            </div>
+          </div>
+          <div slot="button-container">
+            <cr-button class="cancel-button" on-click="onCloseDialog_">
+              $i18n{cancel}
+            </cr-button>
+            <cr-button class="action-button" on-click="onClearAllData_">
+              $i18n{siteSettingsSiteClearStorage}
+            </cr-button>
+          </div>
+        </cr-dialog>
+      </template>
+    </cr-lazy-render>

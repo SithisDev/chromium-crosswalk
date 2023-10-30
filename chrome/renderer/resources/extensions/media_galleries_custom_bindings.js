@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,14 +32,14 @@ apiBridge.registerCustomHook(function(bindingsAPI, extensionId) {
   // getMediaFileSystems and addUserSelectedFolder use a custom callback so that
   // they can instantiate and return an array of file system objects.
   apiFunctions.setCustomCallback('getMediaFileSystems',
-                                 function(name, request, callback, response) {
+                                 function(callback, response) {
     var result = createFileSystemObjectsAndUpdateMetadata(response);
     if (callback)
       callback(result);
   });
 
   apiFunctions.setCustomCallback('addUserSelectedFolder',
-      function(name, request, callback, response) {
+      function(callback, response) {
     var fileSystems = [];
     var selectedFileSystemName = "";
     if (response && 'mediaFileSystems' in response &&
@@ -70,7 +70,7 @@ apiBridge.registerCustomHook(function(bindingsAPI, extensionId) {
     };
   });
 
-  function getMetadataCallback(uuid, name, request, callback, response) {
+  function getMetadataCallback(uuid, callback, response) {
     if (response && response.attachedImagesBlobInfo) {
       for (var i = 0; i < response.attachedImagesBlobInfo.length; i++) {
         var blobInfo = response.attachedImagesBlobInfo[i];

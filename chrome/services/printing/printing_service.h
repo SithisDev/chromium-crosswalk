@@ -1,35 +1,48 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_SERVICES_PRINTING_PRINTING_SERVICE_H_
 #define CHROME_SERVICES_PRINTING_PRINTING_SERVICE_H_
 
-#include "services/service_manager/public/cpp/binder_registry.h"
-#include "services/service_manager/public/cpp/service.h"
-#include "services/service_manager/public/cpp/service_binding.h"
-#include "services/service_manager/public/cpp/service_keepalive.h"
-#include "services/service_manager/public/mojom/service.mojom.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+#include "chrome/services/printing/public/mojom/printing_service.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 
 namespace printing {
 
-class PrintingService : public service_manager::Service {
+class PrintingService : public mojom::PrintingService {
  public:
-  explicit PrintingService(service_manager::mojom::ServiceRequest request);
+  explicit PrintingService(
+      mojo::PendingReceiver<mojom::PrintingService> receiver);
+
+  PrintingService(const PrintingService&) = delete;
+  PrintingService& operator=(const PrintingService&) = delete;
+
   ~PrintingService() override;
 
-  // Lifescycle events that occur after the service has started to spinup.
-  void OnStart() override;
-  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
-                       const std::string& interface_name,
-                       mojo::ScopedMessagePipeHandle interface_pipe) override;
-
  private:
-  service_manager::ServiceBinding service_binding_;
-  service_manager::ServiceKeepalive service_keepalive_;
-  service_manager::BinderRegistry registry_;
+  // mojom::PrintingService implementation:
+  void BindPdfNupConverter(
+      mojo::PendingReceiver<mojom::PdfNupConverter> receiver) override;
+  void BindPdfToPwgRasterConverter(
+      mojo::PendingReceiver<mojom::PdfToPwgRasterConverter> receiver) override;
+#if BUILDFLAG(IS_CHROMEOS)
+  void BindPdfFlattener(
+      mojo::PendingReceiver<mojom::PdfFlattener> receiver) override;
+#endif
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  void BindPdfThumbnailer(
+      mojo::PendingReceiver<mojom::PdfThumbnailer> receiver) override;
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_WIN)
+  void BindPdfToEmfConverterFactory(
+      mojo::PendingReceiver<mojom::PdfToEmfConverterFactory> receiver) override;
+#endif
 
-  DISALLOW_COPY_AND_ASSIGN(PrintingService);
+  mojo::Receiver<mojom::PrintingService> receiver_;
 };
 
 }  // namespace printing

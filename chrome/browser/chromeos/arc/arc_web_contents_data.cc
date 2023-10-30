@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,9 @@ namespace arc {
 // static
 const char ArcWebContentsData::kArcTransitionFlag[] = "ArcTransition";
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(ArcWebContentsData)
+ArcWebContentsData::ArcWebContentsData(content::WebContents* web_contents)
+    : content::WebContentsUserData<ArcWebContentsData>(*web_contents) {}
+
+WEB_CONTENTS_USER_DATA_KEY_IMPL(ArcWebContentsData);
 
 }  // namespace arc

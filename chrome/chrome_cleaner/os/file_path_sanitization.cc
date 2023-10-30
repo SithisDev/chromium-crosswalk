@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 
 #include "base/base_paths_win.h"
 #include "base/logging.h"
+#include "base/notreached.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 
@@ -176,7 +177,7 @@ bool OffsetCSIDLToPath(int csidl_with_offset, base::FilePath* path) {
 
 void InitializeFilePathSanitization() {
   // Only do this once.
-  static bool init_once = []() -> bool {
+  [[maybe_unused]] static bool init_once = []() -> bool {
     // Setup PathService to use OffsetCSIDLToPath so that SanitizePath can
     // benefit from the caching provided in PathService.
     base::PathService::RegisterProvider(&OffsetCSIDLToPath,
@@ -193,7 +194,6 @@ void InitializeFilePathSanitization() {
     sanitization_internal::initialize_file_path_sanitization_called = true;
     return true;
   }();
-  ANALYZER_ALLOW_UNUSED(init_once);
 }
 
 std::vector<base::FilePath> GetRewrittenPaths() {
@@ -207,8 +207,8 @@ std::vector<base::FilePath> GetRewrittenPaths() {
   return paths;
 }
 
-std::map<int, base::string16> PathKeyToSanitizeString() {
-  std::map<int, base::string16> path_key_to_sanitize_string;
+std::map<int, std::wstring> PathKeyToSanitizeString() {
+  std::map<int, std::wstring> path_key_to_sanitize_string;
   for (const auto* rule = sanitization_internal::rewrite_rules;
        rule->path != nullptr; ++rule) {
     path_key_to_sanitize_string.insert(std::make_pair(rule->id, rule->path));
@@ -221,12 +221,12 @@ int CsidlToPathServiceKey(int CSIDL) {
 }
 
 base::FilePath NormalizePath(const base::FilePath& path) {
-  base::string16 long_path;
+  std::wstring long_path;
   ConvertToLongPath(path.value(), &long_path);
   return base::FilePath(base::ToLowerASCII(long_path));
 }
 
-void ConvertToLongPath(const base::string16& path, base::string16* long_path) {
+void ConvertToLongPath(const std::wstring& path, std::wstring* long_path) {
   DCHECK(long_path);
   DWORD long_path_len = ::GetLongPathName(path.c_str(), nullptr, 0);
   if (long_path_len > 0UL) {
@@ -238,11 +238,11 @@ void ConvertToLongPath(const base::string16& path, base::string16* long_path) {
   }
 }
 
-base::string16 SanitizePath(const base::FilePath& path) {
+std::wstring SanitizePath(const base::FilePath& path) {
   return SanitizePathImpl(path).value();
 }
 
-base::string16 SanitizeCommandLine(const base::CommandLine& command_line) {
+std::wstring SanitizeCommandLine(const base::CommandLine& command_line) {
   base::FilePath sanitized_program =
       SanitizePathImpl(command_line.GetProgram());
   base::CommandLine sanitized_command_line(sanitized_program);

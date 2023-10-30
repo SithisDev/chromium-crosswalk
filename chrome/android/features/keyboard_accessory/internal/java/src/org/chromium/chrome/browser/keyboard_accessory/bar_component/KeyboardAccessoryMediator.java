@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,22 @@ package org.chromium.chrome.browser.keyboard_accessory.bar_component;
 
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BAR_ITEMS;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BOTTOM_OFFSET_PX;
+import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.DISABLE_ANIMATIONS_FOR_TESTING;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.KEYBOARD_TOGGLE_VISIBLE;
+import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.OBFUSCATED_CHILD_AT_CALLBACK;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.SHEET_TITLE;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.SHOW_KEYBOARD_CALLBACK;
+import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.SHOW_SWIPING_IPH;
+import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.SKIP_CLOSING_ANIMATION;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.TAB_LAYOUT_ITEM;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.VISIBLE;
 
-import android.support.annotation.Nullable;
-import android.support.annotation.Px;
+import androidx.annotation.Nullable;
+import androidx.annotation.Px;
+import androidx.annotation.VisibleForTesting;
 
-import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.base.TraceEvent;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.keyboard_accessory.AccessoryAction;
 import org.chromium.chrome.browser.keyboard_accessory.AccessorySheetTrigger;
 import org.chromium.chrome.browser.keyboard_accessory.ManualFillingMetricsRecorder;
@@ -64,6 +69,7 @@ class KeyboardAccessoryMediator
         mTabSwitcher = tabSwitcher;
 
         // Add mediator as observer so it can use model changes as signal for accessory visibility.
+        mModel.set(OBFUSCATED_CHILD_AT_CALLBACK, this::onSuggestionObfuscatedAt);
         mModel.set(SHOW_KEYBOARD_CALLBACK, this::closeSheet);
         mModel.set(TAB_LAYOUT_ITEM, new TabLayoutBarItem(tabLayoutCallbacks));
         if (ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY)) {
@@ -98,6 +104,7 @@ class KeyboardAccessoryMediator
     @Override
     public void onItemAvailable(
             @AccessoryAction int typeId, KeyboardAccessoryData.Action[] actions) {
+        TraceEvent.begin("KeyboardAccessoryMediator#onItemAvailable");
         assert typeId != DEFAULT_TYPE : "Did not specify which Action type has been updated.";
         List<BarItem> retainedItems = collectItemsToRetain(typeId);
         retainedItems.addAll(0, toBarItems(actions));
@@ -105,6 +112,7 @@ class KeyboardAccessoryMediator
             retainedItems.add(retainedItems.size(), mModel.get(TAB_LAYOUT_ITEM));
         }
         mModel.get(BAR_ITEMS).set(retainedItems);
+        TraceEvent.end("KeyboardAccessoryMediator#onItemAvailable");
     }
 
     private List<BarItem> collectItemsToRetain(@AccessoryAction int actionType) {
@@ -125,25 +133,24 @@ class KeyboardAccessoryMediator
      */
     private boolean shouldShowSuggestion(AutofillSuggestion suggestion) {
         switch (suggestion.getSuggestionId()) {
+            case PopupItemId.ITEM_ID_INSECURE_CONTEXT_PAYMENT_DISABLED_MESSAGE:
+                // The insecure context warning has a replacement in the fallback sheet.
             case PopupItemId.ITEM_ID_SEPARATOR:
             case PopupItemId.ITEM_ID_CLEAR_FORM:
             case PopupItemId.ITEM_ID_CREDIT_CARD_SIGNIN_PROMO:
             case PopupItemId.ITEM_ID_ALL_SAVED_PASSWORDS_ENTRY:
-            case PopupItemId.ITEM_ID_GOOGLE_PAY_BRANDING:
             case PopupItemId.ITEM_ID_GENERATE_PASSWORD_ENTRY:
             case PopupItemId.ITEM_ID_SHOW_ACCOUNT_CARDS:
             case PopupItemId.ITEM_ID_AUTOFILL_OPTIONS:
                 return false;
-            case PopupItemId.ITEM_ID_INSECURE_CONTEXT_PAYMENT_DISABLED_MESSAGE:
-                return ChromeFeatureList.isEnabled(
-                        ChromeFeatureList.AUTOFILL_MANUAL_FALLBACK_ANDROID);
             case PopupItemId.ITEM_ID_AUTOCOMPLETE_ENTRY:
             case PopupItemId.ITEM_ID_PASSWORD_ENTRY:
             case PopupItemId.ITEM_ID_DATALIST_ENTRY:
             case PopupItemId.ITEM_ID_SCAN_CREDIT_CARD:
             case PopupItemId.ITEM_ID_TITLE:
             case PopupItemId.ITEM_ID_USERNAME_ENTRY:
-            case PopupItemId.ITEM_ID_CREATE_HINT:
+            case PopupItemId.ITEM_ID_ACCOUNT_STORAGE_PASSWORD_ENTRY:
+            case PopupItemId.ITEM_ID_ACCOUNT_STORAGE_USERNAME_ENTRY:
                 return true;
         }
         return true; // If it's not a special id, show the regular suggestion!
@@ -195,11 +202,14 @@ class KeyboardAccessoryMediator
     private KeyboardAccessoryData.Action createAutofillAction(AutofillDelegate delegate, int pos) {
         return new KeyboardAccessoryData.Action(
                 null, // Unused. The AutofillSuggestion has more meaningful labels.
-                AccessoryAction.AUTOFILL_SUGGESTION, result -> {
+                AccessoryAction.AUTOFILL_SUGGESTION,
+                result
+                -> {
                     ManualFillingMetricsRecorder.recordActionSelected(
                             AccessoryAction.AUTOFILL_SUGGESTION);
                     delegate.suggestionSelected(pos);
-                });
+                },
+                result -> { delegate.deleteSuggestion(pos); });
     }
 
     private @BarItem.Type int toBarItemType(@AccessoryAction int accessoryAction) {
@@ -216,7 +226,12 @@ class KeyboardAccessoryMediator
     }
 
     void show() {
+        mModel.set(SKIP_CLOSING_ANIMATION, false);
         mModel.set(VISIBLE, true);
+    }
+
+    void skipClosingAnimationOnce() {
+        mModel.set(SKIP_CLOSING_ANIMATION, true);
     }
 
     void dismiss() {
@@ -229,6 +244,7 @@ class KeyboardAccessoryMediator
             PropertyObservable<PropertyKey> source, @Nullable PropertyKey propertyKey) {
         // Update the visibility only if we haven't set it just now.
         if (propertyKey == VISIBLE) {
+            mModel.set(SHOW_SWIPING_IPH, false); // Reset IPH if visibility changes.
             // When the accessory just (dis)appeared, there should be no active tab.
             mTabSwitcher.closeActiveTab();
             if (!mModel.get(VISIBLE)) {
@@ -243,7 +259,10 @@ class KeyboardAccessoryMediator
             return;
         }
         if (propertyKey == BOTTOM_OFFSET_PX || propertyKey == SHOW_KEYBOARD_CALLBACK
-                || propertyKey == TAB_LAYOUT_ITEM || propertyKey == SHEET_TITLE) {
+                || propertyKey == TAB_LAYOUT_ITEM || propertyKey == SHEET_TITLE
+                || propertyKey == SKIP_CLOSING_ANIMATION
+                || propertyKey == DISABLE_ANIMATIONS_FOR_TESTING
+                || propertyKey == OBFUSCATED_CHILD_AT_CALLBACK || propertyKey == SHOW_SWIPING_IPH) {
             return;
         }
         assert false : "Every property update needs to be handled explicitly!";
@@ -270,6 +289,11 @@ class KeyboardAccessoryMediator
                 mTabSwitcher.getActiveTab().getRecordingType(), AccessorySheetTrigger.MANUAL_CLOSE);
         mModel.set(KEYBOARD_TOGGLE_VISIBLE, false);
         mVisibilityDelegate.onCloseAccessorySheet();
+    }
+
+    private void onSuggestionObfuscatedAt(Integer indexOfLast) {
+        // Show IPH if at least one entire item (suggestion or fallback) can be revealed by swiping.
+        mModel.set(SHOW_SWIPING_IPH, indexOfLast <= mModel.get(BAR_ITEMS).size() - 2);
     }
 
     /**
@@ -307,10 +331,19 @@ class KeyboardAccessoryMediator
     }
 
     private static String getFeatureBySuggestionId(AutofillSuggestion suggestion) {
+        // If the suggestion has an explicit IPH feature defined, prefer that over the default IPH
+        // features.
+        if (!suggestion.getFeatureForIPH().isEmpty()) {
+            return suggestion.getFeatureForIPH();
+        }
         if (containsPasswordInfo(suggestion)) {
             return FeatureConstants.KEYBOARD_ACCESSORY_PASSWORD_FILLING_FEATURE;
         }
         if (containsCreditCardInfo(suggestion)) {
+            if (!suggestion.getItemTag().isEmpty()) {
+                // Prefer showing a linked cashback over the general IPH.
+                return FeatureConstants.KEYBOARD_ACCESSORY_PAYMENT_OFFER_FEATURE;
+            }
             return FeatureConstants.KEYBOARD_ACCESSORY_PAYMENT_FILLING_FEATURE;
         }
         if (containsAddressInfo(suggestion)) {

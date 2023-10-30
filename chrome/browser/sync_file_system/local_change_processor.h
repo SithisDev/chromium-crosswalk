@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_SYNC_FILE_SYSTEM_LOCAL_CHANGE_PROCESSOR_H_
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
 #include "chrome/browser/sync_file_system/sync_callbacks.h"
 
 namespace storage {
@@ -23,6 +22,10 @@ class FileChange;
 class LocalChangeProcessor {
  public:
   LocalChangeProcessor() {}
+
+  LocalChangeProcessor(const LocalChangeProcessor&) = delete;
+  LocalChangeProcessor& operator=(const LocalChangeProcessor&) = delete;
+
   virtual ~LocalChangeProcessor() {}
 
   // This is called to apply the local |change|. If the change type is
@@ -36,10 +39,7 @@ class LocalChangeProcessor {
                                 const base::FilePath& local_file_path,
                                 const SyncFileMetadata& local_file_metadata,
                                 const storage::FileSystemURL& url,
-                                const SyncStatusCallback& callback) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(LocalChangeProcessor);
+                                SyncStatusCallback callback) = 0;
 };
 
 }  // namespace sync_file_system

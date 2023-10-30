@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,40 +8,47 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
-#include "chrome/browser/chromeos/file_manager/volume_manager.h"
-#include "chromeos/disks/disk.h"
+#include "base/test/task_environment.h"
+#include "chrome/browser/ash/file_manager/volume_manager.h"
+#include "chromeos/ash/components/disks/disk.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace file_manager {
 namespace {
 
 namespace file_manager_private = extensions::api::file_manager_private;
-using chromeos::disks::Disk;
+using ::ash::disks::Disk;
 
 const char kTestDevicePath[] = "/device/test";
 
 struct DeviceEvent {
   extensions::api::file_manager_private::DeviceEventType type;
   std::string device_path;
+  std::string device_label;
 };
 
 // DeviceEventRouter implementation for testing.
 class DeviceEventRouterImpl : public DeviceEventRouter {
  public:
-  DeviceEventRouterImpl()
-      : DeviceEventRouter(base::TimeDelta::FromSeconds(0)),
+  explicit DeviceEventRouterImpl(
+      SystemNotificationManager* notification_manager)
+      : DeviceEventRouter(notification_manager, base::Seconds(0)),
         external_storage_disabled(false) {}
+
+  DeviceEventRouterImpl(const DeviceEventRouterImpl&) = delete;
+  DeviceEventRouterImpl& operator=(const DeviceEventRouterImpl&) = delete;
+
   ~DeviceEventRouterImpl() override = default;
 
   // DeviceEventRouter overrides.
   void OnDeviceEvent(file_manager_private::DeviceEventType type,
-                     const std::string& device_path) override {
+                     const std::string& device_path,
+                     const std::string& device_label) override {
     DeviceEvent event;
     event.type = type;
     event.device_path = device_path;
+    event.device_label = device_label;
     events.push_back(event);
   }
 
@@ -55,9 +62,6 @@ class DeviceEventRouterImpl : public DeviceEventRouter {
 
   // Flag returned by |IsExternalStorageDisabled|.
   bool external_storage_disabled;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DeviceEventRouterImpl);
 };
 
 }  // namespace
@@ -65,7 +69,7 @@ class DeviceEventRouterImpl : public DeviceEventRouter {
 class DeviceEventRouterTest : public testing::Test {
  protected:
   void SetUp() override {
-    device_event_router = std::make_unique<DeviceEventRouterImpl>();
+    device_event_router = std::make_unique<DeviceEventRouterImpl>(nullptr);
   }
 
   // Creates a disk instance with |device_path| and |mount_path| for testing.
@@ -86,7 +90,7 @@ class DeviceEventRouterTest : public testing::Test {
   std::unique_ptr<DeviceEventRouterImpl> device_event_router;
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 TEST_F(DeviceEventRouterTest, AddAndRemoveDevice) {
@@ -98,10 +102,8 @@ TEST_F(DeviceEventRouterTest, AddAndRemoveDevice) {
       base::FilePath(FILE_PATH_LITERAL("/mount/path1"))));
   device_event_router->OnDeviceAdded("/device/test");
   device_event_router->OnDiskAdded(disk1, true);
-  device_event_router->OnVolumeMounted(chromeos::MOUNT_ERROR_NONE,
-                                       *volume.get());
-  device_event_router->OnVolumeUnmounted(chromeos::MOUNT_ERROR_NONE,
-                                         *volume.get());
+  device_event_router->OnVolumeMounted(ash::MountError::kNone, *volume.get());
+  device_event_router->OnVolumeUnmounted(ash::MountError::kNone, *volume.get());
   device_event_router->OnDiskRemoved(disk1_unmounted);
   device_event_router->OnDeviceRemoved("/device/test");
   ASSERT_EQ(1u, device_event_router->events.size());

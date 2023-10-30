@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,34 +6,23 @@
 
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
+#include "base/command_line.h"
 #include "base/no_destructor.h"
 #include "base/win/current_module.h"
 #include "base/win/iat_patch_function.h"
+#include "base/win/windows_version.h"
 #include "content/public/child/child_thread.h"
+#include "content/public/common/content_switches.h"
+#include "sandbox/policy/mojom/sandbox.mojom.h"
+#include "sandbox/policy/sandbox_type.h"
+#include "sandbox/policy/switches.h"
 #endif
 
 namespace {
 
-#if defined(OS_WIN)
-HDC WINAPI CreateDCAPatch(LPCSTR driver_name,
-                          LPCSTR device_name,
-                          LPCSTR output,
-                          const void* init_data) {
-  DCHECK(std::string("DISPLAY") == std::string(driver_name));
-  DCHECK(!device_name);
-  DCHECK(!output);
-  DCHECK(!init_data);
-
-  // CreateDC fails behind the sandbox, but not CreateCompatibleDC.
-  return CreateCompatibleDC(NULL);
-}
-
-typedef DWORD (WINAPI* GetFontDataPtr) (HDC hdc,
-                                        DWORD table,
-                                        DWORD offset,
-                                        LPVOID buffer,
-                                        DWORD length);
+#if BUILDFLAG(IS_WIN)
+typedef decltype(::GetFontData)* GetFontDataPtr;
 GetFontDataPtr g_original_get_font_data = nullptr;
 
 
@@ -57,15 +46,24 @@ DWORD WINAPI GetFontDataPatch(HDC hdc,
   }
   return rv;
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace
 
-void InitializePDF() {
-#if defined(OS_WIN)
-  // Need to patch a few functions for font loading to work correctly. This can
-  // be removed once we switch PDF to use Skia
-  // (https://bugs.chromium.org/p/pdfium/issues/detail?id=11).
+void MaybePatchGdiGetFontData() {
+#if BUILDFLAG(IS_WIN)
+  // Only patch utility processes which explicitly need GDI.
+  auto& command_line = *base::CommandLine::ForCurrentProcess();
+  auto service_sandbox_type =
+      sandbox::policy::SandboxTypeFromCommandLine(command_line);
+  bool need_gdi =
+      service_sandbox_type == sandbox::mojom::Sandbox::kPrintCompositor ||
+      service_sandbox_type == sandbox::mojom::Sandbox::kPdfConversion ||
+      (service_sandbox_type == sandbox::mojom::Sandbox::kRenderer &&
+       command_line.HasSwitch(switches::kPdfRenderer));
+  if (!need_gdi)
+    return;
+
 #if defined(COMPONENT_BUILD)
   HMODULE module = ::GetModuleHandleA("pdfium.dll");
   DCHECK(module);
@@ -73,15 +71,13 @@ void InitializePDF() {
   HMODULE module = CURRENT_MODULE();
 #endif  // defined(COMPONENT_BUILD)
 
-  static base::NoDestructor<base::win::IATPatchFunction> patch_createdca;
-  patch_createdca->PatchFromModule(module, "gdi32.dll", "CreateDCA",
-                                   reinterpret_cast<void*>(CreateDCAPatch));
-
+  // Need to patch GetFontData() for font loading to work correctly.
+  // TODO(crbug.com/pdfium/11): Can be removed once PDFium switches to use Skia.
   static base::NoDestructor<base::win::IATPatchFunction> patch_get_font_data;
   patch_get_font_data->PatchFromModule(
       module, "gdi32.dll", "GetFontData",
       reinterpret_cast<void*>(GetFontDataPatch));
   g_original_get_font_data = reinterpret_cast<GetFontDataPtr>(
       patch_get_font_data->original_function());
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 }

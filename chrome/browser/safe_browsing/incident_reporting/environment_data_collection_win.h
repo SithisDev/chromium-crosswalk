@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,8 +45,8 @@ void CollectModuleVerificationData(
     ClientIncidentReport_EnvironmentData_Process* process);
 
 // Populates |process| with the dll names that have been added to the chrome elf
-// blacklist through the Windows registry.
-void CollectDllBlacklistData(
+// blocklist through the Windows registry.
+void CollectDllBlocklistData(
     ClientIncidentReport_EnvironmentData_Process* process);
 
 // Populates |key_data| with the data in the registry keys specified. In case of

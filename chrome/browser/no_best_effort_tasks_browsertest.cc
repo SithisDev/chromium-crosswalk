@@ -1,17 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
+#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -20,6 +20,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "net/dns/mock_host_resolver.h"
@@ -40,6 +41,10 @@ class RunLoopUntilLoadedAndPainted : public content::WebContentsObserver {
  public:
   explicit RunLoopUntilLoadedAndPainted(content::WebContents* web_contents)
       : content::WebContentsObserver(web_contents) {}
+
+  RunLoopUntilLoadedAndPainted(const RunLoopUntilLoadedAndPainted&) = delete;
+  RunLoopUntilLoadedAndPainted& operator=(const RunLoopUntilLoadedAndPainted&) =
+      delete;
 
   ~RunLoopUntilLoadedAndPainted() override = default;
 
@@ -70,11 +75,13 @@ class RunLoopUntilLoadedAndPainted : public content::WebContentsObserver {
   }
 
   base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(RunLoopUntilLoadedAndPainted);
 };
 
 class NoBestEffortTasksTest : public InProcessBrowserTest {
+ public:
+  NoBestEffortTasksTest(const NoBestEffortTasksTest&) = delete;
+  NoBestEffortTasksTest& operator=(const NoBestEffortTasksTest&) = delete;
+
  protected:
   NoBestEffortTasksTest() = default;
   ~NoBestEffortTasksTest() override = default;
@@ -82,7 +89,6 @@ class NoBestEffortTasksTest : public InProcessBrowserTest {
  private:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kDisableBestEffortTasks);
-    InProcessBrowserTest::SetUpCommandLine(command_line);
   }
 
   void SetUpOnMainThread() override {
@@ -91,14 +97,11 @@ class NoBestEffortTasksTest : public InProcessBrowserTest {
     host_resolver()->AddRule("*", "127.0.0.1");
     InProcessBrowserTest::SetUpOnMainThread();
   }
-
-  DISALLOW_COPY_AND_ASSIGN(NoBestEffortTasksTest);
 };
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 constexpr base::StringPiece kExtensionId = "ddchlicdkolnonkihahngkmmmjnjlkkf";
-constexpr base::TimeDelta kSendMessageRetryPeriod =
-    base::TimeDelta::FromMilliseconds(250);
+constexpr base::TimeDelta kSendMessageRetryPeriod = base::Milliseconds(250);
 #endif
 
 }  // namespace
@@ -173,7 +176,7 @@ IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, LoadExtensionAndSendMessages) {
       extensions::ExtensionSystem::Get(browser()->profile())
           ->extension_service())
       ->Load(extension_dir);
-  auto* const extension =
+  scoped_refptr<const extensions::Extension> extension =
       extensions::TestExtensionRegistryObserver(
           extensions::ExtensionRegistry::Get(browser()->profile()))
           .WaitForExtensionReady();
@@ -184,9 +187,9 @@ IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, LoadExtensionAndSendMessages) {
   // here must match the pattern found in the extension's manifest file, or it
   // will not be able to send/receive messaging from the test web page (due to
   // extension permissions).
-  ui_test_utils::NavigateToURL(
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(),
-      embedded_test_server()->GetURL("fake.chromium.org", "/empty.html"));
+      embedded_test_server()->GetURL("fake.chromium.org", "/empty.html")));
 
   // Execute JavaScript in the test page, to send a ping message to the
   // extension and await the reply. The chrome.runtime.sendMessage() operation
@@ -225,3 +228,75 @@ IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, LoadExtensionAndSendMessages) {
   }
 }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+
+// Verify that Blob XMLHttpRequest finishes without running BEST_EFFORT tasks.
+// Regression test for https://crbug.com/989868.
+IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, BlobXMLHttpRequest) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/empty.html")));
+  const char kScript[] = R"(
+      new Promise(function (resolve, reject) {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", "./empty.html?", true);
+        xhr.responseType = "blob";
+        xhr.onload = () => {
+          resolve('DONE');
+        };
+        xhr.send();
+      })
+  )";
+  EXPECT_EQ("DONE",
+            content::EvalJs(
+                browser()->tab_strip_model()->GetActiveWebContents(), kScript));
+}
+
+// A test specialization for verifying quota storage related operations do not
+// use BEST_EFFORT tasks.
+class NoBestEffortTasksTestWithQuota : public NoBestEffortTasksTest {
+ protected:
+  bool UseProductionQuotaSettings() override {
+    // Return true to use the real quota subsystem.
+    return true;
+  }
+};
+
+// Verify that cache_storage finishes without running BEST_EFFORT tasks.
+// Regression test for https://crbug.com/1006546.
+IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTestWithQuota, CacheStorage) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/empty.html")));
+  const char kScript[] = R"(
+      (async function() {
+        const name = 'foo';
+        const url = '/';
+        const body = 'hello world';
+        let c = await caches.open(name);
+        await c.put(url, new Response(body));
+        let r = await c.match(url);
+        await r.text();
+        return 'DONE';
+      })();
+  )";
+  EXPECT_EQ("DONE",
+            content::EvalJs(
+                browser()->tab_strip_model()->GetActiveWebContents(), kScript));
+}
+
+// Verify that quota estimate() finishes without running BEST_EFFORT tasks.
+// Regression test for https://crbug.com/1006546.
+IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTestWithQuota, QuotaEstimate) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/empty.html")));
+  const char kScript[] = R"(
+      (async function() {
+        await navigator.storage.estimate();
+        return 'DONE';
+      })();
+  )";
+  EXPECT_EQ("DONE",
+            content::EvalJs(
+                browser()->tab_strip_model()->GetActiveWebContents(), kScript));
+}

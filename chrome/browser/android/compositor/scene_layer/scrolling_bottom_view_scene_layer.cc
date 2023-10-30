@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "cc/layers/ui_resource_layer.h"
-#include "chrome/android/chrome_jni_headers/ScrollingBottomViewSceneLayer_jni.h"
-#include "content/public/browser/android/compositor.h"
+#include "chrome/browser/ui/android/toolbar/jni_headers/ScrollingBottomViewSceneLayer_jni.h"
 #include "ui/android/resources/resource_manager_impl.h"
 
 using base::android::JavaParamRef;
@@ -20,6 +19,8 @@ ScrollingBottomViewSceneLayer::ScrollingBottomViewSceneLayer(
     JNIEnv* env,
     const JavaRef<jobject>& jobj)
     : SceneLayer(env, jobj),
+      should_show_background_(false),
+      background_color_(SK_ColorWHITE),
       view_container_(cc::Layer::Create()),
       view_layer_(cc::UIResourceLayer::Create()) {
   layer()->SetIsDrawable(true);
@@ -87,6 +88,18 @@ void ScrollingBottomViewSceneLayer::SetContentTree(
     layer_->AddChild(content_tree->layer());
     layer_->AddChild(view_container_);
   }
+
+  // Propagate the background color up from the content layer.
+  should_show_background_ = content_tree->ShouldShowBackground();
+  background_color_ = content_tree->GetBackgroundColor();
+}
+
+SkColor ScrollingBottomViewSceneLayer::GetBackgroundColor() {
+  return background_color_;
+}
+
+bool ScrollingBottomViewSceneLayer::ShouldShowBackground() {
+  return should_show_background_;
 }
 
 static jlong JNI_ScrollingBottomViewSceneLayer_Init(

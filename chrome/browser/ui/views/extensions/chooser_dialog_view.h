@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,35 +7,32 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/views/controls/table/table_view_observer.h"
 #include "ui/views/window/dialog_delegate.h"
 
-class ChooserController;
 class DeviceChooserContentView;
+
+namespace permissions {
+class ChooserController;
+}
 
 // Displays a chooser view as a modal dialog constrained
 // to the window/tab displaying the given web contents.
 class ChooserDialogView : public views::DialogDelegateView,
                           public views::TableViewObserver {
  public:
+  METADATA_HEADER(ChooserDialogView);
   explicit ChooserDialogView(
-      std::unique_ptr<ChooserController> chooser_controller);
+      std::unique_ptr<permissions::ChooserController> chooser_controller);
+  ChooserDialogView(const ChooserDialogView&) = delete;
+  ChooserDialogView& operator=(const ChooserDialogView&) = delete;
   ~ChooserDialogView() override;
 
-  // views::WidgetDelegate:
-  base::string16 GetWindowTitle() const override;
-  bool ShouldShowCloseButton() const override;
-  ui::ModalType GetModalType() const override;
-
   // views::DialogDelegate:
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   bool IsDialogButtonEnabled(ui::DialogButton button) const override;
   views::View* GetInitiallyFocusedView() override;
-  std::unique_ptr<views::View> CreateExtraView() override;
-  bool Accept() override;
-  bool Cancel() override;
-  bool Close() override;
 
   // views::DialogDelegateView:
   views::View* GetContentsView() override;
@@ -45,12 +42,12 @@ class ChooserDialogView : public views::DialogDelegateView,
   // views::TableViewObserver:
   void OnSelectionChanged() override;
 
-  DeviceChooserContentView* device_chooser_content_view_for_test() const;
+  DeviceChooserContentView* device_chooser_content_view_for_test() const {
+    return device_chooser_content_view_;
+  }
 
  private:
-  DeviceChooserContentView* device_chooser_content_view_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChooserDialogView);
+  raw_ptr<DeviceChooserContentView> device_chooser_content_view_;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_EXTENSIONS_CHOOSER_DIALOG_VIEW_H_

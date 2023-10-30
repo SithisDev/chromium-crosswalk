@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,10 @@
 #include <utility>
 
 #include "base/files/file_path.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/singleton.h"
-#include "base/sequenced_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
 #include "base/time/default_clock.h"
 
 #include "chrome/browser/android/explore_sites/explore_sites_service.h"
@@ -21,7 +22,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "components/history/core/browser/history_service.h"
-#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "content/public/browser/browser_context.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
@@ -34,20 +34,20 @@ class URLLoaderFactoryGetterImpl
  public:
   explicit URLLoaderFactoryGetterImpl(Profile* profile) : profile_(profile) {}
 
+  URLLoaderFactoryGetterImpl(const URLLoaderFactoryGetterImpl&) = delete;
+  URLLoaderFactoryGetterImpl& operator=(const URLLoaderFactoryGetterImpl&) =
+      delete;
+
   scoped_refptr<network::SharedURLLoaderFactory> GetFactory() override {
     return profile_->GetURLLoaderFactory();
   }
 
  private:
-  Profile* profile_;
-
-  DISALLOW_COPY_AND_ASSIGN(URLLoaderFactoryGetterImpl);
+  raw_ptr<Profile> profile_;
 };
 
 ExploreSitesServiceFactory::ExploreSitesServiceFactory()
-    : BrowserContextKeyedServiceFactory(
-          "ExploreSitesService",
-          BrowserContextDependencyManager::GetInstance()) {
+    : ProfileKeyedServiceFactory("ExploreSitesService") {
   DependsOn(HistoryServiceFactory::GetInstance());
 }
 ExploreSitesServiceFactory::~ExploreSitesServiceFactory() = default;
@@ -74,7 +74,7 @@ KeyedService* ExploreSitesServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
   Profile* profile = Profile::FromBrowserContext(context);
   scoped_refptr<base::SequencedTaskRunner> background_task_runner =
-      base::CreateSequencedTaskRunnerWithTraits({base::MayBlock()});
+      base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()});
   base::FilePath store_path =
       profile->GetPath().Append(kExploreSitesStoreDirname);
   auto explore_sites_store =
@@ -85,7 +85,7 @@ KeyedService* ExploreSitesServiceFactory::BuildServiceInstanceFor(
       HistoryServiceFactory::GetForProfile(profile,
                                            ServiceAccessType::EXPLICIT_ACCESS);
   auto history_stats_reporter = std::make_unique<HistoryStatisticsReporter>(
-      history_service, profile->GetPrefs(), base::DefaultClock::GetInstance());
+      history_service, profile->GetPrefs());
 
   return new ExploreSitesServiceImpl(std::move(explore_sites_store),
                                      std::move(url_loader_factory_getter),

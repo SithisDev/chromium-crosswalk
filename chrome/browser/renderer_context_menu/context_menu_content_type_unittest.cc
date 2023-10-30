@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/renderer_context_menu/context_menu_content_type.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/context_menu/context_menu.mojom-shared.h"
 #include "url/gurl.h"
 
 using extensions::MenuItem;
@@ -27,10 +28,10 @@ class ContextMenuContentTypeTest : public ChromeRenderViewHostTestHarness {
 content::ContextMenuParams CreateParams(int contexts) {
   content::ContextMenuParams rv;
   rv.is_editable = false;
-  rv.media_type = blink::WebContextMenuData::kMediaTypeNone;
+  rv.media_type = blink::mojom::ContextMenuDataMediaType::kNone;
   rv.page_url = GURL("http://test.page/");
 
-  static const base::string16 selected_text = base::ASCIIToUTF16("sel");
+  static const std::u16string selected_text = u"sel";
   if (contexts & MenuItem::SELECTION)
     rv.selection_text = selected_text;
 
@@ -44,17 +45,17 @@ content::ContextMenuParams CreateParams(int contexts) {
 
   if (contexts & MenuItem::IMAGE) {
     rv.src_url = GURL("http://test.image/");
-    rv.media_type = blink::WebContextMenuData::kMediaTypeImage;
+    rv.media_type = blink::mojom::ContextMenuDataMediaType::kImage;
   }
 
   if (contexts & MenuItem::VIDEO) {
     rv.src_url = GURL("http://test.video/");
-    rv.media_type = blink::WebContextMenuData::kMediaTypeVideo;
+    rv.media_type = blink::mojom::ContextMenuDataMediaType::kVideo;
   }
 
   if (contexts & MenuItem::AUDIO) {
     rv.src_url = GURL("http://test.audio/");
-    rv.media_type = blink::WebContextMenuData::kMediaTypeAudio;
+    rv.media_type = blink::mojom::ContextMenuDataMediaType::kAudio;
   }
 
   if (contexts & MenuItem::FRAME)

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,15 @@
 #include "third_party/metrics_proto/translate_event.pb.h"
 
 namespace translate {
+
+TranslateRankerMetricsProvider::TranslateRankerMetricsProvider()
+    : logging_enabled_(false) {
+  g_browser_process->profile_manager()->AddObserver(this);
+}
+
+TranslateRankerMetricsProvider::~TranslateRankerMetricsProvider() {
+  g_browser_process->profile_manager()->RemoveObserver(this);
+}
 
 void TranslateRankerMetricsProvider::ProvideCurrentSessionData(
     metrics::ChromeUserMetricsExtension* uma_proto) {
@@ -51,6 +60,10 @@ void TranslateRankerMetricsProvider::OnRecordingEnabled() {
 
 void TranslateRankerMetricsProvider::OnRecordingDisabled() {
   logging_enabled_ = false;
+  UpdateLoggingState();
+}
+
+void TranslateRankerMetricsProvider::OnProfileAdded(Profile* profile) {
   UpdateLoggingState();
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,19 @@ package org.chromium.chrome.browser.page_info;
 
 import android.content.Context;
 import android.content.Intent;
+import android.os.Bundle;
 
 import org.chromium.base.StrictModeContext;
 import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
-import org.chromium.chrome.browser.preferences.PreferencesLauncher;
-import org.chromium.chrome.browser.preferences.website.SingleWebsitePreferences;
-import org.chromium.chrome.browser.previews.PreviewsAndroidBridge;
-import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.UrlConstants;
-import org.chromium.net.GURLUtils;
+import org.chromium.chrome.browser.settings.SettingsLauncherImpl;
+import org.chromium.components.browser_ui.settings.SettingsLauncher;
+import org.chromium.components.browser_ui.site_settings.ContentSettingsResources;
+import org.chromium.components.browser_ui.site_settings.SingleCategorySettings;
+import org.chromium.components.browser_ui.site_settings.SiteSettingsCategory;
+import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
+import org.chromium.components.embedder_support.util.UrlUtilities;
+import org.chromium.content_public.browser.WebContents;
+import org.chromium.url.GURL;
 
 /**
  * This class contains helper methods for determining site settings availability and showing the
@@ -22,28 +26,40 @@ import org.chromium.net.GURLUtils;
  */
 public class SiteSettingsHelper {
     /**
-     * Whether site settings is available for a given {@link Tab}.
+     * Whether site settings is available for a given {@link WebContents}.
+     * @param webContents The WebContents for which to check the site settings.
      */
-    public static boolean isSiteSettingsAvailable(Tab tab) {
-        boolean isOfflinePage = OfflinePageUtils.getOfflinePage(tab) != null;
-        boolean isPreviewPage =
-                PreviewsAndroidBridge.getInstance().shouldShowPreviewUI(tab.getWebContents());
-        String scheme = GURLUtils.getScheme(tab.getOriginalUrl());
-        return !isOfflinePage && !isPreviewPage
-                && (UrlConstants.HTTP_SCHEME.equals(scheme)
-                        || UrlConstants.HTTPS_SCHEME.equals(scheme));
+    public static boolean isSiteSettingsAvailable(WebContents webContents) {
+        boolean isOfflinePage = OfflinePageUtils.getOfflinePage(webContents) != null;
+        // TODO(crbug.com/1033178): dedupe the DomDistillerUrlUtils#getOriginalUrlFromDistillerUrl()
+        // calls.
+        GURL url = webContents != null
+                ? DomDistillerUrlUtils.getOriginalUrlFromDistillerUrl(webContents.getVisibleUrl())
+                : null;
+        return !isOfflinePage && url != null && UrlUtilities.isHttpOrHttps(url);
     }
 
     /**
-     * Shows the site settings activity for a given url.
+     * Show the single category settings page for given category and type.
      */
-    public static void showSiteSettings(Context context, String fullUrl) {
-        Intent preferencesIntent = PreferencesLauncher.createIntentForSettingsPage(context,
-                SingleWebsitePreferences.class.getName(),
-                SingleWebsitePreferences.createFragmentArgsForSite(fullUrl));
+    public static void showCategorySettings(
+            Context context, @SiteSettingsCategory.Type int category) {
+        SettingsLauncher settingsLauncher = new SettingsLauncherImpl();
+        Bundle extras = new Bundle();
+        extras.putString(SingleCategorySettings.EXTRA_CATEGORY,
+                SiteSettingsCategory.preferenceKey(category));
+        extras.putString(SingleCategorySettings.EXTRA_TITLE,
+                context.getResources().getString(ContentSettingsResources.getTitle(
+                        SiteSettingsCategory.contentSettingsType(category))));
+        Intent preferencesIntent = settingsLauncher.createSettingsActivityIntent(
+                context, SingleCategorySettings.class.getName(), extras);
+        launchIntent(context, preferencesIntent);
+    }
+
+    private static void launchIntent(Context context, Intent intent) {
         // Disabling StrictMode to avoid violations (https://crbug.com/819410).
         try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
-            context.startActivity(preferencesIntent);
+            context.startActivity(intent);
         }
     }
 }

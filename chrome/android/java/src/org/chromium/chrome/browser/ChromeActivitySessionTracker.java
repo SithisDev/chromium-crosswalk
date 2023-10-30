@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,11 @@ package org.chromium.chrome.browser;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.content.SharedPreferences;
 import android.provider.Settings;
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
@@ -18,43 +19,52 @@ import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.LocaleUtils;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
+import org.chromium.base.TraceEvent;
 import org.chromium.base.metrics.RecordHistogram;
-import org.chromium.chrome.browser.accessibility.FontSizePrefs;
+import org.chromium.base.supplier.Supplier;
+import org.chromium.chrome.browser.browsing_data.BrowsingDataBridge;
 import org.chromium.chrome.browser.browsing_data.BrowsingDataType;
 import org.chromium.chrome.browser.browsing_data.TimePeriod;
+import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.metrics.UmaUtils;
 import org.chromium.chrome.browser.metrics.VariationsSession;
 import org.chromium.chrome.browser.notifications.NotificationPlatformBridge;
 import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
-import org.chromium.chrome.browser.preferences.privacy.BrowsingDataBridge;
+import org.chromium.chrome.browser.password_manager.PasswordManagerLifecycleHelper;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.Pref;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.profiles.ProfileManagerUtils;
-import org.chromium.chrome.browser.share.ShareHelper;
+import org.chromium.chrome.browser.read_later.ReadingListBridge;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.ui.base.ResourceBundle;
+import org.chromium.chrome.browser.translate.TranslateBridge;
+import org.chromium.components.browser_ui.accessibility.FontSizePrefs;
+import org.chromium.components.browser_ui.share.ShareImageFileUtils;
+import org.chromium.components.feature_engagement.EventConstants;
+import org.chromium.components.feature_engagement.Tracker;
+import org.chromium.components.user_prefs.UserPrefs;
 
-import java.util.Locale;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Tracks the foreground session state for the Chrome activities.
  */
 public class ChromeActivitySessionTracker {
 
-    private static final String PREF_LOCALE = "locale";
-
     @SuppressLint("StaticFieldLeak")
     private static ChromeActivitySessionTracker sInstance;
 
     private final PowerBroadcastReceiver mPowerBroadcastReceiver = new PowerBroadcastReceiver();
+    private final Map<Activity, Supplier<TabModelSelector>> mTabModelSelectorSuppliers =
+            new HashMap<>();
 
     // Used to trigger variation changes (such as seed fetches) upon application foregrounding.
     private VariationsSession mVariationsSession;
 
     private boolean mIsInitialized;
     private boolean mIsStarted;
-    private boolean mIsFinishedCachingNativeFlags;
 
     /**
      * @return The activity session tracker for Chrome.
@@ -72,6 +82,24 @@ public class ChromeActivitySessionTracker {
      */
     protected ChromeActivitySessionTracker() {
         mVariationsSession = AppHooks.get().createVariationsSession();
+    }
+
+    /**
+     * Register a supplier which returns the total tab count for the given application.
+     * @param activity The activity associated with the given tab count supplier.
+     * @param tabCountSupplier Supplies the current tab count for the given activity.
+     */
+    public void registerTabModelSelectorSupplier(
+            Activity activity, Supplier<TabModelSelector> tabCountSupplier) {
+        mTabModelSelectorSuppliers.put(activity, tabCountSupplier);
+    }
+
+    /**
+     * Unregisters the supplier associated with the given activity.
+     * @param activity Tha activity to unregister.
+     */
+    public void unregisterTabModelSelectorSupplier(Activity activity) {
+        mTabModelSelectorSuppliers.remove(activity);
     }
 
     /**
@@ -101,6 +129,7 @@ public class ChromeActivitySessionTracker {
         mIsInitialized = true;
         assert !mIsStarted;
 
+        mVariationsSession.initializeWithNative();
         ApplicationStatus.registerApplicationStateListener(createApplicationStateListener());
     }
 
@@ -120,7 +149,6 @@ public class ChromeActivitySessionTracker {
         assert mIsInitialized;
 
         onForegroundSessionStart();
-        cacheNativeFlags();
     }
 
     /**
@@ -130,19 +158,25 @@ public class ChromeActivitySessionTracker {
      * activity.
      */
     private void onForegroundSessionStart() {
-        UmaUtils.recordForegroundStartTime();
-        updatePasswordEchoState();
-        FontSizePrefs.getInstance().onSystemFontScaleChanged();
-        recordWhetherSystemAndAppLanguagesDiffer();
-        updateAcceptLanguages();
-        mVariationsSession.start();
-        mPowerBroadcastReceiver.onForegroundSessionStart();
+        try (TraceEvent te = TraceEvent.scoped(
+                     "ChromeActivitySessionTracker.onForegroundSessionStart")) {
+            UmaUtils.recordForegroundStartTime();
+            updatePasswordEchoState();
+            FontSizePrefs.getInstance(Profile.getLastUsedRegularProfile())
+                    .onSystemFontScaleChanged();
+            ChromeLocalizationUtils.recordUiLanguageStatus();
+            updateAcceptLanguages();
+            mVariationsSession.start();
+            mPowerBroadcastReceiver.onForegroundSessionStart();
+            AppHooks.get().getChimeDelegate().startSession();
+            ReadingListBridge.onStartChromeForeground();
+            PasswordManagerLifecycleHelper.getInstance().onStartForegroundSession();
 
-        // Track the ratio of Chrome startups that are caused by notification clicks.
-        // TODO(johnme): Add other reasons (and switch to recordEnumeratedHistogram).
-        RecordHistogram.recordBooleanHistogram(
-                "Startup.BringToForegroundReason",
-                NotificationPlatformBridge.wasNotificationRecentlyClicked());
+            // Track the ratio of Chrome startups that are caused by notification clicks.
+            // TODO(johnme): Add other reasons (and switch to recordEnumeratedHistogram).
+            RecordHistogram.recordBooleanHistogram("Startup.BringToForegroundReason",
+                    NotificationPlatformBridge.wasNotificationRecentlyClicked());
+        }
     }
 
     /**
@@ -163,24 +197,22 @@ public class ChromeActivitySessionTracker {
 
         int totalTabCount = 0;
         for (Activity activity : ApplicationStatus.getRunningActivities()) {
-            if (activity instanceof ChromeActivity
-                    && ((ChromeActivity) activity).areTabModelsInitialized()) {
-                TabModelSelector tabModelSelector =
-                        ((ChromeActivity) activity).getTabModelSelector();
-                if (tabModelSelector != null) {
-                    totalTabCount += tabModelSelector.getTotalTabCount();
-                }
-            }
+            Supplier<TabModelSelector> tabModelSelectorSupplier =
+                    mTabModelSelectorSuppliers.get(activity);
+            if (tabModelSelectorSupplier == null || !tabModelSelectorSupplier.hasValue()) continue;
+            totalTabCount += tabModelSelectorSupplier.get().getTotalTabCount();
         }
-        RecordHistogram.recordCountHistogram(
-                "Tab.TotalTabCount.BeforeLeavingApp", totalTabCount);
+        RecordHistogram.recordCount1MHistogram("Tab.TotalTabCount.BeforeLeavingApp", totalTabCount);
+
+        Tracker tracker = TrackerFactory.getTrackerForProfile(Profile.getLastUsedRegularProfile());
+        tracker.notifyEvent(EventConstants.FOREGROUND_SESSION_DESTROYED);
     }
 
     private void onForegroundActivityDestroyed() {
         if (ApplicationStatus.isEveryActivityDestroyed()) {
             // These will all be re-initialized when a new Activity starts / upon next use.
             PartnerBrowserCustomizations.destroy();
-            ShareHelper.clearSharedImages();
+            ShareImageFileUtils.clearSharedImages();
         }
     }
 
@@ -200,30 +232,24 @@ public class ChromeActivitySessionTracker {
      * {@link #onStart} instead of {@link #initialize}.
      */
     private void updateAcceptLanguages() {
-        String localeString = LocaleUtils.getDefaultLocaleListString();
-        if (hasLocaleChanged(localeString)) {
-            // Clear cache so that accept-languages change can be applied immediately.
-            // TODO(changwan): The underlying BrowsingDataRemover::Remove() is an asynchronous call.
-            // So cache-clearing may not be effective if URL rendering can happen before
-            // OnBrowsingDataRemoverDone() is called, in which case we may have to reload as well.
-            // Check if it can happen.
-            BrowsingDataBridge.getInstance().clearBrowsingData(
-                    null, new int[] {BrowsingDataType.CACHE}, TimePeriod.ALL_TIME);
+        String currentLocale = LocaleUtils.getDefaultLocaleListString();
+        String previousLocale = SharedPreferencesManager.getInstance().readString(
+                ChromePreferenceKeys.APP_LOCALE, null);
+        ChromeLocalizationUtils.recordLocaleUpdateStatus(previousLocale, currentLocale);
+        if (!TextUtils.equals(previousLocale, currentLocale)) {
+            SharedPreferencesManager.getInstance().writeString(
+                    ChromePreferenceKeys.APP_LOCALE, currentLocale);
+            TranslateBridge.resetAcceptLanguages(currentLocale);
+            if (previousLocale != null) {
+                // Clear cache so that accept-languages change can be applied immediately.
+                // TODO(changwan): The underlying BrowsingDataRemover::Remove() is an asynchronous
+                // call. So cache-clearing may not be effective if URL rendering can happen before
+                // OnBrowsingDataRemoverDone() is called, in which case we may have to reload as
+                // well. Check if it can happen.
+                BrowsingDataBridge.getInstance().clearBrowsingData(
+                        null, new int[] {BrowsingDataType.CACHE}, TimePeriod.ALL_TIME);
+            }
         }
-    }
-
-    private boolean hasLocaleChanged(String newLocale) {
-        String previousLocale = ContextUtils.getAppSharedPreferences().getString(PREF_LOCALE, null);
-        if (!TextUtils.equals(previousLocale, newLocale)) {
-            SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putString(PREF_LOCALE, newLocale);
-            editor.apply();
-            PrefServiceBridge.getInstance().resetAcceptLanguages(newLocale);
-            // We consider writing the initial value to prefs as _not_ changing the locale.
-            return previousLocale != null;
-        }
-        return false;
     }
 
     /**
@@ -235,46 +261,14 @@ public class ChromeActivitySessionTracker {
                 Settings.System.getInt(ContextUtils.getApplicationContext().getContentResolver(),
                         Settings.System.TEXT_SHOW_PASSWORD, 1)
                 == 1;
-        if (PrefServiceBridge.getInstance().getPasswordEchoEnabled() == systemEnabled) return;
-
-        PrefServiceBridge.getInstance().setPasswordEchoEnabled(systemEnabled);
-    }
-
-    /**
-     * Caches flags that are needed by Activities that launch before the native library is loaded
-     * and stores them in SharedPreferences. Because this function is called during launch after the
-     * library has loaded, they won't affect the next launch until Chrome is restarted.
-     */
-    private void cacheNativeFlags() {
-        if (mIsFinishedCachingNativeFlags) return;
-        FeatureUtilities.cacheNativeFlags();
-        mIsFinishedCachingNativeFlags = true;
-    }
-
-    /**
-     * Records whether Chrome was started in a language other than the system language but we
-     * support the system language. That can happen if the user changes the system language and the
-     * required language split cannot be installed in time.
-     */
-    private void recordWhetherSystemAndAppLanguagesDiffer() {
-        String uiLanguage =
-                LocaleUtils.toLanguage(ChromeLocalizationUtils.getUiLocaleStringForCompressedPak());
-        String systemLanguage =
-                LocaleUtils.toLanguage(LocaleUtils.toLanguageTag(Locale.getDefault()));
-        boolean isWrongLanguage = !systemLanguage.equals(uiLanguage)
-                && isLanguageSupported(
-                        systemLanguage, ResourceBundle.getAvailableCompressedPakLocales());
-        RecordHistogram.recordBooleanHistogram(
-                "Android.Language.WrongLanguageAfterResume", isWrongLanguage);
-    }
-
-    private static boolean isLanguageSupported(String language, String[] compressedLocales) {
-        for (String languageTag : compressedLocales) {
-            if (LocaleUtils.toLanguage(languageTag).equals(language)) {
-                return true;
-            }
+        if (UserPrefs.get(Profile.getLastUsedRegularProfile())
+                        .getBoolean(Pref.WEB_KIT_PASSWORD_ECHO_ENABLED)
+                == systemEnabled) {
+            return;
         }
-        return false;
+
+        UserPrefs.get(Profile.getLastUsedRegularProfile())
+                .setBoolean(Pref.WEB_KIT_PASSWORD_ECHO_ENABLED, systemEnabled);
     }
 
     /**

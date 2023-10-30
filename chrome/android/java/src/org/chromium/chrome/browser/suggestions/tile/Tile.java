@@ -1,15 +1,18 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.suggestions.tile;
 
+import android.content.res.ColorStateList;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.Nullable;
 
-import org.chromium.chrome.browser.favicon.IconType;
+import androidx.annotation.Nullable;
+
 import org.chromium.chrome.browser.suggestions.OfflinableSuggestion;
 import org.chromium.chrome.browser.suggestions.SiteSuggestion;
+import org.chromium.components.favicon.IconType;
+import org.chromium.url.GURL;
 
 /**
  * Holds the details to populate a site suggestion tile.
@@ -29,6 +32,9 @@ public class Tile implements OfflinableSuggestion {
     private Drawable mIcon;
 
     @Nullable
+    private ColorStateList mIconTint;
+
+    @Nullable
     private Long mOfflinePageOfflineId;
 
     /**
@@ -45,7 +51,7 @@ public class Tile implements OfflinableSuggestion {
     }
 
     @Override
-    public String getUrl() {
+    public GURL getUrl() {
         return mSiteData.url;
     }
 
@@ -148,6 +154,17 @@ public class Tile implements OfflinableSuggestion {
      */
     public void setIcon(@Nullable Drawable icon) {
         mIcon = icon;
+    }
+
+    /**
+     * Updates the icon tint color.
+     */
+    public void setIconTint(@Nullable ColorStateList iconTint) {
+        mIconTint = iconTint;
+    }
+
+    public ColorStateList getIconTint() {
+        return mIconTint;
     }
 
     @TileSectionType

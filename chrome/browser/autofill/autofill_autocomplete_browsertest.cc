@@ -1,12 +1,14 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/browser/autofill/autocomplete_history_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -18,6 +20,7 @@
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/autofill/core/browser/autocomplete_history_manager.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
+#include "components/autofill/core/browser/suggestions_context.h"
 #include "components/autofill/core/browser/test_autofill_async_observer.h"
 #include "components/autofill/core/browser/test_autofill_clock.h"
 #include "components/autofill/core/browser/ui/suggestion.h"
@@ -26,11 +29,14 @@
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/prefs/pref_service.h"
+#include "components/prefs/pref_test_utils.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/switches.h"
 
 using autofill::test::TestAutofillAsyncObserver;
 using base::ASCIIToUTF16;
@@ -87,11 +93,17 @@ class AutofillAutocompleteTest : public InProcessBrowserTest {
     content::WebContents* web_contents =
         active_browser_->tab_strip_model()->GetActiveWebContents();
     ContentAutofillDriverFactory::FromWebContents(web_contents)
-        ->DriverForFrame(web_contents->GetMainFrame())
+        ->DriverForFrame(web_contents->GetPrimaryMainFrame())
         ->autofill_manager()
         ->client()
-        ->HideAutofillPopup();
+        ->HideAutofillPopup(PopupHidingReason::kTabGone);
     test::ReenableSystemServices();
+  }
+
+  // Necessary to avoid flakiness or failure due to input arriving
+  // before the first compositor commit.
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitch(blink::switches::kAllowPreCommitInput);
   }
 
   // Uses the browser to open the file named |filename| based on the given
@@ -148,9 +160,11 @@ class AutofillAutocompleteTest : public InProcessBrowserTest {
     MockSuggestionsHandler handler;
     GetAutocompleteSuggestions(kDefaultAutocompleteInputId, prefix, handler);
 
-    EXPECT_THAT(
-        handler.last_suggestions(),
-        ElementsAre(Field(&Suggestion::value, ASCIIToUTF16(expected_value))));
+    EXPECT_THAT(handler.last_suggestions(),
+                ElementsAre(Field(
+                    &Suggestion::main_text,
+                    Suggestion::Text(ASCIIToUTF16(expected_value),
+                                     Suggestion::Text::IsPrimary(true)))));
   }
 
   void ValidateNoValue() {
@@ -189,10 +203,12 @@ class AutofillAutocompleteTest : public InProcessBrowserTest {
  private:
   void GetAutocompleteSuggestions(const std::string& input_name,
                                   const std::string& prefix,
-                                  autofill::MockSuggestionsHandler& handler) {
-    autocomplete_history_manager()->OnGetAutocompleteSuggestions(
-        1, true, false, ASCIIToUTF16(input_name), ASCIIToUTF16(prefix), "input",
-        handler.GetWeakPtr());
+                                  MockSuggestionsHandler& handler) {
+    FormFieldData field;
+    test::CreateTestFormField(/*label=*/"", input_name.c_str(), prefix.c_str(),
+                              "input", &field);
+    EXPECT_TRUE(autocomplete_history_manager()->OnGetSingleFieldSuggestions(
+        1, true, false, field, handler.GetWeakPtr(), SuggestionsContext()));
 
     // Make sure the DB task gets executed.
     WaitForDBTasks();
@@ -206,14 +222,15 @@ class AutofillAutocompleteTest : public InProcessBrowserTest {
     return active_browser_->tab_strip_model()->GetActiveWebContents();
   }
 
-  scoped_refptr<autofill::AutofillWebDataService> GetWebDataService() {
+  scoped_refptr<AutofillWebDataService> GetWebDataService() {
     return WebDataServiceFactory::GetAutofillWebDataForProfile(
         current_profile(), ServiceAccessType::EXPLICIT_ACCESS);
   }
 
   Profile* current_profile() { return active_browser_->profile(); }
 
-  Browser* active_browser_;
+  test::AutofillEnvironment autofill_environment_;
+  raw_ptr<Browser> active_browser_;
 };
 
 // Tests that a user can save a simple Autocomplete value.
@@ -257,6 +274,12 @@ IN_PROC_BROWSER_TEST_F(AutofillAutocompleteTest,
   // AutocompleteHistoryManager.
   NavigateToFile(kSimpleFormFileName);
 
+  // The checkup is executed asynchronsouly on startup and may not have
+  // finished, yet.
+  WaitForPrefValue(pref_service(),
+                   prefs::kAutocompleteLastVersionRetentionPolicy,
+                   base::Value(CHROME_VERSION_MAJOR));
+
   int saved_version = pref_service()->GetInteger(
       prefs::kAutocompleteLastVersionRetentionPolicy);
   EXPECT_EQ(CHROME_VERSION_MAJOR, saved_version);
@@ -267,8 +290,7 @@ IN_PROC_BROWSER_TEST_F(AutofillAutocompleteTest,
                        RetentionPolicy_RemovesExpiredEntry) {
   // Go back in time, far enough so that we'll expire the entry.
   TestAutofillClock test_clock;
-  base::TimeDelta days_delta =
-      base::TimeDelta::FromDays(2 * kAutocompleteRetentionPolicyPeriodInDays);
+  base::TimeDelta days_delta = 2 * kAutocompleteRetentionPolicyPeriod;
   test_clock.SetNow(AutofillClock::Now() - days_delta);
 
   // Add an entry.
@@ -302,7 +324,7 @@ IN_PROC_BROWSER_TEST_F(AutofillAutocompleteTest,
   // Go back in time, but not far enough so that we'd expire the entry.
   TestAutofillClock test_clock;
   base::TimeDelta days_delta =
-      base::TimeDelta::FromDays(kAutocompleteRetentionPolicyPeriodInDays - 2);
+      kAutocompleteRetentionPolicyPeriod - base::Days(2);
   test_clock.SetNow(AutofillClock::Now() - days_delta);
 
   // Add an entry.

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,8 @@ namespace notifications {
 class WebUIClient : public NotificationSchedulerClient {
  public:
   WebUIClient();
+  WebUIClient(const WebUIClient&) = delete;
+  WebUIClient& operator=(const WebUIClient&) = delete;
   ~WebUIClient() override;
 
  private:
@@ -26,10 +28,8 @@ class WebUIClient : public NotificationSchedulerClient {
       NotificationDataCallback callback) override;
   void OnSchedulerInitialized(bool success,
                               std::set<std::string> guids) override;
-  void OnUserAction(UserActionType action_type,
-                    base::Optional<ButtonClickInfo> button_info) override;
-
-  DISALLOW_COPY_AND_ASSIGN(WebUIClient);
+  void OnUserAction(const UserActionData& action_data) override;
+  void GetThrottleConfig(ThrottleConfigCallback callback) override;
 };
 
 }  // namespace notifications

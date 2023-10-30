@@ -1,11 +1,13 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/notifications/scheduler/internal/notification_store.h"
 
+#include "base/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/notifications/scheduler/internal/proto_conversion.h"
 #include "chrome/browser/notifications/scheduler/test/test_utils.h"
 #include "components/leveldb_proto/public/proto_database.h"
@@ -29,6 +31,8 @@ const char kGuid[] = "1234";
 class NotificationStoreTest : public testing::Test {
  public:
   NotificationStoreTest() : load_result_(false) {}
+  NotificationStoreTest(const NotificationStoreTest&) = delete;
+  NotificationStoreTest& operator=(const NotificationStoreTest&) = delete;
   ~NotificationStoreTest() override = default;
 
   void SetUp() override {}
@@ -87,17 +91,15 @@ class NotificationStoreTest : public testing::Test {
     loaded_entries_ = std::move(entries);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   // Database test objects.
-  FakeDB<proto::NotificationEntry, NotificationEntry>* db_;
+  raw_ptr<FakeDB<proto::NotificationEntry, NotificationEntry>> db_;
   std::map<std::string, proto::NotificationEntry> db_protos_;
 
   std::unique_ptr<CollectionStore<NotificationEntry>> store_;
   Entries loaded_entries_;
   bool load_result_;
-
-  DISALLOW_COPY_AND_ASSIGN(NotificationStoreTest);
 };
 
 // Verifies initialization with empty database.
@@ -150,7 +152,7 @@ TEST_F(NotificationStoreTest, AddAndUpdate) {
   VerifyDataInDb(std::move(expected));
 
   // Update and verified the new data.
-  entry.notification_data.title = base::UTF8ToUTF16("test_title");
+  entry.notification_data.title = u"test_title";
   expected = std::make_unique<DbEntries>();
   expected->emplace_back(entry);
   store()->Update(kGuid, entry,

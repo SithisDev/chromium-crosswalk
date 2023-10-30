@@ -1,11 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.crash;
 
 import android.annotation.SuppressLint;
-import android.annotation.TargetApi;
 import android.app.job.JobInfo;
 import android.app.job.JobScheduler;
 import android.app.job.JobWorkItem;
@@ -14,7 +13,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.MediumTest;
+
+import androidx.annotation.RequiresApi;
+import androidx.test.filters.MediumTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -26,6 +27,8 @@ import org.chromium.base.StreamUtil;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.components.background_task_scheduler.TaskIds;
+import org.chromium.components.crash.LogcatCrashExtractor;
+import org.chromium.components.crash.MinidumpLogcatPrepender;
 import org.chromium.components.minidump_uploader.CrashFileManager;
 import org.chromium.components.minidump_uploader.CrashTestRule;
 
@@ -52,18 +55,14 @@ public class LogcatExtractionRunnableTest {
     private static final List<String> LOGCAT =
             Arrays.asList("some random log content", "some more deterministic log content");
 
-    private static class TestLogcatExtractionRunnable extends LogcatExtractionRunnable {
-        TestLogcatExtractionRunnable(Context context, File minidump) {
-            super(minidump);
-        }
-
+    private static class TestLogcatCrashExtractor extends LogcatCrashExtractor {
         @Override
         protected List<String> getLogcat() {
             return LOGCAT;
         }
     };
 
-    @TargetApi(Build.VERSION_CODES.M)
+    @RequiresApi(Build.VERSION_CODES.M)
     private static class TestJobScheduler extends JobScheduler {
         TestJobScheduler() {}
 
@@ -111,9 +110,9 @@ public class LogcatExtractionRunnableTest {
             Assert.assertEquals(1, mNumServiceStarts);
             Assert.assertEquals(
                     MinidumpUploadService.class.getName(), intent.getComponent().getClassName());
-            Assert.assertEquals(MinidumpUploadService.ACTION_UPLOAD, intent.getAction());
+            Assert.assertEquals(MinidumpUploadServiceImpl.ACTION_UPLOAD, intent.getAction());
             Assert.assertEquals(new File(mCrashDir, "test.dmp.try0").getAbsolutePath(),
-                    intent.getStringExtra(MinidumpUploadService.FILE_TO_UPLOAD_KEY));
+                    intent.getStringExtra(MinidumpUploadServiceImpl.FILE_TO_UPLOAD_KEY));
             return super.startService(intent);
         }
 
@@ -128,7 +127,7 @@ public class LogcatExtractionRunnableTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mCrashDir = new CrashFileManager(mTestRule.getCacheDir()).getCrashDirectory();
     }
 
@@ -192,22 +191,8 @@ public class LogcatExtractionRunnableTest {
         final File minidump = createMinidump("test.dmp");
         Context testContext = new TestContext(InstrumentationRegistry.getTargetContext());
 
-        LogcatExtractionRunnable runnable = new TestLogcatExtractionRunnable(testContext, minidump);
-        runnable.run();
-
-        verifyMinidumpWithLogcat("test.dmp.try0");
-    }
-
-    @Test
-    @MediumTest
-    public void testSimpleExtraction_WithJobScheduler() throws IOException {
-        // The JobScheduler API is only available as of Android M.
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
-
-        final File minidump = createMinidump("test.dmp");
-        Context testContext = new TestContext(InstrumentationRegistry.getTargetContext());
-
-        LogcatExtractionRunnable runnable = new TestLogcatExtractionRunnable(testContext, minidump);
+        LogcatExtractionRunnable runnable =
+                new LogcatExtractionRunnable(minidump, new TestLogcatCrashExtractor());
         runnable.run();
 
         verifyMinidumpWithLogcat("test.dmp.try0");

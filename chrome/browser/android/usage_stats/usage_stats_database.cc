@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,16 +10,15 @@
 #include "base/callback.h"
 #include "base/strings/safe_sprintf.h"
 #include "base/strings/strcat.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/android/usage_stats/website_event.pb.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/leveldb_proto/content/proto_database_provider_factory.h"
 #include "components/leveldb_proto/public/proto_database_provider.h"
+#include "content/public/browser/storage_partition.h"
 
 namespace usage_stats {
 
 using leveldb_proto::ProtoDatabaseProvider;
-using leveldb_proto::ProtoDatabaseProviderFactory;
 
 const char kNamespace[] = "UsageStats";
 const char kEventsDbName[] = "Events";
@@ -36,15 +35,14 @@ const char kUnixTimeFormat[] = "%011d";
 UsageStatsDatabase::UsageStatsDatabase(Profile* profile)
     : website_event_db_initialized_(false),
       suspension_db_initialized_(false),
-      token_mapping_db_initialized_(false),
-      weak_ptr_factory_(this) {
+      token_mapping_db_initialized_(false) {
   ProtoDatabaseProvider* db_provider =
-      ProtoDatabaseProviderFactory::GetForKey(profile->GetProfileKey());
+      profile->GetDefaultStoragePartition()->GetProtoDatabaseProvider();
 
   base::FilePath usage_stats_dir = profile->GetPath().Append(kNamespace);
 
   scoped_refptr<base::SequencedTaskRunner> db_task_runner =
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
 
   website_event_db_ = db_provider->GetDB<WebsiteEvent>(
@@ -72,8 +70,7 @@ UsageStatsDatabase::UsageStatsDatabase(
       token_mapping_db_(std::move(token_mapping_db)),
       website_event_db_initialized_(false),
       suspension_db_initialized_(false),
-      token_mapping_db_initialized_(false),
-      weak_ptr_factory_(this) {
+      token_mapping_db_initialized_(false) {
   InitializeDBs();
 }
 
@@ -220,9 +217,8 @@ void UsageStatsDatabase::DeleteEventsInRange(base::Time startTime,
     return;
   }
 
-  // TODO(crbug/927655): If/when leveldb_proto adds an UpdateEntriesInRange
-  // function, we should consolidate these two proto_db_ calls into a single
-  // call.
+  // If leveldb_proto adds a DeleteEntriesInRange function, these two proto_db_
+  // calls could be consolidated into a single call (crbug.com/939136).
 
   // Load all WebsiteEvents where the timestamp is in the specified range.
   // Function accepts a half-open range [startTime, endTime) as input, but the
@@ -257,8 +253,7 @@ void UsageStatsDatabase::DeleteEventsWithMatchingDomains(
 }
 
 void UsageStatsDatabase::ExpireEvents(base::Time now) {
-  base::Time seven_days_ago =
-      now - base::TimeDelta::FromDays(EXPIRY_THRESHOLD_DAYS);
+  base::Time seven_days_ago = now - base::Days(EXPIRY_THRESHOLD_DAYS);
   DeleteEventsInRange(
       base::Time::FromDoubleT(1), seven_days_ago,
       base::BindOnce(&UsageStatsDatabase::OnWebsiteEventExpiryDone,

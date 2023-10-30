@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,9 @@
 
 namespace chrome {
 
-MessageBoxResult ShowMessageBoxCocoa(const base::string16& message,
+MessageBoxResult ShowMessageBoxCocoa(const std::u16string& message,
                                      MessageBoxType type,
-                                     const base::string16& checkbox_text);
+                                     const std::u16string& checkbox_text);
 
 }  // namespace chrome
 

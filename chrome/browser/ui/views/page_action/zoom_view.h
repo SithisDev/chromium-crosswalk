@@ -1,21 +1,26 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_PAGE_ACTION_ZOOM_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_PAGE_ACTION_ZOOM_VIEW_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/views/page_action/page_action_icon_view.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 
 // View for the zoom icon in the Omnibox.
 class ZoomView : public PageActionIconView {
  public:
+  METADATA_HEADER(ZoomView);
   // Clicking on the ZoomView shows a ZoomBubbleView, which requires the current
   // WebContents. Because the current WebContents changes as the user switches
   // tabs, a LocationBarView::Delegate is supplied to queried for the current
   // WebContents when needed.
-  explicit ZoomView(PageActionIconView::Delegate* delegate);
+  ZoomView(IconLabelBubbleView::Delegate* icon_label_bubble_delegate,
+           PageActionIconView::Delegate* page_action_icon_delegate);
+  ZoomView(const ZoomView&) = delete;
+  ZoomView& operator=(const ZoomView&) = delete;
   ~ZoomView() override;
 
   // Updates the image and its tooltip appropriately, hiding or showing the icon
@@ -24,21 +29,19 @@ class ZoomView : public PageActionIconView {
 
  protected:
   // PageActionIconView:
-  bool Update() override;
+  void UpdateImpl() override;
   void OnExecuting(PageActionIconView::ExecuteSource source) override;
-  views::BubbleDialogDelegateView* GetBubble() const override;
+  views::BubbleDialogDelegate* GetBubble() const override;
   const gfx::VectorIcon& GetVectorIcon() const override;
-  base::string16 GetTextForTooltipAndAccessibleName() const override;
+  std::u16string GetTextForTooltipAndAccessibleName() const override;
 
  private:
   bool ShouldBeVisible(bool can_show_bubble) const;
   bool HasAssociatedBubble() const;
 
-  const gfx::VectorIcon* icon_ = nullptr;
+  raw_ptr<const gfx::VectorIcon> icon_ = nullptr;
 
   int current_zoom_percent_ = 100;
-
-  DISALLOW_COPY_AND_ASSIGN(ZoomView);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_PAGE_ACTION_ZOOM_VIEW_H_

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,8 +30,13 @@ class [[clang::lto_visibility_public]] ScopedLsaPolicy {
                                       size_t length);
   virtual bool PrivateDataExists(const wchar_t* key);
 
-  // Adds the given right to the given user.
-  virtual HRESULT AddAccountRights(PSID sid, const wchar_t* right);
+  // Adds the set of given rights to the given user.
+  virtual HRESULT AddAccountRights(PSID sid,
+                                   const std::vector<std::wstring>& rights);
+
+  // Removes the set of given rights to the given user.
+  virtual HRESULT RemoveAccountRights(PSID sid,
+                                      const std::vector<std::wstring>& rights);
 
   // Removes the user account from the system.
   virtual HRESULT RemoveAccount(PSID sid);

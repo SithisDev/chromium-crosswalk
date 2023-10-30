@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,26 +10,16 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_multi_source_observation.h"
+#include "chrome/browser/profiles/profile_manager_observer.h"
+#include "chrome/browser/profiles/profile_observer.h"
 #include "chrome/browser/safe_browsing/incident_reporting/download_metadata_manager.h"
 #include "components/history/core/browser/download_row.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 
 class Profile;
-
-namespace content {
-class NotificationDetails;
-class NotificationSource;
-}
-
-namespace history {
-class HistoryService;
-}
 
 namespace safe_browsing {
 
@@ -39,21 +29,25 @@ class ClientIncidentReport_NonBinaryDownloadDetails;
 // Finds the most recent executable download and non-executable download by
 // any on-the-record profile with history that participates in safe browsing
 // extended reporting.
-class LastDownloadFinder : public content::NotificationObserver,
+class LastDownloadFinder : public ProfileManagerObserver,
+                           public ProfileObserver,
                            public history::HistoryServiceObserver {
  public:
-  typedef base::Callback<void(
+  typedef base::RepeatingCallback<void(
       content::BrowserContext* context,
-      const DownloadMetadataManager::GetDownloadDetailsCallback&)>
+      DownloadMetadataManager::GetDownloadDetailsCallback)>
       DownloadDetailsGetter;
 
   // The type of a callback run by the finder upon completion. Each argument is
   // a protobuf containing details of the respective download that was found,
   // or an empty pointer if none was found.
-  typedef base::Callback<void(
+  typedef base::OnceCallback<void(
       std::unique_ptr<ClientIncidentReport_DownloadDetails>,
       std::unique_ptr<ClientIncidentReport_NonBinaryDownloadDetails>)>
       LastDownloadCallback;
+
+  LastDownloadFinder(const LastDownloadFinder&) = delete;
+  LastDownloadFinder& operator=(const LastDownloadFinder&) = delete;
 
   ~LastDownloadFinder() override;
 
@@ -63,8 +57,8 @@ class LastDownloadFinder : public content::NotificationObserver,
   // Returns NULL without running |callback| if there are no eligible profiles
   // to search.
   static std::unique_ptr<LastDownloadFinder> Create(
-      const DownloadDetailsGetter& download_details_getter,
-      const LastDownloadCallback& callback);
+      DownloadDetailsGetter download_details_getter,
+      LastDownloadCallback callback);
 
  protected:
   // Protected constructor so that unit tests can create a fake finder.
@@ -77,9 +71,8 @@ class LastDownloadFinder : public content::NotificationObserver,
     WAITING_FOR_NON_BINARY_HISTORY,
   };
 
-  LastDownloadFinder(const DownloadDetailsGetter& download_details_getter,
-                     const std::vector<Profile*>& profiles,
-                     const LastDownloadCallback& callback);
+  LastDownloadFinder(DownloadDetailsGetter download_details_getter,
+                     LastDownloadCallback callback);
 
   // Adds |profile| to the set of profiles to be searched if it is an
   // on-the-record profile with history that participates in safe browsing
@@ -93,10 +86,6 @@ class LastDownloadFinder : public content::NotificationObserver,
   void OnMetadataQuery(
       Profile* profile,
       std::unique_ptr<ClientIncidentReport_DownloadDetails> details);
-
-  // Abandons the search for downloads in |profile|, reporting results if there
-  // are no more pending queries.
-  void AbandonSearchInProfile(Profile* profile);
 
   // HistoryService::DownloadQueryCallback. Retrieves the most recent completed
   // executable download from |downloads| and reports results if there are no
@@ -112,10 +101,11 @@ class LastDownloadFinder : public content::NotificationObserver,
   // Invokes the caller-supplied callback with the download found.
   void ReportResults();
 
-  // content::NotificationObserver methods.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // ProfileManagerObserver:
+  void OnProfileAdded(Profile* profile) override;
+
+  // ProfileObserver:
+  void OnProfileWillBeDestroyed(Profile* profile) override;
 
   // history::HistoryServiceObserver:
   void OnHistoryServiceLoaded(history::HistoryService* service) override;
@@ -134,9 +124,6 @@ class LastDownloadFinder : public content::NotificationObserver,
   // respective states.
   std::map<Profile*, ProfileWaitState> profile_states_;
 
-  // Registrar for observing profile lifecycle notifications.
-  content::NotificationRegistrar notification_registrar_;
-
   // The most interesting download details retrieved from download metadata.
   std::unique_ptr<ClientIncidentReport_DownloadDetails> details_;
 
@@ -148,13 +135,12 @@ class LastDownloadFinder : public content::NotificationObserver,
   history::DownloadRow most_recent_non_binary_row_;
 
   // HistoryServiceObserver
-  ScopedObserver<history::HistoryService, history::HistoryServiceObserver>
-      history_service_observer_;
+  base::ScopedMultiSourceObservation<history::HistoryService,
+                                     history::HistoryServiceObserver>
+      history_service_observations_{this};
 
   // A factory for asynchronous operations on profiles' HistoryService.
   base::WeakPtrFactory<LastDownloadFinder> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(LastDownloadFinder);
 };
 
 }  // namespace safe_browsing

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,37 +9,42 @@
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/trace_event/trace_event.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/test/base/test_switches.h"
 #include "content/public/browser/tracing_controller.h"
 #include "services/tracing/public/cpp/trace_event_agent.h"
+#include "testing/perf/luci_test_result.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/gl/gl_switches.h"
 
-#if defined(OS_CHROMEOS)
-#include "ash/public/cpp/wallpaper_controller_observer.h"
-#include "ash/public/cpp/wallpaper_types.h"
-#include "chrome/browser/ui/ash/wallpaper_controller_client.h"
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/public/cpp/wallpaper/wallpaper_controller_observer.h"
+#include "ash/public/cpp/wallpaper/wallpaper_types.h"
+#include "chrome/browser/ui/ash/wallpaper_controller_client_impl.h"
 #include "components/user_manager/user_names.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/image/image_skia.h"
-#endif  // OS_CHROMEOS
-
-static const char kTraceDir[] = "trace-dir";
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace {
 
-#if defined(OS_CHROMEOS)
+constexpr char kTraceDir[] = "trace-dir";
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // Watches if the wallpaper has been changed and runs a passed callback if so.
 class TestWallpaperObserver : public ash::WallpaperControllerObserver {
  public:
   explicit TestWallpaperObserver(base::OnceClosure closure)
       : closure_(std::move(closure)) {
-    WallpaperControllerClient::Get()->AddObserver(this);
+    WallpaperControllerClientImpl::Get()->AddObserver(this);
   }
 
+  TestWallpaperObserver(const TestWallpaperObserver&) = delete;
+  TestWallpaperObserver& operator=(const TestWallpaperObserver&) = delete;
+
   ~TestWallpaperObserver() override {
-    WallpaperControllerClient::Get()->RemoveObserver(this);
+    WallpaperControllerClientImpl::Get()->RemoveObserver(this);
   }
 
   // ash::WallpaperControllerObserver:
@@ -47,8 +52,6 @@ class TestWallpaperObserver : public ash::WallpaperControllerObserver {
 
  private:
   base::OnceClosure closure_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestWallpaperObserver);
 };
 
 // Creates a high resolution wallpaper and sets it as the current wallpaper as
@@ -61,17 +64,29 @@ void CreateAndSetWallpaper() {
                         /*isOpaque=*/true);
   SkCanvas canvas(bitmap);
   canvas.drawColor(SK_ColorGREEN);
-  gfx::ImageSkia image(gfx::ImageSkiaRep(std::move(bitmap), 1.f));
+  gfx::ImageSkia image =
+      gfx::ImageSkia::CreateFromBitmap(std::move(bitmap), 1.f);
 
   base::RunLoop run_loop;
   TestWallpaperObserver observer(run_loop.QuitClosure());
-  WallpaperControllerClient::Get()->SetCustomWallpaper(
-      user_manager::StubAccountId(), /*wallpaper_files_id=*/"dummyid",
-      /*file_name=*/"dummyfilename", ash::WALLPAPER_LAYOUT_CENTER_CROPPED,
-      image, /*preview_mode=*/false);
+  WallpaperControllerClientImpl::Get()->SetCustomWallpaper(
+      user_manager::StubAccountId(), /*file_name=*/"dummyfilename",
+      ash::WALLPAPER_LAYOUT_CENTER_CROPPED, image, /*preview_mode=*/false);
   run_loop.Run();
 }
-#endif  // OS_CHROMEOS
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+perf_test::LuciTestResult CreateTestResult(
+    const base::FilePath& trace_file,
+    const std::vector<std::string>& tbm_metrics) {
+  perf_test::LuciTestResult result =
+      perf_test::LuciTestResult::CreateForGTest();
+  result.AddOutputArtifactFile("trace/1.json", trace_file, "application/json");
+  for (auto& metric : tbm_metrics)
+    result.AddTag("tbmv2", metric);
+
+  return result;
+}
 
 }  // namespace
 
@@ -100,6 +115,10 @@ const std::string PerformanceTest::GetTracingCategories() const {
   return std::string();
 }
 
+std::vector<std::string> PerformanceTest::GetTimelineBasedMetrics() const {
+  return {};
+}
+
 void PerformanceTest::SetUpOnMainThread() {
   setup_called_ = true;
   InProcessBrowserTest::SetUpOnMainThread();
@@ -119,25 +138,31 @@ void PerformanceTest::SetUpOnMainThread() {
 }
 
 void PerformanceTest::TearDownOnMainThread() {
+  auto* command_line = base::CommandLine::ForCurrentProcess();
+
   if (should_start_trace_) {
     auto* controller = content::TracingController::GetInstance();
     ASSERT_TRUE(controller->IsTracing())
         << "Did you forget to call PerformanceTest::SetUpOnMainThread?";
 
     base::RunLoop runloop;
-    base::FilePath dir =
-        base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(kTraceDir);
+    base::FilePath dir = command_line->GetSwitchValuePath(kTraceDir);
     base::FilePath trace_file;
     CHECK(base::CreateTemporaryFileInDir(dir, &trace_file));
+    LOG(INFO) << "Created the trace file: " << trace_file;
 
     auto trace_data_endpoint = content::TracingController::CreateFileEndpoint(
         trace_file, runloop.QuitClosure());
     bool result = controller->StopTracing(trace_data_endpoint);
     runloop.Run();
     CHECK(result);
+
+    base::FilePath report_file =
+        trace_file.AddExtension(FILE_PATH_LITERAL("test_result.json"));
+    CreateTestResult(trace_file, GetTimelineBasedMetrics())
+        .WriteToFile(report_file);
   }
-  bool print = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kPerfTestPrintUmaMeans);
+  bool print = command_line->HasSwitch(switches::kPerfTestPrintUmaMeans);
   LOG_IF(INFO, print) << "=== Histogram Means ===";
   for (auto name : GetUMAHistogramNames()) {
     EXPECT_TRUE(HasHistogram(name)) << "missing histogram:" << name;
@@ -168,11 +193,15 @@ bool PerformanceTest::HasHistogram(const std::string& name) {
 
 void UIPerformanceTest::SetUpOnMainThread() {
   PerformanceTest::SetUpOnMainThread();
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   CreateAndSetWallpaper();
-#endif  // OS_CHROMEOS
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 const std::string UIPerformanceTest::GetTracingCategories() const {
   return "benchmark,cc,viz,input,latency,gpu,rail,toplevel,ui,views,viz";
+}
+
+std::vector<std::string> UIPerformanceTest::GetTimelineBasedMetrics() const {
+  return {"renderingMetric", "umaMetric"};
 }

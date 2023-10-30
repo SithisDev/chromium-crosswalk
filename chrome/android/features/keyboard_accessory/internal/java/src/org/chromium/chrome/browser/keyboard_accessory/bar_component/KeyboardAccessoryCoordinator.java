@@ -1,18 +1,21 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.keyboard_accessory.bar_component;
 
+import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.SKIP_CLOSING_ANIMATION;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.VISIBLE;
 
-import android.support.annotation.Nullable;
-import android.support.annotation.Px;
-import android.support.v4.view.ViewPager;
-import android.view.ViewStub;
+import androidx.annotation.Nullable;
+import androidx.annotation.Px;
+import androidx.annotation.VisibleForTesting;
+import androidx.viewpager.widget.ViewPager;
 
-import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.base.TraceEvent;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.keyboard_accessory.AccessoryTabType;
+import org.chromium.chrome.browser.keyboard_accessory.R;
 import org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BarItem;
 import org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryViewBinder.BarItemViewHolder;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData;
@@ -20,7 +23,8 @@ import org.chromium.chrome.browser.keyboard_accessory.data.Provider;
 import org.chromium.chrome.browser.keyboard_accessory.tab_layout_component.KeyboardAccessoryTabLayoutCoordinator;
 import org.chromium.components.autofill.AutofillDelegate;
 import org.chromium.components.autofill.AutofillSuggestion;
-import org.chromium.ui.DeferredViewStubInflationProvider;
+import org.chromium.ui.AsyncViewProvider;
+import org.chromium.ui.AsyncViewStub;
 import org.chromium.ui.ViewProvider;
 import org.chromium.ui.modelutil.LazyConstructionPropertyMcp;
 import org.chromium.ui.modelutil.ListModel;
@@ -37,6 +41,10 @@ import org.chromium.ui.modelutil.RecyclerViewAdapter;
 public class KeyboardAccessoryCoordinator {
     private final KeyboardAccessoryMediator mMediator;
     private final KeyboardAccessoryTabLayoutCoordinator mTabLayout;
+    private final PropertyModelChangeProcessor
+            .ViewBinder<PropertyModel, KeyboardAccessoryView, PropertyKey> mViewBinder;
+    private final PropertyModel mModel;
+    private KeyboardAccessoryView mView;
 
     /**
      * The keyboard accessory provides signals when to show or change the accessory sheet below it.
@@ -86,6 +94,12 @@ public class KeyboardAccessoryCoordinator {
         void closeActiveTab();
 
         /**
+         * Set the currently active tab to the given tabType.
+         * @param tabType The type of the tab that should be selected.
+         */
+        void setActiveTab(@AccessoryTabType int tabType);
+
+        /**
          * Returns whether active tab or null if no tab is currently active. The returned property
          * reflects the latest change while the view might still be in progress of being updated.
          * @return The active {@link KeyboardAccessoryData.Tab}, null otherwise.
@@ -103,39 +117,38 @@ public class KeyboardAccessoryCoordinator {
     /**
      * Initializes the component as soon as the native library is loaded by e.g. starting to listen
      * to keyboard visibility events.
-     * @param barStub A {@link ViewStub} for the accessory bar layout.
+     * @param barStub A {@link AsyncViewStub} for the accessory bar layout.
      */
-    public KeyboardAccessoryCoordinator(VisibilityDelegate visibilityDelegate, ViewStub barStub) {
+    public KeyboardAccessoryCoordinator(
+            VisibilityDelegate visibilityDelegate, AsyncViewStub barStub) {
         this(new KeyboardAccessoryTabLayoutCoordinator(), visibilityDelegate,
-                new DeferredViewStubInflationProvider<>(barStub));
+                AsyncViewProvider.of(barStub, R.id.keyboard_accessory));
     }
 
     /**
-     * Constructor that allows to mock the {@link DeferredViewStubInflationProvider}.
+     * Constructor that allows to mock the {@link AsyncViewProvider}.
      * @param viewProvider A provider for the accessory.
      */
     @VisibleForTesting
     public KeyboardAccessoryCoordinator(KeyboardAccessoryTabLayoutCoordinator tabLayout,
             VisibilityDelegate visibilityDelegate,
             ViewProvider<KeyboardAccessoryView> viewProvider) {
-        PropertyModel model = KeyboardAccessoryProperties.defaultModelBuilder().build();
         mTabLayout = tabLayout;
-        mMediator = new KeyboardAccessoryMediator(model, visibilityDelegate,
+        mModel = KeyboardAccessoryProperties.defaultModelBuilder().build();
+        mMediator = new KeyboardAccessoryMediator(mModel, visibilityDelegate,
                 mTabLayout.getTabSwitchingDelegate(), mTabLayout.getTabLayoutCallbacks());
         if (!ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY)) {
             viewProvider.whenLoaded(barView -> mTabLayout.assignNewView(barView.getTabLayout()));
         }
+        viewProvider.whenLoaded(view -> mView = view);
 
         mTabLayout.setTabObserver(mMediator);
-        PropertyModelChangeProcessor
-                .ViewBinder<PropertyModel, KeyboardAccessoryView, PropertyKey> viewBinder =
-                KeyboardAccessoryViewBinder::bind;
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY)) {
-            viewBinder = KeyboardAccessoryModernViewBinder::bind;
-        }
-        LazyConstructionPropertyMcp.create(model, VISIBLE, viewProvider, viewBinder);
+        mViewBinder = ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY)
+                ? KeyboardAccessoryModernViewBinder::bind
+                : KeyboardAccessoryViewBinder::bind;
+        LazyConstructionPropertyMcp.create(mModel, VISIBLE, viewProvider, mViewBinder);
         KeyboardAccessoryMetricsRecorder.registerKeyboardAccessoryModelMetricsObserver(
-                model, mTabLayout.getTabSwitchingDelegate());
+                mModel, mTabLayout.getTabSwitchingDelegate());
     }
 
     /**
@@ -163,6 +176,10 @@ public class KeyboardAccessoryCoordinator {
 
     public void setTabs(KeyboardAccessoryData.Tab[] tabs) {
         mTabLayout.getTabSwitchingDelegate().setTabs(tabs);
+    }
+
+    public void setActiveTab(@AccessoryTabType int tabType) {
+        mTabLayout.getTabSwitchingDelegate().setActiveTab(tabType);
     }
 
     /**
@@ -210,7 +227,17 @@ public class KeyboardAccessoryCoordinator {
      * Triggers the accessory to be shown.
      */
     public void show() {
+        TraceEvent.begin("KeyboardAccessoryCoordinator#show");
         mMediator.show();
+        TraceEvent.end("KeyboardAccessoryCoordinator#show");
+    }
+
+    /** Next time the accessory is closed, don't delay the closing animation. */
+    public void skipClosingAnimationOnce() {
+        mMediator.skipClosingAnimationOnce();
+        // TODO(fhorschig): Consider allow LazyConstructionPropertyMcp to propagate updates once the
+        // view exists. Currently it doesn't, so we need this ugly explicit binding.
+        if (mView != null) mViewBinder.bind(mModel, mView, SKIP_CLOSING_ANIMATION);
     }
 
     /**

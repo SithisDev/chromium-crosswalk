@@ -1,11 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
 
 #include "base/files/file_path.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_reg_util_win.h"
@@ -52,9 +52,9 @@ TEST(ProductTest, ProductInstallBasic) {
 
     const char kCurrentVersion[] = "1.2.3.4";
     base::Version current_version(kCurrentVersion);
-    version_key.WriteValue(google_update::kRegVersionField,
-                           base::UTF8ToWide(
-                               current_version.GetString()).c_str());
+    version_key.WriteValue(
+        google_update::kRegVersionField,
+        base::UTF8ToWide(current_version.GetString()).c_str());
 
     machine_state.Initialize();
     const installer::ProductState* chrome_state =

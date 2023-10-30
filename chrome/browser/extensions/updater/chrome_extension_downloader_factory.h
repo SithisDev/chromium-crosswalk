@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,10 +25,6 @@ namespace network {
 class SharedURLLoaderFactory;
 }  // namespace network
 
-namespace service_manager {
-class Connector;
-}
-
 // This provides a simple static interface for constructing an
 // ExtensionDownloader suitable for use from within Chrome.
 class ChromeExtensionDownloaderFactory {
@@ -41,13 +37,12 @@ class ChromeExtensionDownloaderFactory {
   //   non-empty.
   //
   // |profile_path| is used exclusely to support download of extensions through
-  // the file:// protocol. In practice, it whitelists specific directories the
+  // the file:// protocol. In practice, it allowlists specific directories the
   // the browser has access to.
   static std::unique_ptr<extensions::ExtensionDownloader>
   CreateForURLLoaderFactory(
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       extensions::ExtensionDownloaderDelegate* delegate,
-      service_manager::Connector* connector,
       crx_file::VerifierFormat required_verifier_format,
       const base::FilePath& profile_path = base::FilePath());
 

@@ -1,13 +1,8 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/**
- * The methods to expose to the client.
- */
-const METHOD_LIST = [
-  'logOut', 'getInstalledArcApps', 'requestClose', 'notifySupervisionEnabled'
-];
+import {PostMessageAPIServer} from 'chrome://resources/js/post_message_api_server.m.js';
 
 /**
  * Class that implements the server side of the AddSupervision postMessage
@@ -15,7 +10,7 @@ const METHOD_LIST = [
  * the remote website that calls the API  is the client.  This is the opposite
  * of the normal browser/web-server client/server relationship.
  */
-class AddSupervisionAPIServer extends PostMessageAPIServer {
+export class AddSupervisionAPIServer extends PostMessageAPIServer {
   /*
    * @constructor
    * @param {!Element} webviewElement  The <webview> element to listen to as a
@@ -26,9 +21,10 @@ class AddSupervisionAPIServer extends PostMessageAPIServer {
    *     messages via the postMessage API.
    */
   constructor(webviewElement, targetURL, originURLPrefix) {
-    super(webviewElement, METHOD_LIST, targetURL, originURLPrefix);
+    super(webviewElement, targetURL, originURLPrefix);
 
-    this.proxy_ = addSupervision.mojom.AddSupervisionHandler.getProxy();
+    this.addSupervisionHandler_ =
+        addSupervision.mojom.AddSupervisionHandler.getRemote();
 
     this.registerMethod('logOut', this.logOut.bind(this));
     this.registerMethod(
@@ -36,6 +32,12 @@ class AddSupervisionAPIServer extends PostMessageAPIServer {
     this.registerMethod('requestClose', this.requestClose.bind(this));
     this.registerMethod(
         'notifySupervisionEnabled', this.notifySupervisionEnabled.bind(this));
+    this.registerMethod('setCloseOnEscape', this.setCloseOnEscape.bind(this));
+  }
+
+  /** @override */
+  onInitializationError(origin) {
+    // TODO(): Trigger an error page to be shown in this case.
   }
 
   /**
@@ -43,7 +45,7 @@ class AddSupervisionAPIServer extends PostMessageAPIServer {
    * @param {!Array} unused Placeholder unused empty parameter.
    */
   logOut(unused) {
-    return this.proxy_.logOut();
+    return this.addSupervisionHandler_.logOut();
   }
 
   /**
@@ -54,7 +56,7 @@ class AddSupervisionAPIServer extends PostMessageAPIServer {
    *     apps installed on the device.
    */
   getInstalledArcApps(unused) {
-    return this.proxy_.getInstalledArcApps();
+    return this.addSupervisionHandler_.getInstalledArcApps();
   }
 
   /**
@@ -67,7 +69,7 @@ class AddSupervisionAPIServer extends PostMessageAPIServer {
    * resolve with boolean result indicating whether the dialog was closed.
    */
   requestClose(unused) {
-    return this.proxy_.requestClose();
+    return this.addSupervisionHandler_.requestClose();
   }
 
   /**
@@ -75,6 +77,17 @@ class AddSupervisionAPIServer extends PostMessageAPIServer {
    * @param {!Array} unused Placeholder unused empty parameter.
    */
   notifySupervisionEnabled(unused) {
-    return this.proxy_.notifySupervisionEnabled();
+    return this.addSupervisionHandler_.notifySupervisionEnabled();
+  }
+
+  /**
+   * Configures whether the Add Supervision dialog should close when
+   * the user presses the Escape key.
+   * @param {!Array} params Param 0 is a <boolean> that denotes whether the
+   * dialog should close.
+   */
+  setCloseOnEscape(params) {
+    const enabled = params[0];
+    return this.addSupervisionHandler_.setCloseOnEscape(enabled);
   }
 }

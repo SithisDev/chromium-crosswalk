@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,21 +57,25 @@ chrome.test.runTests([
     var pages = [kChromeUINewTabURL, pageUrl('a'), pageUrl('b'),
                    pageUrl('c'), pageUrl('d'), pageUrl('e')];
     createWindow(pages, {}, pass(function(winId, tabIds) {
-      firstWindowId = winId;
-      moveTabIds['a'] = tabIds[1];
-      moveTabIds['b'] = tabIds[2];
-      moveTabIds['c'] = tabIds[3];
-      moveTabIds['d'] = tabIds[4];
-      moveTabIds['e'] = tabIds[5];
-      createWindow([kChromeUINewTabURL], {}, pass(function(winId, tabIds) {
-        secondWindowId = winId;
-      }));
-      chrome.tabs.getAllInWindow(firstWindowId, pass(function(tabs) {
-        assertEq(pages.length, tabs.length);
-        assertTrue(newTabUrls.includes(tabs[0].url));
-        for (var i = 1; i < tabs.length; i++) {
-          assertEq(pages[i], tabs[i].url);
-        }
+      waitForAllTabs(pass(function() {
+        firstWindowId = winId;
+        moveTabIds['a'] = tabIds[1];
+        moveTabIds['b'] = tabIds[2];
+        moveTabIds['c'] = tabIds[3];
+        moveTabIds['d'] = tabIds[4];
+        moveTabIds['e'] = tabIds[5];
+        createWindow([kChromeUINewTabURL], {}, pass(function(winId, tabIds) {
+          waitForAllTabs(pass(function() {
+            secondWindowId = winId;
+          }));
+        }));
+        chrome.tabs.getAllInWindow(firstWindowId, pass(function(tabs) {
+          assertEq(pages.length, tabs.length);
+          assertTrue(newTabUrls.includes(tabs[0].url));
+          for (var i = 1; i < tabs.length; i++) {
+            assertEq(pages[i], tabs[i].url);
+          }
+        }));
       }));
     }));
   },
@@ -179,10 +183,7 @@ chrome.test.runTests([
 
   // Make sure we don't crash when the index is out of range.
   function moveToInvalidTab() {
-    var expectedJsBindingsError =
-        'Invalid value for argument 2. Property \'index\': ' +
-        'Value must not be less than -1.';
-    var expectedNativeBindingsError =
+    var expectedError =
         'Error in invocation of tabs.move(' +
         '[integer|array] tabIds, object moveProperties, ' +
         'optional function callback): Error at parameter \'moveProperties\': ' +
@@ -193,8 +194,7 @@ chrome.test.runTests([
         chrome.test.fail("Moved a tab to an invalid index");
       });
     } catch (e) {
-      assertTrue(e.message == expectedJsBindingsError ||
-                 e.message == expectedNativeBindingsError, e.message);
+      assertEq(expectedError, e.message);
       caught = true;
     }
     assertTrue(caught);

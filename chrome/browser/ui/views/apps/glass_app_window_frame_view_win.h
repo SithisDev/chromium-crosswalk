@@ -1,20 +1,24 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_APPS_GLASS_APP_WINDOW_FRAME_VIEW_WIN_H_
 #define CHROME_BROWSER_UI_VIEWS_APPS_GLASS_APP_WINDOW_FRAME_VIEW_WIN_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/geometry/insets.h"
+#include "ui/views/metadata/view_factory.h"
 #include "ui/views/window/non_client_view.h"
 
 // A glass style app window frame view.
 class GlassAppWindowFrameViewWin : public views::NonClientFrameView {
  public:
-  static const char kViewClassName[];
-
+  METADATA_HEADER(GlassAppWindowFrameViewWin);
   explicit GlassAppWindowFrameViewWin(views::Widget* widget);
+  GlassAppWindowFrameViewWin(const GlassAppWindowFrameViewWin&) = delete;
+  GlassAppWindowFrameViewWin& operator=(const GlassAppWindowFrameViewWin&) =
+      delete;
   ~GlassAppWindowFrameViewWin() override;
 
   // The insets to the client area due to the glass frame.
@@ -40,13 +44,17 @@ class GlassAppWindowFrameViewWin : public views::NonClientFrameView {
 
   // views::View implementation.
   gfx::Size CalculatePreferredSize() const override;
-  const char* GetClassName() const override;
   gfx::Size GetMinimumSize() const override;
   gfx::Size GetMaximumSize() const override;
 
-  views::Widget* widget_;
-
-  DISALLOW_COPY_AND_ASSIGN(GlassAppWindowFrameViewWin);
+  raw_ptr<views::Widget> widget_;
 };
+
+BEGIN_VIEW_BUILDER(/* no export */,
+                   GlassAppWindowFrameViewWin,
+                   views::NonClientFrameView)
+END_VIEW_BUILDER
+
+DEFINE_VIEW_BUILDER(/* no export */, GlassAppWindowFrameViewWin)
 
 #endif  // CHROME_BROWSER_UI_VIEWS_APPS_GLASS_APP_WINDOW_FRAME_VIEW_WIN_H_

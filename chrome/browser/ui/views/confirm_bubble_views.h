@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,13 @@
 
 #include <memory>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "ui/views/controls/button/button.h"
+#include "base/memory/raw_ptr.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/views/window/dialog_delegate.h"
 
 class ConfirmBubbleModel;
 
 namespace views {
-class ImageButton;
 class Label;
 }  // namespace views
 
@@ -28,41 +26,26 @@ class Label;
 //   +------------------------+
 //
 // TODO(msw): Remove this class or merge it with DialogDelegateView.
-class ConfirmBubbleViews : public views::DialogDelegateView,
-                           public views::ButtonListener {
+class ConfirmBubbleViews : public views::DialogDelegateView {
  public:
+  METADATA_HEADER(ConfirmBubbleViews);
   explicit ConfirmBubbleViews(std::unique_ptr<ConfirmBubbleModel> model);
+  ConfirmBubbleViews(const ConfirmBubbleViews&) = delete;
+  ConfirmBubbleViews& operator=(const ConfirmBubbleViews&) = delete;
 
  protected:
   ~ConfirmBubbleViews() override;
 
-  // views::DialogDelegate implementation.
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
-  bool IsDialogButtonEnabled(ui::DialogButton button) const override;
-  std::unique_ptr<views::View> CreateExtraView() override;
-  bool Cancel() override;
-  bool Accept() override;
-
-  // views::WidgetDelegate implementation.
-  ui::ModalType GetModalType() const override;
-  base::string16 GetWindowTitle() const override;
+  // views::DialogDelegateView:
+  std::u16string GetWindowTitle() const override;
   bool ShouldShowCloseButton() const override;
-
-  // views::ButtonListener implementation.
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
-  // views::View implementation.
-  void ViewHierarchyChanged(
-      const views::ViewHierarchyChangedDetails& details) override;
+  void OnWidgetInitialized() override;
 
  private:
   // The model to customize this bubble view.
   std::unique_ptr<ConfirmBubbleModel> model_;
 
-  views::Label* label_;
-  views::ImageButton* help_button_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConfirmBubbleViews);
+  raw_ptr<views::Label> label_;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_CONFIRM_BUBBLE_VIEWS_H_

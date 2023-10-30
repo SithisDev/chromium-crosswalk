@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,16 +11,17 @@
 
 #include "base/bind.h"
 #include "base/memory/singleton.h"
+#include "base/time/default_clock.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/signin/chrome_device_id_helper.h"
+#include "chrome/browser/sync/device_info_sync_client_impl.h"
 #include "chrome/browser/sync/model_type_store_service_factory.h"
+#include "chrome/browser/sync/sync_invalidations_service_factory.h"
 #include "chrome/common/channel_info.h"
-#include "components/keyed_service/content/browser_context_dependency_manager.h"
-#include "components/send_tab_to_self/features.h"
-#include "components/sync/base/sync_prefs.h"
+#include "components/sync/invalidations/sync_invalidations_service.h"
 #include "components/sync/model/model_type_store_service.h"
 #include "components/sync_device_info/device_info_prefs.h"
 #include "components/sync_device_info/device_info_sync_service_impl.h"
@@ -60,53 +61,31 @@ void DeviceInfoSyncServiceFactory::GetAllDeviceInfoTrackers(
 }
 
 DeviceInfoSyncServiceFactory::DeviceInfoSyncServiceFactory()
-    : BrowserContextKeyedServiceFactory(
-          "DeviceInfoSyncService",
-          BrowserContextDependencyManager::GetInstance()) {
+    : ProfileKeyedServiceFactory("DeviceInfoSyncService") {
   DependsOn(ModelTypeStoreServiceFactory::GetInstance());
+  DependsOn(SyncInvalidationsServiceFactory::GetInstance());
 }
 
-DeviceInfoSyncServiceFactory::~DeviceInfoSyncServiceFactory() {}
+DeviceInfoSyncServiceFactory::~DeviceInfoSyncServiceFactory() = default;
 
 KeyedService* DeviceInfoSyncServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
   Profile* profile = Profile::FromBrowserContext(context);
 
-  syncer::LocalDeviceInfoProviderImpl::SigninScopedDeviceIdCallback
-      signin_scoped_device_id_callback;
-  syncer::LocalDeviceInfoProviderImpl::SendTabToSelfReceivingEnabledCallback
-      send_tab_to_self_receiving_enabled_callback;
-  bool local_sync_backend_enabled = false;
-
-// Since the local sync backend is currently only supported on Windows don't
-// even check the pref on other os-es.
-#if defined(OS_WIN)
-  syncer::SyncPrefs prefs(profile->GetPrefs());
-  local_sync_backend_enabled = prefs.IsLocalSyncEnabled();
-#endif  // defined(OS_WIN)
-
-  if (local_sync_backend_enabled) {
-    signin_scoped_device_id_callback =
-        base::BindRepeating([]() { return std::string("local_device"); });
-  } else {
-    signin_scoped_device_id_callback =
-        base::BindRepeating(&GetSigninScopedDeviceIdForProfile, profile);
-  }
-
-  send_tab_to_self_receiving_enabled_callback = base::BindRepeating(
-      &send_tab_to_self::IsReceivingEnabledByUserOnThisDevice,
-      profile->GetPrefs());
-
+  auto device_info_sync_client =
+      std::make_unique<browser_sync::DeviceInfoSyncClientImpl>(profile);
   auto local_device_info_provider =
       std::make_unique<syncer::LocalDeviceInfoProviderImpl>(
-          chrome::GetChannel(), chrome::GetVersionString(),
-          signin_scoped_device_id_callback,
-          send_tab_to_self_receiving_enabled_callback);
+          chrome::GetChannel(),
+          chrome::GetVersionString(chrome::WithExtendedStable(false)),
+          device_info_sync_client.get());
 
-  auto device_prefs =
-      std::make_unique<syncer::DeviceInfoPrefs>(profile->GetPrefs());
+  auto device_prefs = std::make_unique<syncer::DeviceInfoPrefs>(
+      profile->GetPrefs(), base::DefaultClock::GetInstance());
 
   return new syncer::DeviceInfoSyncServiceImpl(
       ModelTypeStoreServiceFactory::GetForProfile(profile)->GetStoreFactory(),
-      std::move(local_device_info_provider), std::move(device_prefs));
+      std::move(local_device_info_provider), std::move(device_prefs),
+      std::move(device_info_sync_client),
+      SyncInvalidationsServiceFactory::GetForProfile(profile));
 }

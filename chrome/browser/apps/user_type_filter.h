@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,6 @@ extern const char kKeyUserType[];
 extern const char kUserTypeChild[];
 extern const char kUserTypeGuest[];
 extern const char kUserTypeManaged[];
-extern const char kUserTypeSupervised[];
 extern const char kUserTypeUnmanaged[];
 
 // Returns user type based on |profile|. Must be called on UI thread. List of

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,21 +10,42 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "base/scoped_observation.h"
+#include "chrome/browser/web_applications/app_registrar_observer.h"
+#include "chrome/browser/web_applications/web_app_id.h"
+#include "chrome/browser/web_applications/web_app_install_manager.h"
+#include "chrome/browser/web_applications/web_app_install_manager_observer.h"
+#include "chrome/browser/web_applications/web_app_registrar.h"
+#include "chrome/browser/web_applications/web_app_sync_bridge.h"
 #include "components/sync/model/string_ordinal.h"
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_prefs.h"
-#include "extensions/common/extension.h"
+#include "extensions/common/extension_id.h"
+
+namespace web_app {
+class WebApp;
+class WebAppRegistrar;
+}  // namespace web_app
 
 namespace extensions {
 
-class ChromeAppSorting : public AppSorting {
+class ChromeAppSorting : public AppSorting,
+                         public web_app::AppRegistrarObserver,
+                         public web_app::WebAppInstallManagerObserver {
  public:
   explicit ChromeAppSorting(content::BrowserContext* browser_context);
+
+  ChromeAppSorting(const ChromeAppSorting&) = delete;
+  ChromeAppSorting& operator=(const ChromeAppSorting&) = delete;
+
   ~ChromeAppSorting() override;
 
   // AppSorting implementation:
+  void InitializePageOrdinalMapFromWebApps() override;
   void FixNTPOrdinalCollisions() override;
   void EnsureValidOrdinals(
       const std::string& extension_id,
@@ -56,6 +77,15 @@ class ChromeAppSorting : public AppSorting {
   syncer::StringOrdinal PageIntegerAsStringOrdinal(size_t page_index) override;
   void SetExtensionVisible(const std::string& extension_id,
                            bool visible) override;
+
+  // web_app::WebAppInstallManagerObserver:
+  void OnWebAppInstalled(const web_app::AppId& app_id) override;
+  void OnWebAppInstallManagerDestroyed() override;
+
+  // web_app::AppRegistrarObserver:
+  void OnWebAppsWillBeUpdatedFromSync(
+      const std::vector<const web_app::WebApp*>& updated_apps_state) override;
+  void OnAppRegistrarDestroyed() override;
 
  private:
   // The StringOrdinal is the app launch ordinal and the string is the extension
@@ -101,10 +131,10 @@ class ChromeAppSorting : public AppSorting {
       const syncer::StringOrdinal& page_ordinal,
       AppLaunchOrdinalReturn return_type) const;
 
-  // Initialize the |page_ordinal_map_| with the page ordinals used by the
-  // given extensions.
+  // Initialize the |ntp_ordinal_map_| with the page ordinals used by the
+  // given extensions or by fetching web apps.
   void InitializePageOrdinalMap(
-      const extensions::ExtensionIdList& extension_ids);
+      const std::vector<std::string>& extension_or_app_ids);
 
   // Migrates the app launcher and page index values.
   void MigrateAppIndex(
@@ -145,7 +175,15 @@ class ChromeAppSorting : public AppSorting {
   // Returns the number of items in |m| visible on the new tab page.
   size_t CountItemsVisibleOnNtp(const AppLaunchOrdinalMap& m) const;
 
-  content::BrowserContext* browser_context_;
+  const raw_ptr<content::BrowserContext> browser_context_ = nullptr;
+  raw_ptr<const web_app::WebAppRegistrar> web_app_registrar_ = nullptr;
+  raw_ptr<web_app::WebAppSyncBridge> web_app_sync_bridge_ = nullptr;
+  base::ScopedObservation<web_app::WebAppRegistrar,
+                          web_app::AppRegistrarObserver>
+      app_registrar_observation_{this};
+  base::ScopedObservation<web_app::WebAppInstallManager,
+                          web_app::WebAppInstallManagerObserver>
+      install_manager_observation_{this};
 
   // A map of all the StringOrdinal page ordinals mapping to the collections of
   // app launch ordinals that exist on that page. This is used for mapping
@@ -166,7 +204,7 @@ class ChromeAppSorting : public AppSorting {
   // The set of extensions that don't appear in the new tab page.
   std::set<std::string> ntp_hidden_extensions_;
 
-  DISALLOW_COPY_AND_ASSIGN(ChromeAppSorting);
+  base::WeakPtrFactory<ChromeAppSorting> weak_factory_{this};
 };
 
 }  // namespace extensions

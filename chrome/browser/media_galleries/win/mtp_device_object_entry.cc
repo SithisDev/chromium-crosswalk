@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -9,8 +9,8 @@
 MTPDeviceObjectEntry::MTPDeviceObjectEntry() : is_directory(false), size(0) {
 }
 
-MTPDeviceObjectEntry::MTPDeviceObjectEntry(const base::string16& object_id,
-                                           const base::string16& object_name,
+MTPDeviceObjectEntry::MTPDeviceObjectEntry(const std::wstring& object_id,
+                                           const std::u16string& object_name,
                                            bool is_directory,
                                            int64_t size,
                                            const base::Time& last_modified_time)

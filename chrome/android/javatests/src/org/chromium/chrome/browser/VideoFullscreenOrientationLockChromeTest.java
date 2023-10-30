@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,9 @@ import android.net.Uri;
 import android.support.test.InstrumentationRegistry;
 import android.view.KeyEvent;
 
+import androidx.test.filters.MediumTest;
+
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -17,14 +20,16 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.CriteriaNotSatisfiedException;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.UrlUtils;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.media.MediaViewerUtils;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.DOMUtils;
 import org.chromium.content_public.browser.test.util.JavaScriptUtils;
 import org.chromium.media.MediaSwitches;
@@ -50,10 +55,15 @@ public class VideoFullscreenOrientationLockChromeTest {
         return mActivityTestRule.getActivity().getCurrentWebContents();
     }
 
-    private void waitForContentsFullscreenState(boolean fullscreenValue)
-            throws InterruptedException {
-        CriteriaHelper.pollInstrumentationThread(
-                Criteria.equals(fullscreenValue, () -> DOMUtils.isFullscreen(getWebContents())));
+    private void waitForContentsFullscreenState(boolean fullscreenValue) {
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                Criteria.checkThat(
+                        DOMUtils.isFullscreen(getWebContents()), Matchers.is(fullscreenValue));
+            } catch (TimeoutException ex) {
+                throw new CriteriaNotSatisfiedException(ex);
+            }
+        });
     }
 
     private boolean isScreenOrientationLocked() {
@@ -61,7 +71,7 @@ public class VideoFullscreenOrientationLockChromeTest {
                 != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
     }
 
-    private boolean isScreenOrientationLandscape() throws InterruptedException, TimeoutException {
+    private boolean isScreenOrientationLandscape() throws TimeoutException {
         StringBuilder sb = new StringBuilder();
         sb.append("(function() {");
         sb.append("  return  screen.orientation.type.startsWith('landscape');");
@@ -71,41 +81,29 @@ public class VideoFullscreenOrientationLockChromeTest {
                 .equals("true");
     }
 
-    private void waitUntilLockedToLandscape() throws InterruptedException {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                try {
-                    return isScreenOrientationLocked() && isScreenOrientationLandscape();
-                } catch (InterruptedException e) {
-                    return false;
-                } catch (TimeoutException e) {
-                    return false;
-                }
+    private void waitUntilLockedToLandscape() {
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                Criteria.checkThat(isScreenOrientationLocked(), Matchers.is(true));
+                Criteria.checkThat(isScreenOrientationLandscape(), Matchers.is(true));
+            } catch (TimeoutException e) {
+                throw new CriteriaNotSatisfiedException(e);
             }
         });
     }
 
-    private void waitUntilUnlocked() throws InterruptedException {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return !isScreenOrientationLocked();
-            }
-        });
+    private void waitUntilUnlocked() {
+        CriteriaHelper.pollInstrumentationThread(() -> !isScreenOrientationLocked());
     }
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         mActivityTestRule.startMainActivityWithURL(UrlUtils.getIsolatedTestFileUrl(TEST_URL));
     }
 
     @Test
-    // Test is disabled due to flakiness - crbug.com/888161
-    // @MediumTest
-    // @RetryOnFailure // The final waitForContentsFullscreenState(false) is flaky -
-    // crbug.com/711005.
-    @DisabledTest
+    @MediumTest
+    @DisabledTest(message = "Flaky - crbug.com/888161")
     public void testUnlockWithDownloadViewerActivity() throws Exception {
         if (mActivityTestRule.getActivity().isTablet()) {
             return;
@@ -126,8 +124,8 @@ public class VideoFullscreenOrientationLockChromeTest {
         // Orientation lock should be disabled when download viewer activity is started.
         Uri fileUri = Uri.parse(UrlUtils.getIsolatedTestFileUrl(VIDEO_URL));
         String mimeType = "video/mp4";
-        Intent intent = MediaViewerUtils.getMediaViewerIntent(
-                fileUri, fileUri, mimeType, true /* allowExternalAppHandlers */);
+        Intent intent = MediaViewerUtils.getMediaViewerIntent(fileUri, fileUri, mimeType,
+                true /* allowExternalAppHandlers */, mActivityTestRule.getActivity());
         IntentHandler.startActivityForTrustedIntent(intent);
         waitUntilUnlocked();
 

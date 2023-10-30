@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,7 @@ chrome.test.runTests([
       chrome.tabs.getAllInWindow(firstWindowId, pass(function(tabs) {
         assertEq(pages.length, tabs.length);
         for (var i in tabs) {
-          assertEq(pages[i], tabs[i].url);
+          assertEq(pages[i], tabs[i].url || tabs[i].pendingUrl);
         }
       }));
     }));
@@ -60,7 +60,7 @@ chrome.test.runTests([
     chrome.test.listenOnce(chrome.windows.onCreated, function(window) {
       windowEventsWindow = window;
       chrome.tabs.getAllInWindow(window.id, pass(function(tabs) {
-        assertEq(pageUrl("a"), tabs[0].url);
+        assertEq(pageUrl("a"), tabs[0].url || tabs[0].pendingUrl);
       }));
     });
 

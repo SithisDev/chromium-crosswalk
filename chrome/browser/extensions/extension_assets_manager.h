@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,18 +25,20 @@ class ExtensionAssetsManager {
  public:
   // Callback that is invoked when the extension assets are installed.
   // |file_path| is destination directory on success or empty in case of error.
-  typedef base::Callback<void(const base::FilePath& file_path)>
+  typedef base::OnceCallback<void(const base::FilePath& file_path)>
       InstallExtensionCallback;
 
   static ExtensionAssetsManager* GetInstance();
 
   // Copy extension assets to final location. This location could be under
   // |local_install_dir| or some common location shared for multiple users.
-  virtual void InstallExtension(const Extension* extension,
-                                const base::FilePath& unpacked_extension_root,
-                                const base::FilePath& local_install_dir,
-                                Profile* profile,
-                                InstallExtensionCallback callback) = 0;
+  virtual void InstallExtension(
+      const Extension* extension,
+      const base::FilePath& unpacked_extension_root,
+      const base::FilePath& local_install_dir,
+      Profile* profile,
+      InstallExtensionCallback callback,
+      bool updates_from_webstore_or_empty_update_url) = 0;
 
   // Remove extension assets if it is not used by anyone else.
   virtual void UninstallExtension(const std::string& id,

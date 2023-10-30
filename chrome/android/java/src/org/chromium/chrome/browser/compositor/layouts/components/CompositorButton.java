@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,8 @@ import android.content.res.Resources;
 import android.graphics.RectF;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.compositor.animation.FloatProperty;
+import org.chromium.chrome.browser.layouts.animation.FloatProperty;
+import org.chromium.chrome.browser.layouts.components.VirtualView;
 
 /**
  * {@link CompositorButton} keeps track of state for buttons that are rendered
@@ -30,6 +31,20 @@ public class CompositorButton implements VirtualView {
                 @Override
                 public Float get(CompositorButton object) {
                     return object.getOpacity();
+                }
+            };
+
+    /** A property for animations to use for changing the drawX of the button. */
+    public static final FloatProperty<CompositorButton> DRAW_X =
+            new FloatProperty<CompositorButton>("drawX") {
+                @Override
+                public void setValue(CompositorButton object, float value) {
+                    object.setX(value);
+                }
+
+                @Override
+                public Float get(CompositorButton object) {
+                    return object.getX();
                 }
             };
 

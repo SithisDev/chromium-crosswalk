@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include "base/gtest_prod_util.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/views/widget/widget.h"
 #include "ui/web_dialogs/web_dialog_delegate.h"
 #include "url/gurl.h"
@@ -25,6 +25,10 @@ namespace chromeos {
 
 class SystemWebDialogDelegate : public ui::WebDialogDelegate {
  public:
+  // Default margin (in pixels) used when sizing a dialog to an internal screen;
+  // see ComputeDialogSizeForInternalScreen().
+  static const size_t kDialogMarginForInternalScreenPx;
+
   // Returns the instance whose Id() matches |id|. If more than one instance
   // matches, the first matching instance created is returned.
   static SystemWebDialogDelegate* FindInstance(const std::string& id);
@@ -32,9 +36,21 @@ class SystemWebDialogDelegate : public ui::WebDialogDelegate {
   // Returns true if there is a system dialog with |url| loaded.
   static bool HasInstance(const GURL& url);
 
+  // Generates a dialog size which fits within the device's internal screen. If
+  // possible, this function simply returns |preferred_size|, but if that size
+  // does not fit within the screen's bounds with a margin of
+  // |kDialogMarginForInternalScreenPx| pixels on all sides, a smaller size is
+  // returned.
+  static gfx::Size ComputeDialogSizeForInternalScreen(
+      const gfx::Size& preferred_size);
+
   // |gurl| is the HTML file path for the dialog content and must be set.
   // |title| may be empty in which case ShouldShowDialogTitle() returns false.
-  SystemWebDialogDelegate(const GURL& gurl, const base::string16& title);
+  SystemWebDialogDelegate(const GURL& gurl, const std::u16string& title);
+
+  SystemWebDialogDelegate(const SystemWebDialogDelegate&) = delete;
+  SystemWebDialogDelegate& operator=(const SystemWebDialogDelegate&) = delete;
+
   ~SystemWebDialogDelegate() override;
 
   // Returns an identifier used for matching an instance in FindInstance.
@@ -54,15 +70,14 @@ class SystemWebDialogDelegate : public ui::WebDialogDelegate {
 
   // ui::WebDialogDelegate
   ui::ModalType GetDialogModalType() const override;
-  base::string16 GetDialogTitle() const override;
+  std::u16string GetDialogTitle() const override;
   GURL GetDialogContentURL() const override;
   void GetWebUIMessageHandlers(
       std::vector<content::WebUIMessageHandler*>* handlers) const override;
   void GetDialogSize(gfx::Size* size) const override;
-  bool CanResizeDialog() const override;
+  FrameKind GetWebDialogFrameKind() const override;
   std::string GetDialogArgs() const override;
-  void OnDialogShown(content::WebUI* webui,
-                     content::RenderViewHost* render_view_host) override;
+  void OnDialogShown(content::WebUI* webui) override;
   // Note: deletes |this|.
   void OnDialogClosed(const std::string& json_retval) override;
   void OnCloseContents(content::WebContents* source,
@@ -73,6 +88,9 @@ class SystemWebDialogDelegate : public ui::WebDialogDelegate {
   // If |parent| is not null, the dialog will be parented to |parent|.
   // Otherwise it will be attached to either the AlwaysOnTop container or the
   // LockSystemModal container, depending on the session state at creation.
+  // TODO(https://crbug.com/1268547): Passing a non-null |parent| here or to
+  // ShowSystemDialog() seems to prevent the dialog from properly repositioning
+  // on screen size changes (i.e. when the docked screen magnifier is enabled).
   void ShowSystemDialogForBrowserContext(content::BrowserContext* context,
                                          gfx::NativeWindow parent = nullptr);
   // Same as previous but shows a system dialog using the current active
@@ -92,16 +110,25 @@ class SystemWebDialogDelegate : public ui::WebDialogDelegate {
   // |nullptr| if the dialog has not been created yet.
   gfx::NativeWindow dialog_window() const { return dialog_window_; }
 
+  // A setter for modal type.
+  void set_modal_type(ui::ModalType modal_type) { modal_type_ = modal_type; }
+
+  content::WebUI* webui() { return webui_; }
+
  private:
   GURL gurl_;
-  base::string16 title_;
+  std::u16string title_;
   content::WebUI* webui_ = nullptr;
   ui::ModalType modal_type_;
   gfx::NativeWindow dialog_window_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(SystemWebDialogDelegate);
 };
 
 }  // namespace chromeos
+
+// TODO(https://crbug.com/1164001): remove after the //chrome/browser/chromeos
+// source migration is finished.
+namespace ash {
+using ::chromeos::SystemWebDialogDelegate;
+}
 
 #endif  // CHROME_BROWSER_UI_WEBUI_CHROMEOS_SYSTEM_WEB_DIALOG_DELEGATE_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@ chrome.test.runTests([
     relativePageLoaded = chrome.test.callbackAdded();
 
     chrome.tabs.update(testTabId, {url: pageUrl("a")}, function(tab) {
-      chrome.test.assertEq(pageUrl("a"), tab.url);
+      chrome.test.assertEq(pageUrl("a"), tab.pendingUrl);
       chrome.tabs.update(tab.id, {url: "relative.html"}, function(tab) {
       });
     });

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,6 @@ AccessibilityTest.ruleIds = [
   'frame-title',
   'heading-order',
   'hidden-content',
-  'href-no-hash',
   'html-has-lang',
   'html-lang-valid',
   'image-alt',
@@ -84,5 +83,5 @@ AccessibilityTest.ruleIds = [
   'th-has-data-cells',
   'valid-lang',
   'video-caption',
-  'video-description'
+  'video-description',
 ];

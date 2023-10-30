@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "chrome/browser/vr/test/constants.h"
 #include "chrome/browser/vr/test/gl_test_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/perf/perf_result_reporter.h"
 #include "testing/perf/perf_test.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
@@ -35,17 +36,25 @@ class TextPerfTest : public testing::Test {
   }
 
   void TearDown() override {
+    PrintResults();
     text_element_.reset();
     provider_.reset();
     gl_test_environment_.reset();
   }
 
  protected:
-  void PrintResults(const std::string& name) {
-    perf_test::PrintResult("TextPerfTest", ".render_time_avg", name,
-                           timer_.TimePerLap().InMillisecondsF(), "ms", true);
-    perf_test::PrintResult("TextPerfTest", ".number_of_runs", name,
-                           static_cast<size_t>(timer_.NumLaps()), "runs", true);
+  void SetupReporter(const std::string& test_name,
+                     const std::string& story_name) {
+    reporter_ =
+        std::make_unique<perf_test::PerfResultReporter>(test_name, story_name);
+    reporter_->RegisterImportantMetric(".render_time_avg", "ms");
+    reporter_->RegisterImportantMetric(".number_of_runs", "runs");
+  }
+
+  void PrintResults() {
+    reporter_->AddResult(".render_time_avg", timer_.TimePerLap());
+    reporter_->AddResult(".number_of_runs",
+                         static_cast<size_t>(timer_.NumLaps()));
   }
 
   void RenderAndLapTimer() {
@@ -57,6 +66,9 @@ class TextPerfTest : public testing::Test {
   }
 
   std::unique_ptr<Text> text_element_;
+  // It would be better to initialize this during SetUp(), but there doesn't
+  // appear to be a good way to get the test name from within testing::Test.
+  std::unique_ptr<perf_test::PerfResultReporter> reporter_;
   base::LapTimer timer_;
 
  private:
@@ -65,25 +77,25 @@ class TextPerfTest : public testing::Test {
 };
 
 TEST_F(TextPerfTest, RenderLoremIpsum100Chars) {
-  base::string16 text = base::UTF8ToUTF16(kLoremIpsum100Chars);
+  SetupReporter("TextPerfTest", "render_lorem_ipsum_100_chars");
+  std::u16string text = base::UTF8ToUTF16(kLoremIpsum100Chars);
   timer_.Reset();
   for (size_t i = 0; i < kNumberOfRuns; i++) {
     text[0] = 'a' + (i % 26);
     text_element_->SetText(text);
     RenderAndLapTimer();
   }
-  PrintResults("render_lorem_ipsum_100_chars");
 }
 
 TEST_F(TextPerfTest, RenderLoremIpsum700Chars) {
-  base::string16 text = base::UTF8ToUTF16(kLoremIpsum700Chars);
+  SetupReporter("TextPerfTest", "render_lorem_ipsum_700_chars");
+  std::u16string text = base::UTF8ToUTF16(kLoremIpsum700Chars);
   timer_.Reset();
   for (size_t i = 0; i < kNumberOfRuns; i++) {
     text[0] = 'a' + (i % 26);
     text_element_->SetText(text);
     RenderAndLapTimer();
   }
-  PrintResults("render_lorem_ipsum_700_chars");
 }
 
 }  // namespace vr

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,8 @@
 #define CHROME_TEST_BASE_CHROME_RENDER_VIEW_TEST_H_
 
 #include <memory>
-#include <string>
 
-#include "chrome/renderer/chrome_mock_render_thread.h"
+#include "base/memory/raw_ptr.h"
 #include "content/public/test/render_view_test.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
@@ -19,8 +18,14 @@ namespace autofill {
 class AutofillAgent;
 class TestPasswordAutofillAgent;
 class PasswordGenerationAgent;
-}
+class AutofillAssistantAgent;
+}  // namespace autofill
 
+// This test fixture emulates a single RenderView within the main test process.
+// Since it does everything in a single process, tests based on this fixture do
+// not cover code related to Chrome's multiprocess architecture, such as
+// sandboxing. InProcessBrowserTest is a better fixture for integration tests
+// that care about multiple processes.
 class ChromeRenderViewTest : public content::RenderViewTest {
  public:
   ChromeRenderViewTest();
@@ -41,19 +46,16 @@ class ChromeRenderViewTest : public content::RenderViewTest {
   // Use when overriding CreateContentRendererClient.
   void InitChromeContentRendererClient(ChromeContentRendererClient* client);
 
-  void EnableUserGestureSimulationForAutofill();
-  void DisableUserGestureSimulationForAutofill();
   void WaitForAutofillDidAssociateFormControl();
 
-  autofill::TestPasswordAutofillAgent* password_autofill_agent_;
-  autofill::PasswordGenerationAgent* password_generation_;
-  autofill::AutofillAgent* autofill_agent_;
+  raw_ptr<autofill::TestPasswordAutofillAgent> password_autofill_agent_ =
+      nullptr;
+  raw_ptr<autofill::PasswordGenerationAgent> password_generation_ = nullptr;
+  raw_ptr<autofill::AutofillAssistantAgent> autofill_assistant_agent_ = nullptr;
+  raw_ptr<autofill::AutofillAgent> autofill_agent_ = nullptr;
 
   std::unique_ptr<service_manager::BinderRegistry> registry_;
   blink::AssociatedInterfaceRegistry associated_interfaces_;
-
-  // Naked pointer as ownership is with content::RenderViewTest::render_thread_.
-  ChromeMockRenderThread* chrome_render_thread_;
 };
 
 #endif  // CHROME_TEST_BASE_CHROME_RENDER_VIEW_TEST_H_

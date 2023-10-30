@@ -1,16 +1,16 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.keyboard_accessory.bar_component;
 
-import static android.support.test.espresso.Espresso.onView;
-import static android.support.test.espresso.action.ViewActions.click;
-import static android.support.test.espresso.assertion.ViewAssertions.doesNotExist;
-import static android.support.test.espresso.assertion.ViewAssertions.matches;
-import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
-import static android.support.test.espresso.matcher.ViewMatchers.isRoot;
-import static android.support.test.espresso.matcher.ViewMatchers.withText;
+import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.action.ViewActions.click;
+import static androidx.test.espresso.assertion.ViewAssertions.doesNotExist;
+import static androidx.test.espresso.assertion.ViewAssertions.matches;
+import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
+import static androidx.test.espresso.matcher.ViewMatchers.isRoot;
+import static androidx.test.espresso.matcher.ViewMatchers.withText;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
@@ -20,18 +20,20 @@ import static org.junit.Assert.assertTrue;
 import static org.chromium.chrome.browser.keyboard_accessory.AccessoryAction.AUTOFILL_SUGGESTION;
 import static org.chromium.chrome.browser.keyboard_accessory.AccessoryAction.GENERATE_PASSWORD_AUTOMATIC;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BAR_ITEMS;
+import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.DISABLE_ANIMATIONS_FOR_TESTING;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.TAB_LAYOUT_ITEM;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.VISIBLE;
-import static org.chromium.chrome.test.util.ViewUtils.VIEW_GONE;
-import static org.chromium.chrome.test.util.ViewUtils.VIEW_INVISIBLE;
-import static org.chromium.chrome.test.util.ViewUtils.VIEW_NULL;
-import static org.chromium.chrome.test.util.ViewUtils.waitForView;
+import static org.chromium.ui.test.util.ViewUtils.VIEW_GONE;
+import static org.chromium.ui.test.util.ViewUtils.VIEW_INVISIBLE;
+import static org.chromium.ui.test.util.ViewUtils.VIEW_NULL;
+import static org.chromium.ui.test.util.ViewUtils.onViewWaiting;
+import static org.chromium.ui.test.util.ViewUtils.waitForView;
 
-import android.support.design.widget.TabLayout;
-import android.support.test.filters.MediumTest;
 import android.view.View;
-import android.view.ViewGroup;
-import android.view.ViewStub;
+
+import androidx.test.filters.MediumTest;
+
+import com.google.android.material.tabs.TabLayout;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -39,8 +41,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.keyboard_accessory.R;
 import org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BarItem;
 import org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.TabLayoutBarItem;
@@ -50,7 +52,8 @@ import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
-import org.chromium.ui.DeferredViewStubInflationProvider;
+import org.chromium.ui.AsyncViewProvider;
+import org.chromium.ui.AsyncViewStub;
 import org.chromium.ui.ViewProvider;
 import org.chromium.ui.modelutil.LazyConstructionPropertyMcp;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -89,13 +92,14 @@ public class KeyboardAccessoryViewTest {
                                                                      public void onTabLayoutUnbound(
                                                                              TabLayout tabs) {}
                                                                  }))
+                            .with(DISABLE_ANIMATIONS_FOR_TESTING, true)
                             .build();
-            ViewStub viewStub =
+            AsyncViewStub viewStub =
                     mActivityTestRule.getActivity().findViewById(R.id.keyboard_accessory_stub);
 
             mKeyboardAccessoryView = new ArrayBlockingQueue<>(1);
             ViewProvider<KeyboardAccessoryView> provider =
-                    new DeferredViewStubInflationProvider<>(viewStub);
+                    AsyncViewProvider.of(viewStub, R.id.keyboard_accessory);
             LazyConstructionPropertyMcp.create(
                     mModel, VISIBLE, provider, KeyboardAccessoryViewBinder::bind);
             provider.whenLoaded(mKeyboardAccessoryView::add);
@@ -131,8 +135,7 @@ public class KeyboardAccessoryViewTest {
             mModel.get(BAR_ITEMS).add(testItem);
         });
 
-        onView(isRoot()).check((root, e) -> waitForView((ViewGroup) root, withText("Test Button")));
-        onView(withText("Test Button")).perform(click());
+        onViewWaiting(withText("Test Button")).perform(click());
 
         assertTrue(buttonClicked.get());
     }
@@ -149,7 +152,7 @@ public class KeyboardAccessoryViewTest {
                             new Action("Second", AUTOFILL_SUGGESTION, action -> {}))});
         });
 
-        onView(isRoot()).check((root, e) -> waitForView((ViewGroup) root, withText("First")));
+        onViewWaiting(withText("First"));
         onView(withText("First")).check(matches(isDisplayed()));
         onView(withText("Second")).check(matches(isDisplayed()));
 
@@ -158,7 +161,7 @@ public class KeyboardAccessoryViewTest {
                     new Action("Third", GENERATE_PASSWORD_AUTOMATIC, action -> {})));
         });
 
-        onView(isRoot()).check((root, e) -> waitForView((ViewGroup) root, withText("Third")));
+        onViewWaiting(withText("Third"));
         onView(withText("First")).check(matches(isDisplayed()));
         onView(withText("Second")).check(matches(isDisplayed()));
         onView(withText("Third")).check(matches(isDisplayed()));
@@ -178,7 +181,7 @@ public class KeyboardAccessoryViewTest {
                             new Action("Third", GENERATE_PASSWORD_AUTOMATIC, action -> {}))});
         });
 
-        onView(isRoot()).check((root, e) -> waitForView((ViewGroup) root, withText("First")));
+        onViewWaiting(withText("First"));
         onView(withText("First")).check(matches(isDisplayed()));
         onView(withText("Second")).check(matches(isDisplayed()));
         onView(withText("Third")).check(matches(isDisplayed()));
@@ -186,9 +189,8 @@ public class KeyboardAccessoryViewTest {
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> mModel.get(BAR_ITEMS).remove(mModel.get(BAR_ITEMS).get(1)));
 
-        onView(isRoot()).check((root, e)
-                                       -> waitForView((ViewGroup) root, withText("Second"),
-                                               VIEW_INVISIBLE | VIEW_GONE | VIEW_NULL));
+        onView(isRoot()).check(
+                waitForView(withText("Second"), VIEW_INVISIBLE | VIEW_GONE | VIEW_NULL));
         onView(withText("First")).check(matches(isDisplayed()));
         onView(withText("Second")).check(doesNotExist());
         onView(withText("Third")).check(matches(isDisplayed()));

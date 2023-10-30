@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,13 @@
 #include <memory>
 #include <utility>
 
+#include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
 #include "base/test/values_test_util.h"
 #include "chrome/browser/extensions/api/messaging/native_messaging_test_util.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/version_info/version_info.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/event_router_factory.h"
 #include "extensions/browser/extension_prefs.h"
@@ -42,7 +43,7 @@ class MockEventRouter : public EventRouter {
   }
 
  private:
-  const bool* has_listener_result_;
+  raw_ptr<const bool> has_listener_result_;
 };
 
 std::unique_ptr<KeyedService> BuildMockEventRouter(
@@ -106,16 +107,16 @@ class ExtensionSupportsConnectionFromNativeAppTest : public ::testing::Test {
     EXPECT_TRUE(base::PathService::Get(DIR_TEST_DATA, &path));
 
     std::string error;
-    scoped_refptr<Extension> extension(
-        Extension::Create(path, Manifest::INTERNAL, *manifest_builder.Build(),
-                          Extension::NO_FLAGS, &error));
+    scoped_refptr<Extension> extension(Extension::Create(
+        path, mojom::ManifestLocation::kInternal, *manifest_builder.Build(),
+        Extension::NO_FLAGS, &error));
     ASSERT_TRUE(extension.get()) << error;
     ExtensionRegistry::Get(&profile_)->AddEnabled(extension);
     extension_id_ = extension->id();
   }
 
   ScopedCurrentChannel channel_;
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   bool has_listener_result_ = true;
   TestingProfile profile_;
   std::string extension_id_;
@@ -143,7 +144,8 @@ TEST_F(ExtensionSupportsConnectionFromNativeAppTest, NoOnConnectNative) {
 }
 
 TEST_F(ExtensionSupportsConnectionFromNativeAppTest, OffTheRecordProfile) {
-  auto* off_the_record_profile = profile_.GetOffTheRecordProfile();
+  auto* off_the_record_profile =
+      profile_.GetPrimaryOTRProfile(/*create_if_needed=*/true);
   ASSERT_NO_FATAL_FAILURE(RegisterExtension(true, true, true));
 
   EXPECT_FALSE(ExtensionSupportsConnectionFromNativeApp(

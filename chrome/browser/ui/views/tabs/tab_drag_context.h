@@ -1,79 +1,100 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_TAB_DRAG_CONTEXT_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_DRAG_CONTEXT_H_
 
+#include <memory>
 #include <vector>
 
-#include "base/optional.h"
+#include "base/callback_forward.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/models/list_selection_model.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/views/view.h"
 
 class Tab;
+class TabGroupHeader;
+class TabSlotView;
 class TabStrip;
 class TabStripModel;
 class TabDragController;
 
-namespace views {
-class View;
+namespace tab_groups {
+class TabGroupId;
 }
+
+// A limited subset of TabDragContext for use by non-TabDragController clients.
+class TabDragContextBase : public views::View {
+ public:
+  ~TabDragContextBase() override = default;
+
+  // Called when the TabStrip is changed during a drag session.
+  virtual void UpdateAnimationTarget(TabSlotView* tab_slot_view,
+                                     const gfx::Rect& target_bounds) = 0;
+
+  // Returns true if a drag session is currently active.
+  virtual bool IsDragSessionActive() const = 0;
+
+  // Returns true if this DragContext is in the process of returning tabs to the
+  // associated TabContainer.
+  virtual bool IsEndingDrag() const = 0;
+
+  // Immediately completes any ongoing end drag animations, returning the tabs
+  // to the associated TabContainer immediately.
+  virtual void FinishEndingDrag() = 0;
+
+  // Returns the width of the region in which dragged tabs are allowed to exist.
+  virtual int GetTabDragAreaWidth() const = 0;
+};
 
 // Provides tabstrip functionality specifically for TabDragController, much of
 // which should not otherwise be in TabStrip's public interface.
-class TabDragContext {
+class TabDragContext : public TabDragContextBase {
  public:
-  virtual ~TabDragContext() = default;
+  ~TabDragContext() override = default;
 
-  virtual views::View* AsView() = 0;
-  virtual const views::View* AsView() const = 0;
   virtual Tab* GetTabAt(int index) const = 0;
-  virtual int GetIndexOf(const Tab* tab) const = 0;
+  virtual int GetIndexOf(const TabSlotView* view) const = 0;
   virtual int GetTabCount() const = 0;
   virtual bool IsTabPinned(const Tab* tab) const = 0;
   virtual int GetPinnedTabCount() const = 0;
+  virtual TabGroupHeader* GetTabGroupHeader(
+      const tab_groups::TabGroupId& group) const = 0;
   virtual TabStripModel* GetTabStripModel() = 0;
-
-  // Returns the index of the active tab in touch mode, or no value if not in
-  // touch mode.
-  virtual base::Optional<int> GetActiveTouchIndex() const = 0;
 
   // Returns the tab drag controller owned by this delegate, or null if none.
   virtual TabDragController* GetDragController() = 0;
 
   // Takes ownership of |controller|.
-  virtual void OwnDragController(TabDragController* controller) = 0;
+  virtual void OwnDragController(
+      std::unique_ptr<TabDragController> controller) = 0;
 
   // Releases ownership of the current TabDragController.
-  virtual TabDragController* ReleaseDragController() = 0;
+  [[nodiscard]] virtual std::unique_ptr<TabDragController>
+  ReleaseDragController() = 0;
+
+  // Set a callback to be called with the controller upon assignment by
+  // OwnDragController(controller). Allows tests to get the TabDragController
+  // instance as soon as its assigned.
+  virtual void SetDragControllerCallbackForTesting(
+      base::OnceCallback<void(TabDragController*)> callback) = 0;
 
   // Destroys the current TabDragController. This cancel the existing drag
   // operation.
   virtual void DestroyDragController() = 0;
 
-  // Return true if this tab strip is compatible with the provided tab strip.
-  // Compatible tab strips can transfer tabs during drag and drop.
-  virtual bool IsCompatibleWith(TabDragContext* other) const = 0;
-
-  // Returns true if a drag session is currently active.
-  virtual bool IsDragSessionActive() const = 0;
-
   // Returns true if a tab is being dragged into this tab strip.
   virtual bool IsActiveDropTarget() const = 0;
-
-  // Returns the x-coordinates of the tabs.
-  virtual std::vector<int> GetTabXCoordinates() const = 0;
 
   // Returns the width of the active tab.
   virtual int GetActiveTabWidth() const = 0;
 
-  // Returns the width of the area that contains tabs. This does not include
-  // the width of the new tab button.
-  virtual int GetTabAreaWidth() const = 0;
-
-  // Returns where the drag region ends; tabs dragged past this should detach.
+  // Returns where the drag region begins and ends; tabs dragged beyond these
+  // points should detach.
   virtual int TabDragAreaEndX() const = 0;
+  virtual int TabDragAreaBeginX() const = 0;
 
   // Returns the horizontal drag threshold - the amount a tab drag must move to
   // trigger a reorder. This is dependent on the width of tabs. The smaller the
@@ -84,67 +105,44 @@ class TabDragContext {
   // this tabstrip given the DraggedTabView's bounds |dragged_bounds| in
   // coordinates relative to |attached_tabstrip_| and has had the mirroring
   // transformation applied.
-  // |mouse_has_ever_moved_left| and |mouse_has_ever_moved_right| are used
-  // only in stacked tabs cases.
-  // NOTE: this is invoked from Attach() before the tabs have been inserted.
+  // |dragged_views| are the view children of |attached_tabstrip_| that are
+  // part of the drag.
+  // |group| is set if the drag is originating from a group header, in which
+  // case the entire group is dragged and should not be dropped into other
+  // groups.
   virtual int GetInsertionIndexForDraggedBounds(
       const gfx::Rect& dragged_bounds,
-      bool attaching,
+      std::vector<TabSlotView*> dragged_views,
       int num_dragged_tabs,
-      bool mouse_has_ever_moved_left,
-      bool mouse_has_ever_moved_right) const = 0;
+      absl::optional<tab_groups::TabGroupId> group) const = 0;
 
-  // Returns true if |dragged_bounds| is close enough to the next stacked tab
-  // so that the active tab should be dragged there.
-  virtual bool ShouldDragToNextStackedTab(
-      const gfx::Rect& dragged_bounds,
-      int index,
-      bool mouse_has_ever_moved_right) const = 0;
+  // Returns the bounds needed for each of the views, relative to a leading
+  // coordinate of 0 for the left edge of the first view's bounds.
+  virtual std::vector<gfx::Rect> CalculateBoundsForDraggedViews(
+      const std::vector<TabSlotView*>& views) = 0;
 
-  // Returns true if |dragged_bounds| is close enough to the previous stacked
-  // tab so that the active tab should be dragged there.
-  virtual bool ShouldDragToPreviousStackedTab(
-      const gfx::Rect& dragged_bounds,
-      int index,
-      bool mouse_has_ever_moved_left) const = 0;
+  // Sets the bounds of |views| to |bounds|.
+  virtual void SetBoundsForDrag(const std::vector<TabSlotView*>& views,
+                                const std::vector<gfx::Rect>& bounds) = 0;
 
-  // Drags the active tab by |delta|. |initial_positions| is the x-coordinates
-  // of the tabs when the drag started.  This is only called when
-  // |touch_layout_| is non-null.
-  virtual void DragActiveTabStacked(const std::vector<int>& initial_positions,
-                                    int delta) = 0;
-
-  // Returns the bounds needed for each of the tabs, relative to a leading
-  // coordinate of 0 for the left edge of the first tab's bounds.
-  virtual std::vector<gfx::Rect> CalculateBoundsForDraggedTabs(
-      const std::vector<Tab*>& tabs) = 0;
-
-  // Sets the bounds of the tabs to |tab_bounds|.
-  virtual void SetTabBoundsForDrag(
-      const std::vector<gfx::Rect>& tab_bounds) = 0;
-
-  // Used by TabDragController when the user starts or stops dragging tabs.
-  virtual void StartedDraggingTabs(const std::vector<Tab*>& tabs) = 0;
+  // Used by TabDragController when the user starts or stops dragging.
+  virtual void StartedDragging(const std::vector<TabSlotView*>& views) = 0;
 
   // Invoked when TabDragController detaches a set of tabs.
   virtual void DraggedTabsDetached() = 0;
 
-  // Used by TabDragController when the user stops dragging tabs. |move_only| is
-  // true if the move behavior is TabDragController::MOVE_VISIBLE_TABS.
-  // |completed| is true if the drag operation completed successfully, false if
-  // it was reverted.
-  virtual void StoppedDraggingTabs(const std::vector<Tab*>& tabs,
-                                   const std::vector<int>& initial_positions,
-                                   bool move_only,
-                                   bool completed) = 0;
+  // Used by TabDragController when the user stops dragging. |completed| is
+  // true if the drag operation completed successfully, false if it was
+  // reverted.
+  virtual void StoppedDragging(const std::vector<TabSlotView*>& views) = 0;
 
-  // Invoked during drag to layout the tabs being dragged in |tabs| at
+  // Invoked during drag to layout the views being dragged in |views| at
   // |location|. If |initial_drag| is true, this is the initial layout after the
   // user moved the mouse far enough to trigger a drag.
-  virtual void LayoutDraggedTabsAt(const std::vector<Tab*>& tabs,
-                                   Tab* active_tab,
-                                   const gfx::Point& location,
-                                   bool initial_drag) = 0;
+  virtual void LayoutDraggedViewsAt(const std::vector<TabSlotView*>& views,
+                                    TabSlotView* source_view,
+                                    const gfx::Point& location,
+                                    bool initial_drag) = 0;
 
   // Forces the entire tabstrip to lay out.
   virtual void ForceLayout() = 0;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,9 @@ enum EndDragReason {
 
   // The drag should end as the result of a capture lost.
   END_DRAG_CAPTURE_LOST,
+
+  // The model mutated.
+  END_DRAG_MODEL_ADDED_TAB,
 };
 
 // Source of the call to CloseTab().
@@ -22,11 +25,15 @@ enum CloseTabSource {
   CLOSE_TAB_FROM_TOUCH,
 };
 
-// Enum passed to GetTabForegroundColor and GetTabBackgroundColor to indicate
-// whether the tab is active or not.
-enum TabState {
-  TAB_ACTIVE,
-  TAB_INACTIVE,
+// Source of the call to ToggleTabGroup(). The source of the call can trigger
+// different behaviors such as logging and different animations. Tests will
+// generally use |kImplicitAction| unless testing a particular code path.
+enum class ToggleTabGroupCollapsedStateOrigin {
+  kImplicitAction,
+  kMouse,
+  kKeyboard,
+  kGesture
+
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TABS_TAB_STRIP_TYPES_H_

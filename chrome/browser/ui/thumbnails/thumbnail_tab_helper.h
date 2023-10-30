@@ -1,83 +1,101 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_THUMBNAILS_THUMBNAIL_TAB_HELPER_H_
 #define CHROME_BROWSER_UI_THUMBNAILS_THUMBNAIL_TAB_HELPER_H_
 
-#include "base/macros.h"
+#include <memory>
+
 #include "base/memory/weak_ptr.h"
-#include "base/scoped_observer.h"
 #include "base/time/time.h"
+#include "chrome/browser/ui/thumbnails/thumbnail_capture_info.h"
 #include "chrome/browser/ui/thumbnails/thumbnail_image.h"
-#include "chrome/browser/ui/thumbnails/thumbnail_page_event_adapter.h"
-#include "chrome/browser/ui/thumbnails/thumbnail_page_observer.h"
+#include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+
+class BackgroundThumbnailCapturer;
+class ThumbnailScheduler;
 
 class ThumbnailTabHelper
-    : public thumbnails::ThumbnailPageObserver,
-      public content::WebContentsUserData<ThumbnailTabHelper> {
+    : public content::WebContentsUserData<ThumbnailTabHelper> {
  public:
+  ThumbnailTabHelper(const ThumbnailTabHelper&) = delete;
+  ThumbnailTabHelper& operator=(const ThumbnailTabHelper&) = delete;
+
   ~ThumbnailTabHelper() override;
 
-  ThumbnailImage thumbnail() const { return thumbnail_; }
-
- protected:
-  // ThumbnailWebContentsObserver:
-  void TopLevelNavigationStarted(const GURL& url) override;
-  void TopLevelNavigationEnded(const GURL& url) override;
-  void PagePainted() override;
-  void PageLoadStarted() override;
-  void PageLoadFinished() override;
-  void VisibilityChanged(bool visible) override;
-
-  content::WebContents* web_contents() const { return adapter_.web_contents(); }
+  scoped_refptr<ThumbnailImage> thumbnail() const { return thumbnail_; }
 
  private:
-  // Loading is treated as a state machine for each new URL, and the state for
-  // each new URL the current tab loads can only advance as events are received
-  // (so it is not possible to go from kLoadStarted to kNavigationStarted).
-  enum class LoadingState : int32_t {
-    kNone = 0,
-    kNavigationStarted = 1,
-    kNavigationFinished = 2,
-    kLoadStarted = 3,
-    kLoadFinished = 4
-  };
-
-  explicit ThumbnailTabHelper(content::WebContents* contents);
+  class TabStateTracker;
   friend class content::WebContentsUserData<ThumbnailTabHelper>;
 
-  void StartThumbnailCapture();
-  void ProcessCapturedThumbnail(base::TimeTicks start_time,
-                                const SkBitmap& bitmap);
-  void StoreThumbnail(base::TimeTicks start_time, ThumbnailImage thumbnail);
-  void NotifyTabPreviewChanged();
+  // Metrics enums and helper functions:
+  enum class CaptureType;
 
-  void TransitionLoadingState(LoadingState state, const GURL& url);
-  void ClearThumbnail();
+  explicit ThumbnailTabHelper(content::WebContents* contents);
 
-  ThumbnailImage thumbnail_;
+  static ThumbnailScheduler& GetScheduler();
 
-  // Caches whether or not the web contents view is visible. See notes in
-  // VisibilityChanged() for more information.
-  bool view_is_visible_;  // set in constructor
+  // Begins periodic capture of thumbnails from a loading page.
+  // This can be triggered by someone starting to observe a web contents by
+  // incrementing its capture count, or it can happen opportunistically when a
+  // renderer is available, because we want to capture thumbnails while we can
+  // before a page is frozen or swapped out.
+  void StartVideoCapture();
+  void StopVideoCapture();
+  void CaptureThumbnailOnTabHidden();
 
-  bool page_painted_ = false;
+  void StoreThumbnailForTabSwitch(base::TimeTicks start_time,
+                                  const SkBitmap& bitmap);
+  void StoreThumbnailForBackgroundCapture(const SkBitmap& bitmap,
+                                          uint64_t frame_id);
+  void StoreThumbnail(CaptureType type,
+                      const SkBitmap& bitmap,
+                      absl::optional<uint64_t> frame_id);
 
-  LoadingState loading_state_ = LoadingState::kNone;
-  GURL current_url_;
+  // Clears the data associated to the currently set thumbnail. For when the
+  // thumbnail is no longer valid.
+  void ClearData();
 
-  thumbnails::ThumbnailPageEventAdapter adapter_;
-  ScopedObserver<thumbnails::ThumbnailPageEventAdapter,
-                 thumbnails::ThumbnailPageObserver>
-      scoped_observer_;
+  // viz::mojom::FrameSinkVideoConsumer:
+
+  // Returns the dimensions of the multipurpose thumbnail that should be
+  // captured from an entire webpage. Can be cropped or compressed later.
+  // If |include_scrollbars_in_capture| is false, the area which is likely to
+  // contain scrollbars will be removed from both the result's |copy_rect| and
+  // |target_size|. In both cases, |scrollbar_insets| is calculated. This
+  // function always returns a result with |clip_result| = kSourceNotClipped.
+  static ThumbnailCaptureInfo GetInitialCaptureInfo(
+      const gfx::Size& source_size,
+      float scale_factor,
+      bool include_scrollbars_in_capture);
+
+  // Copy info from the most recent frame we have captured.
+  ThumbnailCaptureInfo last_frame_capture_info_;
+
+  // Private implementation of state tracking.
+  std::unique_ptr<TabStateTracker> state_;
+
+  std::unique_ptr<BackgroundThumbnailCapturer> background_capturer_;
+
+  // Times for computing metrics.
+  base::TimeTicks start_video_capture_time_;
+
+  // Whether the first frame has been received after StartVideoCapture().
+  bool got_first_frame_ = false;
+
+  // The thumbnail maintained by this instance.
+  scoped_refptr<ThumbnailImage> thumbnail_;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 
-  base::WeakPtrFactory<ThumbnailTabHelper> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ThumbnailTabHelper);
+  base::WeakPtrFactory<ThumbnailTabHelper>
+      weak_factory_for_thumbnail_on_tab_hidden_{this};
 };
 
 #endif  // CHROME_BROWSER_UI_THUMBNAILS_THUMBNAIL_TAB_HELPER_H_

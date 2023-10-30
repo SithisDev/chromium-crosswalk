@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include <memory>
 
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -23,6 +23,10 @@ const uint64_t kInvalidLoadAddress = 0xDEADBEEF;
 }  // namespace
 
 class ModuleEventSinkImplTest : public testing::Test {
+ public:
+  ModuleEventSinkImplTest(const ModuleEventSinkImplTest&) = delete;
+  ModuleEventSinkImplTest& operator=(const ModuleEventSinkImplTest&) = delete;
+
  protected:
   ModuleEventSinkImplTest() = default;
   ~ModuleEventSinkImplTest() override = default;
@@ -52,14 +56,11 @@ class ModuleEventSinkImplTest : public testing::Test {
   int module_event_count() { return module_event_count_; }
 
   // Must be first.
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   std::unique_ptr<ModuleEventSinkImpl> module_event_sink_impl_;
 
   int module_event_count_ = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ModuleEventSinkImplTest);
 };
 
 TEST_F(ModuleEventSinkImplTest, CallsForwardedAsExpected) {
@@ -72,12 +73,12 @@ TEST_F(ModuleEventSinkImplTest, CallsForwardedAsExpected) {
 
   // An invalid load event should not cause a module entry.
   module_event_sink_impl_->OnModuleEvents({kInvalidLoadAddress});
-  test_browser_thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_EQ(0, module_event_count());
 
   // A valid load event should cause a module entry.
   module_event_sink_impl_->OnModuleEvents({kValidLoadAddress});
-  test_browser_thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_EQ(1, module_event_count());
 }
 
@@ -90,6 +91,6 @@ TEST_F(ModuleEventSinkImplTest, MultipleEvents) {
   EXPECT_EQ(0, module_event_count());
 
   module_event_sink_impl_->OnModuleEvents({kLoadAddress1, kLoadAddress2});
-  test_browser_thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_EQ(2, module_event_count());
 }

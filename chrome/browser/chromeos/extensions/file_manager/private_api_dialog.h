@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -10,8 +10,8 @@
 
 #include <vector>
 
-#include "chrome/browser/chromeos/extensions/file_manager/private_api_base.h"
-#include "components/arc/common/intent_helper.mojom.h"
+#include "ash/components/arc/mojom/intent_helper.mojom-forward.h"
+#include "chrome/browser/chromeos/extensions/file_manager/logged_extension_function.h"
 #include "components/arc/intent_helper/arc_intent_helper_bridge.h"
 
 namespace ui {
@@ -21,8 +21,7 @@ struct SelectedFileInfo;
 namespace extensions {
 
 // Cancel file selection Dialog.  Closes the dialog window.
-class FileManagerPrivateCancelDialogFunction
-    : public LoggedUIThreadExtensionFunction {
+class FileManagerPrivateCancelDialogFunction : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.cancelDialog",
                              FILEMANAGERPRIVATE_CANCELDIALOG)
@@ -34,8 +33,7 @@ class FileManagerPrivateCancelDialogFunction
   ResponseAction Run() override;
 };
 
-class FileManagerPrivateSelectFileFunction
-    : public LoggedUIThreadExtensionFunction {
+class FileManagerPrivateSelectFileFunction : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.selectFile",
                              FILEMANAGERPRIVATE_SELECTFILE)
@@ -55,28 +53,35 @@ class FileManagerPrivateSelectFileFunction
 };
 
 // Select multiple files.  Closes the dialog window.
-class FileManagerPrivateSelectFilesFunction
-    : public LoggedUIThreadExtensionFunction {
+class FileManagerPrivateSelectFilesFunction : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.selectFiles",
                              FILEMANAGERPRIVATE_SELECTFILES)
 
+  FileManagerPrivateSelectFilesFunction();
+
  protected:
-  ~FileManagerPrivateSelectFilesFunction() override = default;
+  ~FileManagerPrivateSelectFilesFunction() override;
 
   // ExtensionFunction overrides.
   ResponseAction Run() override;
 
  private:
+  void OnReSyncFile();
+
   // A callback method to handle the result of GetSelectedFileInfo.
   void GetSelectedFileInfoResponse(
       bool for_open,
       const std::vector<ui::SelectedFileInfo>& files);
+
+  bool should_return_local_path_;
+  std::vector<GURL> file_urls_;
+  int resync_files_remaining_ = 0;
 };
 
 // Get a list of Android picker apps.
 class FileManagerPrivateGetAndroidPickerAppsFunction
-    : public LoggedUIThreadExtensionFunction {
+    : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.getAndroidPickerApps",
                              FILEMANAGERPRIVATE_GETANDROIDPICKERAPPS)
@@ -97,7 +102,7 @@ class FileManagerPrivateGetAndroidPickerAppsFunction
 
 // Select an Android picker app.  Closes the dialog window.
 class FileManagerPrivateSelectAndroidPickerAppFunction
-    : public LoggedUIThreadExtensionFunction {
+    : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.selectAndroidPickerApp",
                              FILEMANAGERPRIVATE_SELECTANDROIDPICKERAPP)

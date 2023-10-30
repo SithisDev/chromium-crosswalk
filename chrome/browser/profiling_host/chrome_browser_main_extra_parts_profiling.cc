@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,8 @@
 #include "chrome/browser/profiling_host/chrome_client_connection_manager.h"
 #include "chrome/browser/profiling_host/profiling_process_host.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/heap_profiling/supervisor.h"
+#include "components/heap_profiling/multi_process/supervisor.h"
 #include "components/services/heap_profiling/public/cpp/settings.h"
-#include "content/public/browser/system_connector.h"
 
 namespace {
 
@@ -42,7 +41,6 @@ void ChromeBrowserMainExtraPartsProfiling::PostCreateThreads() {
   heap_profiling::Mode mode = heap_profiling::GetModeForStartup();
   if (mode != heap_profiling::Mode::kNone) {
     heap_profiling::Supervisor::GetInstance()->Start(
-        content::GetSystemConnector(),
         base::BindOnce(
             &heap_profiling::ProfilingProcessHost::Start,
             base::Unretained(

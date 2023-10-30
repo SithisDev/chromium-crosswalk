@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include <stdint.h>
 
 #include "base/feature_list.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/metrics/perf/profile_provider_chromeos.h"
+#include "chromeos/dbus/tpm_manager/tpm_manager.pb.h"
 #include "components/metrics/metrics_log_uploader.h"
 #include "components/metrics/metrics_provider.h"
 
@@ -18,36 +18,23 @@ namespace arc {
 struct ArcFeatures;
 }
 
-namespace device {
-class BluetoothAdapter;
-}
-
-namespace features {
-extern const base::Feature kUmaShortHWClass;
-}
-
 namespace metrics {
 class CachedMetricsProfile;
 class ChromeUserMetricsExtension;
-}
+}  // namespace metrics
 
+enum class EnrollmentStatus;
 class PrefRegistrySimple;
 
 // Performs ChromeOS specific metrics logging.
 class ChromeOSMetricsProvider : public metrics::MetricsProvider {
  public:
-  // Possible device enrollment status for a Chrome OS device.
-  // Used by UMA histogram, so entries shouldn't be reordered or removed.
-  enum EnrollmentStatus {
-    NON_MANAGED,
-    UNUSED,  // Formerly MANAGED_EDU, see crbug.com/462770.
-    MANAGED,
-    ERROR_GETTING_ENROLLMENT_STATUS,
-    ENROLLMENT_STATUS_MAX,
-  };
-
   explicit ChromeOSMetricsProvider(
       metrics::MetricsLogUploader::MetricServiceType service_type);
+
+  ChromeOSMetricsProvider(const ChromeOSMetricsProvider&) = delete;
+  ChromeOSMetricsProvider& operator=(const ChromeOSMetricsProvider&) = delete;
+
   ~ChromeOSMetricsProvider() override;
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
@@ -60,20 +47,26 @@ class ChromeOSMetricsProvider : public metrics::MetricsProvider {
 
   // Loads hardware class information. When this task is complete, |callback|
   // is run.
-  void InitTaskGetFullHardwareClass(const base::Closure& callback);
-
-  // Creates the Bluetooth adapter. When this task is complete, |callback| is
-  // run.
-  void InitTaskGetBluetoothAdapter(const base::Closure& callback);
+  void InitTaskGetFullHardwareClass(base::OnceClosure callback);
 
   // Retrieves ARC features using ArcFeaturesParser. When this task is complete,
   // |callback| is run.
-  void InitTaskGetArcFeatures(const base::RepeatingClosure& callback);
+  void InitTaskGetArcFeatures(base::OnceClosure callback);
+
+  // Loads the cellular device variant. When this task is complete, |callback|
+  // is run.
+  void InitTaskGetCellularDeviceVariant(base::OnceClosure callback);
+
+  // Retrieves TPM firmware version using TpmManagerClient. When this task is
+  // complete, |callback| is run.
+  void InitTaskGetTpmFirmwareVersion(base::OnceClosure callback);
 
   // metrics::MetricsProvider:
   void Init() override;
-  void AsyncInit(const base::Closure& done_callback) override;
+  void AsyncInit(base::OnceClosure done_callback) override;
   void OnDidCreateMetricsLog() override;
+  void OnRecordingEnabled() override;
+  void OnRecordingDisabled() override;
   void ProvideSystemProfileMetrics(
       metrics::SystemProfileProto* system_profile_proto) override;
   void ProvideStabilityMetrics(
@@ -83,6 +76,7 @@ class ChromeOSMetricsProvider : public metrics::MetricsProvider {
 
  private:
   void ProvideAccessibilityMetrics();
+  void ProvideSuggestedContentMetrics();
 
   // Update the number of users logged into a multi-profile session.
   // If the number of users change while the log is open, the call invalidates
@@ -90,21 +84,30 @@ class ChromeOSMetricsProvider : public metrics::MetricsProvider {
   void UpdateMultiProfileUserCount(
       metrics::SystemProfileProto* system_profile_proto);
 
-  // Sets the Bluetooth Adapter instance used for the WriteBluetoothProto()
-  // call and calls callback.
-  void SetBluetoothAdapter(base::Closure callback,
-                           scoped_refptr<device::BluetoothAdapter> adapter);
+  // Invoked when StatisticsProvider finishes loading to read the full hardware
+  // class from StatisticsProvider and calls the callback.
+  void OnMachineStatisticsLoaded(base::OnceClosure callback);
 
-  // Sets the full hardware class, then calls the callback.
-  void SetFullHardwareClass(base::Closure callback,
-                            std::string full_hardware_class);
+  // Sets the cellular device variant, then calls the callback.
+  void SetCellularDeviceVariant(base::OnceClosure callback,
+                                std::string cellular_device_variant);
 
   // Updates ARC-related system profile fields, then calls the callback.
-  void OnArcFeaturesParsed(base::RepeatingClosure callback,
-                           base::Optional<arc::ArcFeatures> features);
+  void OnArcFeaturesParsed(base::OnceClosure callback,
+                           absl::optional<arc::ArcFeatures> features);
 
-  // Writes info about paired Bluetooth devices on this system.
-  void WriteBluetoothProto(metrics::SystemProfileProto* system_profile_proto);
+  // Sets the TPM firmware version, then calls the callback.
+  void OnTpmManagerGetVersionInfo(
+      base::OnceClosure callback,
+      const tpm_manager::GetVersionInfoReply& reply);
+
+  // Sets the TPM supported features (runtime selection), then calls the
+  // callback.
+  void OnTpmManagerGetSupportedFeatures(
+      base::OnceClosure callback,
+      const tpm_manager::GetSupportedFeaturesReply& reply);
+
+  void SetTpmType(metrics::SystemProfileProto* system_profile_proto);
 
   // Called from the ProvideCurrentSessionData(...) to record UserType.
   void UpdateUserTypeUMA();
@@ -113,14 +116,19 @@ class ChromeOSMetricsProvider : public metrics::MetricsProvider {
   void WriteLinkedAndroidPhoneProto(
       metrics::SystemProfileProto* system_profile_proto);
 
+  // Writes info about cellular device variant if present in
+  // system profile proto.
+  void WriteCellularDeviceVariant(
+      metrics::SystemProfileProto* system_profile_proto);
+
+  void WriteDemoModeDimensionMetrics(
+      metrics::SystemProfileProto* system_profile_proto);
+
   // For collecting systemwide performance data via the UMA channel.
   std::unique_ptr<metrics::ProfileProvider> profile_provider_;
 
   // Use the first signed-in profile for profile-dependent metrics.
   std::unique_ptr<metrics::CachedMetricsProfile> cached_profile_;
-
-  // Bluetooth Adapter instance for collecting information about paired devices.
-  scoped_refptr<device::BluetoothAdapter> adapter_;
 
   // Whether the user count was registered at the last log initialization.
   bool registered_user_count_at_log_initialization_;
@@ -130,19 +138,20 @@ class ChromeOSMetricsProvider : public metrics::MetricsProvider {
   // true.
   uint64_t user_count_at_log_initialization_;
 
-  // Short Hardware class. This value identifies the board of the hardware.
-  std::string hardware_class_;
-
   // Hardware class (e.g., hardware qualification ID). This value identifies
   // the configured system components such as CPU, WiFi adapter, etc.
   std::string full_hardware_class_;
 
+  // Cellular device variant for Chrome OS devices with cellular support.
+  std::string cellular_device_variant_;
+
   // ARC release version obtained from build properties.
-  base::Optional<std::string> arc_release_ = base::nullopt;
+  absl::optional<std::string> arc_release_ = absl::nullopt;
 
-  base::WeakPtrFactory<ChromeOSMetricsProvider> weak_ptr_factory_;
+  // The firmware version of the TPM (go/trusted-platform-module).
+  absl::optional<uint64_t> tpm_firmware_version_ = absl::nullopt;
 
-  DISALLOW_COPY_AND_ASSIGN(ChromeOSMetricsProvider);
+  base::WeakPtrFactory<ChromeOSMetricsProvider> weak_ptr_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_METRICS_CHROMEOS_METRICS_PROVIDER_H_

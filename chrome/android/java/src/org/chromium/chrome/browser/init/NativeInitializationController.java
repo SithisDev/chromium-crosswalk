@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,12 @@ package org.chromium.chrome.browser.init;
 
 import android.content.Intent;
 
-import org.chromium.base.ContextUtils;
+import org.chromium.base.CommandLine;
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.TraceEvent;
 import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,7 +23,7 @@ import java.util.List;
  *    the library has been loaded.
  */
 class NativeInitializationController {
-    private static final String TAG = "NativeInitializationController";
+    private static final String TAG = "NIController";
 
     private final ChromeActivityNativeDelegate mActivityDelegate;
 
@@ -69,9 +71,16 @@ class NativeInitializationController {
      */
     public void startBackgroundTasks(final boolean allocateChildConnection) {
         ThreadUtils.assertOnUiThread();
-        assert mBackgroundTasksComplete == null;
+        if (CommandLine.getInstance().hasSwitch(ChromeSwitches.DISABLE_NATIVE_INITIALIZATION)) {
+            Log.i(TAG, "Exit early and start Chrome without loading native library!");
+            return;
+        }
+
+        // This is a fairly low cost way to check if fetching the variations seed is needed. It can
+        // produces false positives, but that's okay. There's a later mechanism that checks a
+        // dedicated durable field to make sure the actual network request is only made once.
         boolean fetchVariationsSeed = FirstRunFlowSequencer.checkIfFirstRunIsNecessary(
-                ContextUtils.getApplicationContext(), mActivityDelegate.getInitialIntent(), false);
+                false, mActivityDelegate.getInitialIntent());
 
         mBackgroundTasksComplete = false;
         new AsyncInitTaskRunner() {
@@ -85,11 +94,11 @@ class NativeInitializationController {
             }
 
             @Override
-            protected void onFailure() {
+            protected void onFailure(Exception failureCause) {
                 // Initialization has failed, call onStartup failure to abandon the activity.
                 // This is not expected to return, so there is no need to set
                 // mBackgroundTasksComplete or do any other tidying up.
-                mActivityDelegate.onStartupFailure();
+                mActivityDelegate.onStartupFailure(failureCause);
             }
 
         }.startBackgroundTasks(allocateChildConnection, fetchVariationsSeed);
@@ -134,8 +143,6 @@ class NativeInitializationController {
             mOnResumePending = false;
             onResume();
         }
-
-        LibraryLoader.getInstance().onBrowserNativeInitializationComplete();
     }
 
     /**
@@ -209,30 +216,32 @@ class NativeInitializationController {
     }
 
     private void startNowAndProcessPendingItems() {
-        // onNewIntent and onActivityResult are called only when the activity is paused.
-        // To match the non-deferred behavior, onStart should be called before any processing
-        // of pending intents and activity results.
-        // Note that if we needed ChromeActivityNativeDelegate.onResumeWithNative(), the pending
-        // intents and activity results processing should have happened in the corresponding
-        // resumeNowAndProcessPendingItems, just before the call to
-        // ChromeActivityNativeDelegate.onResumeWithNative().
-        mActivityDelegate.onStartWithNative();
+        try (TraceEvent te = TraceEvent.scoped("startNowAndProcessPendingItems")) {
+            // onNewIntent and onActivityResult are called only when the activity is paused.
+            // To match the non-deferred behavior, onStart should be called before any processing
+            // of pending intents and activity results.
+            // Note that if we needed ChromeActivityNativeDelegate.onResumeWithNative(), the pending
+            // intents and activity results processing should have happened in the corresponding
+            // resumeNowAndProcessPendingItems, just before the call to
+            // ChromeActivityNativeDelegate.onResumeWithNative().
+            mActivityDelegate.onStartWithNative();
 
-        if (mPendingNewIntents != null) {
-            for (Intent intent : mPendingNewIntents) {
-                mActivityDelegate.onNewIntentWithNative(intent);
+            if (mPendingNewIntents != null) {
+                for (Intent intent : mPendingNewIntents) {
+                    mActivityDelegate.onNewIntentWithNative(intent);
+                }
+                mPendingNewIntents = null;
             }
-            mPendingNewIntents = null;
-        }
 
-        if (mPendingActivityResults != null) {
-            ActivityResult activityResult;
-            for (int i = 0; i < mPendingActivityResults.size(); i++) {
-                activityResult = mPendingActivityResults.get(i);
-                mActivityDelegate.onActivityResultWithNative(activityResult.requestCode,
-                        activityResult.resultCode, activityResult.data);
+            if (mPendingActivityResults != null) {
+                ActivityResult activityResult;
+                for (int i = 0; i < mPendingActivityResults.size(); i++) {
+                    activityResult = mPendingActivityResults.get(i);
+                    mActivityDelegate.onActivityResultWithNative(activityResult.requestCode,
+                            activityResult.resultCode, activityResult.data);
+                }
+                mPendingActivityResults = null;
             }
-            mPendingActivityResults = null;
         }
     }
 }

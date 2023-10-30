@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,12 @@
 
 #include "build/build_config.h"
 #include "chrome/browser/browser_switcher/browser_switcher_service.h"
-#include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "chrome/browser/browser_switcher/browser_switcher_service_win.h"
 #endif
 
@@ -21,7 +19,7 @@ namespace browser_switcher {
 
 namespace {
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 using BrowserSwitcherServiceImpl = BrowserSwitcherServiceWin;
 #else
 using BrowserSwitcherServiceImpl = BrowserSwitcherService;
@@ -42,21 +40,20 @@ BrowserSwitcherService* BrowserSwitcherServiceFactory::GetForBrowserContext(
 }
 
 BrowserSwitcherServiceFactory::BrowserSwitcherServiceFactory()
-    : BrowserContextKeyedServiceFactory(
+    : ProfileKeyedServiceFactory(
           "BrowserSwitcherServiceFactory",
-          BrowserContextDependencyManager::GetInstance()) {}
+          // Use the original profile's BrowserSwitcherService, even in
+          // Incognito mode.
+          ProfileSelections::BuildRedirectedInIncognito()) {}
 
 BrowserSwitcherServiceFactory::~BrowserSwitcherServiceFactory() {}
 
 KeyedService* BrowserSwitcherServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
-  return new BrowserSwitcherServiceImpl(Profile::FromBrowserContext(context));
-}
-
-content::BrowserContext* BrowserSwitcherServiceFactory::GetBrowserContextToUse(
-    content::BrowserContext* context) const {
-  // Use the original profile's BrowserSwitcherService, even in Incognito mode.
-  return chrome::GetBrowserContextRedirectedInIncognito(context);
+  auto* instance =
+      new BrowserSwitcherServiceImpl(Profile::FromBrowserContext(context));
+  instance->Init();
+  return instance;
 }
 
 }  // namespace browser_switcher

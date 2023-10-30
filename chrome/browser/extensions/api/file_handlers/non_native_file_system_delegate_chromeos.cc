@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <string>
 #include <utility>
 
-#include "chrome/browser/chromeos/file_manager/filesystem_api_util.h"
+#include "chrome/browser/ash/file_manager/filesystem_api_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_context.h"
 
@@ -34,7 +34,7 @@ bool NonNativeFileSystemDelegateChromeOS::HasNonNativeMimeTypeProvider(
 void NonNativeFileSystemDelegateChromeOS::GetNonNativeLocalPathMimeType(
     content::BrowserContext* context,
     const base::FilePath& path,
-    base::OnceCallback<void(const base::Optional<std::string>&)> callback) {
+    base::OnceCallback<void(const absl::optional<std::string>&)> callback) {
   return file_manager::util::GetNonNativeLocalPathMimeType(
       Profile::FromBrowserContext(context), path, std::move(callback));
 }
@@ -44,9 +44,9 @@ void NonNativeFileSystemDelegateChromeOS::GetNonNativeLocalPathMimeType(
 void NonNativeFileSystemDelegateChromeOS::IsNonNativeLocalPathDirectory(
     content::BrowserContext* context,
     const base::FilePath& path,
-    const base::Callback<void(bool)>& callback) {
+    base::OnceCallback<void(bool)> callback) {
   file_manager::util::IsNonNativeLocalPathDirectory(
-      Profile::FromBrowserContext(context), path, callback);
+      Profile::FromBrowserContext(context), path, std::move(callback));
 }
 
 // Ensures a non-local file exists at |path|, i.e., it does nothing if a file
@@ -56,9 +56,9 @@ void NonNativeFileSystemDelegateChromeOS::
     PrepareNonNativeLocalFileForWritableApp(
         content::BrowserContext* context,
         const base::FilePath& path,
-        const base::Callback<void(bool)>& callback) {
+        base::OnceCallback<void(bool)> callback) {
   file_manager::util::PrepareNonNativeLocalFileForWritableApp(
-      Profile::FromBrowserContext(context), path, callback);
+      Profile::FromBrowserContext(context), path, std::move(callback));
 }
 
 }  // namespace extensions

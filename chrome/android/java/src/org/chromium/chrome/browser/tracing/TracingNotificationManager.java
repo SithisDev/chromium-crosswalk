@@ -1,10 +1,9 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.tracing;
 
-import android.annotation.TargetApi;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -12,14 +11,16 @@ import android.content.Context;
 import android.os.Build;
 import android.view.accessibility.AccessibilityManager;
 
+import androidx.annotation.RequiresApi;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContextUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.notifications.ChromeNotificationBuilder;
-import org.chromium.chrome.browser.notifications.NotificationBuilderFactory;
-import org.chromium.chrome.browser.notifications.NotificationManagerProxy;
-import org.chromium.chrome.browser.notifications.NotificationManagerProxyImpl;
-import org.chromium.chrome.browser.notifications.channels.ChannelDefinitions;
+import org.chromium.chrome.browser.notifications.NotificationWrapperBuilderFactory;
+import org.chromium.chrome.browser.notifications.channels.ChromeChannelDefinitions;
+import org.chromium.components.browser_ui.notifications.NotificationManagerProxy;
+import org.chromium.components.browser_ui.notifications.NotificationManagerProxyImpl;
+import org.chromium.components.browser_ui.notifications.NotificationWrapperBuilder;
 
 /**
  * Manages notifications displayed while tracing and once tracing is complete.
@@ -29,7 +30,7 @@ public class TracingNotificationManager {
     private static final int TRACING_NOTIFICATION_ID = 100;
 
     private static NotificationManagerProxy sNotificationManagerOverride;
-    private static ChromeNotificationBuilder sTracingActiveNotificationBuilder;
+    private static NotificationWrapperBuilder sTracingActiveNotificationBuilder;
     private static int sTracingActiveNotificationBufferPercentage;
 
     // Non-translated strings:
@@ -41,9 +42,10 @@ public class TracingNotificationManager {
     private static final String MSG_STOPPING_NOTIFICATION_MESSAGE =
             "Trace data is being collected and compressed.";
     private static final String MSG_COMPLETE_NOTIFICATION_TITLE = "Chrome trace is complete";
-    private static final String MSG_COMPLETE_NOTIFICATION_MESSAGE = "The trace is ready to share.";
+    private static final String MSG_COMPLETE_NOTIFICATION_MESSAGE =
+            "The trace is ready. Open tracing settings to share.";
     private static final String MSG_STOP = "Stop recording";
-    private static final String MSG_SHARE = "Share trace";
+    private static final String MSG_OPEN_SETTINGS = "Open tracing settings";
 
     // TODO(eseckler): Consider recording UMAs, see e.g. IncognitoNotificationManager.
 
@@ -68,11 +70,6 @@ public class TracingNotificationManager {
      * the user. True if the state can't be determined.
      */
     public static boolean browserNotificationsEnabled() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
-            // Can't determine the state, so assume they are enabled.
-            return true;
-        }
-
         if (!getNotificationManager(ContextUtils.getApplicationContext())
                         .areNotificationsEnabled()) {
             return false;
@@ -80,13 +77,13 @@ public class TracingNotificationManager {
 
         // On Android O and above, the BROWSER channel may have independently been disabled, too.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            return notificationChannelEnabled(ChannelDefinitions.ChannelId.BROWSER);
+            return notificationChannelEnabled(ChromeChannelDefinitions.ChannelId.BROWSER);
         }
 
         return true;
     }
 
-    @TargetApi(Build.VERSION_CODES.O)
+    @RequiresApi(Build.VERSION_CODES.O)
     private static boolean notificationChannelEnabled(String channelId) {
         NotificationChannel channel = getNotificationManager(ContextUtils.getApplicationContext())
                                               .getNotificationChannel(channelId);
@@ -109,16 +106,17 @@ public class TracingNotificationManager {
         // selecting the stop button, so choose a different message.
         AccessibilityManager am =
                 (AccessibilityManager) context.getSystemService(Context.ACCESSIBILITY_SERVICE);
-        if (am.isEnabled() && am.isTouchExplorationEnabled())
+        if (am.isEnabled() && am.isTouchExplorationEnabled()) {
             message = MSG_ACTIVE_NOTIFICATION_ACCESSIBILITY_MESSAGE;
+        }
 
         sTracingActiveNotificationBuilder =
-                createNotificationBuilder()
+                createNotificationWrapperBuilder()
                         .setContentTitle(title)
                         .setContentText(message)
                         .setOngoing(true)
-                        .addAction(R.drawable.ic_stop_white_36dp, MSG_STOP,
-                                TracingNotificationService.getStopRecordingIntent(context));
+                        .addAction(R.drawable.ic_stop_white_24dp, MSG_STOP,
+                                TracingNotificationServiceImpl.getStopRecordingIntent(context));
         showNotification(sTracingActiveNotificationBuilder.build());
     }
 
@@ -157,10 +155,10 @@ public class TracingNotificationManager {
         String title = MSG_STOPPING_NOTIFICATION_TITLE;
         String message = MSG_STOPPING_NOTIFICATION_MESSAGE;
 
-        ChromeNotificationBuilder builder = createNotificationBuilder()
-                                                    .setContentTitle(title)
-                                                    .setContentText(message)
-                                                    .setOngoing(true);
+        NotificationWrapperBuilder builder = createNotificationWrapperBuilder()
+                                                     .setContentTitle(title)
+                                                     .setContentText(message)
+                                                     .setOngoing(true);
         showNotification(builder.build());
     }
 
@@ -171,15 +169,17 @@ public class TracingNotificationManager {
         Context context = ContextUtils.getApplicationContext();
         String title = MSG_COMPLETE_NOTIFICATION_TITLE;
         String message = MSG_COMPLETE_NOTIFICATION_MESSAGE;
+        int noIcon = 0;
 
-        ChromeNotificationBuilder builder =
-                createNotificationBuilder()
+        NotificationWrapperBuilder builder =
+                createNotificationWrapperBuilder()
                         .setContentTitle(title)
                         .setContentText(message)
                         .setOngoing(false)
-                        .addAction(R.drawable.ic_share_white_24dp, MSG_SHARE,
-                                TracingNotificationService.getShareTraceIntent(context))
-                        .setDeleteIntent(TracingNotificationService.getDiscardTraceIntent(context));
+                        .addAction(noIcon, MSG_OPEN_SETTINGS,
+                                TracingNotificationServiceImpl.getOpenSettingsIntent(context))
+                        .setDeleteIntent(
+                                TracingNotificationServiceImpl.getDiscardTraceIntent(context));
         showNotification(builder.build());
     }
 
@@ -193,10 +193,9 @@ public class TracingNotificationManager {
         sTracingActiveNotificationBuilder = null;
     }
 
-    private static ChromeNotificationBuilder createNotificationBuilder() {
-        return NotificationBuilderFactory
-                .createChromeNotificationBuilder(
-                        true /* preferCompat */, ChannelDefinitions.ChannelId.BROWSER)
+    private static NotificationWrapperBuilder createNotificationWrapperBuilder() {
+        return NotificationWrapperBuilderFactory
+                .createNotificationWrapperBuilder(ChromeChannelDefinitions.ChannelId.BROWSER)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setSmallIcon(R.drawable.ic_chrome)
                 .setShowWhen(false)

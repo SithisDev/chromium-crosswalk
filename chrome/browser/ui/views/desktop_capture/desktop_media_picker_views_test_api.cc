@@ -1,18 +1,19 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/desktop_capture/desktop_media_picker_views_test_api.h"
 
+#include "base/ranges/algorithm.h"
 #include "chrome/browser/ui/views/desktop_capture/desktop_media_list_controller.h"
 #include "chrome/browser/ui/views/desktop_capture/desktop_media_list_view.h"
 #include "chrome/browser/ui/views/desktop_capture/desktop_media_picker_views.h"
 #include "chrome/browser/ui/views/desktop_capture/desktop_media_tab_list.h"
-
 #include "ui/events/base_event_utils.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane.h"
 #include "ui/views/controls/table/table_view.h"
+#include "ui/views/controls/table/table_view_observer.h"
 
 namespace {
 
@@ -25,12 +26,21 @@ bool IsDesktopMediaTabList(views::View* view) {
 DesktopMediaPickerViewsTestApi::DesktopMediaPickerViewsTestApi() = default;
 DesktopMediaPickerViewsTestApi::~DesktopMediaPickerViewsTestApi() = default;
 
-void DesktopMediaPickerViewsTestApi::FocusSourceAtIndex(size_t index) {
+void DesktopMediaPickerViewsTestApi::FocusSourceAtIndex(size_t index,
+                                                        bool select) {
   views::View* source_view = GetSourceAtIndex(index);
-  if (source_view)
+  if (source_view) {
     source_view->RequestFocus();
-  else
-    GetTableView()->Select(index);
+  } else {
+    GetTableView()->RequestFocus();
+    if (select)
+      GetTableView()->Select(index);
+  }
+}
+
+bool DesktopMediaPickerViewsTestApi::AudioSupported(
+    DesktopMediaList::Type type) const {
+  return DesktopMediaPickerDialogView::AudioSupported(type);
 }
 
 void DesktopMediaPickerViewsTestApi::FocusAudioCheckbox() {
@@ -53,8 +63,22 @@ void DesktopMediaPickerViewsTestApi::PressMouseOnSourceAtIndex(
     // within a larger view would be breakage-prone; just ask the TableView to
     // to select.
     GetTableView()->Select(index);
-    if (double_click)
-      picker_->dialog_->GetSelectedController()->AcceptSource();
+    if (double_click) {
+      GetTableView()->observer()->OnDoubleClick();
+    }
+  }
+}
+
+void DesktopMediaPickerViewsTestApi::PressKeyOnSourceAtIndex(
+    size_t index,
+    const ui::KeyEvent& event) {
+  views::View* source_view = GetSourceAtIndex(index);
+  if (source_view) {
+    source_view->OnKeyPressed(event);
+  } else {
+    // TableView rows don't receive key events directly; just send the key event
+    // to the TableView itself.
+    GetTableView()->OnKeyPressed(event);
   }
 }
 
@@ -68,35 +92,46 @@ void DesktopMediaPickerViewsTestApi::DoubleTapSourceAtIndex(size_t index) {
 }
 
 void DesktopMediaPickerViewsTestApi::SelectTabForSourceType(
-    content::DesktopMediaID::Type source_type) {
-  const auto& source_types = picker_->dialog_->source_types_;
-  const auto i =
-      std::find(source_types.cbegin(), source_types.cend(), source_type);
-  DCHECK(i != source_types.cend());
+    DesktopMediaList::Type source_type) {
+  const auto& categories = picker_->dialog_->categories_;
+  const auto i = base::ranges::find(
+      categories, source_type,
+      &DesktopMediaPickerDialogView::DisplaySurfaceCategory::type);
+  DCHECK(i != categories.cend());
   if (picker_->dialog_->tabbed_pane_) {
     picker_->dialog_->tabbed_pane_->SelectTabAt(
-        std::distance(source_types.cbegin(), i));
+        std::distance(categories.cbegin(), i));
   }
 }
 
-base::Optional<int> DesktopMediaPickerViewsTestApi::GetSelectedSourceId()
+DesktopMediaList::Type
+DesktopMediaPickerViewsTestApi::GetSelectedSourceListType() const {
+  return picker_->dialog_->GetSelectedSourceListType();
+}
+
+absl::optional<int> DesktopMediaPickerViewsTestApi::GetSelectedSourceId()
     const {
   DesktopMediaListController* controller =
       picker_->dialog_->GetSelectedController();
-  base::Optional<content::DesktopMediaID> source = controller->GetSelection();
-  return source.has_value() ? base::Optional<int>(source.value().id)
-                            : base::nullopt;
+  absl::optional<content::DesktopMediaID> source = controller->GetSelection();
+  return source.has_value() ? absl::optional<int>(source.value().id)
+                            : absl::nullopt;
 }
 
 bool DesktopMediaPickerViewsTestApi::HasSourceAtIndex(size_t index) const {
   const views::TableView* table = GetTableView();
   if (table)
-    return base::checked_cast<size_t>(table->RowCount()) > index;
-  return bool{GetSourceAtIndex(index)};
+    return base::checked_cast<size_t>(table->GetRowCount()) > index;
+  return !!GetSourceAtIndex(index);
 }
 
 views::View* DesktopMediaPickerViewsTestApi::GetSelectedListView() {
   return picker_->dialog_->GetSelectedController()->view_;
+}
+
+DesktopMediaListController*
+DesktopMediaPickerViewsTestApi::GetSelectedController() {
+  return picker_->dialog_->GetSelectedController();
 }
 
 views::Checkbox* DesktopMediaPickerViewsTestApi::GetAudioShareCheckbox() {
@@ -121,13 +156,13 @@ views::View* DesktopMediaPickerViewsTestApi::GetSourceAtIndex(size_t index) {
 const views::TableView* DesktopMediaPickerViewsTestApi::GetTableView() const {
   views::View* list = picker_->dialog_->GetSelectedController()->view_;
   return IsDesktopMediaTabList(list)
-             ? static_cast<DesktopMediaTabList*>(list)->child_
+             ? static_cast<DesktopMediaTabList*>(list)->list_.get()
              : nullptr;
 }
 
 views::TableView* DesktopMediaPickerViewsTestApi::GetTableView() {
   views::View* list = picker_->dialog_->GetSelectedController()->view_;
   return IsDesktopMediaTabList(list)
-             ? static_cast<DesktopMediaTabList*>(list)->child_
+             ? static_cast<DesktopMediaTabList*>(list)->list_.get()
              : nullptr;
 }

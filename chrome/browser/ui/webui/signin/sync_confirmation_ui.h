@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,12 @@
 #include <string>
 #include <unordered_map>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/webui/signin/signin_web_dialog_ui.h"
-#include "components/consent_auditor/consent_auditor.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+
+class Browser;
+class Profile;
 
 namespace content {
 class WebUIDataSource;
@@ -21,6 +24,8 @@ namespace ui {
 class WebUI;
 }
 
+enum class SyncConfirmationStyle;
+
 // WebUI controller for the sync confirmation dialog.
 //
 // Note: This controller does not set the WebUI message handler. It is
@@ -28,12 +33,21 @@ class WebUI;
 class SyncConfirmationUI : public SigninWebDialogUI {
  public:
   explicit SyncConfirmationUI(content::WebUI* web_ui);
+
+  SyncConfirmationUI(const SyncConfirmationUI&) = delete;
+  SyncConfirmationUI& operator=(const SyncConfirmationUI&) = delete;
+
   ~SyncConfirmationUI() override;
 
   // SigninWebDialogUI:
+  // `browser` can be nullptr when the UI is displayed without a browser.
   void InitializeMessageHandlerWithBrowser(Browser* browser) override;
 
  private:
+  void InitializeForSyncConfirmation(content::WebUIDataSource* source,
+                                     SyncConfirmationStyle style);
+  void InitializeForSyncDisabled(content::WebUIDataSource* source);
+
   // Adds a string resource with the given GRD |ids| to the WebUI data |source|
   // named as |name|. Also stores a reverse mapping from the localized version
   // of the string to the |ids| in order to later pass it to
@@ -42,9 +56,23 @@ class SyncConfirmationUI : public SigninWebDialogUI {
                          const std::string& name,
                          int ids);
 
+  // Adds a string resource with the given GRD |ids| and |parameter| as the
+  // placeholder to the WebUI data |source| named as |name|. Also stores a
+  // reverse mapping from the localized version of the string to the |ids| in
+  // order to later pass it to SyncConfirmationHandler.
+  void AddStringResourceWithPlaceholder(content::WebUIDataSource* source,
+                                        const std::string& name,
+                                        int ids,
+                                        const std::u16string& parameter);
+
+  // Adds a mapping from the localized version of a string |localized_string| to
+  // its given GRD |ids| in order to later pass it to SyncConfirmationHandler.
+  void AddLocalizedStringToIdsMap(const std::string& localized_string, int ids);
+
+  // For consent auditing.
   std::unordered_map<std::string, int> js_localized_string_to_ids_map_;
 
-  DISALLOW_COPY_AND_ASSIGN(SyncConfirmationUI);
+  const raw_ptr<Profile> profile_;
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_SIGNIN_SYNC_CONFIRMATION_UI_H_

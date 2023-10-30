@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/strings/string16.h"
 
 namespace offline_pages {
 
@@ -25,7 +24,7 @@ bool AutoFetchInProgressNotificationCanceled();
 void AutoFetchCancellationComplete();
 
 // Triggers the auto-fetch complete notification. See AutoFetchNotifier.java.
-void ShowAutoFetchCompleteNotification(const base::string16& page_title,
+void ShowAutoFetchCompleteNotification(const std::u16string& page_title,
                                        const std::string& original_url,
                                        const std::string& final_url,
                                        int android_tab_id,

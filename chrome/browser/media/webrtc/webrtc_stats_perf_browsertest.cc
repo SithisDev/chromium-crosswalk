@@ -1,10 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string>
 
 #include "base/command_line.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
@@ -13,9 +14,10 @@
 #include "chrome/browser/media/webrtc/webrtc_browsertest_base.h"
 #include "chrome/browser/media/webrtc/webrtc_browsertest_common.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/feature_h264_with_openh264_ffmpeg.h"
+#include "content/public/test/browser_test.h"
 #include "media/base/media_switches.h"
 #include "testing/perf/perf_test.h"
+#include "third_party/blink/public/common/features.h"
 
 namespace content {
 
@@ -85,7 +87,6 @@ class WebRtcStatsPerfBrowserTest : public WebRtcTestBase {
         .AddExtension(test::kY4mFileExtension);
     command_line->AppendSwitchPath(switches::kUseFileForFakeVideoCapture,
                                    input_video);
-    command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
   }
 
   void StartCall(const std::string& audio_codec,
@@ -95,9 +96,18 @@ class WebRtcStatsPerfBrowserTest : public WebRtcTestBase {
     ASSERT_TRUE(test::HasReferenceFilesInCheckout());
     ASSERT_TRUE(embedded_test_server()->Start());
 
+    ASSERT_GE(TestTimeouts::test_launcher_timeout().InSeconds(), 100)
+        << "This is a long-running test; you must specify "
+           "--test-launcher-timeout to have a value of at least 100000.";
+
     ASSERT_GE(TestTimeouts::action_max_timeout().InSeconds(), 100)
         << "This is a long-running test; you must specify "
            "--ui-test-action-max-timeout to have a value of at least 100000.";
+
+    ASSERT_LT(TestTimeouts::action_max_timeout(),
+              TestTimeouts::test_launcher_timeout())
+        << "action_max_timeout needs to be strictly-less-than "
+           "test_launcher_timeout";
 
     left_tab_ = OpenTestPageAndGetUserMediaInNewTab(kMainWebrtcTestHtmlPage);
     right_tab_ = OpenTestPageAndGetUserMediaInNewTab(kMainWebrtcTestHtmlPage);
@@ -256,8 +266,8 @@ class WebRtcStatsPerfBrowserTest : public WebRtcTestBase {
   }
 
  private:
-  content::WebContents* left_tab_ = nullptr;
-  content::WebContents* right_tab_ = nullptr;
+  raw_ptr<content::WebContents> left_tab_ = nullptr;
+  raw_ptr<content::WebContents> right_tab_ = nullptr;
 };
 
 IN_PROC_BROWSER_TEST_F(
@@ -309,9 +319,18 @@ IN_PROC_BROWSER_TEST_F(
   RunsAudioAndVideoCallCollectingMetricsWithVideoCodec("VP9");
 }
 
+// TODO(crbug.com/1241344): test fails on some mac bots.
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_MANUAL_RunsAudioAndVideoCallCollectingMetrics_VideoCodec_VP9Profile2 \
+  DISABLED_MANUAL_RunsAudioAndVideoCallCollectingMetrics_VideoCodec_VP9Profile2
+#else
+#define MAYBE_MANUAL_RunsAudioAndVideoCallCollectingMetrics_VideoCodec_VP9Profile2 \
+  MANUAL_RunsAudioAndVideoCallCollectingMetrics_VideoCodec_VP9Profile2
+#endif
+
 IN_PROC_BROWSER_TEST_F(
     WebRtcStatsPerfBrowserTest,
-    MANUAL_RunsAudioAndVideoCallCollectingMetrics_VideoCodec_VP9Profile2) {
+    MAYBE_MANUAL_RunsAudioAndVideoCallCollectingMetrics_VideoCodec_VP9Profile2) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   RunsAudioAndVideoCallCollectingMetricsWithVideoCodec(
       "VP9", true /* prefer_hw_video_codec */,
@@ -325,7 +344,8 @@ IN_PROC_BROWSER_TEST_F(
     MANUAL_RunsAudioAndVideoCallCollectingMetrics_VideoCodec_H264) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   // Only run test if run-time feature corresponding to |rtc_use_h264| is on.
-  if (!base::FeatureList::IsEnabled(content::kWebRtcH264WithOpenH264FFmpeg)) {
+  if (!base::FeatureList::IsEnabled(
+          blink::features::kWebRtcH264WithOpenH264FFmpeg)) {
     LOG(WARNING) << "Run-time feature WebRTC-H264WithOpenH264FFmpeg disabled. "
                     "Skipping WebRtcPerfBrowserTest."
                     "MANUAL_RunsAudioAndVideoCallCollectingMetrics_VideoCodec_"

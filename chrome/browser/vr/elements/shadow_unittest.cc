@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,14 +25,14 @@ TEST(Shadow, ShadowPaddingGrows) {
   shadow->AddChild(std::move(rect));
   scene.AddUiElement(kRoot, std::move(shadow));
 
-  scene.OnBeginFrame(MsToTicks(0), kStartHeadPose);
+  scene.OnBeginFrame(gfx::MsToTicks(0), kStartHeadPose);
   float old_left_padding = shadow_ptr->left_padding();
   float old_top_padding = shadow_ptr->top_padding();
   EXPECT_LE(0.0f, old_left_padding);
   EXPECT_LE(0.0f, old_top_padding);
 
   rect_ptr->SetTranslate(0, 0, 0.15);
-  scene.OnBeginFrame(MsToTicks(0), kStartHeadPose);
+  scene.OnBeginFrame(gfx::MsToTicks(0), kStartHeadPose);
   float new_left_padding = shadow_ptr->left_padding();
   float new_top_padding = shadow_ptr->top_padding();
   EXPECT_LE(old_left_padding, new_left_padding);

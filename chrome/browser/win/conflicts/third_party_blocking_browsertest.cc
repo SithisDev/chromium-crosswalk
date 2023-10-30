@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/scoped_native_library.h"
+#include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
-#include "base/win/win_util.h"
 #include "base/win/windows_version.h"
-#include "chrome/browser/win/conflicts/module_blacklist_cache_updater.h"
-#include "chrome/browser/win/conflicts/module_blacklist_cache_util.h"
+#include "chrome/browser/win/conflicts/module_blocklist_cache_updater.h"
+#include "chrome/browser/win/conflicts/module_blocklist_cache_util.h"
 #include "chrome/browser/win/conflicts/module_database.h"
 #include "chrome/browser/win/conflicts/proto/module_list.pb.h"
 #include "chrome/browser/win/conflicts/third_party_conflicts_manager.h"
@@ -24,6 +24,7 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/install_static/install_util.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "content/public/test/browser_test.h"
 
 namespace {
 
@@ -36,8 +37,12 @@ class ThirdPartyRegistryKeyObserver {
                       GetRegistryKeyPath().c_str(),
                       KEY_CREATE_SUB_KEY | KEY_READ | KEY_NOTIFY) {}
 
+  ThirdPartyRegistryKeyObserver(const ThirdPartyRegistryKeyObserver&) = delete;
+  ThirdPartyRegistryKeyObserver& operator=(
+      const ThirdPartyRegistryKeyObserver&) = delete;
+
   bool StartWatching() {
-    return registry_key_.StartWatching(base::Bind(
+    return registry_key_.StartWatching(base::BindOnce(
         &ThirdPartyRegistryKeyObserver::OnChange, base::Unretained(this)));
   }
 
@@ -61,7 +66,7 @@ class ThirdPartyRegistryKeyObserver {
   }
 
  private:
-  base::string16 GetRegistryKeyPath() {
+  std::wstring GetRegistryKeyPath() {
     return install_static::GetRegistryPath().append(
         third_party_dlls::kThirdPartyRegKeyName);
   }
@@ -72,15 +77,40 @@ class ThirdPartyRegistryKeyObserver {
   // callback is invoked before WaitForCachePathWritten() was called.
   bool path_written_ = false;
 
-  base::Closure run_loop_quit_closure_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThirdPartyRegistryKeyObserver);
+  base::OnceClosure run_loop_quit_closure_;
 };
 
-class ThirdPartyBlockingBrowserTest : public InProcessBrowserTest {
- protected:
-  ThirdPartyBlockingBrowserTest() : scoped_domain_(false) {}
+// Creates an empty serialized ModuleList proto in the module list component
+// directory and returns its path.
+void CreateModuleList(base::FilePath* module_list_path) {
+  chrome::conflicts::ModuleList module_list;
+  // Include an empty blocklist and allowlist.
+  module_list.mutable_blocklist();
+  module_list.mutable_allowlist();
 
+  std::string contents;
+  ASSERT_TRUE(module_list.SerializeToString(&contents));
+
+  // Put the module list beside the module blocklist cache.
+  *module_list_path = ModuleBlocklistCacheUpdater::GetModuleBlocklistCachePath()
+                          .DirName()
+                          .Append(FILE_PATH_LITERAL("ModuleList.bin"));
+
+  base::ScopedAllowBlockingForTesting scoped_allow_blocking;
+  ASSERT_TRUE(base::CreateDirectory(module_list_path->DirName()));
+  ASSERT_EQ(static_cast<int>(contents.size()),
+            base::WriteFile(*module_list_path, contents.data(),
+                            static_cast<int>(contents.size())));
+}
+
+class ThirdPartyBlockingBrowserTest : public InProcessBrowserTest {
+ public:
+  ThirdPartyBlockingBrowserTest(const ThirdPartyBlockingBrowserTest&) = delete;
+  ThirdPartyBlockingBrowserTest& operator=(
+      const ThirdPartyBlockingBrowserTest&) = delete;
+
+ protected:
+  ThirdPartyBlockingBrowserTest() = default;
   ~ThirdPartyBlockingBrowserTest() override = default;
 
   // InProcessBrowserTest:
@@ -98,7 +128,7 @@ class ThirdPartyBlockingBrowserTest : public InProcessBrowserTest {
   // Creates a copy of a test DLL into a temp directory that will act as the
   // third-party module and return its path. It can't be located in the output
   // directory because modules in the same directory as chrome.exe are
-  // whitelisted in non-official builds.
+  // allowlisted in non-official builds.
   void CreateThirdPartyModule(base::FilePath* third_party_module_path) {
     base::FilePath test_dll_path;
     ASSERT_TRUE(base::PathService::Get(base::DIR_EXE, &test_dll_path));
@@ -110,33 +140,6 @@ class ThirdPartyBlockingBrowserTest : public InProcessBrowserTest {
     ASSERT_TRUE(base::CopyFile(test_dll_path, *third_party_module_path));
   }
 
-  // Creates an empty serialized ModuleList proto in the module list component
-  // directory and returns its path.
-  void CreateModuleList(base::FilePath* module_list_path) {
-    chrome::conflicts::ModuleList module_list;
-    // Include an empty blacklist and whitelist.
-    module_list.mutable_blacklist();
-    module_list.mutable_whitelist();
-
-    std::string contents;
-    ASSERT_TRUE(module_list.SerializeToString(&contents));
-
-    // Put the module list beside the module blacklist cache.
-    *module_list_path =
-        ModuleBlacklistCacheUpdater::GetModuleBlacklistCachePath()
-            .DirName()
-            .Append(FILE_PATH_LITERAL("ModuleList.bin"));
-
-    base::ScopedAllowBlockingForTesting scoped_allow_blocking;
-    ASSERT_TRUE(base::CreateDirectory(module_list_path->DirName()));
-    ASSERT_EQ(static_cast<int>(contents.size()),
-              base::WriteFile(*module_list_path, contents.data(),
-                              static_cast<int>(contents.size())));
-  }
-
-  // The feature is always disabled on domain-joined machines.
-  base::win::ScopedDomainStateForTesting scoped_domain_;
-
   // Enables the ThirdPartyModulesBlocking feature.
   base::test::ScopedFeatureList scoped_feature_list_;
 
@@ -144,8 +147,6 @@ class ThirdPartyBlockingBrowserTest : public InProcessBrowserTest {
 
   // Temp directory where the third-party module is located.
   base::ScopedTempDir scoped_temp_dir_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThirdPartyBlockingBrowserTest);
 };
 
 }  // namespace
@@ -153,32 +154,40 @@ class ThirdPartyBlockingBrowserTest : public InProcessBrowserTest {
 // This is an integration test for the blocking of third-party modules.
 //
 // This test makes sure that all the different classes interact together
-// correctly to produce a valid module blacklist cache and to write its path in
+// correctly to produce a valid module blocklist cache and to write its path in
 // the registry.
 //
 // Note: This doesn't test that the modules are actually blocked on the next
 //       browser launch.
 IN_PROC_BROWSER_TEST_F(ThirdPartyBlockingBrowserTest,
-                       CreateModuleBlacklistCache) {
+                       CreateModuleBlocklistCache) {
   if (base::win::GetVersion() < base::win::Version::WIN8)
     return;
-
-  base::FilePath module_list_path;
-  ASSERT_NO_FATAL_FAILURE(CreateModuleList(&module_list_path));
-  ASSERT_FALSE(module_list_path.empty());
-
-  ModuleDatabase* module_database = ModuleDatabase::GetInstance();
-
-  // Speed up the test.
-  module_database->IncreaseInspectionPriority();
 
   // Create the observer early so the change is guaranteed to be observed.
   ThirdPartyRegistryKeyObserver third_party_registry_key_observer;
   ASSERT_TRUE(third_party_registry_key_observer.StartWatching());
 
-  // Simulate the download of the module list component.
-  module_database->third_party_conflicts_manager()->LoadModuleList(
-      module_list_path);
+  base::RunLoop run_loop;
+  ModuleDatabase::GetTaskRunner()->PostTask(
+      FROM_HERE,
+      base::BindLambdaForTesting([quit_closure = run_loop.QuitClosure()]() {
+        ModuleDatabase* module_database = ModuleDatabase::GetInstance();
+
+        // Speed up the test.
+        module_database->ForceStartInspection();
+
+        base::FilePath module_list_path;
+        ASSERT_NO_FATAL_FAILURE(CreateModuleList(&module_list_path));
+        ASSERT_FALSE(module_list_path.empty());
+
+        // Simulate the download of the module list component.
+        module_database->third_party_conflicts_manager()->LoadModuleList(
+            module_list_path);
+
+        quit_closure.Run();
+      }));
+  run_loop.Run();
 
   // Injects the third-party DLL into the process.
   base::FilePath third_party_module_path;
@@ -189,22 +198,22 @@ IN_PROC_BROWSER_TEST_F(ThirdPartyBlockingBrowserTest,
   base::ScopedNativeLibrary dll(third_party_module_path);
   ASSERT_TRUE(dll.is_valid());
 
-  // Now the module blacklist cache will eventually be created and its path
+  // Now the module blocklist cache will eventually be created and its path
   // written in the registry.
   third_party_registry_key_observer.WaitForCachePathWritten();
 
-  base::FilePath module_blacklist_cache_path =
-      ModuleBlacklistCacheUpdater::GetModuleBlacklistCachePath();
-  ASSERT_FALSE(module_blacklist_cache_path.empty());
-  ASSERT_TRUE(base::PathExists(module_blacklist_cache_path));
+  base::FilePath module_blocklist_cache_path =
+      ModuleBlocklistCacheUpdater::GetModuleBlocklistCachePath();
+  ASSERT_FALSE(module_blocklist_cache_path.empty());
+  ASSERT_TRUE(base::PathExists(module_blocklist_cache_path));
 
-  // Now check that the third-party DLL was added to the module blacklist cache.
+  // Now check that the third-party DLL was added to the module blocklist cache.
   third_party_dlls::PackedListMetadata metadata;
-  std::vector<third_party_dlls::PackedListModule> blacklisted_modules;
+  std::vector<third_party_dlls::PackedListModule> blocklisted_modules;
   base::MD5Digest md5_digest;
   ASSERT_EQ(ReadResult::kSuccess,
-            ReadModuleBlacklistCache(module_blacklist_cache_path, &metadata,
-                                     &blacklisted_modules, &md5_digest));
+            ReadModuleBlocklistCache(module_blocklist_cache_path, &metadata,
+                                     &blocklisted_modules, &md5_digest));
 
-  EXPECT_GE(blacklisted_modules.size(), 1u);
+  EXPECT_GE(blocklisted_modules.size(), 1u);
 }

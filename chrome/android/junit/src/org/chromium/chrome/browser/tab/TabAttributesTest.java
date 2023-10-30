@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@ package org.chromium.chrome.browser.tab;
 
 import static org.mockito.Mockito.when;
 
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -36,14 +36,14 @@ public class TabAttributesTest {
     private static class TestObject {}
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         MockitoAnnotations.initMocks(this);
         when(mTab.getUserDataHost()).thenReturn(mUserDataHost);
     }
 
     @Test
     @SmallTest
-    public void testBasicGetAndSetOperation() throws Exception {
+    public void testBasicGetAndSetOperation() {
         // |get| for an uninitialized attribute returns null.
         Assert.assertNull(TabAttributes.from(mTab).get(ATTR1));
 
@@ -61,7 +61,7 @@ public class TabAttributesTest {
 
     @Test
     @SmallTest
-    public void testGetWithDefaultReturnsNullForAttributeExplicitlySetToNull() throws Exception {
+    public void testGetWithDefaultReturnsNullForAttributeExplicitlySetToNull() {
         TestObject defaultValue = new TestObject();
 
         // The attribute is not set by default, therefore default value is returned.

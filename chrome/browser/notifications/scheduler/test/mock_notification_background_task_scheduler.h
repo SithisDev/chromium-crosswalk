@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,15 +15,13 @@ class MockNotificationBackgroundTaskScheduler
     : public NotificationBackgroundTaskScheduler {
  public:
   MockNotificationBackgroundTaskScheduler();
+  MockNotificationBackgroundTaskScheduler(
+      const MockNotificationBackgroundTaskScheduler&) = delete;
+  MockNotificationBackgroundTaskScheduler& operator=(
+      const MockNotificationBackgroundTaskScheduler&) = delete;
   ~MockNotificationBackgroundTaskScheduler() override;
-  MOCK_METHOD3(Schedule,
-               void(notifications::SchedulerTaskTime,
-                    base::TimeDelta,
-                    base::TimeDelta));
+  MOCK_METHOD2(Schedule, void(base::TimeDelta, base::TimeDelta));
   MOCK_METHOD0(Cancel, void());
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockNotificationBackgroundTaskScheduler);
 };
 
 }  // namespace test

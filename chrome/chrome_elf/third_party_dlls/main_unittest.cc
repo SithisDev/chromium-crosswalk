@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 #include "base/process/launch.h"
 #include "base/scoped_native_library.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/test/test_timeouts.h"
@@ -51,9 +50,8 @@ struct TestModuleData {
 };
 
 // NOTE: TestTimeouts::action_max_timeout() is not long enough here.
-base::TimeDelta g_timeout = ::IsDebuggerPresent()
-                                ? base::TimeDelta::FromMilliseconds(INFINITE)
-                                : base::TimeDelta::FromMilliseconds(5000);
+base::TimeDelta g_timeout =
+    ::IsDebuggerPresent() ? base::TimeDelta::Max() : base::Milliseconds(5000);
 
 // Centralize child test process control.
 void LaunchChildAndWait(const base::CommandLine& command_line, int* exit_code) {
@@ -131,7 +129,7 @@ void RegRedirect(nt::ROOT_KEY key,
                  registry_util::RegistryOverrideManager* rom) {
   ASSERT_NE(key, nt::AUTO);
   HKEY root = (key == nt::HKCU ? HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE);
-  base::string16 temp;
+  std::wstring temp;
 
   ASSERT_NO_FATAL_FAILURE(rom->OverrideRegistry(root, &temp));
   ASSERT_TRUE(nt::SetTestingOverride(key, temp));
@@ -140,7 +138,7 @@ void RegRedirect(nt::ROOT_KEY key,
 // Utility function to disable local registry protection.
 void CancelRegRedirect(nt::ROOT_KEY key) {
   ASSERT_NE(key, nt::AUTO);
-  ASSERT_TRUE(nt::SetTestingOverride(key, base::string16()));
+  ASSERT_TRUE(nt::SetTestingOverride(key, std::wstring()));
 }
 
 // Use NtRegistry to query status codes (it's more handy than base).
@@ -174,6 +172,10 @@ bool QueryStatusCodes(std::vector<ThirdPartyStatus>* status_array) {
 //------------------------------------------------------------------------------
 
 class ThirdPartyTest : public testing::Test {
+ public:
+  ThirdPartyTest(const ThirdPartyTest&) = delete;
+  ThirdPartyTest& operator=(const ThirdPartyTest&) = delete;
+
  protected:
   ThirdPartyTest() = default;
 
@@ -194,7 +196,7 @@ class ThirdPartyTest : public testing::Test {
     // Create the blacklist file empty.
     base::File file(base::FilePath(bl_test_file_path_),
                     base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE |
-                        base::File::FLAG_SHARE_DELETE |
+                        base::File::FLAG_WIN_SHARE_DELETE |
                         base::File::FLAG_DELETE_ON_CLOSE);
     ASSERT_TRUE(file.IsValid());
 
@@ -226,8 +228,8 @@ class ThirdPartyTest : public testing::Test {
     return true;
   }
 
-  const base::string16& GetBlTestFilePath() { return bl_test_file_path_; }
-  const base::string16& GetExeDir() { return exe_dir_; }
+  const std::wstring& GetBlTestFilePath() { return bl_test_file_path_; }
+  const std::wstring& GetExeDir() { return exe_dir_; }
   const std::wstring& GetScopedTempDirValue() {
     return scoped_temp_dir_.GetPath().value();
   }
@@ -235,10 +237,8 @@ class ThirdPartyTest : public testing::Test {
  private:
   base::ScopedTempDir scoped_temp_dir_;
   base::File bl_file_;
-  base::string16 bl_test_file_path_;
-  base::string16 exe_dir_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThirdPartyTest);
+  std::wstring bl_test_file_path_;
+  std::wstring exe_dir_;
 };
 
 //------------------------------------------------------------------------------
@@ -249,7 +249,7 @@ class ThirdPartyTest : public testing::Test {
 // configurations.
 //------------------------------------------------------------------------------
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define MAYBE_Base DISABLED_Base
 #else
 #define MAYBE_Base Base
@@ -260,23 +260,21 @@ TEST_F(ThirdPartyTest, MAYBE_Base) {
   // initialization.
   base::CommandLine cmd_line1 = base::CommandLine::FromString(kTestExeFilename);
   cmd_line1.AppendArgNative(GetBlTestFilePath());
-  cmd_line1.AppendArgNative(
-      base::NumberToString16(main_unittest_exe::kTestOnlyInitialization));
+  cmd_line1.AppendArgNative(base::NumberToWString(kTestOnlyInitialization));
 
   int exit_code = 0;
   LaunchChildAndWait(cmd_line1, &exit_code);
-  ASSERT_EQ(main_unittest_exe::kDllLoadSuccess, exit_code);
+  ASSERT_EQ(kDllLoadSuccess, exit_code);
 
   //----------------------------------------------------------------------------
   // 2. Spawn the test process with NO blacklist.  Expect successful DLL load.
   base::CommandLine cmd_line2 = base::CommandLine::FromString(kTestExeFilename);
   cmd_line2.AppendArgNative(GetBlTestFilePath());
-  cmd_line2.AppendArgNative(
-      base::NumberToString16(main_unittest_exe::kTestSingleDllLoad));
+  cmd_line2.AppendArgNative(base::NumberToWString(kTestSingleDllLoad));
   cmd_line2.AppendArgNative(MakePath(GetExeDir(), kTestDllName1));
 
   LaunchChildAndWait(cmd_line2, &exit_code);
-  ASSERT_EQ(main_unittest_exe::kDllLoadSuccess, exit_code);
+  ASSERT_EQ(kDllLoadSuccess, exit_code);
 
   //----------------------------------------------------------------------------
   // 3. Spawn the test process with blacklist.  Expect failed DLL load.
@@ -295,12 +293,11 @@ TEST_F(ThirdPartyTest, MAYBE_Base) {
 
   base::CommandLine cmd_line3 = base::CommandLine::FromString(kTestExeFilename);
   cmd_line3.AppendArgNative(GetBlTestFilePath());
-  cmd_line3.AppendArgNative(
-      base::NumberToString16(main_unittest_exe::kTestSingleDllLoad));
+  cmd_line3.AppendArgNative(base::NumberToWString(kTestSingleDllLoad));
   cmd_line3.AppendArgNative(MakePath(GetExeDir(), kTestDllName1));
 
   LaunchChildAndWait(cmd_line3, &exit_code);
-  ASSERT_EQ(main_unittest_exe::kDllLoadFailed, exit_code);
+  ASSERT_EQ(kDllLoadFailed, exit_code);
 
   //----------------------------------------------------------------------------
   // 4. Spawn the test process with blacklist.  Expect failed DLL load.
@@ -315,13 +312,12 @@ TEST_F(ThirdPartyTest, MAYBE_Base) {
 
   base::CommandLine cmd_line4 = base::CommandLine::FromString(kTestExeFilename);
   cmd_line4.AppendArgNative(GetBlTestFilePath());
-  cmd_line4.AppendArgNative(
-      base::NumberToString16(main_unittest_exe::kTestSingleDllLoad));
+  cmd_line4.AppendArgNative(base::NumberToWString(kTestSingleDllLoad));
   cmd_line4.AppendArgNative(
       MakePath(GetScopedTempDirValue(), kTestDllName1MixedCase));
 
   LaunchChildAndWait(cmd_line4, &exit_code);
-  ASSERT_EQ(main_unittest_exe::kDllLoadFailed, exit_code);
+  ASSERT_EQ(kDllLoadFailed, exit_code);
 }
 
 // Note: The test module used in this unittest has no export table.
@@ -334,13 +330,12 @@ TEST_F(ThirdPartyTest, WideCharEncoding) {
   // 1) Test a successful DLL load with no blacklist.
   base::CommandLine cmd_line1 = base::CommandLine::FromString(kTestExeFilename);
   cmd_line1.AppendArgNative(GetBlTestFilePath());
-  cmd_line1.AppendArgNative(
-      base::NumberToString16(main_unittest_exe::kTestSingleDllLoad));
+  cmd_line1.AppendArgNative(base::NumberToWString(kTestSingleDllLoad));
   cmd_line1.AppendArgNative(MakePath(GetScopedTempDirValue(), kChineseUnicode));
 
   int exit_code = 0;
   LaunchChildAndWait(cmd_line1, &exit_code);
-  ASSERT_EQ(main_unittest_exe::kDllLoadSuccess, exit_code);
+  ASSERT_EQ(kDllLoadSuccess, exit_code);
 
   //----------------------------------------------------------------------------
   // 2) Test a failed DLL load with blacklist.
@@ -360,12 +355,11 @@ TEST_F(ThirdPartyTest, WideCharEncoding) {
 
   base::CommandLine cmd_line2 = base::CommandLine::FromString(kTestExeFilename);
   cmd_line2.AppendArgNative(GetBlTestFilePath());
-  cmd_line2.AppendArgNative(
-      base::NumberToString16(main_unittest_exe::kTestSingleDllLoad));
+  cmd_line2.AppendArgNative(base::NumberToWString(kTestSingleDllLoad));
   cmd_line2.AppendArgNative(MakePath(GetScopedTempDirValue(), kChineseUnicode));
 
   LaunchChildAndWait(cmd_line2, &exit_code);
-  ASSERT_EQ(main_unittest_exe::kDllLoadFailed, exit_code);
+  ASSERT_EQ(kDllLoadFailed, exit_code);
 }
 
 // Note: The test module used in this unittest has an export table.
@@ -378,13 +372,12 @@ TEST_F(ThirdPartyTest, WideCharEncodingWithExportDir) {
   // 1) Test a successful DLL load with no blacklist.
   base::CommandLine cmd_line1 = base::CommandLine::FromString(kTestExeFilename);
   cmd_line1.AppendArgNative(GetBlTestFilePath());
-  cmd_line1.AppendArgNative(
-      base::NumberToString16(main_unittest_exe::kTestSingleDllLoad));
+  cmd_line1.AppendArgNative(base::NumberToWString(kTestSingleDllLoad));
   cmd_line1.AppendArgNative(MakePath(GetScopedTempDirValue(), kChineseUnicode));
 
   int exit_code = 0;
   LaunchChildAndWait(cmd_line1, &exit_code);
-  ASSERT_EQ(main_unittest_exe::kDllLoadSuccess, exit_code);
+  ASSERT_EQ(kDllLoadSuccess, exit_code);
 
   //----------------------------------------------------------------------------
   // 2) Test a failed DLL load with blacklist.
@@ -402,36 +395,34 @@ TEST_F(ThirdPartyTest, WideCharEncodingWithExportDir) {
   // 2a) Only blacklist the original DLL name, which should be mined out of the
   //     export table by the hook, and the load should be blocked.
   std::vector<PackedListModule> vector;
-  vector.emplace_back(GeneratePackedListModule(
-      base::UTF16ToASCII(kTestDllName2), module_data.timedatestamp,
-      module_data.imagesize));
+  vector.emplace_back(GeneratePackedListModule(base::WideToASCII(kTestDllName2),
+                                               module_data.timedatestamp,
+                                               module_data.imagesize));
   ASSERT_TRUE(WriteModulesToBlacklist(vector));
 
   base::CommandLine cmd_line2 = base::CommandLine::FromString(kTestExeFilename);
   cmd_line2.AppendArgNative(GetBlTestFilePath());
-  cmd_line2.AppendArgNative(
-      base::NumberToString16(main_unittest_exe::kTestSingleDllLoad));
+  cmd_line2.AppendArgNative(base::NumberToWString(kTestSingleDllLoad));
   cmd_line2.AppendArgNative(MakePath(GetScopedTempDirValue(), kChineseUnicode));
 
   LaunchChildAndWait(cmd_line2, &exit_code);
-  ASSERT_EQ(main_unittest_exe::kDllLoadFailed, exit_code);
+  ASSERT_EQ(kDllLoadFailed, exit_code);
 
   // 2b) Only blacklist the new DLL file name, which should be mined out of the
   //     section by the hook, and the load should be blocked.
   vector.clear();
   vector.emplace_back(GeneratePackedListModule(
-      base::UTF16ToUTF8(kChineseUnicode), module_data.timedatestamp,
+      base::WideToUTF8(kChineseUnicode), module_data.timedatestamp,
       module_data.imagesize));
   ASSERT_TRUE(WriteModulesToBlacklist(vector));
 
   base::CommandLine cmd_line3 = base::CommandLine::FromString(kTestExeFilename);
   cmd_line3.AppendArgNative(GetBlTestFilePath());
-  cmd_line3.AppendArgNative(
-      base::NumberToString16(main_unittest_exe::kTestSingleDllLoad));
+  cmd_line3.AppendArgNative(base::NumberToWString(kTestSingleDllLoad));
   cmd_line3.AppendArgNative(MakePath(GetScopedTempDirValue(), kChineseUnicode));
 
   LaunchChildAndWait(cmd_line3, &exit_code);
-  ASSERT_EQ(main_unittest_exe::kDllLoadFailed, exit_code);
+  ASSERT_EQ(kDllLoadFailed, exit_code);
 }
 
 // Note: The test module used in this unittest has no export table.
@@ -444,14 +435,13 @@ TEST_F(ThirdPartyTest, DeprecatedBlacklistSanityCheck) {
   //    should trigger a block).
   base::CommandLine cmd_line1 = base::CommandLine::FromString(kTestExeFilename);
   cmd_line1.AppendArgNative(GetBlTestFilePath());
-  cmd_line1.AppendArgNative(
-      base::NumberToString16(main_unittest_exe::kTestSingleDllLoad));
+  cmd_line1.AppendArgNative(base::NumberToWString(kTestSingleDllLoad));
   cmd_line1.AppendArgNative(
       MakePath(GetScopedTempDirValue(), kOldBlacklistDllName));
 
   int exit_code = 0;
   LaunchChildAndWait(cmd_line1, &exit_code);
-  ASSERT_EQ(main_unittest_exe::kDllLoadFailed, exit_code);
+  ASSERT_EQ(kDllLoadFailed, exit_code);
 }
 
 // Note: This test only sanity checks the two SHA1 libraries used on either side
@@ -472,12 +462,12 @@ TEST_F(ThirdPartyTest, SHA1SanityCheck) {
 
   // Get hashes from elf_sha1.
   PackedListModule elf_sha1_generated = GeneratePackedListModule(
-      base::UTF16ToUTF8(kChineseUnicode), module_data.timedatestamp,
+      base::WideToUTF8(kChineseUnicode), module_data.timedatestamp,
       module_data.imagesize);
 
   // Get hashes from base_sha1.
   const std::string module_basename_hash =
-      base::SHA1HashString(base::UTF16ToUTF8(kChineseUnicode));
+      base::SHA1HashString(base::WideToUTF8(kChineseUnicode));
   const std::string module_code_id_hash = base::SHA1HashString(
       GetFingerprintString(module_data.timedatestamp, module_data.imagesize));
 
@@ -491,7 +481,7 @@ TEST_F(ThirdPartyTest, SHA1SanityCheck) {
 }
 
 // Flaky: crbug.com/868233
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define MAYBE_PathCaseSensitive DISABLED_PathCaseSensitive
 #else
 #define MAYBE_PathCaseSensitive PathCaseSensitive
@@ -513,7 +503,7 @@ TEST_F(ThirdPartyTest, MAYBE_PathCaseSensitive) {
   // before comparing.
   base::FilePath drive;
   ASSERT_TRUE(base::DevicePathToDriveLetterPath(
-      base::FilePath(base::ASCIIToUTF16(module_data.section_path)), &drive));
+      base::FilePath(base::ASCIIToWide(module_data.section_path)), &drive));
 
   EXPECT_EQ(drive.value().compare(
                 MakePath(GetScopedTempDirValue(), kTestDllName1MixedCase)),
@@ -523,14 +513,13 @@ TEST_F(ThirdPartyTest, MAYBE_PathCaseSensitive) {
   //    for this test.
   base::CommandLine cmd_line1 = base::CommandLine::FromString(kTestExeFilename);
   cmd_line1.AppendArgNative(GetBlTestFilePath());
-  cmd_line1.AppendArgNative(
-      base::NumberToString16(main_unittest_exe::kTestSingleDllLoad));
+  cmd_line1.AppendArgNative(base::NumberToWString(kTestSingleDllLoad));
   cmd_line1.AppendArgNative(
       MakePath(GetScopedTempDirValue(), kTestDllName1MixedCase));
 
   int exit_code = 0;
   LaunchChildAndWait(cmd_line1, &exit_code);
-  ASSERT_EQ(main_unittest_exe::kDllLoadSuccess, exit_code);
+  ASSERT_EQ(kDllLoadSuccess, exit_code);
 }
 
 // Test the status-code passing in registry.

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "chrome/browser/notifications/scheduler/public/notification_scheduler_types.h"
 
 namespace notifications {
@@ -17,7 +16,6 @@ class BackgroundTaskCoordinator;
 class DisplayAgent;
 class DisplayDecider;
 class ImpressionHistoryTracker;
-class NotificationBackgroundTaskScheduler;
 class NotificationSchedulerClientRegistrar;
 class ScheduledNotificationManager;
 struct SchedulerConfig;
@@ -28,12 +26,15 @@ class NotificationSchedulerContext {
  public:
   NotificationSchedulerContext(
       std::unique_ptr<NotificationSchedulerClientRegistrar> client_registrar,
-      std::unique_ptr<NotificationBackgroundTaskScheduler> background_task,
+      std::unique_ptr<BackgroundTaskCoordinator> background_task_coordinator,
       std::unique_ptr<ImpressionHistoryTracker> impression_tracker,
       std::unique_ptr<ScheduledNotificationManager> notification_manager,
       std::unique_ptr<DisplayAgent> display_agent,
       std::unique_ptr<DisplayDecider> display_decider,
       std::unique_ptr<SchedulerConfig> config);
+  NotificationSchedulerContext(const NotificationSchedulerContext&) = delete;
+  NotificationSchedulerContext& operator=(const NotificationSchedulerContext&) =
+      delete;
   ~NotificationSchedulerContext();
 
   NotificationSchedulerClientRegistrar* client_registrar() {
@@ -79,8 +80,6 @@ class NotificationSchedulerContext {
 
   // Used to schedule background task in OS level.
   std::unique_ptr<BackgroundTaskCoordinator> background_task_coordinator_;
-
-  DISALLOW_COPY_AND_ASSIGN(NotificationSchedulerContext);
 };
 
 }  // namespace notifications

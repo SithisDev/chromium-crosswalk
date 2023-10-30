@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,25 +8,27 @@
 #include <memory>
 #include <set>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/callback_forward.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bubble_observer.h"
 #include "chrome/browser/ui/bookmarks/bookmark_stats.h"
+#include "chrome/browser/ui/tabs/tab_group_theme.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_controller_observer.h"
+#include "chrome/browser/ui/views/bookmarks/saved_tab_groups/saved_tab_group_bar.h"
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_node_data.h"
 #include "components/prefs/pref_change_registrar.h"
+#include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/views/accessible_pane_view.h"
 #include "ui/views/animation/animation_delegate_views.h"
 #include "ui/views/context_menu_controller.h"
-#include "ui/views/controls/button/button.h"
-#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/menu/menu_types.h"
 #include "ui/views/drag_controller.h"
+#include "ui/views/view.h"
 
 class BookmarkBarViewObserver;
 class BookmarkBarViewTestHelper;
@@ -34,6 +36,7 @@ class BookmarkContextMenu;
 class Browser;
 class BrowserView;
 class Profile;
+class SavedTabGroupBar;
 
 namespace bookmarks {
 class BookmarkModel;
@@ -64,19 +67,19 @@ class LabelButton;
 // creating the BookmarkModel.
 class BookmarkBarView : public views::AccessiblePaneView,
                         public bookmarks::BookmarkModelObserver,
-                        public views::MenuButtonListener,
-                        public views::ButtonListener,
                         public views::ContextMenuController,
                         public views::DragController,
                         public views::AnimationDelegateViews,
                         public BookmarkMenuControllerObserver,
                         public bookmarks::BookmarkBubbleObserver {
  public:
-  // The internal view class name.
-  static const char kViewClassName[];
+  class ButtonSeparatorView;
 
+  METADATA_HEADER(BookmarkBarView);
   // |browser_view| can be NULL during tests.
   BookmarkBarView(Browser* browser, BrowserView* browser_view);
+  BookmarkBarView(const BookmarkBarView&) = delete;
+  BookmarkBarView& operator=(const BookmarkBarView&) = delete;
   ~BookmarkBarView() override;
 
   static void DisableAnimationsForTesting(bool disabled);
@@ -94,6 +97,7 @@ class BookmarkBarView : public views::AccessiblePaneView,
   // Sets whether the containing browser is showing an infobar.  This affects
   // layout during animation.
   void SetInfoBarVisible(bool infobar_visible);
+  bool GetInfoBarVisible() const;
 
   // Changes the state of the bookmark bar.
   void SetBookmarkBarState(BookmarkBar::State state,
@@ -145,14 +149,11 @@ class BookmarkBarView : public views::AccessiblePaneView,
   //
   // Note that we adjust the direction of both the URL and the title based on
   // the locale so that pure LTR strings are displayed properly in RTL locales.
-  static base::string16 CreateToolTipForURLAndTitle(
+  static std::u16string CreateToolTipForURLAndTitle(
       int max_tooltip_width,
       const gfx::FontList& font_list,
       const GURL& url,
-      const base::string16& title);
-
-  // Returns the current amount of overlap atop the browser toolbar.
-  int GetToolbarOverlap() const;
+      const std::u16string& title);
 
   // views::View:
   gfx::Size CalculatePreferredSize() const override;
@@ -168,10 +169,11 @@ class BookmarkBarView : public views::AccessiblePaneView,
   void OnDragEntered(const ui::DropTargetEvent& event) override;
   int OnDragUpdated(const ui::DropTargetEvent& event) override;
   void OnDragExited() override;
-  int OnPerformDrop(const ui::DropTargetEvent& event) override;
+  views::View::DropCallback GetDropCallback(
+      const ui::DropTargetEvent& event) override;
   void OnThemeChanged() override;
-  const char* GetClassName() const override;
-  void VisibilityChanged(View* starting_from, bool is_visible) override;
+  void VisibilityChanged(views::View* starting_from, bool is_visible) override;
+  void ChildPreferredSizeChanged(views::View* child) override;
 
   // AccessiblePaneView:
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
@@ -199,7 +201,8 @@ class BookmarkBarView : public views::AccessiblePaneView,
                          size_t new_index) override;
   void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
                          const bookmarks::BookmarkNode* parent,
-                         size_t index) override;
+                         size_t index,
+                         bool added_by_user) override;
   void BookmarkNodeRemoved(bookmarks::BookmarkModel* model,
                            const bookmarks::BookmarkNode* parent,
                            size_t old_index,
@@ -225,21 +228,12 @@ class BookmarkBarView : public views::AccessiblePaneView,
                            const gfx::Point& press_pt,
                            const gfx::Point& p) override;
 
-  // views::MenuButtonListener:
-  void OnMenuButtonClicked(views::Button* source,
-                           const gfx::Point& point,
-                           const ui::Event* event) override;
-
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
   // views::ContextMenuController:
   void ShowContextMenuForViewImpl(views::View* source,
                                   const gfx::Point& point,
                                   ui::MenuSourceType source_type) override;
 
  private:
-  class ButtonSeparatorView;
   struct DropInfo;
   struct DropLocation;
 
@@ -253,6 +247,12 @@ class BookmarkBarView : public views::AccessiblePaneView,
   // calculating the preferred height.
   void Init();
 
+  void AppsPageShortcutPressed(const ui::Event& event);
+  void OnButtonPressed(const bookmarks::BookmarkNode* node,
+                       const ui::Event& event);
+  void OnMenuButtonPressed(const bookmarks::BookmarkNode* node,
+                           const ui::Event& event);
+
   // NOTE: unless otherwise stated all methods that take an index are in terms
   // of the bookmark bar view. Typically the view index and model index are the
   // same, but they may differ during animations or drag and drop.
@@ -260,28 +260,25 @@ class BookmarkBarView : public views::AccessiblePaneView,
   // It's easy to get the mapping wrong. For this reason all these methods are
   // private.
 
-  // Returns BOOKMARK_LAUNCH_LOCATION_DETACHED_BAR or
-  // BOOKMARK_LAUNCH_LOCATION_ATTACHED_BAR based on detached node_data.
-  BookmarkLaunchLocation GetBookmarkLaunchLocation() const;
-
   // Returns the index of the first hidden bookmark button. If all buttons are
   // visible, this returns GetBookmarkButtonCount().
-  size_t GetFirstHiddenNodeIndex();
+  size_t GetFirstHiddenNodeIndex() const;
 
   // Creates the button showing the "Other Bookmarks" folder.
-  views::MenuButton* CreateOtherBookmarksButton();
+  std::unique_ptr<views::MenuButton> CreateOtherBookmarksButton();
 
   // Creates the button showing the "Managed Bookmarks" folder.
-  views::MenuButton* CreateManagedBookmarksButton();
+  std::unique_ptr<views::MenuButton> CreateManagedBookmarksButton();
 
   // Creates the button used when not all bookmark buttons fit.
-  views::MenuButton* CreateOverflowButton();
+  std::unique_ptr<views::MenuButton> CreateOverflowButton();
 
   // Creates the button for rendering the specified bookmark node.
-  views::View* CreateBookmarkButton(const bookmarks::BookmarkNode* node);
+  std::unique_ptr<views::View> CreateBookmarkButton(
+      const bookmarks::BookmarkNode* node);
 
   // Creates the button for rendering the apps page shortcut.
-  views::LabelButton* CreateAppsPageShortcutButton();
+  std::unique_ptr<views::LabelButton> CreateAppsPageShortcutButton();
 
   // Configures the button from the specified node. This sets the text,
   // and icon.
@@ -319,9 +316,13 @@ class BookmarkBarView : public views::AccessiblePaneView,
                              const bookmarks::BookmarkNodeData& data,
                              DropLocation* location);
 
+  // Marks the current drop as invalid and cancels the menu. Used when the
+  // model is mutated and a drop is in progress.
+  void InvalidateDrop();
+
   // Returns the node corresponding to |sender|, which is one of the
   // |bookmark_buttons_|.
-  const bookmarks::BookmarkNode* GetNodeForSender(View* sender) const;
+  const bookmarks::BookmarkNode* GetNodeForSender(views::View* sender) const;
 
   // Writes a BookmarkNodeData for node to data.
   void WriteBookmarkDragData(const bookmarks::BookmarkNode* node,
@@ -362,85 +363,107 @@ class BookmarkBarView : public views::AccessiblePaneView,
     SchedulePaint();
   }
 
-  // Inserts |button| in logical position |index| in the bar, maintaining
-  // correct focus traversal order.
-  void InsertBookmarkButtonAtIndex(views::View* button, size_t index);
+  // Inserts |bookmark_button| in logical position |index| in the bar,
+  // maintaining correct focus traversal order.
+  void InsertBookmarkButtonAtIndex(std::unique_ptr<views::View> bookmark_button,
+                                   size_t index);
 
   // Returns the model index for the bookmark associated with |button|,
   // or size_t{-1} if |button| is not a bookmark button from this bar.
   size_t GetIndexForButton(views::View* button);
 
-  // Returns the color that should be used to draw text on the bookmark bar.
-  SkColor GetBookmarkBarTextColor();
+  // Returns the target drop BookmarkNode parent pointer and updates `index`
+  // with the right value.
+  const bookmarks::BookmarkNode* GetParentNodeAndIndexForDrop(size_t& index);
+
+  // Drops Bookmark `data` and updates `output_drag_op` accordingly.
+  void PerformDrop(const bookmarks::BookmarkNodeData data,
+                   const bookmarks::BookmarkNode* parent_node,
+                   const size_t index,
+                   const bool copy,
+                   const ui::DropTargetEvent& event,
+                   ui::mojom::DragOperation& output_drag_op);
+
+  int GetDropLocationModelIndexForTesting() const;
 
   // Needed to react to kShowAppsShortcutInBookmarkBar changes.
   PrefChangeRegistrar profile_pref_registrar_;
 
   // Used for opening urls.
-  content::PageNavigator* page_navigator_;
+  raw_ptr<content::PageNavigator> page_navigator_ = nullptr;
 
   // BookmarkModel that owns the entries and folders that are shown in this
   // view. This is owned by the Profile.
-  bookmarks::BookmarkModel* model_;
+  raw_ptr<bookmarks::BookmarkModel> bookmark_model_ = nullptr;
 
   // ManagedBookmarkService. This is owned by the Profile.
-  bookmarks::ManagedBookmarkService* managed_;
+  raw_ptr<bookmarks::ManagedBookmarkService> managed_ = nullptr;
 
   // Used to manage showing a Menu, either for the most recently bookmarked
   // entries, or for the starred folder.
-  BookmarkMenuController* bookmark_menu_;
+  raw_ptr<BookmarkMenuController> bookmark_menu_ = nullptr;
 
   // Used when showing a menu for drag and drop. That is, if the user drags
   // over a folder this becomes non-null and manages the menu showing the
   // contents of the node.
-  BookmarkMenuController* bookmark_drop_menu_;
+  raw_ptr<BookmarkMenuController> bookmark_drop_menu_ = nullptr;
 
   // If non-NULL we're showing a context menu for one of the items on the
   // bookmark bar.
   std::unique_ptr<BookmarkContextMenu> context_menu_;
 
+  // Saved Tab Group section
+  raw_ptr<SavedTabGroupBar> saved_tab_group_bar_ = nullptr;
+
   // Shows the "Other Bookmarks" folder button.
-  views::MenuButton* other_bookmarks_button_;
+  raw_ptr<views::MenuButton> other_bookmarks_button_ = nullptr;
 
   // Shows the managed bookmarks entries.
-  views::MenuButton* managed_bookmarks_button_;
+  raw_ptr<views::MenuButton> managed_bookmarks_button_ = nullptr;
 
   // Shows the Apps page shortcut.
-  views::LabelButton* apps_page_shortcut_;
+  raw_ptr<views::LabelButton> apps_page_shortcut_ = nullptr;
 
   // Used to track drops on the bookmark bar view.
   std::unique_ptr<DropInfo> drop_info_;
 
   // Visible if not all the bookmark buttons fit.
-  views::MenuButton* overflow_button_;
+  raw_ptr<views::MenuButton> overflow_button_ = nullptr;
 
   // The individual bookmark buttons.
   std::vector<views::LabelButton*> bookmark_buttons_;
 
-  ButtonSeparatorView* bookmarks_separator_view_;
+  raw_ptr<ButtonSeparatorView> bookmarks_separator_view_ = nullptr;
+  raw_ptr<ButtonSeparatorView> saved_tab_groups_separator_view_ = nullptr;
 
-  Browser* const browser_;
-  BrowserView* browser_view_;
+  const raw_ptr<Browser> browser_;
+  raw_ptr<BrowserView> browser_view_;
 
   // True if the owning browser is showing an infobar.
-  bool infobar_visible_;
+  bool infobar_visible_ = false;
 
   // Animation controlling showing and hiding of the bar.
-  gfx::SlideAnimation size_animation_;
+  gfx::SlideAnimation size_animation_{this};
 
   // If the bookmark bubble is showing, this is the visible ancestor of the URL.
   // The visible ancestor is either the |other_bookmarks_button_|,
   // |overflow_button_| or a button on the bar.
-  views::Button* throbbing_view_;
+  raw_ptr<views::Button> throbbing_view_ = nullptr;
 
-  BookmarkBar::State bookmark_bar_state_;
+  BookmarkBar::State bookmark_bar_state_ = BookmarkBar::SHOW;
 
   base::ObserverList<BookmarkBarViewObserver>::Unchecked observers_;
 
   // Factory used to delay showing of the drop menu.
   base::WeakPtrFactory<BookmarkBarView> show_folder_method_factory_{this};
 
-  DISALLOW_COPY_AND_ASSIGN(BookmarkBarView);
+  // Returns WeakPtrs used in GetPageNavigatorGetter(). Used to ensure
+  // safety if BookmarkBarView is deleted after getting the callback.
+  base::WeakPtrFactory<BookmarkBarView> weak_ptr_factory_{this};
+
+  // Returns WeakPtrs used in GetDropCallback(). Used to ensure
+  // safety if `model_` is mutated after getting the callback.
+  base::WeakPtrFactory<BookmarkBarView> drop_weak_ptr_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_BAR_VIEW_H_

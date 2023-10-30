@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@
 
 #include "base/path_service.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/common/extensions/manifest_tests/chrome_manifest_test.h"
+#include "extensions/common/api/extension_action/action_info.h"
+#include "extensions/common/api/extension_action/action_info_test_util.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension.h"
@@ -35,7 +36,7 @@ std::unique_ptr<ActionInfo> PageActionManifestTest::LoadAction(
   scoped_refptr<Extension> extension = LoadAndExpectSuccess(
       manifest_filename.c_str());
   const ActionInfo* page_action_info =
-      ActionInfo::GetPageActionInfo(extension.get());
+      GetActionInfoOfType(*extension, ActionInfo::TYPE_PAGE);
   EXPECT_TRUE(page_action_info);
   if (page_action_info)
     return std::make_unique<ActionInfo>(*page_action_info);
@@ -49,7 +50,7 @@ TEST_F(PageActionManifestTest, ManifestVersion2DoesntAllowLegacyKeys) {
       LoadAndExpectSuccess("page_action_manifest_version_2.json"));
   ASSERT_TRUE(extension.get());
   const ActionInfo* page_action_info =
-      ActionInfo::GetPageActionInfo(extension.get());
+      GetActionInfoOfType(*extension, ActionInfo::TYPE_PAGE);
   ASSERT_TRUE(page_action_info);
 
   EXPECT_TRUE(page_action_info->default_icon.empty());
@@ -94,7 +95,7 @@ TEST_F(PageActionManifestTest, LoadPageActionHelper) {
   scoped_refptr<const Extension> extension =
       LoadAndExpectSuccess("page_action_default_popup.json");
   const ActionInfo* extension_action =
-      ActionInfo::GetPageActionInfo(extension.get());
+      GetActionInfoOfType(*extension, ActionInfo::TYPE_PAGE);
   ASSERT_TRUE(extension_action);
   EXPECT_EQ(extension->url().Resolve(kPopupHtmlFile),
             extension_action->default_popup_url);

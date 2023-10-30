@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define CHROME_TEST_CHROMEDRIVER_WINDOW_COMMANDS_H_
 
 #include <memory>
-#include <string>
 
 #include "base/callback_forward.h"
 #include "base/values.h"
@@ -22,12 +21,12 @@ class Status;
 class Timeout;
 class WebView;
 
-typedef base::Callback<Status(Session* session,
-                              WebView* web_view,
-                              const base::DictionaryValue&,
-                              std::unique_ptr<base::Value>*,
-                              Timeout*)>
-    WindowCommand;
+using WindowCommand =
+    base::RepeatingCallback<Status(Session* session,
+                                   WebView* web_view,
+                                   const base::DictionaryValue&,
+                                   std::unique_ptr<base::Value>*,
+                                   Timeout*)>;
 
 // Execute a Window Command on the target window.
 Status ExecuteWindowCommand(const WindowCommand& command,
@@ -218,6 +217,12 @@ Status ExecuteSendCommand(Session* session,
                           std::unique_ptr<base::Value>* value,
                           Timeout* timeout);
 
+Status ExecuteSendCommandFromWebSocket(Session* session,
+                                       WebView* web_view,
+                                       const base::DictionaryValue& params,
+                                       std::unique_ptr<base::Value>* value,
+                                       Timeout* timeout);
+
 Status ExecuteSendCommandAndGetResult(Session* session,
                                       WebView* web_view,
                                       const base::DictionaryValue& params,
@@ -236,19 +241,6 @@ Status ExecuteSendKeysToActiveElement(Session* session,
                                       const base::DictionaryValue& params,
                                       std::unique_ptr<base::Value>* value,
                                       Timeout* timeout);
-
-// Gets the status of the application cache (window.applicationCache.status).
-Status ExecuteGetAppCacheStatus(Session* session,
-                                WebView* web_view,
-                                const base::DictionaryValue& params,
-                                std::unique_ptr<base::Value>* value,
-                                Timeout* timeout);
-
-Status ExecuteIsBrowserOnline(Session* session,
-                              WebView* web_view,
-                              const base::DictionaryValue& params,
-                              std::unique_ptr<base::Value>* value,
-                              Timeout* timeout);
 
 Status ExecuteGetStorageItem(const char* storage,
                              Session* session,
@@ -297,6 +289,18 @@ Status ExecuteScreenshot(Session* session,
                          const base::DictionaryValue& params,
                          std::unique_ptr<base::Value>* value,
                          Timeout* timeout);
+
+Status ExecuteFullPageScreenshot(Session* session,
+                                 WebView* web_view,
+                                 const base::DictionaryValue& params,
+                                 std::unique_ptr<base::Value>* value,
+                                 Timeout* timeout);
+
+Status ExecutePrint(Session* session,
+                    WebView* web_view,
+                    const base::DictionaryValue& params,
+                    std::unique_ptr<base::Value>* value,
+                    Timeout* timeout);
 
 // Retrieve all cookies visible to the current page.
 Status ExecuteGetCookies(Session* session,
@@ -367,7 +371,7 @@ Status ExecutePerformActions(Session* session,
 Status ProcessInputActionSequence(
     Session* session,
     const base::DictionaryValue* action_sequence,
-    std::unique_ptr<base::DictionaryValue>* result);
+    std::vector<std::unique_ptr<base::DictionaryValue>>* action_list);
 
 Status ExecuteReleaseActions(Session* session,
                              WebView* web_view,
@@ -413,6 +417,14 @@ Status ExecuteSetSinkToUse(Session* session,
                            std::unique_ptr<base::Value>* value,
                            Timeout* timeout);
 
+// Starts mirroring the desktop to the sink specified by the "sinkName" value in
+// |params|.
+Status ExecuteStartDesktopMirroring(Session* session,
+                                    WebView* web_view,
+                                    const base::DictionaryValue& params,
+                                    std::unique_ptr<base::Value>* value,
+                                    Timeout* timeout);
+
 // Starts mirroring the tab to the sink specified by the "sinkName" value in
 // |params|.
 Status ExecuteStartTabMirroring(Session* session,
@@ -441,5 +453,12 @@ Status ExecuteGetIssueMessage(Session* session,
                               const base::DictionaryValue& params,
                               std::unique_ptr<base::Value>* value,
                               Timeout* timeout);
+
+// Sets permissions.
+Status ExecuteSetPermission(Session* session,
+                            WebView* web_view,
+                            const base::DictionaryValue& params,
+                            std::unique_ptr<base::Value>* value,
+                            Timeout* timeout);
 
 #endif  // CHROME_TEST_CHROMEDRIVER_WINDOW_COMMANDS_H_

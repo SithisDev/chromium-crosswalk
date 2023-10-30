@@ -1,20 +1,25 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/safe_browsing/certificate_reporting_service_test_utils.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/strings/string_piece.h"
-#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chrome/browser/ssl/certificate_error_report.h"
 #include "components/encrypted_messages/encrypted_message.pb.h"
 #include "components/encrypted_messages/message_encrypter.h"
+#include "components/security_interstitials/content/certificate_error_report.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_utils.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/http/http_response_headers.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/mojom/url_loader.mojom.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/boringssl/src/include/openssl/curve25519.h"
@@ -48,13 +53,16 @@ std::string GetReportContents(const network::ResourceRequest& request,
 void WaitReports(
     certificate_reporting_test_utils::RequestObserver* observer,
     const certificate_reporting_test_utils::ReportExpectation& expectation,
-    std::vector<std::string>* full_reports) {
+    std::vector<std::string>* full_reports,
+    std::vector<network::ResourceRequest>* full_requests) {
   observer->Wait(expectation.num_reports());
   EXPECT_EQ(expectation.successful_reports, observer->successful_reports());
   EXPECT_EQ(expectation.failed_reports, observer->failed_reports());
   EXPECT_EQ(expectation.delayed_reports, observer->delayed_reports());
   if (full_reports)
     *full_reports = observer->full_reports();
+  if (full_requests)
+    *full_requests = observer->full_requests();
   observer->ClearObservedReports();
 }
 
@@ -75,7 +83,7 @@ void RequestObserver::Wait(unsigned int num_events_to_wait_for) {
 
   if (num_received_events_ < num_events_to_wait_for) {
     num_events_to_wait_for_ = num_events_to_wait_for;
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
     run_loop_.reset(nullptr);
     EXPECT_EQ(0u, num_received_events_);
@@ -86,13 +94,15 @@ void RequestObserver::Wait(unsigned int num_events_to_wait_for) {
   }
 }
 
-void RequestObserver::OnRequest(const std::string& serialized_report,
+void RequestObserver::OnRequest(const network::ResourceRequest& url_request,
+                                const std::string& serialized_report,
                                 ReportSendingResult report_type) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   CertificateErrorReport report;
   EXPECT_TRUE(report.InitializeFromString(serialized_report));
 
   full_reports_.push_back(serialized_report);
+  full_requests_.push_back(url_request);
 
   switch (report_type) {
     case REPORTS_SUCCESSFUL:
@@ -141,6 +151,11 @@ const std::vector<std::string>& RequestObserver::full_reports() const {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   return full_reports_;
 }
+const std::vector<network::ResourceRequest>& RequestObserver::full_requests()
+    const {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  return full_requests_;
+}
 
 void RequestObserver::ClearObservedReports() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -148,6 +163,7 @@ void RequestObserver::ClearObservedReports() {
   failed_reports_.clear();
   delayed_reports_.clear();
   full_reports_.clear();
+  full_requests_.clear();
 }
 
 ReportExpectation::ReportExpectation() {}
@@ -195,7 +211,7 @@ void CertificateReportingServiceObserver::WaitForReset() {
   DCHECK(!run_loop_);
   if (did_reset_)
     return;
-  run_loop_.reset(new base::RunLoop());
+  run_loop_ = std::make_unique<base::RunLoop>();
   run_loop_->Run();
   run_loop_.reset();
 }
@@ -226,7 +242,8 @@ void CertificateReportingServiceTestHelper::ResumeDelayedRequest() {
   EXPECT_EQ(REPORTS_DELAY, expected_report_result_);
   if (delayed_client_) {
     SendResponse(std::move(delayed_client_), delayed_result_ == REPORTS_FAIL);
-    request_destroyed_observer_.OnRequest(delayed_report_, delayed_result_);
+    request_destroyed_observer_.OnRequest(delayed_request_, delayed_report_,
+                                          delayed_result_);
   }
 }
 
@@ -241,24 +258,28 @@ uint32_t CertificateReportingServiceTestHelper::server_public_key_version()
 
 void CertificateReportingServiceTestHelper::WaitForRequestsCreated(
     const ReportExpectation& expectation) {
-  WaitReports(&request_created_observer_, expectation, nullptr);
+  WaitReports(&request_created_observer_, expectation, nullptr, nullptr);
 }
 
 void CertificateReportingServiceTestHelper::WaitForRequestsCreated(
     const ReportExpectation& expectation,
-    std::vector<std::string>* full_reports) {
-  WaitReports(&request_created_observer_, expectation, full_reports);
+    std::vector<std::string>* full_reports,
+    std::vector<network::ResourceRequest>* full_requests) {
+  WaitReports(&request_created_observer_, expectation, full_reports,
+              full_requests);
 }
 
 void CertificateReportingServiceTestHelper::WaitForRequestsDestroyed(
     const ReportExpectation& expectation) {
-  WaitReports(&request_destroyed_observer_, expectation, nullptr);
+  WaitReports(&request_destroyed_observer_, expectation, nullptr, nullptr);
 }
 
 void CertificateReportingServiceTestHelper::WaitForRequestsDestroyed(
     const ReportExpectation& expectation,
-    std::vector<std::string>* full_reports) {
-  WaitReports(&request_destroyed_observer_, expectation, full_reports);
+    std::vector<std::string>* full_reports,
+    std::vector<network::ResourceRequest>* full_requests) {
+  WaitReports(&request_destroyed_observer_, expectation, full_reports,
+              full_requests);
 }
 
 void CertificateReportingServiceTestHelper::ExpectNoRequests(
@@ -278,38 +299,40 @@ void CertificateReportingServiceTestHelper::ExpectNoRequests(
 }
 
 void CertificateReportingServiceTestHelper::SendResponse(
-    network::mojom::URLLoaderClientPtr client,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
     bool fail) {
+  mojo::Remote<network::mojom::URLLoaderClient> client_remote(
+      std::move(client));
   if (fail) {
-    client->OnComplete(
+    client_remote->OnComplete(
         network::URLLoaderCompletionStatus(net::ERR_SSL_PROTOCOL_ERROR));
     return;
   }
 
-  network::ResourceResponseHead head;
-  head.headers = new net::HttpResponseHeaders(
+  auto head = network::mojom::URLResponseHead::New();
+  head->headers = new net::HttpResponseHeaders(
       "HTTP/1.1 200 OK\nContent-type: text/html\n\n");
-  head.mime_type = "text/html";
-  client->OnReceiveResponse(head);
-  client->OnComplete(network::URLLoaderCompletionStatus());
+  head->mime_type = "text/html";
+  client_remote->OnReceiveResponse(
+      std::move(head), mojo::ScopedDataPipeConsumerHandle(), absl::nullopt);
+  client_remote->OnComplete(network::URLLoaderCompletionStatus());
 }
 
 void CertificateReportingServiceTestHelper::CreateLoaderAndStart(
-    network::mojom::URLLoaderRequest request,
-    int32_t routing_id,
+    mojo::PendingReceiver<network::mojom::URLLoader> receiver,
     int32_t request_id,
     uint32_t options,
     const network::ResourceRequest& url_request,
-    network::mojom::URLLoaderClientPtr client,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
   const std::string serialized_report =
       GetReportContents(url_request, server_private_key_);
-  request_created_observer_.OnRequest(serialized_report,
+  request_created_observer_.OnRequest(url_request, serialized_report,
                                       expected_report_result_);
 
   if (expected_report_result_ == REPORTS_FAIL) {
     SendResponse(std::move(client), true);
-    request_destroyed_observer_.OnRequest(serialized_report,
+    request_destroyed_observer_.OnRequest(url_request, serialized_report,
                                           expected_report_result_);
     return;
   }
@@ -318,21 +341,22 @@ void CertificateReportingServiceTestHelper::CreateLoaderAndStart(
     DCHECK(!delayed_client_) << "Supports only one delayed request at a time";
     delayed_client_ = std::move(client);
     delayed_report_ = serialized_report;
+    delayed_request_ = url_request;
     delayed_result_ = expected_report_result_;
     return;
   }
 
   SendResponse(std::move(client), false);
-  request_destroyed_observer_.OnRequest(serialized_report,
+  request_destroyed_observer_.OnRequest(url_request, serialized_report,
                                         expected_report_result_);
 }
 
 void CertificateReportingServiceTestHelper::Clone(
-    network::mojom::URLLoaderFactoryRequest request) {
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver) {
   NOTREACHED();
 }
 
-std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+std::unique_ptr<network::PendingSharedURLLoaderFactory>
 CertificateReportingServiceTestHelper::Clone() {
   NOTREACHED();
   return nullptr;

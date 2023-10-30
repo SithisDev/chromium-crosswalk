@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,9 +17,9 @@ extern const bool kBrowserAliveWithNoWindows;
 // Whether various menu items are shown.
 extern const bool kShowExitMenuItem;
 extern const bool kShowUpgradeMenuItem;
-#if defined(GOOGLE_CHROME_BUILD)
+
+// Only used in branded builds.
 extern const bool kShowHelpMenuItemIcon;
-#endif
 
 // Should a link be shown on the bookmark bar allowing the user to import
 // bookmarks?

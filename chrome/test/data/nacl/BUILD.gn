@@ -1,4 +1,4 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -6,10 +6,11 @@ import("//build/config/compiler/compiler.gni")
 import("//build/config/features.gni")
 import("//build/config/nacl/config.gni")
 import("//components/nacl/features.gni")
+import("//components/nacl/target_cpu.gni")
 import("//ppapi/native_client/nacl_test_data.gni")
 
 group("nacl") {
-  newlib = "//build/toolchain/nacl:clang_newlib_${target_cpu}"
+  newlib = "//build/toolchain/nacl:clang_newlib_${nacl_target_cpu}"
   pnacl = "//build/toolchain/nacl:newlib_pnacl"
   data_deps = [
     ":exit_status_test($newlib)",
@@ -22,8 +23,6 @@ group("nacl") {
     ":pnacl_dyncode_syscall_disabled_test($pnacl)",
     ":pnacl_error_handling_test($pnacl)",
     ":pnacl_hw_eh_disabled_test($pnacl)",
-    ":pnacl_mime_type_test($newlib)",
-    ":pnacl_mime_type_test($pnacl)",
     ":pnacl_options_test($pnacl)",
     ":pnacl_url_loader_test($pnacl)",
     ":ppapi_bad_get_ppp_instance_crash($newlib)",
@@ -58,16 +57,19 @@ group("nacl") {
     ":sysconf_nprocessors_onln_test($newlib)",
     ":sysconf_nprocessors_onln_test($pnacl)",
   ]
-  if (target_cpu != "arm") {
+  if (nacl_target_cpu != "arm") {
     data_deps += [ ":partly_invalid($newlib)" ]
   }
-  if (target_cpu != "mipsel") {
-    glibc = "//build/toolchain/nacl:glibc_${target_cpu}"
+  if (target_cpu != "mipsel" && !is_mac && !is_win) {
+    # GlibC tools are not available for MIPS
+    # The GlibC toolchain is based on gcc, which no longer runs on mac;
+    # it still runs on Windows but is flaky due to its use of cygwin, so also
+    # disable it there.
+    glibc = "//build/toolchain/nacl:glibc_${nacl_target_cpu}"
     data_deps += [
       ":exit_status_test($glibc)",
       ":extension_validation_cache($glibc)",
       ":irt_exception_test($glibc)",
-      ":pnacl_mime_type_test($glibc)",
       ":ppapi_crash_in_callback($glibc)",
       ":ppapi_crash_off_main_thread($glibc)",
       ":ppapi_crash_ppapi_off_main_thread($glibc)",
@@ -81,17 +83,6 @@ group("nacl") {
       ":simple_test($glibc)",
       ":sysconf_nprocessors_onln_test($glibc)",
     ]
-  }
-  if (is_linux && enable_nacl_nonsfi) {
-    nonsfi = "//build/toolchain/nacl:newlib_pnacl_nonsfi"
-    data_deps += [
-      ":irt_exception_test($nonsfi)",
-      ":irt_manifest_file($nonsfi)",
-      ":shared_test_files($nonsfi)",
-    ]
-    if (is_clang) {
-      data_deps += [ ":nonsfi_libc_free" ]
-    }
   }
 }
 
@@ -122,12 +113,10 @@ if (is_nacl) {
       "progress_event_listener.js",
       "simple_cc.js",
     ]
-    outputs = [
-      "${root_build_dir}/nacl_test_data/${nacl_toolchain_variant}/{{source_file_part}}",
-    ]
+    outputs = [ "${root_build_dir}/nacl_test_data/${nacl_toolchain_variant}/{{source_file_part}}" ]
   }
 
-  source_set("ppapi_test_lib") {
+  static_library("ppapi_test_lib") {
     sources = [
       "ppapi_test_lib/get_browser_interface.cc",
       "ppapi_test_lib/get_browser_interface.h",
@@ -142,17 +131,14 @@ if (is_nacl) {
     deps = [
       "//native_client/src/shared/gio",
       "//native_client/src/shared/platform",
+      "//ppapi/c",
       "//ppapi/native_client:ppapi_lib",
     ]
   }
 
   nacl_test_data("irt_manifest_file") {
-    sources = [
-      "manifest_file/irt_manifest_file_test.cc",
-    ]
-    deps = [
-      "//ppapi/cpp",
-    ]
+    sources = [ "manifest_file/irt_manifest_file_test.cc" ]
+    deps = [ "//ppapi/cpp" ]
     nmfflags = [
       "-xtest_file:test_file.txt",
       "-xnmf says hello world:test_file.txt",
@@ -166,50 +152,34 @@ if (is_nacl) {
   }
 
   nacl_test_data("irt_exception_test") {
-    sources = [
-      "irt_exception/irt_exception_test.cc",
-    ]
-    deps = [
-      ":ppapi_test_lib",
-    ]
+    sources = [ "irt_exception/irt_exception_test.cc" ]
+    deps = [ ":ppapi_test_lib" ]
     libs = [ "nacl_exception" ]
     destination_dir = "nacl_test_data"
     test_files = [ "irt_exception/irt_exception_test.html" ]
   }
 }
 
-if (is_nacl && !is_nacl_nonsfi) {
+if (is_nacl) {
   nacl_test_data("simple_test") {
     output_name = "simple"
-    sources = [
-      "simple.cc",
-    ]
-    deps = [
-      "//ppapi/cpp",
-    ]
+    sources = [ "simple.cc" ]
+    deps = [ "//ppapi/cpp" ]
     destination_dir = "nacl_test_data"
     test_files = [ "nacl_load_test.html" ]
   }
 
   nacl_test_data("exit_status_test") {
     output_name = "pm_exit_status_test"
-    sources = [
-      "exit_status/pm_exit_status_test.cc",
-    ]
-    deps = [
-      "//ppapi/cpp",
-    ]
+    sources = [ "exit_status/pm_exit_status_test.cc" ]
+    deps = [ "//ppapi/cpp" ]
     destination_dir = "nacl_test_data"
     test_files = [ "exit_status/pm_exit_status_test.html" ]
   }
 
   nacl_test_data("extension_validation_cache") {
-    sources = [
-      "simple.cc",
-    ]
-    deps = [
-      "//ppapi/cpp",
-    ]
+    sources = [ "simple.cc" ]
+    deps = [ "//ppapi/cpp" ]
 
     # Need a new directory to not clash with with other extension
     # tests's files (e.g., manifest.json).
@@ -231,130 +201,87 @@ if (is_nacl && !is_nacl_nonsfi) {
   }
 
   nacl_test_data("sysconf_nprocessors_onln_test") {
-    sources = [
-      "sysconf_nprocessors_onln/sysconf_nprocessors_onln_test.cc",
-    ]
-    deps = [
-      "//ppapi/cpp",
-    ]
+    sources = [ "sysconf_nprocessors_onln/sysconf_nprocessors_onln_test.cc" ]
+    deps = [ "//ppapi/cpp" ]
     destination_dir = "nacl_test_data"
     test_files =
         [ "sysconf_nprocessors_onln/sysconf_nprocessors_onln_test.html" ]
   }
 
   nacl_test_data("ppapi_progress_events") {
-    sources = [
-      "progress_events/ppapi_progress_events.cc",
-    ]
+    sources = [ "progress_events/ppapi_progress_events.cc" ]
     destination_dir = "nacl_test_data"
     test_files = [ "progress_events/ppapi_progress_events.html" ]
-    deps = [
-      ":ppapi_test_lib",
-    ]
+    deps = [ ":ppapi_test_lib" ]
   }
 
   nacl_test_data("ppapi_bad_ppp_initialize") {
-    sources = [
-      "bad/ppapi_bad_ppp_initialize.cc",
-    ]
+    sources = [ "bad/ppapi_bad_ppp_initialize.cc" ]
     destination_dir = "nacl_test_data"
   }
 
   nacl_test_data("ppapi_bad_ppp_initialize_crash") {
-    sources = [
-      "bad/ppapi_bad_ppp_initialize_crash.cc",
-    ]
+    sources = [ "bad/ppapi_bad_ppp_initialize_crash.cc" ]
+    deps = [ ":ppapi_test_lib" ]
     destination_dir = "nacl_test_data"
   }
 
   nacl_test_data("ppapi_bad_no_ppp_instance") {
-    sources = [
-      "bad/ppapi_bad_no_ppp_instance.cc",
-    ]
-    deps = [
-      "//native_client/src/shared/platform",
-    ]
+    sources = [ "bad/ppapi_bad_no_ppp_instance.cc" ]
+    deps = [ "//native_client/src/shared/platform" ]
     destination_dir = "nacl_test_data"
   }
 
   nacl_test_data("ppapi_bad_get_ppp_instance_crash") {
-    sources = [
-      "bad/ppapi_bad_get_ppp_instance_crash.cc",
-    ]
+    sources = [ "bad/ppapi_bad_get_ppp_instance_crash.cc" ]
+    deps = [ ":ppapi_test_lib" ]
     destination_dir = "nacl_test_data"
   }
 
   nacl_test_data("ppapi_bad_ppp_instance_didcreate") {
-    sources = [
-      "bad/ppapi_bad_ppp_instance_didcreate.cc",
-    ]
+    sources = [ "bad/ppapi_bad_ppp_instance_didcreate.cc" ]
     destination_dir = "nacl_test_data"
   }
 
   nacl_test_data("ppapi_bad_ppp_instance_didcreate_crash") {
-    sources = [
-      "bad/ppapi_bad_ppp_instance_didcreate_crash.cc",
-    ]
+    sources = [ "bad/ppapi_bad_ppp_instance_didcreate_crash.cc" ]
+    deps = [ ":ppapi_test_lib" ]
     destination_dir = "nacl_test_data"
   }
 
   nacl_test_data("ppapi_crash_via_check_failure") {
-    sources = [
-      "crash/ppapi_crash_via_check_failure.cc",
-    ]
+    sources = [ "crash/ppapi_crash_via_check_failure.cc" ]
     destination_dir = "nacl_test_data"
-    deps = [
-      ":ppapi_test_lib",
-    ]
+    deps = [ ":ppapi_test_lib" ]
   }
 
   nacl_test_data("ppapi_crash_via_exit_call") {
-    sources = [
-      "crash/ppapi_crash_via_exit_call.cc",
-    ]
+    sources = [ "crash/ppapi_crash_via_exit_call.cc" ]
     destination_dir = "nacl_test_data"
-    deps = [
-      ":ppapi_test_lib",
-    ]
+    deps = [ ":ppapi_test_lib" ]
   }
 
   nacl_test_data("ppapi_crash_in_callback") {
-    sources = [
-      "crash/ppapi_crash_in_callback.cc",
-    ]
+    sources = [ "crash/ppapi_crash_in_callback.cc" ]
     destination_dir = "nacl_test_data"
-    deps = [
-      ":ppapi_test_lib",
-    ]
+    deps = [ ":ppapi_test_lib" ]
   }
 
   nacl_test_data("ppapi_crash_off_main_thread") {
-    sources = [
-      "crash/ppapi_crash_off_main_thread.cc",
-    ]
+    sources = [ "crash/ppapi_crash_off_main_thread.cc" ]
     destination_dir = "nacl_test_data"
-    deps = [
-      ":ppapi_test_lib",
-    ]
+    deps = [ ":ppapi_test_lib" ]
   }
 
   nacl_test_data("ppapi_crash_ppapi_off_main_thread") {
-    sources = [
-      "crash/ppapi_crash_ppapi_off_main_thread.cc",
-    ]
+    sources = [ "crash/ppapi_crash_ppapi_off_main_thread.cc" ]
     destination_dir = "nacl_test_data"
-    deps = [
-      ":ppapi_test_lib",
-    ]
+    deps = [ ":ppapi_test_lib" ]
   }
 
   nacl_test_data("ppapi_extension_mime_handler") {
-    sources = [
-      "extension_mime_handler/ppapi_extension_mime_handler.cc",
-    ]
-    deps = [
-      ":ppapi_test_lib",
-    ]
+    sources = [ "extension_mime_handler/ppapi_extension_mime_handler.cc" ]
+    deps = [ ":ppapi_test_lib" ]
     destination_dir = "nacl_test_data"
     test_files = [
       "extension_mime_handler/ppapi_extension_mime_handler.html",
@@ -371,12 +298,8 @@ if (is_nacl && !is_nacl_nonsfi) {
 
   nacl_test_data("pnacl_debug_url_test") {
     output_name = "pnacl_debug_url"
-    sources = [
-      "simple.cc",
-    ]
-    deps = [
-      "//ppapi/cpp",
-    ]
+    sources = [ "simple.cc" ]
+    deps = [ "//ppapi/cpp" ]
     generate_nmf = false
     if (current_cpu == "pnacl") {
       debug_pexe = true
@@ -392,12 +315,8 @@ if (is_nacl && !is_nacl_nonsfi) {
 
   nacl_test_data("pnacl_error_handling_test") {
     output_name = "pnacl_errors"
-    sources = [
-      "simple.cc",
-    ]
-    deps = [
-      "//ppapi/cpp",
-    ]
+    sources = [ "simple.cc" ]
+    deps = [ "//ppapi/cpp" ]
     generate_nmf = false
     if (current_cpu == "pnacl") {
       nonstable_pexe = true
@@ -414,23 +333,10 @@ if (is_nacl && !is_nacl_nonsfi) {
     ]
   }
 
-  copy("pnacl_mime_type_test") {
-    sources = [
-      "pnacl_mime_type/pnacl_mime_type.html",
-    ]
-    outputs = [
-      "${root_build_dir}/nacl_test_data/${nacl_toolchain_variant}/{{source_file_part}}",
-    ]
-  }
-
   nacl_test_data("pnacl_options_test") {
     output_name = "pnacl_options"
-    sources = [
-      "simple.cc",
-    ]
-    deps = [
-      "//ppapi/cpp",
-    ]
+    sources = [ "simple.cc" ]
+    deps = [ "//ppapi/cpp" ]
     generate_nmf = false
     destination_dir = "nacl_test_data"
     test_files = [
@@ -443,12 +349,8 @@ if (is_nacl && !is_nacl_nonsfi) {
 
   nacl_test_data("pnacl_url_loader_test") {
     output_name = "pnacl_url_loader"
-    sources = [
-      "pnacl_url_loader/pnacl_url_loader.cc",
-    ]
-    deps = [
-      "//ppapi/cpp",
-    ]
+    sources = [ "pnacl_url_loader/pnacl_url_loader.cc" ]
+    deps = [ "//ppapi/cpp" ]
     generate_nmf = true
     destination_dir = "nacl_test_data"
     test_files = [ "pnacl_url_loader/pnacl_url_loader.html" ]
@@ -456,9 +358,8 @@ if (is_nacl && !is_nacl_nonsfi) {
 
   nacl_test_data("pnacl_dyncode_syscall_disabled_test") {
     output_name = "pnacl_dyncode_syscall_disabled"
-    sources = [
-      "pnacl_dyncode_syscall_disabled/pnacl_dyncode_syscall_disabled.cc",
-    ]
+    sources =
+        [ "pnacl_dyncode_syscall_disabled/pnacl_dyncode_syscall_disabled.cc" ]
     deps = [
       ":ppapi_test_lib",
       "//native_client/src/untrusted/nacl:nacl_dyncode_private",
@@ -470,9 +371,7 @@ if (is_nacl && !is_nacl_nonsfi) {
 
   nacl_test_data("pnacl_hw_eh_disabled_test") {
     output_name = "pnacl_hw_eh_disabled"
-    sources = [
-      "pnacl_hw_eh_disabled/pnacl_hw_eh_disabled.cc",
-    ]
+    sources = [ "pnacl_hw_eh_disabled/pnacl_hw_eh_disabled.cc" ]
     deps = [
       ":ppapi_test_lib",
       "//native_client/src/untrusted/nacl:nacl_exception_private",
@@ -483,34 +382,22 @@ if (is_nacl && !is_nacl_nonsfi) {
 
   # Legacy NaCl PPAPI interface tests being here.
   nacl_test_data("ppapi_ppb_core") {
-    sources = [
-      "ppapi/ppb_core/ppapi_ppb_core.cc",
-    ]
-    deps = [
-      ":ppapi_test_lib",
-    ]
+    sources = [ "ppapi/ppb_core/ppapi_ppb_core.cc" ]
+    deps = [ ":ppapi_test_lib" ]
     destination_dir = "nacl_test_data"
     test_files = [ "ppapi/ppb_core/ppapi_ppb_core.html" ]
   }
 
   nacl_test_data("ppapi_ppb_instance") {
-    sources = [
-      "ppapi/ppb_instance/ppapi_ppb_instance.cc",
-    ]
-    deps = [
-      ":ppapi_test_lib",
-    ]
+    sources = [ "ppapi/ppb_instance/ppapi_ppb_instance.cc" ]
+    deps = [ ":ppapi_test_lib" ]
     destination_dir = "nacl_test_data"
     test_files = [ "ppapi/ppb_instance/ppapi_ppb_instance.html" ]
   }
 
   nacl_test_data("ppapi_ppp_instance") {
-    sources = [
-      "ppapi/ppp_instance/ppapi_ppp_instance.cc",
-    ]
-    deps = [
-      ":ppapi_test_lib",
-    ]
+    sources = [ "ppapi/ppp_instance/ppapi_ppp_instance.cc" ]
+    deps = [ ":ppapi_test_lib" ]
     destination_dir = "nacl_test_data"
     test_files = [
       "ppapi/ppp_instance/ppapi_ppp_instance.html",
@@ -521,116 +408,8 @@ if (is_nacl && !is_nacl_nonsfi) {
   if (target_cpu != "arm") {
     # Source file does not have asm for ARM.
     nacl_test_data("partly_invalid") {
-      sources = [
-        "//native_client/tests/stubout_mode/partly_invalid.c",
-      ]
+      sources = [ "//native_client/tests/stubout_mode/partly_invalid.c" ]
       destination_dir = "nacl_test_data"
     }
-  }
-}
-
-if (is_linux && is_clang) {
-  if (target_cpu == "x86") {
-    arch = "x86_32"
-  } else if (target_cpu == "x64") {
-    arch = "x86_64"
-  } else {
-    arch = target_cpu
-  }
-
-  config("nonsfi_libc_free_nexe_config") {
-    cflags = [
-      "-Wno-sign-compare",
-
-      # Stack-Smashing protector does not work with libc-free context.
-      "-fno-stack-protector",
-
-      # Optimizers may translate the original code to code which
-      # requires builtin functions and/or relocations. Specifically,
-      # the LLVM's optimizer translates for-loop based zero
-      # clear to memset.
-      "-O0",
-
-      # ARM GCC emits symbols like __aeabi_unwind_cpp_pr0 in
-      # .exidx sections without this flag.
-      "-fno-unwind-tables",
-    ]
-
-    # Workaround against LLVM bug.
-    # In short, an LTO optimization pass might recognize
-    # naive implementations of builtins (such as memset)
-    # and replace them with references to the real builtins,
-    # which, in the case of -nostdlib, might cause the binary
-    # to get undefined references to those symbols.
-    #
-    # See more details:
-    # https://llvm.org/bugs/show_bug.cgi?id=30403
-    if (use_thin_lto) {
-      if (use_lld) {
-        ldflags = [ "-Wl,--lto-O0" ]
-      } else {
-        ldflags = [ "-Wl,-plugin-opt,O0" ]
-      }
-    }
-  }
-
-  executable("nonsfi_libc_free_nexe") {
-    output_name = "libc_free_$arch"
-    output_extension = "nexe"
-    sources = [
-      "nonsfi/libc_free.c",
-    ]
-
-    no_default_deps = true
-
-    # Here, we would like to link a relocatable, libc-free executable.
-    # -shared/-fPIC make this binary relocatable. -nostdlib ensures
-    # this is libc-free.
-    # The program does not apply any dynamic relocations at start up,
-    # so it cannot rely on relocations having been applied.
-    # In addition, -fvisibility=hidden avoids creating some types
-    # of relocation.
-    cflags = [
-      "-fPIC",
-      "-fvisibility=hidden",
-    ]
-    ldflags = [
-      "-nostdlib",
-      "-shared",
-
-      # This binary cannot relocate itself, so we should have no
-      # undefined references left.
-      "-Wl,--no-undefined",
-
-      # Silence the warning about the unused '-pthread' argument.
-      # TODO(gn): Come up with a way to remove the -pthread flag instead.
-      "-Qunused-arguments",
-    ]
-    defines = [ "NACL_LINUX=1" ]
-    include_dirs = [ "../../../.." ]
-
-    # Do not use any sanitizers or coverage tools, which require a few symbols.
-    configs -= [ "//build/config/sanitizers:default_sanitizer_flags" ]
-    configs -= [ "//build/config/coverage:default_coverage" ]
-    configs += [ ":nonsfi_libc_free_nexe_config" ]
-  }
-
-  copy("nonsfi_libc_free") {
-    sources = [
-      "${root_out_dir}/libc_free_${arch}.nexe",
-
-      # TODO(ncbray) move into chrome/test/data/nacl when all tests are
-      # converted.
-      "//ppapi/native_client/tools/browser_tester/browserdata/nacltest.js",
-      "nonsfi/irt_test.html",
-      "nonsfi/libc_free.html",
-      "nonsfi/libc_free.nmf",
-    ]
-    outputs = [
-      "${root_build_dir}/nacl_test_data/libc-free/{{source_file_part}}",
-    ]
-    deps = [
-      ":nonsfi_libc_free_nexe",
-    ]
   }
 }

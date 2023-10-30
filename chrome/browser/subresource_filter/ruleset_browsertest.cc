@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "components/subresource_filter/content/browser/ruleset_service.h"
 #include "components/subresource_filter/core/common/common_features.h"
 #include "components/subresource_filter/core/common/indexed_ruleset.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace subresource_filter {
@@ -108,15 +109,15 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest, InvalidRuleset_Checksum) {
       g_browser_process->subresource_filter_ruleset_service();
 
   // Publish the good ruleset.
-  TestRulesetPublisher publisher;
+  TestRulesetPublisher publisher(service);
   publisher.SetRuleset(test_ruleset_pair.unindexed);
 
   // Now corrupt it by flipping one entry.  This can only be detected
   // via the checksum, and not the Flatbuffer Verifier.  This was determined
   // at random by flipping elements until this test failed, then adding
   // the checksum code and ensuring it passed.
-  testing::TestRuleset::CorruptByFilling(test_ruleset_pair.indexed, 28250,
-                                         28251, 32);
+  testing::TestRuleset::CorruptByFilling(test_ruleset_pair.indexed, 28246,
+                                         28247, 32);
   OpenAndPublishRuleset(service, test_ruleset_pair.indexed.path);
   ASSERT_TRUE(service->GetRulesetDealer());
 
@@ -186,23 +187,41 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
                                       1);
 }
 
-IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest, LazyRulesetValidation) {
+class SubresourceFilterBrowserTestWithoutAdTagging
+    : public SubresourceFilterBrowserTest {
+ public:
+  SubresourceFilterBrowserTestWithoutAdTagging() {
+    feature_list_.InitAndDisableFeature(subresource_filter::kAdTagging);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTestWithoutAdTagging,
+                       LazyRulesetValidation) {
   // The ruleset shouldn't be validated until it's used, unless ad tagging is
   // enabled.
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(subresource_filter::kAdTagging);
   SetRulesetToDisallowURLsWithPathSuffix("included_script.js");
   RulesetVerificationStatus dealer_status = GetRulesetVerification();
   EXPECT_EQ(RulesetVerificationStatus::kNotVerified, dealer_status);
 }
 
-IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
+class SubresourceFilterBrowserTestWithAdTagging
+    : public SubresourceFilterBrowserTest {
+ public:
+  SubresourceFilterBrowserTestWithAdTagging() {
+    feature_list_.InitAndEnableFeature(subresource_filter::kAdTagging);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTestWithAdTagging,
                        AdsTaggingImmediateRulesetValidation) {
   // When Ads Tagging is enabled, the ruleset should be validated as soon as
   // it's published.
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(subresource_filter::kAdTagging);
-
   SetRulesetToDisallowURLsWithPathSuffix("included_script.js");
   RulesetVerificationStatus dealer_status = GetRulesetVerification();
   EXPECT_EQ(RulesetVerificationStatus::kIntact, dealer_status);

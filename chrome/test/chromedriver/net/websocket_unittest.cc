@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,19 @@
 #include <string>
 #include <vector>
 
+#include "base/base64.h"
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "chrome/test/chromedriver/net/test_http_server.h"
-#include "net/url_request/url_request_test_util.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -31,16 +33,11 @@ void OnConnectFinished(base::RunLoop* run_loop, int* save_error, int error) {
   run_loop->Quit();
 }
 
-void RunPending(base::MessageLoop* loop) {
-  base::RunLoop run_loop;
-  loop->task_runner()->PostTask(FROM_HERE, run_loop.QuitClosure());
-  run_loop.Run();
-}
-
 class Listener : public WebSocketListener {
  public:
-  explicit Listener(const std::vector<std::string>& messages)
-      : messages_(messages) {}
+  explicit Listener(const std::vector<std::string>& messages,
+                    base::RunLoop* run_loop)
+      : messages_(messages), run_loop_(run_loop) {}
 
   ~Listener() override { EXPECT_TRUE(messages_.empty()); }
 
@@ -49,19 +46,19 @@ class Listener : public WebSocketListener {
     EXPECT_EQ(messages_[0], message);
     messages_.erase(messages_.begin());
     if (messages_.empty())
-      base::RunLoop::QuitCurrentWhenIdleDeprecated();
+      run_loop_->QuitWhenIdle();
   }
 
   void OnClose() override { EXPECT_TRUE(false); }
 
  private:
   std::vector<std::string> messages_;
+  raw_ptr<base::RunLoop> run_loop_;
 };
 
 class CloseListener : public WebSocketListener {
  public:
-  explicit CloseListener(base::RunLoop* run_loop)
-      : run_loop_(run_loop) {}
+  explicit CloseListener(base::RunLoop* run_loop) : run_loop_(run_loop) {}
 
   ~CloseListener() override { EXPECT_FALSE(run_loop_); }
 
@@ -71,11 +68,28 @@ class CloseListener : public WebSocketListener {
     EXPECT_TRUE(run_loop_);
     if (run_loop_)
       run_loop_->Quit();
-    run_loop_ = NULL;
+    run_loop_ = nullptr;
   }
 
  private:
-  base::RunLoop* run_loop_;
+  raw_ptr<base::RunLoop> run_loop_;
+};
+
+class MessageReceivedListener : public WebSocketListener {
+ public:
+  MessageReceivedListener() = default;
+  ~MessageReceivedListener() override = default;
+
+  void OnMessageReceived(const std::string& message) override {
+    messages_.push_back(message);
+  }
+
+  const std::vector<std::string>& Messages() const { return messages_; }
+
+  void OnClose() override {}
+
+ private:
+  std::vector<std::string> messages_;
 };
 
 class WebSocketTest : public testing::Test {
@@ -97,12 +111,12 @@ class WebSocketTest : public testing::Test {
             : new WebSocket(url, listener, read_buffer_size_));
     base::RunLoop run_loop;
     sock->Connect(base::BindOnce(&OnConnectFinished, &run_loop, &error));
-    loop_.task_runner()->PostDelayedTask(FROM_HERE, run_loop.QuitClosure(),
-                                         base::TimeDelta::FromSeconds(10));
+    task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
+        FROM_HERE, run_loop.QuitClosure(), base::Seconds(10));
     run_loop.Run();
     if (error == net::OK)
       return sock;
-    return std::unique_ptr<WebSocket>();
+    return nullptr;
   }
 
   std::unique_ptr<WebSocket> CreateConnectedWebSocket(
@@ -111,21 +125,22 @@ class WebSocketTest : public testing::Test {
   }
 
   void SendReceive(const std::vector<std::string>& messages) {
-    Listener listener(messages);
+    base::RunLoop run_loop;
+    Listener listener(messages, &run_loop);
     std::unique_ptr<WebSocket> sock(CreateConnectedWebSocket(&listener));
     ASSERT_TRUE(sock);
     for (size_t i = 0; i < messages.size(); ++i) {
       ASSERT_TRUE(sock->Send(messages[i]));
     }
-    base::RunLoop run_loop;
-    loop_.task_runner()->PostDelayedTask(FROM_HERE, run_loop.QuitClosure(),
-                                         base::TimeDelta::FromSeconds(10));
+    task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
+        FROM_HERE, run_loop.QuitClosure(), base::Seconds(10));
     run_loop.Run();
   }
 
   void SetReadBufferSize(size_t size) { read_buffer_size_ = size; }
 
-  base::MessageLoopForIO loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
   TestHttpServer server_;
   size_t read_buffer_size_ = 0;
 };
@@ -133,33 +148,33 @@ class WebSocketTest : public testing::Test {
 }  // namespace
 
 TEST_F(WebSocketTest, CreateDestroy) {
-  CloseListener listener(NULL);
+  CloseListener listener(nullptr);
   WebSocket sock(GURL("ws://127.0.0.1:2222"), &listener);
 }
 
 TEST_F(WebSocketTest, Connect) {
-  CloseListener listener(NULL);
+  CloseListener listener(nullptr);
   ASSERT_TRUE(CreateWebSocket(server_.web_socket_url(), &listener));
-  RunPending(&loop_);
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(server_.WaitForConnectionsToClose());
 }
 
 TEST_F(WebSocketTest, ConnectNoServer) {
-  CloseListener listener(NULL);
-  ASSERT_FALSE(CreateWebSocket(GURL("ws://127.0.0.1:33333"), NULL));
+  CloseListener listener(nullptr);
+  ASSERT_FALSE(CreateWebSocket(GURL("ws://127.0.0.1:33333"), nullptr));
 }
 
 TEST_F(WebSocketTest, Connect404) {
   server_.SetRequestAction(TestHttpServer::kNotFound);
-  CloseListener listener(NULL);
-  ASSERT_FALSE(CreateWebSocket(server_.web_socket_url(), NULL));
-  RunPending(&loop_);
+  CloseListener listener(nullptr);
+  ASSERT_FALSE(CreateWebSocket(server_.web_socket_url(), nullptr));
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(server_.WaitForConnectionsToClose());
 }
 
 TEST_F(WebSocketTest, ConnectServerClosesConn) {
   server_.SetRequestAction(TestHttpServer::kClose);
-  CloseListener listener(NULL);
+  CloseListener listener(nullptr);
   ASSERT_FALSE(CreateWebSocket(server_.web_socket_url(), &listener));
 }
 
@@ -170,8 +185,8 @@ TEST_F(WebSocketTest, CloseOnReceive) {
   std::unique_ptr<WebSocket> sock(CreateConnectedWebSocket(&listener));
   ASSERT_TRUE(sock);
   ASSERT_TRUE(sock->Send("hi"));
-  loop_.task_runner()->PostDelayedTask(FROM_HERE, run_loop.QuitClosure(),
-                                       base::TimeDelta::FromSeconds(10));
+  task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
+      FROM_HERE, run_loop.QuitClosure(), base::Seconds(10));
   run_loop.Run();
 }
 
@@ -183,29 +198,24 @@ TEST_F(WebSocketTest, CloseOnSend) {
   server_.Stop();
 
   sock->Send("hi");
-  loop_.task_runner()->PostDelayedTask(FROM_HERE, run_loop.QuitClosure(),
-                                       base::TimeDelta::FromSeconds(10));
+  task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
+      FROM_HERE, run_loop.QuitClosure(), base::Seconds(10));
   run_loop.Run();
   ASSERT_FALSE(sock->Send("hi"));
 }
 
-#if !DCHECK_IS_ON()
 TEST_F(WebSocketTest, SendReceive) {
   std::vector<std::string> messages;
   messages.push_back("hello");
   SendReceive(messages);
 }
-#endif
 
-#if !DCHECK_IS_ON()
 TEST_F(WebSocketTest, SendReceiveLarge) {
   std::vector<std::string> messages;
   messages.push_back(std::string(10 << 20, 'a'));
   SendReceive(messages);
 }
-#endif
 
-#if !DCHECK_IS_ON()
 TEST_F(WebSocketTest, SendReceiveManyPacks) {
   std::vector<std::string> messages;
   // A message size of 1 << 16 crashes code with https://crbug.com/877105 bug
@@ -215,9 +225,7 @@ TEST_F(WebSocketTest, SendReceiveManyPacks) {
   SetReadBufferSize(1);
   SendReceive(messages);
 }
-#endif
 
-#if !DCHECK_IS_ON()
 TEST_F(WebSocketTest, SendReceiveMultiple) {
   std::vector<std::string> messages;
   messages.push_back("1");
@@ -225,4 +233,76 @@ TEST_F(WebSocketTest, SendReceiveMultiple) {
   messages.push_back("3");
   SendReceive(messages);
 }
-#endif
+
+TEST_F(WebSocketTest, VerifyTextFramelsProcessed) {
+  constexpr uint8_t kFinalBit = 0x80;
+
+  const std::string kOriginalMessage = "hello";
+  std::string frame = {
+      static_cast<char>(net::WebSocketFrameHeader::kOpCodeText | kFinalBit),
+      static_cast<char>(kOriginalMessage.length())};
+  frame += kOriginalMessage;
+  std::string encoded_frame;
+  base::Base64Encode(frame, &encoded_frame);
+
+  server_.SetMessageAction(TestHttpServer::kEchoRawMessage);
+  base::RunLoop run_loop;
+  MessageReceivedListener listener;
+  std::unique_ptr<WebSocket> sock(CreateConnectedWebSocket(&listener));
+  ASSERT_TRUE(sock);
+  ASSERT_TRUE(sock->Send(encoded_frame));
+
+  EXPECT_EQ(listener.Messages().size(), 0u);
+  task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
+      FROM_HERE, run_loop.QuitClosure(), base::Seconds(10));
+  run_loop.Run();
+  EXPECT_THAT(listener.Messages(), testing::ElementsAre(kOriginalMessage));
+}
+
+TEST_F(WebSocketTest, VerifyBinaryFramelsNotProcessed) {
+  constexpr uint8_t kFinalBit = 0x80;
+
+  const std::string kOriginalMessage = "hello";
+  std::string frame = {
+      static_cast<char>(net::WebSocketFrameHeader::kOpCodeBinary | kFinalBit),
+      static_cast<char>(kOriginalMessage.length())};
+  frame += kOriginalMessage;
+  std::string encoded_frame;
+  base::Base64Encode(frame, &encoded_frame);
+
+  server_.SetMessageAction(TestHttpServer::kEchoRawMessage);
+  base::RunLoop run_loop;
+  MessageReceivedListener listener;
+  std::unique_ptr<WebSocket> sock(CreateConnectedWebSocket(&listener));
+  ASSERT_TRUE(sock);
+  ASSERT_TRUE(sock->Send(encoded_frame));
+  EXPECT_EQ(listener.Messages().size(), 0u);
+
+  task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
+      FROM_HERE, run_loop.QuitClosure(), base::Seconds(10));
+  run_loop.Run();
+  EXPECT_EQ(listener.Messages().size(), 0u);
+}
+
+TEST_F(WebSocketTest, VerifyCloseFramelsNotProcessed) {
+  constexpr uint8_t kFinalBit = 0x80;
+
+  std::string frame = {
+      static_cast<char>(net::WebSocketFrameHeader::kOpCodeClose | kFinalBit),
+      0};
+  std::string encoded_frame;
+  base::Base64Encode(frame, &encoded_frame);
+
+  server_.SetMessageAction(TestHttpServer::kEchoRawMessage);
+  base::RunLoop run_loop;
+  MessageReceivedListener listener;
+  std::unique_ptr<WebSocket> sock(CreateConnectedWebSocket(&listener));
+  ASSERT_TRUE(sock);
+  ASSERT_TRUE(sock->Send(encoded_frame));
+  EXPECT_EQ(listener.Messages().size(), 0u);
+
+  task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
+      FROM_HERE, run_loop.QuitClosure(), base::Seconds(10));
+  run_loop.Run();
+  EXPECT_EQ(listener.Messages().size(), 0u);
+}

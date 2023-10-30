@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/media/router/data_decoder_util.h"
+#include "services/data_decoder/public/cpp/safe_xml_parser.h"
 #include "url/gurl.h"
 
 namespace media_router {
@@ -34,20 +35,16 @@ void NotifyParsingError(SafeDialDeviceDescriptionParser::ParseCallback callback,
 
 }  // namespace
 
-SafeDialDeviceDescriptionParser::SafeDialDeviceDescriptionParser(
-    DataDecoder* data_decoder)
-    : data_decoder_(data_decoder) {}
+SafeDialDeviceDescriptionParser::SafeDialDeviceDescriptionParser() = default;
 
-SafeDialDeviceDescriptionParser::~SafeDialDeviceDescriptionParser() {}
+SafeDialDeviceDescriptionParser::~SafeDialDeviceDescriptionParser() = default;
 
 void SafeDialDeviceDescriptionParser::Parse(const std::string& xml_text,
                                             const GURL& app_url,
                                             ParseCallback callback) {
-  DVLOG(2) << "Parsing device description...";
   DCHECK(callback);
-
-  data_decoder_->ParseXml(
-      xml_text,
+  GetDataDecoder().ParseXml(
+      xml_text, data_decoder::mojom::XmlParser::WhitespaceBehavior::kIgnore,
       base::BindOnce(&SafeDialDeviceDescriptionParser::OnXmlParsingDone,
                      weak_factory_.GetWeakPtr(), std::move(callback), app_url));
 }
@@ -55,9 +52,8 @@ void SafeDialDeviceDescriptionParser::Parse(const std::string& xml_text,
 void SafeDialDeviceDescriptionParser::OnXmlParsingDone(
     SafeDialDeviceDescriptionParser::ParseCallback callback,
     const GURL& app_url,
-    std::unique_ptr<base::Value> value,
-    const base::Optional<std::string>& error) {
-  if (!value || !value->is_dict()) {
+    data_decoder::DataDecoder::ValueOrError result) {
+  if (!result.has_value() || !result->is_dict()) {
     std::move(callback).Run(
         ParsedDialDeviceDescription(),
         SafeDialDeviceDescriptionParser::ParsingError::kInvalidXml);
@@ -66,7 +62,7 @@ void SafeDialDeviceDescriptionParser::OnXmlParsingDone(
 
   bool unique_device = true;
   const base::Value* device_element = data_decoder::FindXmlElementPath(
-      *value, {"root", "device"}, &unique_device);
+      *result, {"root", "device"}, &unique_device);
   if (!device_element) {
     NotifyParsingError(
         std::move(callback),
@@ -99,8 +95,8 @@ void SafeDialDeviceDescriptionParser::OnXmlParsingDone(
     if (value) {
       DCHECK_EQ(1, data_decoder::GetXmlElementChildrenCount(*device_element,
                                                             kNodeNames[i]));
-      bool result = data_decoder::GetXmlElementText(*value, kFields[i]);
-      if (!result) {
+      bool parsed = data_decoder::GetXmlElementText(*value, kFields[i]);
+      if (!parsed) {
         NotifyParsingError(std::move(callback), kParsingErrors[i]);
         return;
       }

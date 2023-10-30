@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/warning_badge_service.h"
 
+#include "base/memory/raw_ptr.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/warning_service.h"
 #include "extensions/browser/warning_set.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -42,14 +43,14 @@ class TestWarningBadgeService : public WarningBadgeService {
   }
 
  private:
-  WarningService* warning_service_;
+  raw_ptr<WarningService> warning_service_;
 };
 
 bool HasBadge(Profile* profile) {
   GlobalErrorService* service =
       GlobalErrorServiceFactory::GetForProfile(profile);
   return service->GetGlobalErrorByMenuItemCommandID(IDC_EXTENSION_ERRORS) !=
-         NULL;
+         nullptr;
 }
 
 const char ext1_id[] = "extension1";
@@ -60,7 +61,7 @@ const char ext2_id[] = "extension2";
 // Check that no badge appears if it has been suppressed for a specific
 // warning.
 TEST(WarningBadgeServiceTest, SuppressBadgeForCurrentWarnings) {
-  content::TestBrowserThreadBundle thread_bundle;
+  content::BrowserTaskEnvironment task_environment;
   TestingProfile profile;
   TestExtensionWarningSet warnings(&profile);
   TestWarningBadgeService badge_service(&profile, &warnings);

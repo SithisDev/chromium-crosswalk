@@ -1,15 +1,15 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_EXTENSIONS_CHROME_PROCESS_MANAGER_DELEGATE_H_
 #define CHROME_BROWSER_EXTENSIONS_CHROME_PROCESS_MANAGER_DELEGATE_H_
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/scoped_multi_source_observation.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager_observer.h"
+#include "chrome/browser/profiles/profile_observer.h"
 #include "chrome/browser/ui/browser_list_observer.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/process_manager_delegate.h"
 
 class Browser;
@@ -20,10 +20,16 @@ namespace extensions {
 // Support for ProcessManager. Controls cases where Chrome wishes to disallow
 // extension background pages or defer their creation.
 class ChromeProcessManagerDelegate : public ProcessManagerDelegate,
-                                     public content::NotificationObserver,
-                                     public BrowserListObserver {
+                                     public BrowserListObserver,
+                                     public ProfileManagerObserver,
+                                     public ProfileObserver {
  public:
   ChromeProcessManagerDelegate();
+
+  ChromeProcessManagerDelegate(const ChromeProcessManagerDelegate&) = delete;
+  ChromeProcessManagerDelegate& operator=(const ChromeProcessManagerDelegate&) =
+      delete;
+
   ~ChromeProcessManagerDelegate() override;
 
   // ProcessManagerDelegate:
@@ -35,22 +41,19 @@ class ChromeProcessManagerDelegate : public ProcessManagerDelegate,
   bool DeferCreatingStartupBackgroundHosts(
       content::BrowserContext* context) const override;
 
-  // content::NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
-
   // BrowserListObserver:
   void OnBrowserAdded(Browser* browser) override;
 
+  // ProfileManagerObserver:
+  void OnProfileAdded(Profile* profile) override;
+
+  // ProfileObserver:
+  void OnOffTheRecordProfileCreated(Profile* off_the_record_profile) override;
+  void OnProfileWillBeDestroyed(Profile* profile) override;
+
  private:
-  // Notification handlers.
-  void OnProfileCreated(Profile* profile);
-  void OnProfileDestroyed(Profile* profile);
-
-  content::NotificationRegistrar registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeProcessManagerDelegate);
+  base::ScopedMultiSourceObservation<Profile, ProfileObserver>
+      observed_profiles_{this};
 };
 
 }  // namespace extensions

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,11 +44,11 @@ Status JavaScriptDialogManager::HandleDialog(bool accept,
     return Status(kNoSuchAlert);
 
   base::DictionaryValue params;
-  params.SetBoolean("accept", accept);
+  params.GetDict().Set("accept", accept);
   if (text)
-    params.SetString("promptText", *text);
+    params.GetDict().Set("promptText", *text);
   else
-    params.SetString("promptText", prompt_text_);
+    params.GetDict().Set("promptText", prompt_text_);
   Status status = client_->SendCommand("Page.handleJavaScriptDialog", params);
   if (status.IsError()) {
     // Retry once to work around

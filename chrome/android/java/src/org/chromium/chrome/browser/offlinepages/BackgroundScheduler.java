@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,8 +69,8 @@ public class BackgroundScheduler {
         TaskExtrasPacker.packTriggerConditionsInBundle(taskExtras, triggerConditions);
 
         TaskInfo taskInfo =
-                TaskInfo.createOneOffTask(TaskIds.OFFLINE_PAGES_BACKGROUND_JOB_ID,
-                                OfflineBackgroundTask.class, delayStartMs, executionDeadlineMs)
+                TaskInfo.createOneOffTask(TaskIds.OFFLINE_PAGES_BACKGROUND_JOB_ID, delayStartMs,
+                                executionDeadlineMs)
                         .setRequiredNetworkType(triggerConditions.requireUnmeteredNetwork()
                                         ? TaskInfo.NetworkType.UNMETERED
                                         : TaskInfo.NetworkType.ANY)

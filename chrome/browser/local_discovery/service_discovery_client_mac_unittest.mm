@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,45 +7,46 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/containers/contains.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
+#include "base/threading/thread.h"
 #include "chrome/browser/local_discovery/service_discovery_client.h"
 #include "chrome/browser/local_discovery/service_discovery_client_mac.h"
 #import "chrome/browser/ui/cocoa/test/cocoa_test_helper.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/sockaddr_storage.h"
 #include "testing/gtest_mac.h"
 
 @interface TestNSNetService : NSNetService {
  @private
-  base::scoped_nsobject<NSData> data_;
-  base::scoped_nsobject<NSArray> addresses_;
+  base::scoped_nsobject<NSData> _data;
+  base::scoped_nsobject<NSArray> _addresses;
 }
-- (id)initWithData:(NSData*)data;
+- (instancetype)initWithData:(NSData*)data;
 - (void)setAddresses:(NSArray*)addresses;
 @end
 
 @implementation TestNSNetService
 
-- (id)initWithData:(NSData*)data {
-  if ((self = [super init])) {
-    data_.reset([data retain]);
+- (instancetype)initWithData:(NSData*)data {
+  if ((self = [super initWithDomain:@"" type:@"_tcp." name:@"Test.123"])) {
+    _data.reset([data retain]);
   }
   return self;
 }
 
 - (void)setAddresses:(NSArray*)addresses {
-  addresses_.reset([addresses copy]);
+  _addresses.reset([addresses copy]);
 }
 
 - (NSArray*)addresses {
-  return addresses_;
+  return _addresses;
 }
 
 - (NSData*)TXTRecordData {
-  return data_;
+  return _data;
 }
 
 @end
@@ -79,7 +80,7 @@ class ServiceDiscoveryClientMacTest : public CocoaTest {
   ServiceDiscoveryClient* client() { return client_.get(); }
 
  protected:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   scoped_refptr<ServiceDiscoveryClientMac> client_;
 
@@ -115,17 +116,37 @@ TEST_F(ServiceDiscoveryClientMacTest, ServiceWatcher) {
   EXPECT_EQ(num_updates_, 3);
 }
 
-TEST_F(ServiceDiscoveryClientMacTest, ServiceResolver) {
-  const std::string test_service_name = "Test.123._testing._tcp.local";
+TEST_F(ServiceDiscoveryClientMacTest, DeleteWatcherAfterStart) {
+  const std::string test_service_type = "_testing._tcp.local";
+
+  std::unique_ptr<ServiceWatcher> watcher = client()->CreateServiceWatcher(
+      test_service_type,
+      base::BindRepeating(&ServiceDiscoveryClientMacTest::OnServiceUpdated,
+                          base::Unretained(this)));
+  watcher->Start();
+  watcher.reset();
+
+  EXPECT_EQ(0, num_updates_);
+}
+
+TEST_F(ServiceDiscoveryClientMacTest, DeleteResolverAfterStart) {
+  const std::string test_service_name = "Test.123";
+
   std::unique_ptr<ServiceResolver> resolver = client()->CreateServiceResolver(
       test_service_name,
-      base::BindOnce(&ServiceDiscoveryClientMacTest::OnResolveComplete,
-                     base::Unretained(this)));
+      base::BindRepeating(&ServiceDiscoveryClientMacTest::OnResolveComplete,
+                          base::Unretained(this)));
+  resolver->StartResolving();
+  resolver.reset();
 
+  EXPECT_EQ(0, num_resolves_);
+}
+
+TEST_F(ServiceDiscoveryClientMacTest, ParseServiceRecord) {
   const uint8_t record_bytes[] = {2, 'a', 'b', 3, 'd', '=', 'e'};
   base::scoped_nsobject<TestNSNetService> test_service([[TestNSNetService alloc]
       initWithData:[NSData dataWithBytes:record_bytes
-                                  length:base::size(record_bytes)]]);
+                                  length:std::size(record_bytes)]]);
 
   const std::string kIp = "2001:4860:4860::8844";
   const uint16_t kPort = 4321;
@@ -139,38 +160,21 @@ TEST_F(ServiceDiscoveryClientMacTest, ServiceResolver) {
   NSArray* addresses = @[ discoveryHost ];
   [test_service setAddresses:addresses];
 
-  ServiceResolverImplMac* resolver_impl =
-      static_cast<ServiceResolverImplMac*>(resolver.get());
-  resolver_impl->GetContainerForTesting()->SetServiceForTesting(
-      base::scoped_nsobject<NSNetService>(test_service));
-  resolver->StartResolving();
+  ServiceDescription description;
+  ParseNetService(test_service.get(), description);
 
-  resolver_impl->GetContainerForTesting()->OnResolveUpdate(
-      ServiceResolver::STATUS_SUCCESS);
-
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_EQ(1, num_resolves_);
-
-  const std::vector<std::string>& metadata =
-      last_service_description_.metadata;
+  const std::vector<std::string>& metadata = description.metadata;
   EXPECT_EQ(2u, metadata.size());
   EXPECT_TRUE(base::Contains(metadata, "ab"));
   EXPECT_TRUE(base::Contains(metadata, "d=e"));
 
-  EXPECT_EQ(ip_address, last_service_description_.ip_address);
-  EXPECT_EQ(kPort, last_service_description_.address.port());
-  EXPECT_EQ(kIp, last_service_description_.address.host());
+  EXPECT_EQ(ip_address, description.ip_address);
+  EXPECT_EQ(kPort, description.address.port());
+  EXPECT_EQ(kIp, description.address.host());
 }
 
 // https://crbug.com/586628
-TEST_F(ServiceDiscoveryClientMacTest, ResolveInvalidUnicodeRecord) {
-  const std::string test_service_name = "Test.123._testing._tcp.local";
-  std::unique_ptr<ServiceResolver> resolver = client()->CreateServiceResolver(
-      test_service_name,
-      base::BindOnce(&ServiceDiscoveryClientMacTest::OnResolveComplete,
-                     base::Unretained(this)));
-
+TEST_F(ServiceDiscoveryClientMacTest, ParseInvalidUnicodeRecord) {
   const uint8_t record_bytes[] = {
     3, 'a', '=', 'b',
     // The bytes after name= are the UTF-8 encoded representation of
@@ -180,7 +184,7 @@ TEST_F(ServiceDiscoveryClientMacTest, ResolveInvalidUnicodeRecord) {
   };
   base::scoped_nsobject<TestNSNetService> test_service([[TestNSNetService alloc]
       initWithData:[NSData dataWithBytes:record_bytes
-                                  length:base::size(record_bytes)]]);
+                                  length:std::size(record_bytes)]]);
 
   const std::string kIp = "2001:4860:4860::8844";
   const uint16_t kPort = 4321;
@@ -194,28 +198,17 @@ TEST_F(ServiceDiscoveryClientMacTest, ResolveInvalidUnicodeRecord) {
   NSArray* addresses = @[ discovery_host ];
   [test_service setAddresses:addresses];
 
-  ServiceResolverImplMac* resolver_impl =
-      static_cast<ServiceResolverImplMac*>(resolver.get());
-  resolver_impl->GetContainerForTesting()->SetServiceForTesting(
-      base::scoped_nsobject<NSNetService>(test_service));
-  resolver->StartResolving();
+  ServiceDescription description;
+  ParseNetService(test_service.get(), description);
 
-  resolver_impl->GetContainerForTesting()->OnResolveUpdate(
-      ServiceResolver::STATUS_SUCCESS);
-
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_EQ(1, num_resolves_);
-
-  const std::vector<std::string>& metadata =
-      last_service_description_.metadata;
+  const std::vector<std::string>& metadata = description.metadata;
   EXPECT_EQ(2u, metadata.size());
   EXPECT_TRUE(base::Contains(metadata, "a=b"));
   EXPECT_TRUE(base::Contains(metadata, "cd=e9"));
 
-  EXPECT_EQ(ip_address, last_service_description_.ip_address);
-  EXPECT_EQ(kPort, last_service_description_.address.port());
-  EXPECT_EQ(kIp, last_service_description_.address.host());
+  EXPECT_EQ(ip_address, description.ip_address);
+  EXPECT_EQ(kPort, description.address.port());
+  EXPECT_EQ(kIp, description.address.host());
 }
 
 TEST_F(ServiceDiscoveryClientMacTest, ResolveInvalidServiceName) {

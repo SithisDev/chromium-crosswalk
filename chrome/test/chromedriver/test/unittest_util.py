@@ -1,4 +1,4 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -81,7 +81,7 @@ def GetTestsFromSuite(suite):
 
 def GetTestNamesFromSuite(suite):
   """Returns a list of every test name in the given suite."""
-  return map(lambda x: GetTestName(x), GetTestsFromSuite(suite))
+  return [GetTestName(x) for x in GetTestsFromSuite(suite)]
 
 
 def GetTestName(test):
@@ -94,7 +94,7 @@ def GetTestName(test):
 def FilterTestSuite(suite, gtest_filter):
   """Returns a new filtered tests suite based on the given gtest filter.
 
-  See https://github.com/google/googletest/blob/master/googletest/docs/AdvancedGuide.md
+  See https://github.com/google/googletest/blob/main/docs/advanced.md
   for gtest_filter specification.
   """
   return unittest.TestSuite(FilterTests(GetTestsFromSuite(suite), gtest_filter))
@@ -103,7 +103,7 @@ def FilterTestSuite(suite, gtest_filter):
 def FilterTests(all_tests, gtest_filter):
   """Returns a filtered list of tests based on the given gtest filter.
 
-  See https://github.com/google/googletest/blob/master/googletest/docs/AdvancedGuide.md
+  See https://github.com/google/googletest/blob/main/docs/advanced.md
   for gtest_filter specification.
   """
   pattern_groups = gtest_filter.split('-')
@@ -128,3 +128,15 @@ def FilterTests(all_tests, gtest_filter):
     else:
       tests += [test]
   return tests
+
+
+class AddSuccessTextTestResult(unittest.runner.TextTestResult):
+
+  def __init__(self, stream, descriptions, verbosity):
+    super(AddSuccessTextTestResult, self).__init__(
+            stream, descriptions, verbosity)
+    self.successes = []
+
+  def addSuccess(self, test):
+    super(AddSuccessTextTestResult, self).addSuccess(test)
+    self.successes.append(test)

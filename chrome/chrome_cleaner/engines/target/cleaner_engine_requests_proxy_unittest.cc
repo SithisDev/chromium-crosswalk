@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -21,7 +22,7 @@
 #include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "chrome/chrome_cleaner/engines/common/registry_util.h"
 #include "chrome/chrome_cleaner/engines/target/sandboxed_test_helpers.h"
@@ -69,7 +70,7 @@ scoped_refptr<SandboxChildProcess> SetupChildProcess() {
 }
 
 base::ProcessId GetTestProcessId(const base::CommandLine& command_line) {
-  base::string16 pid_string =
+  std::wstring pid_string =
       command_line.GetSwitchValueNative(kLongRunningProcessIdSwitch);
   uint64_t pid;
   if (!base::StringToUint64(pid_string, &pid)) {
@@ -80,7 +81,7 @@ base::ProcessId GetTestProcessId(const base::CommandLine& command_line) {
 }
 
 base::FilePath GetTestFilePath(const base::CommandLine& command_line,
-                               const base::string16& file_name) {
+                               const std::wstring& file_name) {
   base::FilePath path =
       command_line.GetSwitchValuePath(kTempDirectoryPathSwitch);
   if (path.empty()) {
@@ -90,26 +91,26 @@ base::FilePath GetTestFilePath(const base::CommandLine& command_line,
   return path.Append(file_name);
 }
 
-String16EmbeddedNulls GetTestRegistryKeyPath(
+WStringEmbeddedNulls GetTestRegistryKeyPath(
     const base::CommandLine& command_line) {
-  base::string16 path = command_line.GetSwitchValueNative(kTempRegistryKeyPath);
+  std::wstring path = command_line.GetSwitchValueNative(kTempRegistryKeyPath);
   if (path.empty()) {
     LOG(ERROR) << "Missing temp registry key path switch";
-    return String16EmbeddedNulls();
+    return WStringEmbeddedNulls();
   }
   path += L"\\";
   path.append(kRegistryKeyWithNulls, kRegistryKeyWithNullsLength);
-  return String16EmbeddedNulls(path);
+  return WStringEmbeddedNulls(path);
 }
 
-String16EmbeddedNulls GetTestRegistryValueName() {
-  return String16EmbeddedNulls(kRegistryValueNameWithNulls,
-                               kRegistryValueNameWithNullsLength);
+WStringEmbeddedNulls GetTestRegistryValueName() {
+  return WStringEmbeddedNulls(kRegistryValueNameWithNulls,
+                              kRegistryValueNameWithNullsLength);
 }
 
-String16EmbeddedNulls GetTestRegistryValue() {
-  return String16EmbeddedNulls(kRegistryValueWithNulls,
-                               kRegistryValueWithNullsLength);
+WStringEmbeddedNulls GetTestRegistryValue() {
+  return WStringEmbeddedNulls(kRegistryValueWithNulls,
+                              kRegistryValueWithNullsLength);
 }
 
 class CleanerEngineRequestsProxyTestBase : public ::testing::Test {
@@ -146,7 +147,7 @@ class CleanerEngineRequestsProxyTestBase : public ::testing::Test {
   scoped_refptr<TestParentProcess> parent_process_;
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 };
 
 // CleanerEngineRequestsProxyTest is parameterized with:
@@ -213,7 +214,7 @@ MULTIPROCESS_TEST_MAIN(DeleteTaskNoHang) {
 
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   TestTaskScheduler test_task_scheduler;
 
@@ -294,7 +295,7 @@ MULTIPROCESS_TEST_MAIN(DeleteFileNoHang) {
 
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_FALSE(proxy->DeleteFile(
       GetTestFilePath(child_process->command_line(), kTempFileName)));
@@ -332,7 +333,7 @@ MULTIPROCESS_TEST_MAIN(DeleteFilePostRebootNoHang) {
 
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_FALSE(proxy->DeleteFilePostReboot(
       GetTestFilePath(child_process->command_line(), kTempFileName)));
@@ -396,8 +397,8 @@ class CleanerEngineRequestsProxyRegistryTest
     parent_process_->AppendSwitchNative(kTempRegistryKeyPath,
                                         temp_key_.FullyQualifiedPath());
 
-    String16EmbeddedNulls value_name_buffer{L'f', L'o', L'o', L'\0'};
-    String16EmbeddedNulls value_buffer{L'b', L'a', L'r', L'\0'};
+    WStringEmbeddedNulls value_name_buffer{L'f', L'o', L'o', L'\0'};
+    WStringEmbeddedNulls value_buffer{L'b', L'a', L'r', L'\0'};
     ASSERT_EQ(chrome_cleaner_sandbox::NativeSetValueKey(
                   temp_key_handle_, GetTestRegistryValueName(), REG_SZ,
                   GetTestRegistryValue()),
@@ -438,9 +439,9 @@ MULTIPROCESS_TEST_MAIN(NtDeleteRegistryKeyNoHang) {
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
 
-  EXPECT_FALSE(proxy->NtDeleteRegistryKey(String16EmbeddedNulls(nullptr)));
+  EXPECT_FALSE(proxy->NtDeleteRegistryKey(WStringEmbeddedNulls(nullptr)));
 
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_FALSE(proxy->NtDeleteRegistryKey(
       GetTestRegistryKeyPath(child_process->command_line())));
@@ -473,11 +474,11 @@ MULTIPROCESS_TEST_MAIN(NtDeleteRegistryValueNoHang) {
 
   EXPECT_FALSE(proxy->NtDeleteRegistryValue(
       GetTestRegistryKeyPath(child_process->command_line()),
-      String16EmbeddedNulls(nullptr)));
-  EXPECT_FALSE(proxy->NtDeleteRegistryValue(String16EmbeddedNulls(nullptr),
+      WStringEmbeddedNulls(nullptr)));
+  EXPECT_FALSE(proxy->NtDeleteRegistryValue(WStringEmbeddedNulls(nullptr),
                                             GetTestRegistryValueName()));
 
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_FALSE(proxy->NtDeleteRegistryValue(
       GetTestRegistryKeyPath(child_process->command_line()),
@@ -494,8 +495,8 @@ MULTIPROCESS_TEST_MAIN(NtChangeRegistryValue) {
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
 
-  const String16EmbeddedNulls new_value(
-      GetTestRegistryValue().CastAsStringPiece16().substr(1));
+  const WStringEmbeddedNulls new_value(
+      GetTestRegistryValue().CastAsWStringPiece().substr(1));
 
   EXPECT_TRUE(proxy->NtChangeRegistryValue(
       GetTestRegistryKeyPath(child_process->command_line()),
@@ -506,12 +507,12 @@ MULTIPROCESS_TEST_MAIN(NtChangeRegistryValue) {
   EXPECT_TRUE(proxy->NtChangeRegistryValue(
       GetTestRegistryKeyPath(child_process->command_line()),
       GetTestRegistryValueName(),
-      String16EmbeddedNulls(new_value.CastAsWCharArray(), new_value.size())));
+      WStringEmbeddedNulls(new_value.CastAsWCharArray(), new_value.size())));
 
   // Set the new value to an empty string.
   EXPECT_TRUE(proxy->NtChangeRegistryValue(
       GetTestRegistryKeyPath(child_process->command_line()),
-      GetTestRegistryValueName(), String16EmbeddedNulls()));
+      GetTestRegistryValueName(), WStringEmbeddedNulls()));
 
   return ::testing::Test::HasNonfatalFailure();
 }
@@ -524,16 +525,16 @@ MULTIPROCESS_TEST_MAIN(NtChangeRegistryValueNoHang) {
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
 
-  const String16EmbeddedNulls new_value(
-      GetTestRegistryValue().CastAsStringPiece16().substr(1));
+  const WStringEmbeddedNulls new_value(
+      GetTestRegistryValue().CastAsWStringPiece().substr(1));
 
   EXPECT_FALSE(proxy->NtChangeRegistryValue(
-      String16EmbeddedNulls(nullptr), GetTestRegistryValueName(), new_value));
+      WStringEmbeddedNulls(nullptr), GetTestRegistryValueName(), new_value));
   EXPECT_FALSE(proxy->NtChangeRegistryValue(
       GetTestRegistryKeyPath(child_process->command_line()),
-      String16EmbeddedNulls(nullptr), new_value));
+      WStringEmbeddedNulls(nullptr), new_value));
 
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_FALSE(proxy->NtChangeRegistryValue(
       GetTestRegistryKeyPath(child_process->command_line()),
@@ -590,7 +591,7 @@ MULTIPROCESS_TEST_MAIN(DeleteService) {
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
 
-  base::string16 service_name =
+  std::wstring service_name =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueNative(
           kServiceNameSwitch);
   CHECK(!service_name.empty());
@@ -607,9 +608,9 @@ MULTIPROCESS_TEST_MAIN(DeleteServiceNoHang) {
 
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
-  base::string16 service_name =
+  std::wstring service_name =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueNative(
           kServiceNameSwitch);
   CHECK(!service_name.empty());
@@ -664,7 +665,7 @@ class CleanerEngineRequestsProxyTerminateTest
     test_process_ = LongRunningProcess(/*command_line=*/nullptr);
     ASSERT_TRUE(test_process_.IsValid());
 
-    base::string16 switch_str = base::NumberToString16(test_process_.Pid());
+    std::wstring switch_str = base::NumberToWString(test_process_.Pid());
     parent_process_->AppendSwitchNative(kLongRunningProcessIdSwitch,
                                         switch_str);
   }
@@ -756,7 +757,7 @@ MULTIPROCESS_TEST_MAIN(TerminateProcessNoHang) {
 
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   base::ProcessId pid = GetTestProcessId(child_process->command_line());
   if (!pid) {
