@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "gpu/command_buffer/common/gpu_memory_buffer_support.h"
 #include "gpu/gpu_export.h"
 #include "ui/gfx/buffer_types.h"
+#include "ui/gfx/surface_origin.h"
 
 // From gl2.h. We want to avoid including gl headers because client-side and
 // service-side headers conflict.
@@ -77,6 +78,7 @@ struct GPU_EXPORT Capabilities {
   int max_fragment_uniform_vectors = 0;
   int max_renderbuffer_size = 0;
   int max_texture_image_units = 0;
+  // Note this may be smaller than GL_MAX_TEXTURE_SIZE for a GLES context.
   int max_texture_size = 0;
   int max_varying_vectors = 0;
   int max_vertex_attribs = 0;
@@ -132,6 +134,7 @@ struct GPU_EXPORT Capabilities {
   bool swap_buffers_with_bounds = false;
   bool commit_overlay_planes = false;
   bool egl_image_external = false;
+  bool egl_image_external_essl3 = false;
   bool texture_format_astc = false;
   bool texture_format_atc = false;
   bool texture_format_bgra8888 = false;
@@ -154,15 +157,15 @@ struct GPU_EXPORT Capabilities {
   bool image_ycbcr_422 = false;
   bool image_ycbcr_420v = false;
   bool image_ycbcr_420v_disabled_for_video_frames = false;
-  bool image_xr30 = false;
-  bool image_xb30 = false;
+  bool image_ar30 = false;
+  bool image_ab30 = false;
   bool image_ycbcr_p010 = false;
   bool render_buffer_format_bgra8888 = false;
   bool occlusion_query = false;
   bool occlusion_query_boolean = false;
   bool timer_queries = false;
   bool surfaceless = false;
-  bool flips_vertically = false;
+  gfx::SurfaceOrigin surface_origin = gfx::SurfaceOrigin::kBottomLeft;
   bool msaa_is_slow = false;
   bool disable_one_component_textures = false;
   bool gpu_rasterization = false;
@@ -170,9 +173,11 @@ struct GPU_EXPORT Capabilities {
   bool multisample_compatibility = false;
   // True if DirectComposition layers are enabled.
   bool dc_layers = false;
-  bool use_dc_overlays_for_video = false;
   bool protected_video_swap_chain = false;
   bool gpu_vsync = false;
+  bool shared_image_d3d = false;
+  bool shared_image_swap_chain = false;
+  bool angle_rgbx_internal_format = false;
 
   // When this parameter is true, a CHROMIUM image created with RGB format will
   // actually have RGBA format. The client is responsible for handling most of
@@ -180,9 +185,6 @@ struct GPU_EXPORT Capabilities {
   // gpu/GLES2/extensions/CHROMIUM/CHROMIUM_image.txt for more
   // details.
   bool chromium_image_rgb_emulation = false;
-
-  // When true, non-empty post sub buffer calls are unsupported.
-  bool disable_non_empty_post_sub_buffers = false;
 
   bool disable_2d_canvas_copy_on_write = false;
 
@@ -194,8 +196,6 @@ struct GPU_EXPORT Capabilities {
 
   bool chromium_gpu_fence = false;
 
-  bool unpremultiply_and_dither_copy = false;
-
   bool separate_stencil_ref_mask_writemask = false;
 
   bool use_gpu_fences_for_overlay_planes = false;
@@ -204,12 +204,14 @@ struct GPU_EXPORT Capabilities {
 
   bool mesa_framebuffer_flip_y = false;
 
+  // Clients should use SharedImageInterface instead.
+  bool disable_legacy_mailbox = false;
+
   int major_version = 2;
   int minor_version = 0;
 
   // Used by OOP raster.
   bool context_supports_distance_field_text = true;
-  uint64_t glyph_cache_max_texture_bytes = 0.f;
 
   GpuMemoryBufferFormatSet gpu_memory_buffer_formats = {
       gfx::BufferFormat::BGR_565,   gfx::BufferFormat::RGBA_4444,

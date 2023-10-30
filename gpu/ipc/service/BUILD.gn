@@ -1,8 +1,7 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
 import("//build/config/ui.gni")
 import("//gpu/vulkan/features.gni")
 import("//testing/test.gni")
@@ -10,14 +9,17 @@ if (is_mac) {
   import("//build/config/mac/mac_sdk.gni")
 }
 
-jumbo_component("service") {
+declare_args() {
+  subpixel_font_rendering_disabled = false
+}
+
+component("service") {
   output_name = "gpu_ipc_service"
   sources = [
     "command_buffer_stub.cc",
     "command_buffer_stub.h",
     "context_url.cc",
     "context_url.h",
-    "display_context.h",
     "gles2_command_buffer_stub.cc",
     "gles2_command_buffer_stub.h",
     "gpu_channel.cc",
@@ -28,12 +30,12 @@ jumbo_component("service") {
     "gpu_config.h",
     "gpu_init.cc",
     "gpu_init.h",
+    "gpu_memory_ablation_experiment.cc",
+    "gpu_memory_ablation_experiment.h",
     "gpu_memory_buffer_factory.cc",
     "gpu_memory_buffer_factory.h",
     "gpu_watchdog_thread.cc",
     "gpu_watchdog_thread.h",
-    "gpu_watchdog_thread_v2.cc",
-    "gpu_watchdog_thread_v2.h",
     "image_decode_accelerator_stub.cc",
     "image_decode_accelerator_stub.h",
     "image_decode_accelerator_worker.h",
@@ -49,12 +51,15 @@ jumbo_component("service") {
     "webgpu_command_buffer_stub.h",
   ]
   defines = [ "GPU_IPC_SERVICE_IMPLEMENTATION" ]
-  if (is_chromecast) {
-    defines += [ "IS_CHROMECAST" ]
+  if (subpixel_font_rendering_disabled) {
+    defines += [ "SUBPIXEL_FONT_RENDERING_DISABLED" ]
   }
   public_deps = [
     "//base",
+    "//build:chromecast_buildflags",
     "//components/viz/common",
+    "//gpu/config",
+    "//gpu/ipc/common",
     "//ipc",
     "//ui/base",
     "//ui/display",
@@ -67,6 +72,7 @@ jumbo_component("service") {
   ]
   deps = [
     "//base/third_party/dynamic_annotations",
+    "//build:chromeos_buildflags",
 
     # crbug.com/799267: crash_key needs to be added explicitly for Windows and
     # Mac even though it's not directly referenced, because it's being
@@ -77,16 +83,23 @@ jumbo_component("service") {
     "//gpu/command_buffer/service",
     "//gpu/command_buffer/service:gles2",
     "//gpu/config",
-    "//gpu/ipc/common",
     "//gpu/vulkan:buildflags",
+    "//mojo/public/cpp/bindings",
   ]
   libs = []
   ldflags = []
   if (is_win) {
     sources += [
+      "dcomp_texture_win.cc",
+      "dcomp_texture_win.h",
       "gpu_memory_buffer_factory_dxgi.cc",
       "gpu_memory_buffer_factory_dxgi.h",
       "image_transport_surface_win.cc",
+    ]
+    libs += [
+      "d3d11.lib",
+      "dcomp.lib",
+      "dxguid.lib",
     ]
   }
   if (is_mac) {
@@ -99,7 +112,7 @@ jumbo_component("service") {
     ]
     deps += [ "//ui/accelerated_widget_mac" ]
     lib_dirs = [ "$mac_sdk_path/usr/lib" ]
-    libs += [
+    frameworks = [
       "CoreGraphics.framework",
       "IOSurface.framework",
       "OpenGL.framework",
@@ -116,20 +129,15 @@ jumbo_component("service") {
     ]
     libs += [ "android" ]
   }
-  if (is_linux) {
+  if (is_linux || is_chromeos) {
     sources += [ "image_transport_surface_linux.cc" ]
   }
-  if (is_linux || use_ozone) {
+  if (use_ozone) {
     sources += [
       "gpu_memory_buffer_factory_native_pixmap.cc",
       "gpu_memory_buffer_factory_native_pixmap.h",
     ]
-  }
-  if (use_x11) {
-    sources += [ "x_util.h" ]
-    libs += [ "X11" ]
-  }
-  if (use_ozone) {
+
     deps += [ "//ui/ozone" ]
   }
   if (is_fuchsia) {
@@ -142,14 +150,13 @@ jumbo_component("service") {
 
 source_set("test_support") {
   testonly = true
-  sources = [
-    "gpu_memory_buffer_factory_test_template.h",
-  ]
+  sources = [ "gpu_memory_buffer_factory_test_template.h" ]
   public_deps = [
     ":service",
     "//testing/gtest:gtest",
   ]
   deps = [
+    "//base/test:test_support",
     "//gpu/ipc/common",
     "//ui/gl:test_support",
   ]

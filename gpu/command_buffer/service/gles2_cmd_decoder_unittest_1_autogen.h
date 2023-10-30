@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1230,59 +1230,6 @@ TEST_P(GLES2DecoderTest1, GetIntegervInvalidArgs1_1) {
   result->size = 0;
   cmds::GetIntegerv cmd;
   cmd.Init(GL_ACTIVE_TEXTURE, shared_memory_id_, kInvalidSharedMemoryOffset);
-  EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
-  EXPECT_EQ(0u, result->size);
-}
-
-TEST_P(GLES2DecoderTest1, GetProgramivValidArgs) {
-  SpecializedSetup<cmds::GetProgramiv, 0>(true);
-  typedef cmds::GetProgramiv::Result Result;
-  Result* result = static_cast<Result*>(shared_memory_address_);
-  result->size = 0;
-  cmds::GetProgramiv cmd;
-  cmd.Init(client_program_id_, GL_DELETE_STATUS, shared_memory_id_,
-           shared_memory_offset_);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(decoder_->GetGLES2Util()->GLGetNumValuesReturned(GL_DELETE_STATUS),
-            result->GetNumResults());
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-}
-
-TEST_P(GLES2DecoderTest1, GetProgramivInvalidArgs1_0) {
-  EXPECT_CALL(*gl_, GetProgramiv(_, _, _)).Times(0);
-  SpecializedSetup<cmds::GetProgramiv, 0>(false);
-  cmds::GetProgramiv::Result* result =
-      static_cast<cmds::GetProgramiv::Result*>(shared_memory_address_);
-  result->size = 0;
-  cmds::GetProgramiv cmd;
-  cmd.Init(client_program_id_, GL_PROGRAM_BINARY_RETRIEVABLE_HINT,
-           shared_memory_id_, shared_memory_offset_);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(0u, result->size);
-  EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
-}
-
-TEST_P(GLES2DecoderTest1, GetProgramivInvalidArgs2_0) {
-  EXPECT_CALL(*gl_, GetProgramiv(_, _, _)).Times(0);
-  SpecializedSetup<cmds::GetProgramiv, 0>(false);
-  cmds::GetProgramiv::Result* result =
-      static_cast<cmds::GetProgramiv::Result*>(shared_memory_address_);
-  result->size = 0;
-  cmds::GetProgramiv cmd;
-  cmd.Init(client_program_id_, GL_DELETE_STATUS, kInvalidSharedMemoryId, 0);
-  EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
-  EXPECT_EQ(0u, result->size);
-}
-
-TEST_P(GLES2DecoderTest1, GetProgramivInvalidArgs2_1) {
-  EXPECT_CALL(*gl_, GetProgramiv(_, _, _)).Times(0);
-  SpecializedSetup<cmds::GetProgramiv, 0>(false);
-  cmds::GetProgramiv::Result* result =
-      static_cast<cmds::GetProgramiv::Result*>(shared_memory_address_);
-  result->size = 0;
-  cmds::GetProgramiv cmd;
-  cmd.Init(client_program_id_, GL_DELETE_STATUS, shared_memory_id_,
-           kInvalidSharedMemoryOffset);
   EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
   EXPECT_EQ(0u, result->size);
 }

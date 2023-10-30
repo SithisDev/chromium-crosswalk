@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,14 +88,6 @@ class WebGL2DecoderTest : public GLES2DecoderTest {
 class GLES3DecoderWithShaderTest : public GLES2DecoderWithShaderTest {
  public:
   GLES3DecoderWithShaderTest() { shader_language_version_ = 300; }
-
-  // Override default setup so ES3 capabilities are enabled by default.
-  void SetUp() override;
-};
-
-class GLES3DecoderRGBBackbufferTest : public GLES2DecoderRGBBackbufferTest {
- public:
-  GLES3DecoderRGBBackbufferTest() { shader_language_version_ = 300; }
 
   // Override default setup so ES3 capabilities are enabled by default.
   void SetUp() override;

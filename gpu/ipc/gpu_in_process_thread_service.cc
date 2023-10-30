@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,34 +7,37 @@
 #include <utility>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "gpu/command_buffer/service/scheduler.h"
-#include "gpu/ipc/scheduler_sequence.h"
+#include "gpu/command_buffer/service/scheduler_sequence.h"
 
 namespace gpu {
 
+GpuInProcessThreadServiceDelegate::GpuInProcessThreadServiceDelegate() =
+    default;
+GpuInProcessThreadServiceDelegate::~GpuInProcessThreadServiceDelegate() =
+    default;
+
 GpuInProcessThreadService::GpuInProcessThreadService(
+    GpuInProcessThreadServiceDelegate* delegate,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     Scheduler* scheduler,
     SyncPointManager* sync_point_manager,
     MailboxManager* mailbox_manager,
-    scoped_refptr<gl::GLShareGroup> share_group,
     gl::GLSurfaceFormat share_group_surface_format,
     const GpuFeatureInfo& gpu_feature_info,
     const GpuPreferences& gpu_preferences,
     SharedImageManager* shared_image_manager,
-    gles2::ProgramCache* program_cache,
-    scoped_refptr<SharedContextState> shared_context_state)
+    gles2::ProgramCache* program_cache)
     : CommandBufferTaskExecutor(gpu_preferences,
                                 gpu_feature_info,
                                 sync_point_manager,
                                 mailbox_manager,
-                                share_group,
                                 share_group_surface_format,
                                 shared_image_manager,
-                                program_cache,
-                                std::move(shared_context_state)),
+                                program_cache),
+      delegate_(delegate),
       task_runner_(task_runner),
       scheduler_(scheduler) {}
 
@@ -50,7 +53,7 @@ bool GpuInProcessThreadService::ShouldCreateMemoryTracker() const {
 
 std::unique_ptr<SingleTaskSequence>
 GpuInProcessThreadService::CreateSequence() {
-  return std::make_unique<SchedulerSequence>(scheduler_);
+  return std::make_unique<SchedulerSequence>(scheduler_, task_runner_);
 }
 
 void GpuInProcessThreadService::ScheduleOutOfOrderTask(base::OnceClosure task) {
@@ -59,12 +62,21 @@ void GpuInProcessThreadService::ScheduleOutOfOrderTask(base::OnceClosure task) {
 
 void GpuInProcessThreadService::ScheduleDelayedWork(base::OnceClosure task) {
   task_runner_->PostDelayedTask(FROM_HERE, std::move(task),
-                                base::TimeDelta::FromMilliseconds(2));
+                                base::Milliseconds(2));
 }
 
 void GpuInProcessThreadService::PostNonNestableToClient(
     base::OnceClosure callback) {
   NOTREACHED();
+}
+
+scoped_refptr<SharedContextState>
+GpuInProcessThreadService::GetSharedContextState() {
+  return delegate_->GetSharedContextState();
+}
+
+scoped_refptr<gl::GLShareGroup> GpuInProcessThreadService::GetShareGroup() {
+  return delegate_->GetShareGroup();
 }
 
 }  // namespace gpu

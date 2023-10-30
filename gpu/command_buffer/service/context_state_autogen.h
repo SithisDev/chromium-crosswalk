@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,11 +80,6 @@ GLenum hint_generate_mipmap;
 GLenum hint_fragment_shader_derivative;
 GLenum hint_texture_filtering;
 GLfloat line_width;
-GLfloat modelview_matrix[16];
-GLfloat projection_matrix[16];
-GLenum stencil_path_func;
-GLint stencil_path_ref;
-GLuint stencil_path_mask;
 GLint pack_alignment;
 GLint unpack_alignment;
 GLint pack_row_length;

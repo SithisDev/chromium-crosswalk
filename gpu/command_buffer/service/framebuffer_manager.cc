@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/logging.h"
-#include "base/macros.h"
-#include "base/strings/stringprintf.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/framebuffer_completeness_cache.h"
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
@@ -33,6 +32,9 @@ class RenderbufferAttachment
       Renderbuffer* renderbuffer)
       : renderbuffer_(renderbuffer) {
   }
+
+  RenderbufferAttachment(const RenderbufferAttachment&) = delete;
+  RenderbufferAttachment& operator=(const RenderbufferAttachment&) = delete;
 
   GLsizei width() const override { return renderbuffer_->width(); }
 
@@ -132,8 +134,6 @@ class RenderbufferAttachment
 
  private:
   scoped_refptr<Renderbuffer> renderbuffer_;
-
-  DISALLOW_COPY_AND_ASSIGN(RenderbufferAttachment);
 };
 
 class TextureAttachment
@@ -148,6 +148,9 @@ class TextureAttachment
         samples_(samples),
         layer_(layer) {
   }
+
+  TextureAttachment(const TextureAttachment&) = delete;
+  TextureAttachment& operator=(const TextureAttachment&) = delete;
 
   GLsizei width() const override {
     GLsizei temp_width = 0;
@@ -314,8 +317,6 @@ class TextureAttachment
   GLint level_;
   GLsizei samples_;
   GLint layer_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextureAttachment);
 };
 
 FramebufferManager::FramebufferManager(
@@ -386,8 +387,7 @@ Framebuffer::Framebuffer(FramebufferManager* manager, GLuint service_id)
       draw_buffer_bound_mask_(0u),
       adjusted_draw_buffer_bound_mask_(0u),
       last_color_attachment_id_(-1),
-      read_buffer_(GL_COLOR_ATTACHMENT0),
-      flip_y_(false) {
+      read_buffer_(GL_COLOR_ATTACHMENT0) {
   manager->StartTracking(this);
   DCHECK_GT(manager->max_draw_buffers_, 0u);
   draw_buffers_.reset(new GLenum[manager->max_draw_buffers_]);

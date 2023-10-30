@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,9 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "gpu/command_buffer/client/cmd_buffer_helper.h"
 #include "gpu/command_buffer/client/command_buffer_direct_locked.h"
 #include "gpu/command_buffer/service/mocks.h"
@@ -41,8 +40,9 @@ const int32_t kUnusedCommandId = 5;  // we use 0 and 2 currently.
 class CommandBufferHelperTest : public testing::Test {
  protected:
   void SetUp() override {
-    command_buffer_.reset(new CommandBufferDirectLocked());
-    api_mock_.reset(new AsyncAPIMock(true, command_buffer_->service()));
+    command_buffer_ = std::make_unique<CommandBufferDirectLocked>();
+    api_mock_ =
+        std::make_unique<AsyncAPIMock>(true, command_buffer_->service());
     command_buffer_->set_handler(api_mock_.get());
 
     // ignore noops in the mock - we don't want to inspect the internals of the
@@ -50,7 +50,7 @@ class CommandBufferHelperTest : public testing::Test {
     EXPECT_CALL(*api_mock_, DoCommand(cmd::kNoop, _, _))
         .WillRepeatedly(Return(error::kNoError));
 
-    helper_.reset(new CommandBufferHelper(command_buffer_.get()));
+    helper_ = std::make_unique<CommandBufferHelper>(command_buffer_.get());
     helper_->Initialize(kCommandBufferSizeBytes);
 
     test_command_next_id_ = kUnusedCommandId;
@@ -202,7 +202,7 @@ class CommandBufferHelperTest : public testing::Test {
   std::vector<std::unique_ptr<CommandBufferEntry[]>> test_command_args_;
   unsigned int test_command_next_id_;
   Sequence sequence_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 // Checks immediate_entry_count_ changes based on RingBuffer state.

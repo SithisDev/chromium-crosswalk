@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/containers/queue.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "gpu/ipc/service/image_transport_surface.h"
 #include "gpu/ipc/service/image_transport_surface_delegate.h"
@@ -27,6 +26,11 @@ class PassThroughImageTransportSurface : public gl::GLSurfaceAdapter {
       base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
       gl::GLSurface* surface,
       bool override_vsync_for_multi_window_swap);
+
+  PassThroughImageTransportSurface(const PassThroughImageTransportSurface&) =
+      delete;
+  PassThroughImageTransportSurface& operator=(
+      const PassThroughImageTransportSurface&) = delete;
 
   // GLSurface implementation.
   bool Initialize(gl::GLSurfaceFormat format) override;
@@ -55,15 +59,17 @@ class PassThroughImageTransportSurface : public gl::GLSurfaceAdapter {
  private:
   ~PassThroughImageTransportSurface() override;
 
+  void TrackMultiSurfaceSwap();
   void UpdateVSyncEnabled();
 
   void StartSwapBuffers(gfx::SwapResponse* response);
-  void FinishSwapBuffers(gfx::SwapResponse response, uint64_t local_swap_id);
+  void FinishSwapBuffers(gfx::SwapResponse response,
+                         uint64_t local_swap_id,
+                         gfx::GpuFenceHandle release_fence);
   void FinishSwapBuffersAsync(SwapCompletionCallback callback,
                               gfx::SwapResponse response,
                               uint64_t local_swap_id,
-                              gfx::SwapResult result,
-                              std::unique_ptr<gfx::GpuFence> gpu_fence);
+                              gfx::SwapCompletionResult result);
 
   void BufferPresented(PresentationCallback callback,
                        uint64_t local_swap_id,
@@ -74,6 +80,7 @@ class PassThroughImageTransportSurface : public gl::GLSurfaceAdapter {
   base::WeakPtr<ImageTransportSurfaceDelegate> delegate_;
   int swap_generation_ = 0;
   bool vsync_enabled_ = true;
+  bool multiple_surfaces_swapped_ = false;
 
   // Local swap ids, which are used to make sure the swap order is correct and
   // the presentation callbacks are not called earlier than the swap ack of the
@@ -86,8 +93,6 @@ class PassThroughImageTransportSurface : public gl::GLSurfaceAdapter {
 
   base::WeakPtrFactory<PassThroughImageTransportSurface> weak_ptr_factory_{
       this};
-
-  DISALLOW_COPY_AND_ASSIGN(PassThroughImageTransportSurface);
 };
 
 }  // namespace gpu

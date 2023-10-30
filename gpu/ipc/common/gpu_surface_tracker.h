@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,17 @@
 
 #include <map>
 
-#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/synchronization/lock.h"
+#include "build/build_config.h"
 #include "gpu/gpu_export.h"
 #include "gpu/ipc/common/gpu_surface_lookup.h"
 #include "gpu/ipc/common/surface_handle.h"
 #include "ui/gfx/native_widget_types.h"
+
+#if BUILDFLAG(IS_ANDROID)
+#include "base/android/scoped_java_ref.h"
+#endif
 
 namespace gpu {
 
@@ -35,19 +39,19 @@ namespace gpu {
 class GPU_EXPORT GpuSurfaceTracker : public gpu::GpuSurfaceLookup {
  public:
   struct SurfaceRecord {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     SurfaceRecord(gfx::AcceleratedWidget widget,
-                  jobject j_surface,
+                  const base::android::JavaRef<jobject>& j_surface,
                   bool can_be_used_with_surface_control);
-#else   // defined(OS_ANDROID)
+#else   // BUILDFLAG(IS_ANDROID)
     explicit SurfaceRecord(gfx::AcceleratedWidget widget);
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
 
     SurfaceRecord(SurfaceRecord&&);
     SurfaceRecord(const SurfaceRecord&) = delete;
 
     gfx::AcceleratedWidget widget;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     gl::ScopedJavaSurface surface;
     bool can_be_used_with_surface_control;
 #endif
@@ -60,7 +64,7 @@ class GPU_EXPORT GpuSurfaceTracker : public gpu::GpuSurfaceLookup {
       gpu::SurfaceHandle surface_handle,
       bool* can_be_used_with_surface_control) override;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   gl::ScopedJavaSurface AcquireJavaSurface(
       gpu::SurfaceHandle surface_handle,
       bool* can_be_used_with_surface_control) override;
@@ -68,6 +72,9 @@ class GPU_EXPORT GpuSurfaceTracker : public gpu::GpuSurfaceLookup {
 
   // Gets the global instance of the surface tracker.
   static GpuSurfaceTracker* Get() { return GetInstance(); }
+
+  GpuSurfaceTracker(const GpuSurfaceTracker&) = delete;
+  GpuSurfaceTracker& operator=(const GpuSurfaceTracker&) = delete;
 
   // Adds a surface for a native widget. Returns the surface ID.
   int AddSurfaceForNativeWidget(SurfaceRecord record);
@@ -96,8 +103,6 @@ class GPU_EXPORT GpuSurfaceTracker : public gpu::GpuSurfaceLookup {
   mutable base::Lock surface_map_lock_;
   SurfaceMap surface_map_;
   int next_surface_handle_;
-
-  DISALLOW_COPY_AND_ASSIGN(GpuSurfaceTracker);
 };
 
 }  // namespace ui

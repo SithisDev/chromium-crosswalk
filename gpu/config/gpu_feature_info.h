@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@ namespace gpu {
 // Flags indicating the status of a GPU feature (see gpu_feature_type.h).
 enum GpuFeatureStatus {
   kGpuFeatureStatusEnabled,
-  kGpuFeatureStatusBlacklisted,
+  kGpuFeatureStatusBlocklisted,
   kGpuFeatureStatusDisabled,
   kGpuFeatureStatusSoftware,
   kGpuFeatureStatusUndefined,
@@ -58,8 +58,8 @@ struct GPU_EXPORT GpuFeatureInfo {
   std::string disabled_extensions;
   // Disabled WebGL extensions separated by whitespaces.
   std::string disabled_webgl_extensions;
-  // Applied gpu blacklist entry indices.
-  std::vector<uint32_t> applied_gpu_blacklist_entries;
+  // Applied gpu blocklist entry indices.
+  std::vector<uint32_t> applied_gpu_blocklist_entries;
   // Applied gpu driver bug list entry indices.
   std::vector<uint32_t> applied_gpu_driver_bug_list_entries;
 

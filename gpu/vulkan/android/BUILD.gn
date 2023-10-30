@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -24,7 +24,8 @@ component("android") {
   defines = [ "IS_VULKAN_ANDROID_IMPL" ]
 
   deps = [
-    "//gpu/ipc/common:common",
+    "//gpu/ipc/common",
+    "//gpu/ipc/common:vulkan_ycbcr_info",
     "//ui/gfx",
   ]
 
@@ -43,6 +44,7 @@ test("vk_tests") {
     "//base/test:test_support",
     "//components/viz/common:vulkan_context_provider",
     "//testing/gtest",
+    "//ui/gfx",
   ]
   sources = [
     "run_all_unittests.cc",

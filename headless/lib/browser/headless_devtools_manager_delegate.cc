@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include "build/build_config.h"
 #include "content/public/browser/devtools_agent_host.h"
+#include "content/public/browser/devtools_agent_host_client_channel.h"
 #include "content/public/browser/web_contents.h"
-#include "headless/grit/headless_lib_resources.h"
 #include "headless/lib/browser/headless_browser_context_impl.h"
 #include "headless/lib/browser/headless_browser_impl.h"
 #include "headless/lib/browser/headless_web_contents_impl.h"
@@ -23,13 +23,12 @@ HeadlessDevToolsManagerDelegate::HeadlessDevToolsManagerDelegate(
 HeadlessDevToolsManagerDelegate::~HeadlessDevToolsManagerDelegate() = default;
 
 void HeadlessDevToolsManagerDelegate::HandleCommand(
-    content::DevToolsAgentHost* agent_host,
-    content::DevToolsAgentHostClient* client,
-    const std::string& method,
-    const std::string& message,
+    content::DevToolsAgentHostClientChannel* channel,
+    base::span<const uint8_t> message,
     NotHandledCallback callback) {
-  DCHECK(sessions_.find(client) != sessions_.end());
-  sessions_[client]->HandleCommand(method, message, std::move(callback));
+  auto it = sessions_.find(channel);
+  DCHECK(it != sessions_.end());
+  it->second->HandleCommand(message, std::move(callback));
 }
 
 scoped_refptr<content::DevToolsAgentHost>
@@ -47,33 +46,28 @@ HeadlessDevToolsManagerDelegate::CreateNewTarget(const GURL& url) {
       web_contents_impl->web_contents());
 }
 
-std::string HeadlessDevToolsManagerDelegate::GetDiscoveryPageHTML() {
-  return ui::ResourceBundle::GetSharedInstance()
-      .GetRawDataResource(IDR_HEADLESS_LIB_DEVTOOLS_DISCOVERY_PAGE)
-      .as_string();
-}
-
 bool HeadlessDevToolsManagerDelegate::HasBundledFrontendResources() {
   return true;
 }
 
 void HeadlessDevToolsManagerDelegate::ClientAttached(
-    content::DevToolsAgentHost* agent_host,
-    content::DevToolsAgentHostClient* client) {
-  DCHECK(sessions_.find(client) == sessions_.end());
-  sessions_[client] = std::make_unique<protocol::HeadlessDevToolsSession>(
-      browser_, agent_host, client);
+    content::DevToolsAgentHostClientChannel* channel) {
+  DCHECK(sessions_.find(channel) == sessions_.end());
+  sessions_.emplace(
+      channel,
+      std::make_unique<protocol::HeadlessDevToolsSession>(browser_, channel));
 }
 
 void HeadlessDevToolsManagerDelegate::ClientDetached(
-    content::DevToolsAgentHost* agent_host,
-    content::DevToolsAgentHostClient* client) {
-  sessions_.erase(client);
+    content::DevToolsAgentHostClientChannel* channel) {
+  sessions_.erase(channel);
 }
 
 std::vector<content::BrowserContext*>
 HeadlessDevToolsManagerDelegate::GetBrowserContexts() {
   std::vector<content::BrowserContext*> contexts;
+  if (!browser_)
+    return contexts;
   for (auto* context : browser_->GetAllBrowserContexts()) {
     if (context != browser_->GetDefaultBrowserContext())
       contexts.push_back(HeadlessBrowserContextImpl::From(context));
@@ -82,11 +76,15 @@ HeadlessDevToolsManagerDelegate::GetBrowserContexts() {
 }
 content::BrowserContext*
 HeadlessDevToolsManagerDelegate::GetDefaultBrowserContext() {
-  return HeadlessBrowserContextImpl::From(browser_->GetDefaultBrowserContext());
+  return browser_ ? HeadlessBrowserContextImpl::From(
+                        browser_->GetDefaultBrowserContext())
+                  : nullptr;
 }
 
 content::BrowserContext*
 HeadlessDevToolsManagerDelegate::CreateBrowserContext() {
+  if (!browser_)
+    return nullptr;
   auto builder = browser_->CreateBrowserContextBuilder();
   builder.SetIncognitoMode(true);
   HeadlessBrowserContext* browser_context = builder.Build();

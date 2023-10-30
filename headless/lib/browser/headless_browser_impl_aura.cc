@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,8 +39,7 @@ void HeadlessBrowserImpl::PlatformStart() {
 void HeadlessBrowserImpl::PlatformInitializeWebContents(
     HeadlessWebContentsImpl* web_contents) {
   auto window_tree_host = std::make_unique<HeadlessWindowTreeHost>(
-      gfx::Rect(),
-      web_contents->begin_frame_control_enabled() ? web_contents : nullptr);
+      web_contents->begin_frame_control_enabled());
   window_tree_host->InitHost();
   gfx::NativeWindow parent_window = window_tree_host->window();
   parent_window->Show();

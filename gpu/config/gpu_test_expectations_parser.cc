@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "base/check_op.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -46,6 +46,9 @@ enum Token {
   kConfigMacSierra,
   kConfigMacHighSierra,
   kConfigMacMojave,
+  kConfigMacCatalina,
+  kConfigMacBigSur,
+  kConfigMacMonterey,
   kConfigMac,
   kConfigLinux,
   kConfigChromeOS,
@@ -63,6 +66,9 @@ enum Token {
   kConfigD3D11,
   kConfigGLDesktop,
   kConfigGLES,
+  // command decoder
+  kConfigPassthrough,
+  kConfigValidating,
   // expectation
   kExpectationPass,
   kExpectationFail,
@@ -103,6 +109,9 @@ const TokenInfo kTokenData[] = {
     {"sierra", GPUTestConfig::kOsMacSierra},
     {"highsierra", GPUTestConfig::kOsMacHighSierra},
     {"mojave", GPUTestConfig::kOsMacMojave},
+    {"catalina", GPUTestConfig::kOsMacCatalina},
+    {"bigsur", GPUTestConfig::kOsMacBigSur},
+    {"monterey", GPUTestConfig::kOsMacMonterey},
     {"mac", GPUTestConfig::kOsMac},
     {"linux", GPUTestConfig::kOsLinux},
     {"chromeos", GPUTestConfig::kOsChromeOS},
@@ -117,6 +126,8 @@ const TokenInfo kTokenData[] = {
     {"d3d11", GPUTestConfig::kAPID3D11},
     {"opengl", GPUTestConfig::kAPIGLDesktop},
     {"gles", GPUTestConfig::kAPIGLES},
+    {"passthrough", GPUTestConfig::kCommandDecoderPassthrough},
+    {"validating", GPUTestConfig::kCommandDecoderValidating},
     {"pass", GPUTestExpectationsParser::kGpuTestPass},
     {"fail", GPUTestExpectationsParser::kGpuTestFail},
     {"flaky", GPUTestExpectationsParser::kGpuTestFlaky},
@@ -134,6 +145,7 @@ enum ErrorType {
   kErrorEntryWithGpuVendorConflicts,
   kErrorEntryWithBuildTypeConflicts,
   kErrorEntryWithAPIConflicts,
+  kErrorEntryWithCommandDecoderConflicts,
   kErrorEntryWithGpuDeviceIdConflicts,
   kErrorEntryWithExpectationConflicts,
   kErrorEntriesOverlap,
@@ -149,6 +161,7 @@ const char* kErrorMessage[] = {
     "entry with GPU vendor modifier conflicts",
     "entry with GPU build type conflicts",
     "entry with GPU API conflicts",
+    "entry with GPU process command decoder conflicts",
     "entry with GPU device id conflicts or malformat",
     "entry with expectation modifier conflicts",
     "two entries' configs overlap",
@@ -161,7 +174,7 @@ Token ParseToken(const std::string& word) {
     return kConfigGPUDeviceID;
 
   for (int32_t i = 0; i < kNumberOfExactMatchTokens; ++i) {
-    if (base::LowerCaseEqualsASCII(word, kTokenData[i].name))
+    if (base::EqualsCaseInsensitiveASCII(word, kTokenData[i].name))
       return static_cast<Token>(i);
   }
   return kTokenWord;
@@ -267,6 +280,9 @@ bool GPUTestExpectationsParser::ParseConfig(
       case kConfigMacSierra:
       case kConfigMacHighSierra:
       case kConfigMacMojave:
+      case kConfigMacCatalina:
+      case kConfigMacBigSur:
+      case kConfigMacMonterey:
       case kConfigMac:
       case kConfigLinux:
       case kConfigChromeOS:
@@ -281,6 +297,8 @@ bool GPUTestExpectationsParser::ParseConfig(
       case kConfigD3D11:
       case kConfigGLDesktop:
       case kConfigGLES:
+      case kConfigPassthrough:
+      case kConfigValidating:
       case kConfigGPUDeviceID:
         if (token == kConfigGPUDeviceID) {
           if (!UpdateTestConfig(config, tokens[i], 0))
@@ -329,6 +347,9 @@ bool GPUTestExpectationsParser::ParseLine(
       case kConfigMacSierra:
       case kConfigMacHighSierra:
       case kConfigMacMojave:
+      case kConfigMacCatalina:
+      case kConfigMacBigSur:
+      case kConfigMacMonterey:
       case kConfigMac:
       case kConfigLinux:
       case kConfigChromeOS:
@@ -343,6 +364,8 @@ bool GPUTestExpectationsParser::ParseLine(
       case kConfigD3D11:
       case kConfigGLDesktop:
       case kConfigGLES:
+      case kConfigPassthrough:
+      case kConfigValidating:
       case kConfigGPUDeviceID:
         // MODIFIERS, could be in any order, need at least one.
         if (stage != kLineParserConfigs && stage != kLineParserBugID) {
@@ -454,6 +477,9 @@ bool GPUTestExpectationsParser::UpdateTestConfig(GPUTestConfig* config,
     case kConfigMacSierra:
     case kConfigMacHighSierra:
     case kConfigMacMojave:
+    case kConfigMacCatalina:
+    case kConfigMacBigSur:
+    case kConfigMacMonterey:
     case kConfigMac:
     case kConfigLinux:
     case kConfigChromeOS:
@@ -503,6 +529,16 @@ bool GPUTestExpectationsParser::UpdateTestConfig(GPUTestConfig* config,
         return false;
       }
       config->set_api(config->api() | kTokenData[token].flag);
+      break;
+    case kConfigPassthrough:
+    case kConfigValidating:
+      if ((config->command_decoder() & kTokenData[token].flag) != 0) {
+        PushErrorMessage(kErrorMessage[kErrorEntryWithCommandDecoderConflicts],
+                         line_number);
+        return false;
+      }
+      config->set_command_decoder(config->command_decoder() |
+                                  kTokenData[token].flag);
       break;
     default:
       DCHECK(false);
@@ -568,4 +604,3 @@ GPUTestExpectationsParser:: GPUTestExpectationEntry::GPUTestExpectationEntry()
 }
 
 }  // namespace gpu
-

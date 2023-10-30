@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,30 +28,6 @@ using ::testing::StrEq;
 
 namespace gpu {
 namespace gles2 {
-
-using namespace cmds;
-
-class GLES2DecoderTest4 : public GLES2DecoderTestBase {
- public:
-  GLES2DecoderTest4() = default;
-};
-
-class GLES3DecoderTest4 : public GLES2DecoderTest4 {
- public:
-  GLES3DecoderTest4() { shader_language_version_ = 300; }
-
- protected:
-  void SetUp() override {
-    InitState init;
-    init.gl_version = "OpenGL ES 3.0";
-    init.bind_generates_resource = true;
-    init.context_type = CONTEXT_TYPE_OPENGLES3;
-    InitDecoder(init);
-  }
-};
-
-INSTANTIATE_TEST_SUITE_P(Service, GLES2DecoderTest4, ::testing::Bool());
-INSTANTIATE_TEST_SUITE_P(Service, GLES3DecoderTest4, ::testing::Bool());
 
 #include "gpu/command_buffer/service/gles2_cmd_decoder_unittest_4_autogen.h"
 

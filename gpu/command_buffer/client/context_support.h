@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,21 +9,21 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/containers/span.h"
+#include "ui/gfx/gpu_fence_handle.h"
 #include "ui/gfx/overlay_transform.h"
-#include "ui/gfx/presentation_feedback.h"
 
-class GrContext;
+class GrDirectContext;
 
 namespace gfx {
 class GpuFence;
-class Rect;
-class RectF;
+}
+
+namespace cc {
+struct ImageHeaderMetadata;
 }
 
 namespace gpu {
 
-struct SwapBuffersCompleteParams;
 struct SyncToken;
 
 class ContextSupport {
@@ -55,38 +55,6 @@ class ContextSupport {
   // flushed.
   virtual void SetAggressivelyFreeResources(
       bool aggressively_free_resources) = 0;
-
-  using SwapCompletedCallback =
-      base::OnceCallback<void(const SwapBuffersCompleteParams&)>;
-  using PresentationCallback =
-      base::OnceCallback<void(const gfx::PresentationFeedback&)>;
-  virtual void Swap(uint32_t flags,
-                    SwapCompletedCallback complete_callback,
-                    PresentationCallback presentation_callback) = 0;
-  virtual void SwapWithBounds(const std::vector<gfx::Rect>& rects,
-                              uint32_t flags,
-                              SwapCompletedCallback swap_completed,
-                              PresentationCallback presentation_callback) = 0;
-  virtual void PartialSwapBuffers(
-      const gfx::Rect& sub_buffer,
-      uint32_t flags,
-      SwapCompletedCallback swap_completed,
-      PresentationCallback presentation_callback) = 0;
-  virtual void CommitOverlayPlanes(
-      uint32_t flags,
-      SwapCompletedCallback swap_completed,
-      PresentationCallback presentation_callback) = 0;
-
-  // Schedule a texture to be presented as an overlay synchronously with the
-  // primary surface during the next buffer swap or CommitOverlayPlanes.
-  // This method is not stateful and needs to be re-scheduled every frame.
-  virtual void ScheduleOverlayPlane(int plane_z_order,
-                                    gfx::OverlayTransform plane_transform,
-                                    unsigned overlay_texture_id,
-                                    const gfx::Rect& display_bounds,
-                                    const gfx::RectF& uv_rect,
-                                    bool enable_blend,
-                                    unsigned gpu_fence_id) = 0;
 
   // Returns an ID that can be used to globally identify the share group that
   // this context's resources belong to.
@@ -135,28 +103,31 @@ class ContextSupport {
 
   virtual unsigned int GetTransferBufferFreeSize() const = 0;
 
-  // Determines if an encoded image can be decoded using hardware decode
-  // acceleration. If this method returns true, then the client can be confident
-  // that a call to RasterInterface::ScheduleImageDecode() will succeed.
+  // Determines if hardware decode acceleration is supported for JPEG images.
+  virtual bool IsJpegDecodeAccelerationSupported() const = 0;
+
+  // Determines if hardware decode acceleration is supported for WebP images.
+  virtual bool IsWebPDecodeAccelerationSupported() const = 0;
+
+  // Determines if |image_metadata| corresponds to an image that can be decoded
+  // using hardware decode acceleration. If this method returns true, then the
+  // client can be confident that a call to
+  // RasterInterface::ScheduleImageDecode() will succeed.
   virtual bool CanDecodeWithHardwareAcceleration(
-      base::span<const uint8_t> encoded_data) const = 0;
+      const cc::ImageHeaderMetadata* image_metadata) const = 0;
 
   // Returns true if the context provider automatically manages calls to
-  // GrContext::resetContext under the hood to prevent GL state synchronization
-  // problems between the GLES2 interface and skia.
+  // GrDirectContext::resetContext under the hood to prevent GL state
+  // synchronization problems between the GLES2 interface and skia.
   virtual bool HasGrContextSupport() const = 0;
 
-  // Sets the GrContext that is to receive resetContext signals when the GL
-  // state is modified via direct calls to the GLES2 interface.
-  virtual void SetGrContext(GrContext* gr) = 0;
+  // Sets the GrDirectContext that is to receive resetContext signals when the
+  // GL state is modified via direct calls to the GLES2 interface.
+  virtual void SetGrContext(GrDirectContext* gr) = 0;
 
   virtual void WillCallGLFromSkia() = 0;
 
   virtual void DidCallGLFromSkia() = 0;
-
-  // Notifies the onscreen surface of the display transform applied to the swaps
-  // from the client.
-  virtual void SetDisplayTransform(gfx::OverlayTransform transform) = 0;
 
  protected:
   ContextSupport() = default;

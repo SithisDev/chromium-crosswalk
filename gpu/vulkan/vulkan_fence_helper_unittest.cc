@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -167,6 +167,9 @@ TEST_F(VulkanFenceHelperTest, SkiaCallbackAfterFences) {
   VulkanFenceHelper::FenceHandle fence_handle =
       fence_helper->GenerateCleanupFence();
   EXPECT_TRUE(fence_handle.is_valid());
+
+  // Call vkQueueWaitIdle() to make sure the |fence_handle| is passed.
+  vkQueueWaitIdle(queue());
 
   // Enqueue 5 more callbacks.
   for (int i = 5; i < 10; i++) {

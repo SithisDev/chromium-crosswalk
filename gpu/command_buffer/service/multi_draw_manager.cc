@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@
 
 #include <algorithm>
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "base/numerics/checked_math.h"
 
 namespace gpu {
@@ -24,8 +25,9 @@ MultiDrawManager::ResultData::ResultData(ResultData&& rhs)
       counts(std::move(rhs.counts)),
       offsets(std::move(rhs.offsets)),
       indices(std::move(rhs.indices)),
-      instance_counts(std::move(rhs.instance_counts)) {
-}
+      instance_counts(std::move(rhs.instance_counts)),
+      basevertices(std::move(rhs.basevertices)),
+      baseinstances(std::move(rhs.baseinstances)) {}
 
 MultiDrawManager::ResultData& MultiDrawManager::ResultData::operator=(
     ResultData&& rhs) {
@@ -41,6 +43,8 @@ MultiDrawManager::ResultData& MultiDrawManager::ResultData::operator=(
   std::swap(offsets, rhs.offsets);
   std::swap(indices, rhs.indices);
   std::swap(instance_counts, rhs.instance_counts);
+  std::swap(basevertices, rhs.basevertices);
+  std::swap(baseinstances, rhs.baseinstances);
   return *this;
 }
 
@@ -78,9 +82,8 @@ bool MultiDrawManager::MultiDrawArrays(GLenum mode,
   if (!EnsureDrawArraysFunction(DrawFunction::DrawArrays, mode, drawcount)) {
     return false;
   }
-  std::copy(firsts, firsts + drawcount, &result_.firsts[current_draw_offset_]);
-  std::copy(counts, counts + drawcount, &result_.counts[current_draw_offset_]);
-  current_draw_offset_ += drawcount;
+  CopyArraysHelper(drawcount, firsts, counts, nullptr, nullptr, nullptr,
+                   nullptr);
   return true;
 }
 
@@ -93,11 +96,24 @@ bool MultiDrawManager::MultiDrawArraysInstanced(GLenum mode,
                                 drawcount)) {
     return false;
   }
-  std::copy(firsts, firsts + drawcount, &result_.firsts[current_draw_offset_]);
-  std::copy(counts, counts + drawcount, &result_.counts[current_draw_offset_]);
-  std::copy(instance_counts, instance_counts + drawcount,
-            &result_.instance_counts[current_draw_offset_]);
-  current_draw_offset_ += drawcount;
+  CopyArraysHelper(drawcount, firsts, counts, nullptr, instance_counts, nullptr,
+                   nullptr);
+  return true;
+}
+
+bool MultiDrawManager::MultiDrawArraysInstancedBaseInstance(
+    GLenum mode,
+    const GLint* firsts,
+    const GLsizei* counts,
+    const GLsizei* instance_counts,
+    const GLuint* baseinstances,
+    GLsizei drawcount) {
+  if (!EnsureDrawArraysFunction(DrawFunction::DrawArraysInstancedBaseInstance,
+                                mode, drawcount)) {
+    return false;
+  }
+  CopyArraysHelper(drawcount, firsts, counts, nullptr, instance_counts, nullptr,
+                   baseinstances);
   return true;
 }
 
@@ -110,21 +126,8 @@ bool MultiDrawManager::MultiDrawElements(GLenum mode,
                                   drawcount)) {
     return false;
   }
-  std::copy(counts, counts + drawcount, &result_.counts[current_draw_offset_]);
-  switch (index_type_) {
-    case IndexStorageType::Offset:
-      std::copy(offsets, offsets + drawcount,
-                &result_.offsets[current_draw_offset_]);
-      break;
-    case IndexStorageType::Pointer:
-      std::transform(
-          offsets, offsets + drawcount, &result_.indices[current_draw_offset_],
-          [](uint32_t offset) {
-            return reinterpret_cast<void*>(static_cast<intptr_t>(offset));
-          });
-      break;
-  }
-  current_draw_offset_ += drawcount;
+  CopyArraysHelper(drawcount, nullptr, counts, offsets, nullptr, nullptr,
+                   nullptr);
   return true;
 }
 
@@ -139,38 +142,49 @@ bool MultiDrawManager::MultiDrawElementsInstanced(
                                   type, drawcount)) {
     return false;
   }
-  std::copy(counts, counts + drawcount, &result_.counts[current_draw_offset_]);
-  std::copy(instance_counts, instance_counts + drawcount,
-            &result_.instance_counts[current_draw_offset_]);
-  switch (index_type_) {
-    case IndexStorageType::Offset:
-      std::copy(offsets, offsets + drawcount,
-                &result_.offsets[current_draw_offset_]);
-      break;
-    case IndexStorageType::Pointer:
-      std::transform(
-          offsets, offsets + drawcount, &result_.indices[current_draw_offset_],
-          [](uint32_t offset) {
-            return reinterpret_cast<void*>(static_cast<intptr_t>(offset));
-          });
-      break;
+  CopyArraysHelper(drawcount, nullptr, counts, offsets, instance_counts,
+                   nullptr, nullptr);
+  return true;
+}
+
+bool MultiDrawManager::MultiDrawElementsInstancedBaseVertexBaseInstance(
+    GLenum mode,
+    const GLsizei* counts,
+    GLenum type,
+    const GLsizei* offsets,
+    const GLsizei* instance_counts,
+    const GLint* basevertices,
+    const GLuint* baseinstances,
+    GLsizei drawcount) {
+  if (!EnsureDrawElementsFunction(
+          DrawFunction::DrawElementsInstancedBaseVertexBaseInstance, mode, type,
+          drawcount)) {
+    return false;
   }
-  current_draw_offset_ += drawcount;
+  CopyArraysHelper(drawcount, nullptr, counts, offsets, instance_counts,
+                   basevertices, baseinstances);
   return true;
 }
 
 void MultiDrawManager::ResizeArrays() {
   switch (result_.draw_function) {
+    case DrawFunction::DrawArraysInstancedBaseInstance:
+      result_.baseinstances.resize(result_.drawcount);
+      [[fallthrough]];
     case DrawFunction::DrawArraysInstanced:
       result_.instance_counts.resize(result_.drawcount);
-      FALLTHROUGH;
+      [[fallthrough]];
     case DrawFunction::DrawArrays:
       result_.firsts.resize(result_.drawcount);
       result_.counts.resize(result_.drawcount);
       break;
+    case DrawFunction::DrawElementsInstancedBaseVertexBaseInstance:
+      result_.basevertices.resize(result_.drawcount);
+      result_.baseinstances.resize(result_.drawcount);
+      [[fallthrough]];
     case DrawFunction::DrawElementsInstanced:
       result_.instance_counts.resize(result_.drawcount);
-      FALLTHROUGH;
+      [[fallthrough]];
     case DrawFunction::DrawElements:
       result_.counts.resize(result_.drawcount);
       switch (index_type_) {
@@ -246,6 +260,57 @@ bool MultiDrawManager::EnsureDrawElementsFunction(DrawFunction draw_function,
     ResizeArrays();
   }
   return true;
+}
+
+void MultiDrawManager::CopyArraysHelper(GLsizei drawcount,
+                                        const GLint* firsts,
+                                        const GLsizei* counts,
+                                        const GLsizei* offsets,
+                                        const GLsizei* instance_counts,
+                                        const GLint* basevertices,
+                                        const GLuint* baseinstances) {
+  if (firsts) {
+    std::copy(firsts, firsts + drawcount,
+              &result_.firsts[current_draw_offset_]);
+  }
+
+  if (counts) {
+    std::copy(counts, counts + drawcount,
+              &result_.counts[current_draw_offset_]);
+  }
+
+  if (instance_counts) {
+    std::copy(instance_counts, instance_counts + drawcount,
+              &result_.instance_counts[current_draw_offset_]);
+  }
+
+  if (basevertices) {
+    std::copy(basevertices, basevertices + drawcount,
+              &result_.basevertices[current_draw_offset_]);
+  }
+
+  if (baseinstances) {
+    std::copy(baseinstances, baseinstances + drawcount,
+              &result_.baseinstances[current_draw_offset_]);
+  }
+
+  if (offsets) {
+    switch (index_type_) {
+      case IndexStorageType::Offset:
+        std::copy(offsets, offsets + drawcount,
+                  &result_.offsets[current_draw_offset_]);
+        break;
+      case IndexStorageType::Pointer:
+        std::transform(
+            offsets, offsets + drawcount,
+            &result_.indices[current_draw_offset_], [](uint32_t offset) {
+              return reinterpret_cast<void*>(static_cast<intptr_t>(offset));
+            });
+        break;
+    }
+  }
+
+  current_draw_offset_ += drawcount;
 }
 
 }  // namespace gles2

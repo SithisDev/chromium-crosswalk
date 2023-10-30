@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -851,6 +851,16 @@ void GetBooleanv(GLenum pname,
   }
 }
 
+void GetBooleani_v(GLenum pname,
+                   GLuint index,
+                   uint32_t data_shm_id,
+                   uint32_t data_shm_offset) {
+  gles2::cmds::GetBooleani_v* c = GetCmdSpace<gles2::cmds::GetBooleani_v>();
+  if (c) {
+    c->Init(pname, index, data_shm_id, data_shm_offset);
+  }
+}
+
 void GetBufferParameteri64v(GLenum target,
                             GLenum pname,
                             uint32_t params_shm_id,
@@ -1553,6 +1563,27 @@ void MultiDrawArraysInstancedCHROMIUM(GLenum mode,
   }
 }
 
+void MultiDrawArraysInstancedBaseInstanceCHROMIUM(
+    GLenum mode,
+    uint32_t firsts_shm_id,
+    uint32_t firsts_shm_offset,
+    uint32_t counts_shm_id,
+    uint32_t counts_shm_offset,
+    uint32_t instance_counts_shm_id,
+    uint32_t instance_counts_shm_offset,
+    uint32_t baseinstances_shm_id,
+    uint32_t baseinstances_shm_offset,
+    GLsizei drawcount) {
+  gles2::cmds::MultiDrawArraysInstancedBaseInstanceCHROMIUM* c =
+      GetCmdSpace<gles2::cmds::MultiDrawArraysInstancedBaseInstanceCHROMIUM>();
+  if (c) {
+    c->Init(mode, firsts_shm_id, firsts_shm_offset, counts_shm_id,
+            counts_shm_offset, instance_counts_shm_id,
+            instance_counts_shm_offset, baseinstances_shm_id,
+            baseinstances_shm_offset, drawcount);
+  }
+}
+
 void MultiDrawElementsCHROMIUM(GLenum mode,
                                uint32_t counts_shm_id,
                                uint32_t counts_shm_offset,
@@ -1583,6 +1614,33 @@ void MultiDrawElementsInstancedCHROMIUM(GLenum mode,
     c->Init(mode, counts_shm_id, counts_shm_offset, type, offsets_shm_id,
             offsets_shm_offset, instance_counts_shm_id,
             instance_counts_shm_offset, drawcount);
+  }
+}
+
+void MultiDrawElementsInstancedBaseVertexBaseInstanceCHROMIUM(
+    GLenum mode,
+    uint32_t counts_shm_id,
+    uint32_t counts_shm_offset,
+    GLenum type,
+    uint32_t offsets_shm_id,
+    uint32_t offsets_shm_offset,
+    uint32_t instance_counts_shm_id,
+    uint32_t instance_counts_shm_offset,
+    uint32_t basevertices_shm_id,
+    uint32_t basevertices_shm_offset,
+    uint32_t baseinstances_shm_id,
+    uint32_t baseinstances_shm_offset,
+    GLsizei drawcount) {
+  gles2::cmds::MultiDrawElementsInstancedBaseVertexBaseInstanceCHROMIUM* c =
+      GetCmdSpace<
+          gles2::cmds::
+              MultiDrawElementsInstancedBaseVertexBaseInstanceCHROMIUM>();
+  if (c) {
+    c->Init(mode, counts_shm_id, counts_shm_offset, type, offsets_shm_id,
+            offsets_shm_offset, instance_counts_shm_id,
+            instance_counts_shm_offset, basevertices_shm_id,
+            basevertices_shm_offset, baseinstances_shm_id,
+            baseinstances_shm_offset, drawcount);
   }
 }
 
@@ -2494,6 +2552,22 @@ void DispatchComputeIndirect(GLintptr offset) {
   }
 }
 
+void DrawArraysIndirect(GLenum mode, GLuint offset) {
+  gles2::cmds::DrawArraysIndirect* c =
+      GetCmdSpace<gles2::cmds::DrawArraysIndirect>();
+  if (c) {
+    c->Init(mode, offset);
+  }
+}
+
+void DrawElementsIndirect(GLenum mode, GLenum type, GLuint offset) {
+  gles2::cmds::DrawElementsIndirect* c =
+      GetCmdSpace<gles2::cmds::DrawElementsIndirect>();
+  if (c) {
+    c->Init(mode, type, offset);
+  }
+}
+
 void GetProgramInterfaceiv(GLuint program,
                            GLenum program_interface,
                            GLenum pname,
@@ -2637,14 +2711,17 @@ void FlushMappedBufferRange(GLenum target, GLintptr offset, GLsizeiptr size) {
   }
 }
 
-void ResizeCHROMIUM(GLuint width,
-                    GLuint height,
+void ResizeCHROMIUM(GLint width,
+                    GLint height,
                     GLfloat scale_factor,
-                    GLenum color_space,
-                    GLboolean alpha) {
+                    GLboolean alpha,
+                    GLuint shm_id,
+                    GLuint shm_offset,
+                    GLsizei color_space_size) {
   gles2::cmds::ResizeCHROMIUM* c = GetCmdSpace<gles2::cmds::ResizeCHROMIUM>();
   if (c) {
-    c->Init(width, height, scale_factor, color_space, alpha);
+    c->Init(width, height, scale_factor, alpha, shm_id, shm_offset,
+            color_space_size);
   }
 }
 
@@ -2712,19 +2789,6 @@ void GetTranslatedShaderSourceANGLE(GLuint shader, uint32_t bucket_id) {
   }
 }
 
-void PostSubBufferCHROMIUM(GLuint64 swap_id,
-                           GLint x,
-                           GLint y,
-                           GLint width,
-                           GLint height,
-                           GLbitfield flags) {
-  gles2::cmds::PostSubBufferCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::PostSubBufferCHROMIUM>();
-  if (c) {
-    c->Init(swap_id, x, y, width, height, flags);
-  }
-}
-
 void CopyTextureCHROMIUM(GLuint source_id,
                          GLint source_level,
                          GLenum dest_target,
@@ -2778,6 +2842,18 @@ void DrawArraysInstancedANGLE(GLenum mode,
   }
 }
 
+void DrawArraysInstancedBaseInstanceANGLE(GLenum mode,
+                                          GLint first,
+                                          GLsizei count,
+                                          GLsizei primcount,
+                                          GLuint baseinstance) {
+  gles2::cmds::DrawArraysInstancedBaseInstanceANGLE* c =
+      GetCmdSpace<gles2::cmds::DrawArraysInstancedBaseInstanceANGLE>();
+  if (c) {
+    c->Init(mode, first, count, primcount, baseinstance);
+  }
+}
+
 void DrawElementsInstancedANGLE(GLenum mode,
                                 GLsizei count,
                                 GLenum type,
@@ -2787,6 +2863,22 @@ void DrawElementsInstancedANGLE(GLenum mode,
       GetCmdSpace<gles2::cmds::DrawElementsInstancedANGLE>();
   if (c) {
     c->Init(mode, count, type, index_offset, primcount);
+  }
+}
+
+void DrawElementsInstancedBaseVertexBaseInstanceANGLE(GLenum mode,
+                                                      GLsizei count,
+                                                      GLenum type,
+                                                      GLuint index_offset,
+                                                      GLsizei primcount,
+                                                      GLint basevertex,
+                                                      GLuint baseinstance) {
+  gles2::cmds::DrawElementsInstancedBaseVertexBaseInstanceANGLE* c =
+      GetCmdSpace<
+          gles2::cmds::DrawElementsInstancedBaseVertexBaseInstanceANGLE>();
+  if (c) {
+    c->Init(mode, count, type, index_offset, primcount, basevertex,
+            baseinstance);
   }
 }
 
@@ -2831,32 +2923,6 @@ void BindUniformLocationCHROMIUMBucket(GLuint program,
   }
 }
 
-void BindTexImage2DCHROMIUM(GLenum target, GLint imageId) {
-  gles2::cmds::BindTexImage2DCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::BindTexImage2DCHROMIUM>();
-  if (c) {
-    c->Init(target, imageId);
-  }
-}
-
-void BindTexImage2DWithInternalformatCHROMIUM(GLenum target,
-                                              GLenum internalformat,
-                                              GLint imageId) {
-  gles2::cmds::BindTexImage2DWithInternalformatCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::BindTexImage2DWithInternalformatCHROMIUM>();
-  if (c) {
-    c->Init(target, internalformat, imageId);
-  }
-}
-
-void ReleaseTexImage2DCHROMIUM(GLenum target, GLint imageId) {
-  gles2::cmds::ReleaseTexImage2DCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::ReleaseTexImage2DCHROMIUM>();
-  if (c) {
-    c->Init(target, imageId);
-  }
-}
-
 void TraceBeginCHROMIUM(GLuint category_bucket_id, GLuint name_bucket_id) {
   gles2::cmds::TraceBeginCHROMIUM* c =
       GetCmdSpace<gles2::cmds::TraceBeginCHROMIUM>();
@@ -2894,19 +2960,6 @@ void LoseContextCHROMIUM(GLenum current, GLenum other) {
   }
 }
 
-void UnpremultiplyAndDitherCopyCHROMIUM(GLuint source_id,
-                                        GLuint dest_id,
-                                        GLint x,
-                                        GLint y,
-                                        GLsizei width,
-                                        GLsizei height) {
-  gles2::cmds::UnpremultiplyAndDitherCopyCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::UnpremultiplyAndDitherCopyCHROMIUM>();
-  if (c) {
-    c->Init(source_id, dest_id, x, y, width, height);
-  }
-}
-
 void DrawBuffersEXTImmediate(GLsizei count, const GLenum* bufs) {
   const uint32_t size =
       gles2::cmds::DrawBuffersEXTImmediate::ComputeSize(count);
@@ -2925,114 +2978,11 @@ void DiscardBackbufferCHROMIUM() {
   }
 }
 
-void ScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
-                                  GLenum plane_transform,
-                                  GLuint overlay_texture_id,
-                                  GLint bounds_x,
-                                  GLint bounds_y,
-                                  GLint bounds_width,
-                                  GLint bounds_height,
-                                  GLfloat uv_x,
-                                  GLfloat uv_y,
-                                  GLfloat uv_width,
-                                  GLfloat uv_height,
-                                  GLboolean enable_blend,
-                                  GLuint gpu_fence_id) {
-  gles2::cmds::ScheduleOverlayPlaneCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::ScheduleOverlayPlaneCHROMIUM>();
-  if (c) {
-    c->Init(plane_z_order, plane_transform, overlay_texture_id, bounds_x,
-            bounds_y, bounds_width, bounds_height, uv_x, uv_y, uv_width,
-            uv_height, enable_blend, gpu_fence_id);
-  }
-}
-
-void ScheduleCALayerSharedStateCHROMIUM(GLfloat opacity,
-                                        GLboolean is_clipped,
-                                        GLint sorting_context_id,
-                                        GLuint shm_id,
-                                        GLuint shm_offset) {
-  gles2::cmds::ScheduleCALayerSharedStateCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::ScheduleCALayerSharedStateCHROMIUM>();
-  if (c) {
-    c->Init(opacity, is_clipped, sorting_context_id, shm_id, shm_offset);
-  }
-}
-
-void ScheduleCALayerCHROMIUM(GLuint contents_texture_id,
-                             GLuint background_color,
-                             GLuint edge_aa_mask,
-                             GLuint filter,
-                             GLuint shm_id,
-                             GLuint shm_offset) {
-  gles2::cmds::ScheduleCALayerCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::ScheduleCALayerCHROMIUM>();
-  if (c) {
-    c->Init(contents_texture_id, background_color, edge_aa_mask, filter, shm_id,
-            shm_offset);
-  }
-}
-
-void ScheduleCALayerInUseQueryCHROMIUMImmediate(GLsizei count,
-                                                const GLuint* textures) {
-  const uint32_t size =
-      gles2::cmds::ScheduleCALayerInUseQueryCHROMIUMImmediate::ComputeSize(
-          count);
-  gles2::cmds::ScheduleCALayerInUseQueryCHROMIUMImmediate* c =
-      GetImmediateCmdSpaceTotalSize<
-          gles2::cmds::ScheduleCALayerInUseQueryCHROMIUMImmediate>(size);
-  if (c) {
-    c->Init(count, textures);
-  }
-}
-
-void CommitOverlayPlanesCHROMIUM(GLuint64 swap_id, GLbitfield flags) {
-  gles2::cmds::CommitOverlayPlanesCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::CommitOverlayPlanesCHROMIUM>();
-  if (c) {
-    c->Init(swap_id, flags);
-  }
-}
-
 void FlushDriverCachesCHROMIUM() {
   gles2::cmds::FlushDriverCachesCHROMIUM* c =
       GetCmdSpace<gles2::cmds::FlushDriverCachesCHROMIUM>();
   if (c) {
     c->Init();
-  }
-}
-
-void ScheduleDCLayerCHROMIUM(GLuint y_texture_id,
-                             GLuint uv_texture_id,
-                             GLint z_order,
-                             GLint content_x,
-                             GLint content_y,
-                             GLint content_width,
-                             GLint content_height,
-                             GLint quad_x,
-                             GLint quad_y,
-                             GLint quad_width,
-                             GLint quad_height,
-                             GLfloat transform_c1r1,
-                             GLfloat transform_c2r1,
-                             GLfloat transform_c1r2,
-                             GLfloat transform_c2r2,
-                             GLfloat transform_tx,
-                             GLfloat transform_ty,
-                             GLboolean is_clipped,
-                             GLint clip_x,
-                             GLint clip_y,
-                             GLint clip_width,
-                             GLint clip_height,
-                             GLuint protected_video_type) {
-  gles2::cmds::ScheduleDCLayerCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::ScheduleDCLayerCHROMIUM>();
-  if (c) {
-    c->Init(y_texture_id, uv_texture_id, z_order, content_x, content_y,
-            content_width, content_height, quad_x, quad_y, quad_width,
-            quad_height, transform_c1r1, transform_c2r1, transform_c1r2,
-            transform_c2r2, transform_tx, transform_ty, is_clipped, clip_x,
-            clip_y, clip_width, clip_height, protected_video_type);
   }
 }
 
@@ -3044,281 +2994,11 @@ void SetActiveURLCHROMIUM(GLuint url_bucket_id) {
   }
 }
 
-void MatrixLoadfCHROMIUMImmediate(GLenum matrixMode, const GLfloat* m) {
-  const uint32_t size =
-      gles2::cmds::MatrixLoadfCHROMIUMImmediate::ComputeSize();
-  gles2::cmds::MatrixLoadfCHROMIUMImmediate* c =
-      GetImmediateCmdSpaceTotalSize<gles2::cmds::MatrixLoadfCHROMIUMImmediate>(
-          size);
+void ContextVisibilityHintCHROMIUM(GLboolean visibility) {
+  gles2::cmds::ContextVisibilityHintCHROMIUM* c =
+      GetCmdSpace<gles2::cmds::ContextVisibilityHintCHROMIUM>();
   if (c) {
-    c->Init(matrixMode, m);
-  }
-}
-
-void MatrixLoadIdentityCHROMIUM(GLenum matrixMode) {
-  gles2::cmds::MatrixLoadIdentityCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::MatrixLoadIdentityCHROMIUM>();
-  if (c) {
-    c->Init(matrixMode);
-  }
-}
-
-void GenPathsCHROMIUM(GLuint first_client_id, GLsizei range) {
-  gles2::cmds::GenPathsCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::GenPathsCHROMIUM>();
-  if (c) {
-    c->Init(first_client_id, range);
-  }
-}
-
-void DeletePathsCHROMIUM(GLuint first_client_id, GLsizei range) {
-  gles2::cmds::DeletePathsCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::DeletePathsCHROMIUM>();
-  if (c) {
-    c->Init(first_client_id, range);
-  }
-}
-
-void IsPathCHROMIUM(GLuint path,
-                    uint32_t result_shm_id,
-                    uint32_t result_shm_offset) {
-  gles2::cmds::IsPathCHROMIUM* c = GetCmdSpace<gles2::cmds::IsPathCHROMIUM>();
-  if (c) {
-    c->Init(path, result_shm_id, result_shm_offset);
-  }
-}
-
-void PathCommandsCHROMIUM(GLuint path,
-                          GLsizei numCommands,
-                          uint32_t commands_shm_id,
-                          uint32_t commands_shm_offset,
-                          GLsizei numCoords,
-                          GLenum coordType,
-                          uint32_t coords_shm_id,
-                          uint32_t coords_shm_offset) {
-  gles2::cmds::PathCommandsCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::PathCommandsCHROMIUM>();
-  if (c) {
-    c->Init(path, numCommands, commands_shm_id, commands_shm_offset, numCoords,
-            coordType, coords_shm_id, coords_shm_offset);
-  }
-}
-
-void PathParameterfCHROMIUM(GLuint path, GLenum pname, GLfloat value) {
-  gles2::cmds::PathParameterfCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::PathParameterfCHROMIUM>();
-  if (c) {
-    c->Init(path, pname, value);
-  }
-}
-
-void PathParameteriCHROMIUM(GLuint path, GLenum pname, GLint value) {
-  gles2::cmds::PathParameteriCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::PathParameteriCHROMIUM>();
-  if (c) {
-    c->Init(path, pname, value);
-  }
-}
-
-void PathStencilFuncCHROMIUM(GLenum func, GLint ref, GLuint mask) {
-  gles2::cmds::PathStencilFuncCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::PathStencilFuncCHROMIUM>();
-  if (c) {
-    c->Init(func, ref, mask);
-  }
-}
-
-void StencilFillPathCHROMIUM(GLuint path, GLenum fillMode, GLuint mask) {
-  gles2::cmds::StencilFillPathCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::StencilFillPathCHROMIUM>();
-  if (c) {
-    c->Init(path, fillMode, mask);
-  }
-}
-
-void StencilStrokePathCHROMIUM(GLuint path, GLint reference, GLuint mask) {
-  gles2::cmds::StencilStrokePathCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::StencilStrokePathCHROMIUM>();
-  if (c) {
-    c->Init(path, reference, mask);
-  }
-}
-
-void CoverFillPathCHROMIUM(GLuint path, GLenum coverMode) {
-  gles2::cmds::CoverFillPathCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::CoverFillPathCHROMIUM>();
-  if (c) {
-    c->Init(path, coverMode);
-  }
-}
-
-void CoverStrokePathCHROMIUM(GLuint path, GLenum coverMode) {
-  gles2::cmds::CoverStrokePathCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::CoverStrokePathCHROMIUM>();
-  if (c) {
-    c->Init(path, coverMode);
-  }
-}
-
-void StencilThenCoverFillPathCHROMIUM(GLuint path,
-                                      GLenum fillMode,
-                                      GLuint mask,
-                                      GLenum coverMode) {
-  gles2::cmds::StencilThenCoverFillPathCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::StencilThenCoverFillPathCHROMIUM>();
-  if (c) {
-    c->Init(path, fillMode, mask, coverMode);
-  }
-}
-
-void StencilThenCoverStrokePathCHROMIUM(GLuint path,
-                                        GLint reference,
-                                        GLuint mask,
-                                        GLenum coverMode) {
-  gles2::cmds::StencilThenCoverStrokePathCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::StencilThenCoverStrokePathCHROMIUM>();
-  if (c) {
-    c->Init(path, reference, mask, coverMode);
-  }
-}
-
-void StencilFillPathInstancedCHROMIUM(GLsizei numPaths,
-                                      GLenum pathNameType,
-                                      uint32_t paths_shm_id,
-                                      uint32_t paths_shm_offset,
-                                      GLuint pathBase,
-                                      GLenum fillMode,
-                                      GLuint mask,
-                                      GLenum transformType,
-                                      uint32_t transformValues_shm_id,
-                                      uint32_t transformValues_shm_offset) {
-  gles2::cmds::StencilFillPathInstancedCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::StencilFillPathInstancedCHROMIUM>();
-  if (c) {
-    c->Init(numPaths, pathNameType, paths_shm_id, paths_shm_offset, pathBase,
-            fillMode, mask, transformType, transformValues_shm_id,
-            transformValues_shm_offset);
-  }
-}
-
-void StencilStrokePathInstancedCHROMIUM(GLsizei numPaths,
-                                        GLenum pathNameType,
-                                        uint32_t paths_shm_id,
-                                        uint32_t paths_shm_offset,
-                                        GLuint pathBase,
-                                        GLint reference,
-                                        GLuint mask,
-                                        GLenum transformType,
-                                        uint32_t transformValues_shm_id,
-                                        uint32_t transformValues_shm_offset) {
-  gles2::cmds::StencilStrokePathInstancedCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::StencilStrokePathInstancedCHROMIUM>();
-  if (c) {
-    c->Init(numPaths, pathNameType, paths_shm_id, paths_shm_offset, pathBase,
-            reference, mask, transformType, transformValues_shm_id,
-            transformValues_shm_offset);
-  }
-}
-
-void CoverFillPathInstancedCHROMIUM(GLsizei numPaths,
-                                    GLenum pathNameType,
-                                    uint32_t paths_shm_id,
-                                    uint32_t paths_shm_offset,
-                                    GLuint pathBase,
-                                    GLenum coverMode,
-                                    GLenum transformType,
-                                    uint32_t transformValues_shm_id,
-                                    uint32_t transformValues_shm_offset) {
-  gles2::cmds::CoverFillPathInstancedCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::CoverFillPathInstancedCHROMIUM>();
-  if (c) {
-    c->Init(numPaths, pathNameType, paths_shm_id, paths_shm_offset, pathBase,
-            coverMode, transformType, transformValues_shm_id,
-            transformValues_shm_offset);
-  }
-}
-
-void CoverStrokePathInstancedCHROMIUM(GLsizei numPaths,
-                                      GLenum pathNameType,
-                                      uint32_t paths_shm_id,
-                                      uint32_t paths_shm_offset,
-                                      GLuint pathBase,
-                                      GLenum coverMode,
-                                      GLenum transformType,
-                                      uint32_t transformValues_shm_id,
-                                      uint32_t transformValues_shm_offset) {
-  gles2::cmds::CoverStrokePathInstancedCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::CoverStrokePathInstancedCHROMIUM>();
-  if (c) {
-    c->Init(numPaths, pathNameType, paths_shm_id, paths_shm_offset, pathBase,
-            coverMode, transformType, transformValues_shm_id,
-            transformValues_shm_offset);
-  }
-}
-
-void StencilThenCoverFillPathInstancedCHROMIUM(
-    GLsizei numPaths,
-    GLenum pathNameType,
-    uint32_t paths_shm_id,
-    uint32_t paths_shm_offset,
-    GLuint pathBase,
-    GLenum fillMode,
-    GLuint mask,
-    GLenum coverMode,
-    GLenum transformType,
-    uint32_t transformValues_shm_id,
-    uint32_t transformValues_shm_offset) {
-  gles2::cmds::StencilThenCoverFillPathInstancedCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::StencilThenCoverFillPathInstancedCHROMIUM>();
-  if (c) {
-    c->Init(numPaths, pathNameType, paths_shm_id, paths_shm_offset, pathBase,
-            fillMode, mask, coverMode, transformType, transformValues_shm_id,
-            transformValues_shm_offset);
-  }
-}
-
-void StencilThenCoverStrokePathInstancedCHROMIUM(
-    GLsizei numPaths,
-    GLenum pathNameType,
-    uint32_t paths_shm_id,
-    uint32_t paths_shm_offset,
-    GLuint pathBase,
-    GLint reference,
-    GLuint mask,
-    GLenum coverMode,
-    GLenum transformType,
-    uint32_t transformValues_shm_id,
-    uint32_t transformValues_shm_offset) {
-  gles2::cmds::StencilThenCoverStrokePathInstancedCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::StencilThenCoverStrokePathInstancedCHROMIUM>();
-  if (c) {
-    c->Init(numPaths, pathNameType, paths_shm_id, paths_shm_offset, pathBase,
-            reference, mask, coverMode, transformType, transformValues_shm_id,
-            transformValues_shm_offset);
-  }
-}
-
-void BindFragmentInputLocationCHROMIUMBucket(GLuint program,
-                                             GLint location,
-                                             uint32_t name_bucket_id) {
-  gles2::cmds::BindFragmentInputLocationCHROMIUMBucket* c =
-      GetCmdSpace<gles2::cmds::BindFragmentInputLocationCHROMIUMBucket>();
-  if (c) {
-    c->Init(program, location, name_bucket_id);
-  }
-}
-
-void ProgramPathFragmentInputGenCHROMIUM(GLuint program,
-                                         GLint location,
-                                         GLenum genMode,
-                                         GLint components,
-                                         uint32_t coeffs_shm_id,
-                                         uint32_t coeffs_shm_offset) {
-  gles2::cmds::ProgramPathFragmentInputGenCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::ProgramPathFragmentInputGenCHROMIUM>();
-  if (c) {
-    c->Init(program, location, genMode, components, coeffs_shm_id,
-            coeffs_shm_offset);
+    c->Init(visibility);
   }
 }
 
@@ -3332,14 +3012,6 @@ void CoverageModulationCHROMIUM(GLenum components) {
 
 void BlendBarrierKHR() {
   gles2::cmds::BlendBarrierKHR* c = GetCmdSpace<gles2::cmds::BlendBarrierKHR>();
-  if (c) {
-    c->Init();
-  }
-}
-
-void ApplyScreenSpaceAntialiasingCHROMIUM() {
-  gles2::cmds::ApplyScreenSpaceAntialiasingCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::ApplyScreenSpaceAntialiasingCHROMIUM>();
   if (c) {
     c->Init();
   }
@@ -3377,65 +3049,6 @@ void GetFragDataIndexEXT(GLuint program,
   }
 }
 
-void UniformMatrix4fvStreamTextureMatrixCHROMIUMImmediate(
-    GLint location,
-    GLboolean transpose,
-    const GLfloat* transform) {
-  const uint32_t size = gles2::cmds::
-      UniformMatrix4fvStreamTextureMatrixCHROMIUMImmediate::ComputeSize();
-  gles2::cmds::UniformMatrix4fvStreamTextureMatrixCHROMIUMImmediate* c =
-      GetImmediateCmdSpaceTotalSize<
-          gles2::cmds::UniformMatrix4fvStreamTextureMatrixCHROMIUMImmediate>(
-          size);
-  if (c) {
-    c->Init(location, transpose, transform);
-  }
-}
-
-void OverlayPromotionHintCHROMIUM(GLuint texture,
-                                  GLboolean promotion_hint,
-                                  GLint display_x,
-                                  GLint display_y,
-                                  GLint display_width,
-                                  GLint display_height) {
-  gles2::cmds::OverlayPromotionHintCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::OverlayPromotionHintCHROMIUM>();
-  if (c) {
-    c->Init(texture, promotion_hint, display_x, display_y, display_width,
-            display_height);
-  }
-}
-
-void SwapBuffersWithBoundsCHROMIUMImmediate(GLuint64 swap_id,
-                                            GLsizei count,
-                                            const GLint* rects,
-                                            GLbitfield flags) {
-  const uint32_t size =
-      gles2::cmds::SwapBuffersWithBoundsCHROMIUMImmediate::ComputeSize(count);
-  gles2::cmds::SwapBuffersWithBoundsCHROMIUMImmediate* c =
-      GetImmediateCmdSpaceTotalSize<
-          gles2::cmds::SwapBuffersWithBoundsCHROMIUMImmediate>(size);
-  if (c) {
-    c->Init(swap_id, count, rects, flags);
-  }
-}
-
-void SetDrawRectangleCHROMIUM(GLint x, GLint y, GLint width, GLint height) {
-  gles2::cmds::SetDrawRectangleCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::SetDrawRectangleCHROMIUM>();
-  if (c) {
-    c->Init(x, y, width, height);
-  }
-}
-
-void SetEnableDCLayersCHROMIUM(GLboolean enabled) {
-  gles2::cmds::SetEnableDCLayersCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::SetEnableDCLayersCHROMIUM>();
-  if (c) {
-    c->Init(enabled);
-  }
-}
-
 void InitializeDiscardableTextureCHROMIUM(GLuint texture_id,
                                           uint32_t shm_id,
                                           uint32_t shm_offset) {
@@ -3459,28 +3072,6 @@ void LockDiscardableTextureCHROMIUM(GLuint texture_id) {
       GetCmdSpace<gles2::cmds::LockDiscardableTextureCHROMIUM>();
   if (c) {
     c->Init(texture_id);
-  }
-}
-
-void TexStorage2DImageCHROMIUM(GLenum target,
-                               GLenum internalFormat,
-                               GLsizei width,
-                               GLsizei height) {
-  gles2::cmds::TexStorage2DImageCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::TexStorage2DImageCHROMIUM>();
-  if (c) {
-    c->Init(target, internalFormat, width, height);
-  }
-}
-
-void SetColorSpaceMetadataCHROMIUM(GLuint texture_id,
-                                   GLuint shm_id,
-                                   GLuint shm_offset,
-                                   GLsizei color_space_size) {
-  gles2::cmds::SetColorSpaceMetadataCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::SetColorSpaceMetadataCHROMIUM>();
-  if (c) {
-    c->Init(texture_id, shm_id, shm_offset, color_space_size);
   }
 }
 
@@ -3554,7 +3145,6 @@ void MaxShaderCompilerThreadsKHR(GLuint count) {
 }
 
 void CreateAndTexStorage2DSharedImageINTERNALImmediate(GLuint texture,
-                                                       GLenum internalformat,
                                                        const GLbyte* mailbox) {
   const uint32_t size = gles2::cmds::
       CreateAndTexStorage2DSharedImageINTERNALImmediate::ComputeSize();
@@ -3562,7 +3152,7 @@ void CreateAndTexStorage2DSharedImageINTERNALImmediate(GLuint texture,
       GetImmediateCmdSpaceTotalSize<
           gles2::cmds::CreateAndTexStorage2DSharedImageINTERNALImmediate>(size);
   if (c) {
-    c->Init(texture, internalformat, mailbox);
+    c->Init(texture, mailbox);
   }
 }
 
@@ -3579,6 +3169,76 @@ void EndSharedImageAccessDirectCHROMIUM(GLuint texture) {
       GetCmdSpace<gles2::cmds::EndSharedImageAccessDirectCHROMIUM>();
   if (c) {
     c->Init(texture);
+  }
+}
+
+void EnableiOES(GLenum target, GLuint index) {
+  gles2::cmds::EnableiOES* c = GetCmdSpace<gles2::cmds::EnableiOES>();
+  if (c) {
+    c->Init(target, index);
+  }
+}
+
+void DisableiOES(GLenum target, GLuint index) {
+  gles2::cmds::DisableiOES* c = GetCmdSpace<gles2::cmds::DisableiOES>();
+  if (c) {
+    c->Init(target, index);
+  }
+}
+
+void BlendEquationiOES(GLuint buf, GLenum mode) {
+  gles2::cmds::BlendEquationiOES* c =
+      GetCmdSpace<gles2::cmds::BlendEquationiOES>();
+  if (c) {
+    c->Init(buf, mode);
+  }
+}
+
+void BlendEquationSeparateiOES(GLuint buf, GLenum modeRGB, GLenum modeAlpha) {
+  gles2::cmds::BlendEquationSeparateiOES* c =
+      GetCmdSpace<gles2::cmds::BlendEquationSeparateiOES>();
+  if (c) {
+    c->Init(buf, modeRGB, modeAlpha);
+  }
+}
+
+void BlendFunciOES(GLuint buf, GLenum src, GLenum dst) {
+  gles2::cmds::BlendFunciOES* c = GetCmdSpace<gles2::cmds::BlendFunciOES>();
+  if (c) {
+    c->Init(buf, src, dst);
+  }
+}
+
+void BlendFuncSeparateiOES(GLuint buf,
+                           GLenum srcRGB,
+                           GLenum dstRGB,
+                           GLenum srcAlpha,
+                           GLenum dstAlpha) {
+  gles2::cmds::BlendFuncSeparateiOES* c =
+      GetCmdSpace<gles2::cmds::BlendFuncSeparateiOES>();
+  if (c) {
+    c->Init(buf, srcRGB, dstRGB, srcAlpha, dstAlpha);
+  }
+}
+
+void ColorMaskiOES(GLuint buf,
+                   GLboolean r,
+                   GLboolean g,
+                   GLboolean b,
+                   GLboolean a) {
+  gles2::cmds::ColorMaskiOES* c = GetCmdSpace<gles2::cmds::ColorMaskiOES>();
+  if (c) {
+    c->Init(buf, r, g, b, a);
+  }
+}
+
+void IsEnablediOES(GLenum target,
+                   GLuint index,
+                   uint32_t result_shm_id,
+                   uint32_t result_shm_offset) {
+  gles2::cmds::IsEnablediOES* c = GetCmdSpace<gles2::cmds::IsEnablediOES>();
+  if (c) {
+    c->Init(target, index, result_shm_id, result_shm_offset);
   }
 }
 

@@ -1,11 +1,11 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/sampler_manager.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/service/error_state.h"
 #include "gpu/command_buffer/service/feature_info.h"
@@ -27,8 +27,8 @@ SamplerState::SamplerState()
       compare_func(GL_LEQUAL),
       compare_mode(GL_NONE),
       max_lod(1000.0f),
-      min_lod(-1000.0f) {
-}
+      min_lod(-1000.0f),
+      max_anisotropy_ext(1.0f) {}
 
 Sampler::Sampler(SamplerManager* manager, GLuint client_id, GLuint service_id)
     : manager_(manager),
@@ -120,6 +120,9 @@ GLenum Sampler::SetParameterf(
       break;
     case GL_TEXTURE_MAX_LOD:
       sampler_state_.max_lod = param;
+      break;
+    case GL_TEXTURE_MAX_ANISOTROPY_EXT:
+      sampler_state_.max_anisotropy_ext = param;
       break;
     default:
       return GL_INVALID_ENUM;

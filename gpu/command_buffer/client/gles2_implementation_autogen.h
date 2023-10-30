@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -316,6 +316,8 @@ GLint GetAttribLocation(GLuint program, const char* name) override;
 
 void GetBooleanv(GLenum pname, GLboolean* params) override;
 
+void GetBooleani_v(GLenum pname, GLuint index, GLboolean* data) override;
+
 void GetBufferParameteri64v(GLenum target,
                             GLenum pname,
                             GLint64* params) override;
@@ -524,8 +526,6 @@ void ShaderSource(GLuint shader,
 
 void ShallowFinishCHROMIUM() override;
 
-void ShallowFlushCHROMIUM() override;
-
 void OrderingBarrierCHROMIUM() override;
 
 void MultiDrawArraysWEBGL(GLenum mode,
@@ -539,6 +539,13 @@ void MultiDrawArraysInstancedWEBGL(GLenum mode,
                                    const GLsizei* instance_counts,
                                    GLsizei drawcount) override;
 
+void MultiDrawArraysInstancedBaseInstanceWEBGL(GLenum mode,
+                                               const GLint* firsts,
+                                               const GLsizei* counts,
+                                               const GLsizei* instance_counts,
+                                               const GLuint* baseinstances,
+                                               GLsizei drawcount) override;
+
 void MultiDrawElementsWEBGL(GLenum mode,
                             const GLsizei* counts,
                             GLenum type,
@@ -551,6 +558,16 @@ void MultiDrawElementsInstancedWEBGL(GLenum mode,
                                      const GLsizei* offsets,
                                      const GLsizei* instance_counts,
                                      GLsizei drawcount) override;
+
+void MultiDrawElementsInstancedBaseVertexBaseInstanceWEBGL(
+    GLenum mode,
+    const GLsizei* counts,
+    GLenum type,
+    const GLsizei* offsets,
+    const GLsizei* instance_counts,
+    const GLint* basevertices,
+    const GLuint* baseinstances,
+    GLsizei drawcount) override;
 
 void StencilFunc(GLenum func, GLint ref, GLuint mask) override;
 
@@ -892,6 +909,12 @@ void DispatchCompute(GLuint num_groups_x,
 
 void DispatchComputeIndirect(GLintptr offset) override;
 
+void DrawArraysIndirect(GLenum mode, const void* offset) override;
+
+void DrawElementsIndirect(GLenum mode,
+                          GLenum type,
+                          const void* offset) override;
+
 void GetProgramInterfaceiv(GLuint program,
                            GLenum program_interface,
                            GLenum pname,
@@ -971,7 +994,7 @@ void UnmapTexSubImage2DCHROMIUM(const void* mem) override;
 void ResizeCHROMIUM(GLuint width,
                     GLuint height,
                     GLfloat scale_factor,
-                    GLenum color_space,
+                    GLcolorSpace color_space,
                     GLboolean alpha) override;
 
 const GLchar* GetRequestableExtensionsCHROMIUM() override;
@@ -998,26 +1021,12 @@ void GetUniformsES3CHROMIUM(GLuint program,
                             GLsizei* size,
                             void* info) override;
 
-GLuint CreateImageCHROMIUM(ClientBuffer buffer,
-                           GLsizei width,
-                           GLsizei height,
-                           GLenum internalformat) override;
-
-void DestroyImageCHROMIUM(GLuint image_id) override;
-
 void DescheduleUntilFinishedCHROMIUM() override;
 
 void GetTranslatedShaderSourceANGLE(GLuint shader,
                                     GLsizei bufsize,
                                     GLsizei* length,
                                     char* source) override;
-
-void PostSubBufferCHROMIUM(GLuint64 swap_id,
-                           GLint x,
-                           GLint y,
-                           GLint width,
-                           GLint height,
-                           GLbitfield flags = 0) override;
 
 void CopyTextureCHROMIUM(GLuint source_id,
                          GLint source_level,
@@ -1050,11 +1059,26 @@ void DrawArraysInstancedANGLE(GLenum mode,
                               GLsizei count,
                               GLsizei primcount) override;
 
+void DrawArraysInstancedBaseInstanceANGLE(GLenum mode,
+                                          GLint first,
+                                          GLsizei count,
+                                          GLsizei primcount,
+                                          GLuint baseinstance) override;
+
 void DrawElementsInstancedANGLE(GLenum mode,
                                 GLsizei count,
                                 GLenum type,
                                 const void* indices,
                                 GLsizei primcount) override;
+
+void DrawElementsInstancedBaseVertexBaseInstanceANGLE(
+    GLenum mode,
+    GLsizei count,
+    GLenum type,
+    const void* indices,
+    GLsizei primcount,
+    GLint basevertex,
+    GLuint baseinstance) override;
 
 void VertexAttribDivisorANGLE(GLuint index, GLuint divisor) override;
 
@@ -1065,14 +1089,6 @@ GLuint CreateAndConsumeTextureCHROMIUM(const GLbyte* mailbox) override;
 void BindUniformLocationCHROMIUM(GLuint program,
                                  GLint location,
                                  const char* name) override;
-
-void BindTexImage2DCHROMIUM(GLenum target, GLint imageId) override;
-
-void BindTexImage2DWithInternalformatCHROMIUM(GLenum target,
-                                              GLenum internalformat,
-                                              GLint imageId) override;
-
-void ReleaseTexImage2DCHROMIUM(GLenum target, GLint imageId) override;
 
 void TraceBeginCHROMIUM(const char* category_name,
                         const char* trace_name) override;
@@ -1085,200 +1101,23 @@ void DiscardFramebufferEXT(GLenum target,
 
 void LoseContextCHROMIUM(GLenum current, GLenum other) override;
 
-void UnpremultiplyAndDitherCopyCHROMIUM(GLuint source_id,
-                                        GLuint dest_id,
-                                        GLint x,
-                                        GLint y,
-                                        GLsizei width,
-                                        GLsizei height) override;
-
 void DrawBuffersEXT(GLsizei count, const GLenum* bufs) override;
 
 void DiscardBackbufferCHROMIUM() override;
-
-void ScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
-                                  GLenum plane_transform,
-                                  GLuint overlay_texture_id,
-                                  GLint bounds_x,
-                                  GLint bounds_y,
-                                  GLint bounds_width,
-                                  GLint bounds_height,
-                                  GLfloat uv_x,
-                                  GLfloat uv_y,
-                                  GLfloat uv_width,
-                                  GLfloat uv_height,
-                                  GLboolean enable_blend,
-                                  GLuint gpu_fence_id) override;
-
-void ScheduleCALayerSharedStateCHROMIUM(GLfloat opacity,
-                                        GLboolean is_clipped,
-                                        const GLfloat* clip_rect,
-                                        const GLfloat* rounded_corner_bounds,
-                                        GLint sorting_context_id,
-                                        const GLfloat* transform) override;
-
-void ScheduleCALayerCHROMIUM(GLuint contents_texture_id,
-                             const GLfloat* contents_rect,
-                             GLuint background_color,
-                             GLuint edge_aa_mask,
-                             const GLfloat* bounds_rect,
-                             GLuint filter) override;
-
-void ScheduleCALayerInUseQueryCHROMIUM(GLsizei count,
-                                       const GLuint* textures) override;
-
-void CommitOverlayPlanesCHROMIUM(GLuint64 swap_id,
-                                 GLbitfield flags = 0) override;
 
 void FlushDriverCachesCHROMIUM() override;
 
 GLuint GetLastFlushIdCHROMIUM() override;
 
-void ScheduleDCLayerCHROMIUM(GLuint y_texture_id,
-                             GLuint uv_texture_id,
-                             GLint z_order,
-                             GLint content_x,
-                             GLint content_y,
-                             GLint content_width,
-                             GLint content_height,
-                             GLint quad_x,
-                             GLint quad_y,
-                             GLint quad_width,
-                             GLint quad_height,
-                             GLfloat transform_c1r1,
-                             GLfloat transform_c2r1,
-                             GLfloat transform_c1r2,
-                             GLfloat transform_c2r2,
-                             GLfloat transform_tx,
-                             GLfloat transform_ty,
-                             GLboolean is_clipped,
-                             GLint clip_x,
-                             GLint clip_y,
-                             GLint clip_width,
-                             GLint clip_height,
-                             GLuint protected_video_type) override;
-
 void SetActiveURLCHROMIUM(const char* url) override;
 
-void MatrixLoadfCHROMIUM(GLenum matrixMode, const GLfloat* m) override;
-
-void MatrixLoadIdentityCHROMIUM(GLenum matrixMode) override;
-
-GLuint GenPathsCHROMIUM(GLsizei range) override;
-
-void DeletePathsCHROMIUM(GLuint path, GLsizei range) override;
-
-GLboolean IsPathCHROMIUM(GLuint path) override;
-
-void PathCommandsCHROMIUM(GLuint path,
-                          GLsizei numCommands,
-                          const GLubyte* commands,
-                          GLsizei numCoords,
-                          GLenum coordType,
-                          const GLvoid* coords) override;
-
-void PathParameterfCHROMIUM(GLuint path, GLenum pname, GLfloat value) override;
-
-void PathParameteriCHROMIUM(GLuint path, GLenum pname, GLint value) override;
-
-void PathStencilFuncCHROMIUM(GLenum func, GLint ref, GLuint mask) override;
-
-void StencilFillPathCHROMIUM(GLuint path,
-                             GLenum fillMode,
-                             GLuint mask) override;
-
-void StencilStrokePathCHROMIUM(GLuint path,
-                               GLint reference,
-                               GLuint mask) override;
-
-void CoverFillPathCHROMIUM(GLuint path, GLenum coverMode) override;
-
-void CoverStrokePathCHROMIUM(GLuint path, GLenum coverMode) override;
-
-void StencilThenCoverFillPathCHROMIUM(GLuint path,
-                                      GLenum fillMode,
-                                      GLuint mask,
-                                      GLenum coverMode) override;
-
-void StencilThenCoverStrokePathCHROMIUM(GLuint path,
-                                        GLint reference,
-                                        GLuint mask,
-                                        GLenum coverMode) override;
-
-void StencilFillPathInstancedCHROMIUM(GLsizei numPaths,
-                                      GLenum pathNameType,
-                                      const GLvoid* paths,
-                                      GLuint pathBase,
-                                      GLenum fillMode,
-                                      GLuint mask,
-                                      GLenum transformType,
-                                      const GLfloat* transformValues) override;
-
-void StencilStrokePathInstancedCHROMIUM(
-    GLsizei numPaths,
-    GLenum pathNameType,
-    const GLvoid* paths,
-    GLuint pathBase,
-    GLint reference,
-    GLuint mask,
-    GLenum transformType,
-    const GLfloat* transformValues) override;
-
-void CoverFillPathInstancedCHROMIUM(GLsizei numPaths,
-                                    GLenum pathNameType,
-                                    const GLvoid* paths,
-                                    GLuint pathBase,
-                                    GLenum coverMode,
-                                    GLenum transformType,
-                                    const GLfloat* transformValues) override;
-
-void CoverStrokePathInstancedCHROMIUM(GLsizei numPaths,
-                                      GLenum pathNameType,
-                                      const GLvoid* paths,
-                                      GLuint pathBase,
-                                      GLenum coverMode,
-                                      GLenum transformType,
-                                      const GLfloat* transformValues) override;
-
-void StencilThenCoverFillPathInstancedCHROMIUM(
-    GLsizei numPaths,
-    GLenum pathNameType,
-    const GLvoid* paths,
-    GLuint pathBase,
-    GLenum fillMode,
-    GLuint mask,
-    GLenum coverMode,
-    GLenum transformType,
-    const GLfloat* transformValues) override;
-
-void StencilThenCoverStrokePathInstancedCHROMIUM(
-    GLsizei numPaths,
-    GLenum pathNameType,
-    const GLvoid* paths,
-    GLuint pathBase,
-    GLint reference,
-    GLuint mask,
-    GLenum coverMode,
-    GLenum transformType,
-    const GLfloat* transformValues) override;
-
-void BindFragmentInputLocationCHROMIUM(GLuint program,
-                                       GLint location,
-                                       const char* name) override;
-
-void ProgramPathFragmentInputGenCHROMIUM(GLuint program,
-                                         GLint location,
-                                         GLenum genMode,
-                                         GLint components,
-                                         const GLfloat* coeffs) override;
+void ContextVisibilityHintCHROMIUM(GLboolean visibility) override;
 
 void CoverageModulationCHROMIUM(GLenum components) override;
 
 GLenum GetGraphicsResetStatusKHR() override;
 
 void BlendBarrierKHR() override;
-
-void ApplyScreenSpaceAntialiasingCHROMIUM() override;
 
 void BindFragDataLocationIndexedEXT(GLuint program,
                                     GLuint colorNumber,
@@ -1291,44 +1130,11 @@ void BindFragDataLocationEXT(GLuint program,
 
 GLint GetFragDataIndexEXT(GLuint program, const char* name) override;
 
-void UniformMatrix4fvStreamTextureMatrixCHROMIUM(
-    GLint location,
-    GLboolean transpose,
-    const GLfloat* transform) override;
-
-void OverlayPromotionHintCHROMIUM(GLuint texture,
-                                  GLboolean promotion_hint,
-                                  GLint display_x,
-                                  GLint display_y,
-                                  GLint display_width,
-                                  GLint display_height) override;
-
-void SwapBuffersWithBoundsCHROMIUM(GLuint64 swap_id,
-                                   GLsizei count,
-                                   const GLint* rects,
-                                   GLbitfield flags = 0) override;
-
-void SetDrawRectangleCHROMIUM(GLint x,
-                              GLint y,
-                              GLint width,
-                              GLint height) override;
-
-void SetEnableDCLayersCHROMIUM(GLboolean enabled) override;
-
 void InitializeDiscardableTextureCHROMIUM(GLuint texture_id) override;
 
 void UnlockDiscardableTextureCHROMIUM(GLuint texture_id) override;
 
 bool LockDiscardableTextureCHROMIUM(GLuint texture_id) override;
-
-void TexStorage2DImageCHROMIUM(GLenum target,
-                               GLenum internalFormat,
-                               GLenum bufferUsage,
-                               GLsizei width,
-                               GLsizei height) override;
-
-void SetColorSpaceMetadataCHROMIUM(GLuint texture_id,
-                                   GLColorSpace color_space) override;
 
 void WindowRectanglesEXT(GLenum mode, GLsizei count, const GLint* box) override;
 
@@ -1353,12 +1159,34 @@ void MaxShaderCompilerThreadsKHR(GLuint count) override;
 
 GLuint CreateAndTexStorage2DSharedImageCHROMIUM(const GLbyte* mailbox) override;
 
-GLuint CreateAndTexStorage2DSharedImageWithInternalFormatCHROMIUM(
-    const GLbyte* mailbox,
-    GLenum internalformat) override;
-
 void BeginSharedImageAccessDirectCHROMIUM(GLuint texture, GLenum mode) override;
 
 void EndSharedImageAccessDirectCHROMIUM(GLuint texture) override;
+
+void EnableiOES(GLenum target, GLuint index) override;
+
+void DisableiOES(GLenum target, GLuint index) override;
+
+void BlendEquationiOES(GLuint buf, GLenum mode) override;
+
+void BlendEquationSeparateiOES(GLuint buf,
+                               GLenum modeRGB,
+                               GLenum modeAlpha) override;
+
+void BlendFunciOES(GLuint buf, GLenum src, GLenum dst) override;
+
+void BlendFuncSeparateiOES(GLuint buf,
+                           GLenum srcRGB,
+                           GLenum dstRGB,
+                           GLenum srcAlpha,
+                           GLenum dstAlpha) override;
+
+void ColorMaskiOES(GLuint buf,
+                   GLboolean r,
+                   GLboolean g,
+                   GLboolean b,
+                   GLboolean a) override;
+
+GLboolean IsEnablediOES(GLenum target, GLuint index) override;
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_IMPLEMENTATION_AUTOGEN_H_

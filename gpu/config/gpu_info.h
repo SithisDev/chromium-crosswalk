@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,40 +13,73 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/flat_map.h"
+#include "base/containers/span.h"
 #include "base/time/time.h"
 #include "base/version.h"
 #include "build/build_config.h"
 #include "gpu/config/dx_diag_node.h"
 #include "gpu/gpu_export.h"
+#include "gpu/vulkan/buildflags.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gl/gpu_preference.h"
 
-#if defined(USE_X11)
-typedef unsigned long VisualID;
+#if BUILDFLAG(IS_WIN)
+#include <dxgi.h>
+
+#include "base/win/windows_types.h"
+#endif
+
+#if BUILDFLAG(ENABLE_VULKAN)
+#include "gpu/config/vulkan_info.h"
 #endif
 
 namespace gpu {
 
-// These values are persisted to logs. Entries should not be renumbered and
+// These values are persistent to logs. Entries should not be renumbered and
 // numeric values should never be reused.
-enum class GpuSeriesType {
+// This should match enum IntelGpuSeriesType in
+//  \tools\metrics\histograms\enums.xml
+enum class IntelGpuSeriesType {
   kUnknown = 0,
+  // Intel 4th gen
+  kBroadwater = 16,
+  kEaglelake = 17,
+  // Intel 5th gen
+  kIronlake = 18,
   // Intel 6th gen
-  kIntelSandyBridge = 1,
+  kSandybridge = 1,
   // Intel 7th gen
-  kIntelValleyView = 2,  // BayTrail
-  kIntelIvyBridge = 3,
-  kIntelHaswell = 4,
+  kBaytrail = 2,
+  kIvybridge = 3,
+  kHaswell = 4,
   // Intel 8th gen
-  kIntelCherryView = 5,  // Braswell
-  kIntelBroadwell = 6,
+  kCherrytrail = 5,
+  kBroadwell = 6,
   // Intel 9th gen
-  kIntelApolloLake = 7,
-  kIntelSkyLake = 8,
-  kIntelGeminiLake = 9,
-  kIntelKabyLake = 10,
-  kIntelCoffeeLake = 11,
+  kApollolake = 7,
+  kSkylake = 8,
+  kGeminilake = 9,
+  kAmberlake = 23,
+  kKabylake = 10,
+  kCoffeelake = 11,
+  kWhiskeylake = 12,
+  kCometlake = 13,
+  // Intel 10th gen
+  kCannonlake = 14,
+  // Intel 11th gen
+  kIcelake = 15,
+  kElkhartlake = 19,
+  kJasperlake = 20,
+  // Intel 12th gen
+  kTigerlake = 21,
+  kRocketlake = 24,
+  kDG1 = 25,
+  kAlderlake = 22,
+  kAlchemist = 26,
   // Please also update |gpu_series_map| in process_json.py.
-  kMaxValue = kIntelCoffeeLake,
+  kMaxValue = kAlchemist,
 };
 
 // Video profile.  This *must* match media::VideoCodecProfile.
@@ -82,7 +115,15 @@ enum VideoCodecProfile {
   AV1PROFILE_PROFILE_PRO,
   DOLBYVISION_PROFILE8,
   DOLBYVISION_PROFILE9,
-  VIDEO_CODEC_PROFILE_MAX = DOLBYVISION_PROFILE9,
+  HEVCPROFILE_REXT,
+  HEVCPROFILE_HIGH_THROUGHPUT,
+  HEVCPROFILE_MULTIVIEW_MAIN,
+  HEVCPROFILE_SCALABLE_MAIN,
+  HEVCPROFILE_3D_MAIN,
+  HEVCPROFILE_SCREEN_EXTENDED,
+  HEVCPROFILE_SCALABLE_REXT,
+  HEVCPROFILE_HIGH_THROUGHPUT_SCREEN_EXTENDED,
+  VIDEO_CODEC_PROFILE_MAX = HEVCPROFILE_HIGH_THROUGHPUT_SCREEN_EXTENDED,
 };
 
 // Specification of a decoding profile supported by a hardware decoder.
@@ -108,6 +149,7 @@ struct GPU_EXPORT VideoDecodeAcceleratorCapabilities {
 // Specification of an encoding profile supported by a hardware encoder.
 struct GPU_EXPORT VideoEncodeAcceleratorSupportedProfile {
   VideoCodecProfile profile;
+  gfx::Size min_resolution;
   gfx::Size max_resolution;
   uint32_t max_framerate_numerator;
   uint32_t max_framerate_denominator;
@@ -156,27 +198,44 @@ struct GPU_EXPORT ImageDecodeAcceleratorSupportedProfile {
 using ImageDecodeAcceleratorSupportedProfiles =
     std::vector<ImageDecodeAcceleratorSupportedProfile>;
 
-#if defined(OS_WIN)
-enum class OverlaySupport { kNone = 0, kDirect = 1, kScaling = 2 };
+#if BUILDFLAG(IS_WIN)
+enum class OverlaySupport {
+  kNone = 0,
+  kDirect = 1,
+  kScaling = 2,
+  kSoftware = 3
+};
 
 GPU_EXPORT const char* OverlaySupportToString(OverlaySupport support);
 
-struct GPU_EXPORT Dx12VulkanVersionInfo {
-  bool IsEmpty() const { return !d3d12_feature_level && !vulkan_version; }
+struct GPU_EXPORT OverlayInfo {
+  OverlayInfo& operator=(const OverlayInfo& other) = default;
+  bool operator==(const OverlayInfo& other) const {
+    return direct_composition == other.direct_composition &&
+           supports_overlays == other.supports_overlays &&
+           yuy2_overlay_support == other.yuy2_overlay_support &&
+           nv12_overlay_support == other.nv12_overlay_support &&
+           bgra8_overlay_support == other.bgra8_overlay_support &&
+           rgb10a2_overlay_support == other.rgb10a2_overlay_support;
+  }
+  bool operator!=(const OverlayInfo& other) const { return !(*this == other); }
 
-  // True if the GPU driver supports DX12.
-  bool supports_dx12 = false;
+  // True if we use direct composition surface on Windows.
+  bool direct_composition = false;
 
-  // True if the GPU driver supports Vulkan.
-  bool supports_vulkan = false;
-
-  // The supported d3d feature level in the gpu driver;
-  uint32_t d3d12_feature_level = 0;
-
-  // The support Vulkan API version in the gpu driver;
-  uint32_t vulkan_version = 0;
+  // True if we use direct composition surface overlays on Windows.
+  bool supports_overlays = false;
+  OverlaySupport yuy2_overlay_support = OverlaySupport::kNone;
+  OverlaySupport nv12_overlay_support = OverlaySupport::kNone;
+  OverlaySupport bgra8_overlay_support = OverlaySupport::kNone;
+  OverlaySupport rgb10a2_overlay_support = OverlaySupport::kNone;
 };
+
 #endif
+
+#if BUILDFLAG(IS_MAC)
+GPU_EXPORT bool ValidateMacOSSpecificTextureTarget(int target);
+#endif  // BUILDFLAG(IS_MAC)
 
 struct GPU_EXPORT GPUInfo {
   struct GPU_EXPORT GPUDevice {
@@ -187,16 +246,44 @@ struct GPU_EXPORT GPUInfo {
     GPUDevice& operator=(const GPUDevice& other);
     GPUDevice& operator=(GPUDevice&& other) noexcept;
 
+    bool IsSoftwareRenderer() const;
+
     // The DWORD (uint32_t) representing the graphics card vendor id.
-    uint32_t vendor_id;
+    uint32_t vendor_id = 0u;
 
     // The DWORD (uint32_t) representing the graphics card device id.
     // Device ids are unique to vendor, not to one another.
-    uint32_t device_id;
+    uint32_t device_id = 0u;
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
+    // The graphics card revision number.
+    uint32_t revision = 0u;
+#endif
+
+#if BUILDFLAG(IS_WIN)
+    // The graphics card subsystem id.
+    // The lower 16 bits represents the subsystem vendor id.
+    uint32_t sub_sys_id = 0u;
+
+    // The graphics card LUID. This is a unique identifier for the graphics card
+    // that is guaranteed to be unique until the computer is restarted. The LUID
+    // is used over the vendor id and device id because the device id is only
+    // unique relative its vendor, not to each other. If there are more than one
+    // of the same exact graphics card, they all have the same vendor id and
+    // device id but different LUIDs.
+    CHROME_LUID luid;
+#endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_MAC)
+    // The registry ID of an IOGraphicsAccelerator2 or AGXAccelerator matches
+    // the ID used for GPU selection by ANGLE_platform_angle_device_id.
+    uint64_t register_id = 0ULL;
+#endif  // BUILDFLAG(IS_MAC)
 
     // Whether this GPU is the currently used one.
-    // Currently this field is only supported and meaningful on OS X.
-    bool active;
+    // Currently this field is only supported and meaningful on OS X and on
+    // Windows using Angle with D3D11.
+    bool active = false;
 
     // The strings that describe the GPU.
     // In Linux these strings are obtained through libpci.
@@ -207,11 +294,13 @@ struct GPU_EXPORT GPUInfo {
 
     std::string driver_vendor;
     std::string driver_version;
-    std::string driver_date;
 
     // NVIDIA CUDA compute capability, major version. 0 if undetermined. Can be
     // used to determine the hardware generation that the GPU belongs to.
-    int cuda_compute_capability_major;
+    int cuda_compute_capability_major = 0;
+
+    // If this device is identified as high performance or low power GPU.
+    gl::GpuPreference gpu_preference = gl::GpuPreference::kNone;
   };
 
   GPUInfo();
@@ -223,6 +312,16 @@ struct GPU_EXPORT GPUInfo {
   const GPUDevice& active_gpu() const;
 
   bool IsInitialized() const;
+
+  bool UsesSwiftShader() const;
+
+  unsigned int GpuCount() const;
+
+  const GPUDevice* GetGpuByPreference(gl::GpuPreference preference) const;
+
+#if BUILDFLAG(IS_WIN)
+  GPUDevice* FindGpuByLuid(DWORD low_part, LONG high_part);
+#endif  // BUILDFLAG(IS_WIN)
 
   // The amount of time taken to get from the process starting to the message
   // loop being pumped.
@@ -310,22 +409,45 @@ struct GPU_EXPORT GPUInfo {
   // is only implemented on Android.
   bool can_support_threaded_texture_mailbox = false;
 
-#if defined(OS_WIN)
-  // True if we use direct composition surface on Windows.
-  bool direct_composition = false;
+// Whether the browser was built with ASAN or not.
+#if defined(ADDRESS_SANITIZER)
+  bool is_asan = true;
+#else
+  bool is_asan = false;
+#endif
 
-  // True if we use direct composition surface overlays on Windows.
-  bool supports_overlays = false;
-  OverlaySupport yuy2_overlay_support = OverlaySupport::kNone;
-  OverlaySupport nv12_overlay_support = OverlaySupport::kNone;
+#if defined(ARCH_CPU_64_BITS)
+  uint32_t target_cpu_bits = 64;
+#elif defined(ARCH_CPU_32_BITS)
+  uint32_t target_cpu_bits = 32;
+#elif defined(ARCH_CPU_31_BITS)
+  uint32_t target_cpu_bits = 31;
+#endif
 
+#if BUILDFLAG(IS_MAC)
+  // Enum describing which texture target is used for native GpuMemoryBuffers on
+  // MacOS. Valid values are GL_TEXTURE_2D and GL_TEXTURE_RECTANGLE_ARB.
+  uint32_t macos_specific_texture_target;
+#endif  // BUILDFLAG(IS_MAC)
+
+#if BUILDFLAG(IS_WIN)
   // The information returned by the DirectX Diagnostics Tool.
   DxDiagNode dx_diagnostics;
 
-  Dx12VulkanVersionInfo dx12_vulkan_version_info;
-#endif
+  // The supported d3d feature level in the gpu driver;
+  uint32_t d3d12_feature_level = 0;
 
-  VideoDecodeAcceleratorCapabilities video_decode_accelerator_capabilities;
+  // The support Vulkan API version in the gpu driver;
+  uint32_t vulkan_version = 0;
+
+  // The GPU hardware overlay info.
+  OverlayInfo overlay_info;
+#endif
+  VideoDecodeAcceleratorSupportedProfiles
+      video_decode_accelerator_supported_profiles;
+
+  // DO NOT use for anything but diagnostics/metrics like chrome://gpu,
+  // it's not populated at start up and can be unreliable for a while.
   VideoEncodeAcceleratorSupportedProfiles
       video_encode_accelerator_supported_profiles;
   bool jpeg_decode_accelerator_supported;
@@ -333,12 +455,13 @@ struct GPU_EXPORT GPUInfo {
   ImageDecodeAcceleratorSupportedProfiles
       image_decode_accelerator_supported_profiles;
 
-#if defined(USE_X11)
-  VisualID system_visual;
-  VisualID rgba_visual;
-#endif
+  bool subpixel_font_rendering;
 
-  bool oop_rasterization_supported;
+  uint32_t visibility_callback_call_count = 0;
+
+#if BUILDFLAG(ENABLE_VULKAN)
+  absl::optional<VulkanInfo> vulkan_info;
+#endif
 
   // Note: when adding new members, please remember to update EnumerateFields
   // in gpu_info.cc.
@@ -359,6 +482,8 @@ struct GPU_EXPORT GPUInfo {
     virtual void AddBool(const char* name, bool value) = 0;
     virtual void AddTimeDeltaInSecondsF(const char* name,
                                         const base::TimeDelta& value) = 0;
+    virtual void AddBinary(const char* name,
+                           const base::span<const uint8_t>& blob) = 0;
 
     // Markers indicating that a GPUDevice is being described.
     virtual void BeginGPUDevice() = 0;
@@ -384,8 +509,8 @@ struct GPU_EXPORT GPUInfo {
     virtual void BeginAuxAttributes() = 0;
     virtual void EndAuxAttributes() = 0;
 
-    virtual void BeginDx12VulkanVersionInfo() = 0;
-    virtual void EndDx12VulkanVersionInfo() = 0;
+    virtual void BeginOverlayInfo() = 0;
+    virtual void EndOverlayInfo() = 0;
 
    protected:
     virtual ~Enumerator() = default;

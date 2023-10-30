@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@ void SRGBConverter::InitializeSRGBConverterProgram() {
 
   srgb_converter_program_ = glCreateProgram();
 
-  const char* kShaderPrecisionPreamble =
+  const char* kShaderPreamble =
       "#ifdef GL_ES\n"
       "precision mediump float;\n"
       "#define TexCoordPrecision mediump\n"
@@ -52,7 +52,7 @@ void SRGBConverter::InitializeSRGBConverterProgram() {
         "#define VARYING out\n";
   }
 
-  vs_source += kShaderPrecisionPreamble;
+  vs_source += kShaderPreamble;
 
   // TODO(yizhou): gles 2.0 does not support gl_VertexID.
   // Compile the vertex shader
@@ -102,7 +102,7 @@ void SRGBConverter::InitializeSRGBConverterProgram() {
     fs_source += "#version 150\n";
   }
 
-  fs_source += kShaderPrecisionPreamble;
+  fs_source += kShaderPreamble;
 
   if (feature_info_->gl_version_info().is_es) {
     if (feature_info_->gl_version_info().is_es3) {

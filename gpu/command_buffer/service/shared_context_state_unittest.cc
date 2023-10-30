@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,12 @@
 #include <string>
 #include <utility>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/context_state_test_helpers.h"
 #include "gpu/command_buffer/service/feature_info.h"
-#include "gpu/command_buffer/service/shared_context_state.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "gpu/config/gpu_feature_info.h"
@@ -72,6 +71,9 @@ TEST_F(SharedContextStateTest, InitFailsIfLostContext) {
 
   // Setup expectations for SharedContextState::InitializeGL().
   EXPECT_CALL(gl_interface, GetIntegerv(GL_MAX_VERTEX_ATTRIBS, _))
+      .WillOnce(SetArgPointee<1>(8u))
+      .RetiresOnSaturation();
+  EXPECT_CALL(gl_interface, GetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, _))
       .WillOnce(SetArgPointee<1>(8u))
       .RetiresOnSaturation();
   ContextStateTestHelpers::SetupInitState(&gl_interface, feature_info.get(),

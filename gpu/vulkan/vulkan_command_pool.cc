@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,8 +58,8 @@ VulkanCommandPool::CreatePrimaryCommandBuffer() {
 
 std::unique_ptr<VulkanCommandBuffer>
 VulkanCommandPool::CreateSecondaryCommandBuffer() {
-  std::unique_ptr<VulkanCommandBuffer> command_buffer(
-      new VulkanCommandBuffer(device_queue_, this, false));
+  auto command_buffer =
+      std::make_unique<VulkanCommandBuffer>(device_queue_, this, false);
   if (!command_buffer->Initialize())
     return nullptr;
 

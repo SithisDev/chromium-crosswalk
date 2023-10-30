@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/trace_event/memory_dump_provider.h"
 #include "gpu/command_buffer/client/client_transfer_cache.h"
@@ -25,6 +25,8 @@
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/common/capabilities.h"
 #include "gpu/command_buffer/common/context_result.h"
+
+class GrDirectContext;
 
 namespace gpu {
 
@@ -60,6 +62,10 @@ class GLES2_IMPL_EXPORT ImplementationBase
   ImplementationBase(CommandBufferHelper* helper,
                      TransferBufferInterface* transfer_buffer,
                      GpuControl* gpu_control);
+
+  ImplementationBase(const ImplementationBase&) = delete;
+  ImplementationBase& operator=(const ImplementationBase&) = delete;
+
   ~ImplementationBase() override;
 
   void FreeUnusedSharedMemory();
@@ -80,11 +86,10 @@ class GLES2_IMPL_EXPORT ImplementationBase
   void GetGpuFence(uint32_t gpu_fence_id,
                    base::OnceCallback<void(std::unique_ptr<gfx::GpuFence>)>
                        callback) override;
-  void SetGrContext(GrContext* gr) override;
+  void SetGrContext(GrDirectContext* gr) override;
   bool HasGrContextSupport() const override;
   void WillCallGLFromSkia() override;
   void DidCallGLFromSkia() override;
-  void SetDisplayTransform(gfx::OverlayTransform transform) override;
 
   // base::trace_event::MemoryDumpProvider implementation.
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
@@ -135,7 +140,7 @@ class GLES2_IMPL_EXPORT ImplementationBase
 
   void RunIfContextNotLost(base::OnceClosure callback);
 
-  TransferBufferInterface* transfer_buffer_;
+  raw_ptr<TransferBufferInterface> transfer_buffer_;
 
   std::unique_ptr<MappedMemoryManager> mapped_memory_;
 
@@ -144,7 +149,7 @@ class GLES2_IMPL_EXPORT ImplementationBase
   base::OnceClosure lost_context_callback_;
   bool lost_context_callback_run_ = false;
 
-  GpuControl* const gpu_control_;
+  const raw_ptr<GpuControl> gpu_control_;
 
   Capabilities capabilities_;
 
@@ -154,11 +159,9 @@ class GLES2_IMPL_EXPORT ImplementationBase
                           const char* function_name,
                           const char* msg) = 0;
 
-  CommandBufferHelper* helper_;
+  raw_ptr<CommandBufferHelper> helper_;
 
   base::WeakPtrFactory<ImplementationBase> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ImplementationBase);
 };
 
 }  // namespace gpu

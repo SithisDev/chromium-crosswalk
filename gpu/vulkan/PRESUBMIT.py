@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,6 +9,9 @@ for more details on the presubmit API built into depot_tools.
 """
 
 import os.path
+
+
+USE_PYTHON3 = True
 
 
 def CommonChecks(input_api, output_api):
@@ -22,10 +25,10 @@ def CommonChecks(input_api, output_api):
 
   messages = []
 
-  if (len(generated_files) > 0 and len(generating_files) == 0):
+  if generated_files and not generating_files:
     long_text = 'Changed files:\n'
-    for file in generated_files:
-      long_text += file.LocalPath() + '\n'
+    for generated_file in generated_files:
+      long_text += generated_file.LocalPath() + '\n'
       long_text += '\n'
       messages.append(output_api.PresubmitError(
           'Vulkan function pointer generated files changed but the generator '
@@ -33,15 +36,16 @@ def CommonChecks(input_api, output_api):
 
   with input_api.temporary_directory() as temp_dir:
     commands = []
-    if len(generating_files) > 0:
+    if generating_files:
+      python_executable = input_api.python3_executable
       commands.append(input_api.Command(name='generate_bindings',
-                                        cmd=[input_api.python_executable,
+                                        cmd=[python_executable,
                                              'generate_bindings.py',
                                              '--check',
                                              '--output-dir=' + temp_dir],
                                         kwargs={},
                                         message=output_api.PresubmitError))
-    if len(commands) > 0:
+    if commands:
       messages.extend(input_api.RunTests(commands))
 
   return messages

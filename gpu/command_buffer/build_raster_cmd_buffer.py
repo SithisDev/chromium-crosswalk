@@ -1,21 +1,23 @@
-#!/usr/bin/env python
-# Copyright 2018 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """code generator for raster command buffers."""
 
 import filecmp
 import os
-import os.path
 import sys
 from optparse import OptionParser
 
 import build_cmd_buffer_lib
 
+# Additional space required after "type" here and elsewhere because otherwise
+# pylint detects "# type:" as invalid syntax on Python 3.8, see
+# https://github.com/PyCQA/pylint/issues/3556.
 # Named type info object represents a named type that is used in OpenGL call
 # arguments.  Each named type defines a set of valid OpenGL call arguments.  The
 # named types are used in 'raster_cmd_buffer_functions.txt'.
-# type: The actual GL type of the named type.
+# type : The actual GL type of the named type.
 # valid: The list of values that are valid for both the client and the service.
 # invalid: Examples of invalid values for the type. At least these values
 #          should be tested to be invalid.
@@ -47,6 +49,7 @@ _NAMED_TYPE_INFO = {
     'is_complete': True,
     'valid': [
       'GL_COMMANDS_ISSUED_CHROMIUM',
+      'GL_COMMANDS_ISSUED_TIMESTAMP_CHROMIUM',
       'GL_COMMANDS_COMPLETED_CHROMIUM',
     ],
     'invalid': [
@@ -130,15 +133,23 @@ _NAMED_TYPE_INFO = {
       'viz::ResourceFormat::R16_EXT',
       'viz::ResourceFormat::RGBX_8888',
       'viz::ResourceFormat::BGRX_8888',
-      'viz::ResourceFormat::RGBX_1010102',
-      'viz::ResourceFormat::BGRX_1010102',
+      'viz::ResourceFormat::RGBA_1010102',
+      'viz::ResourceFormat::BGRA_1010102',
       'viz::ResourceFormat::YVU_420',
       'viz::ResourceFormat::YUV_420_BIPLANAR',
-      'viz::ResourceFormat::UYVY_422',
-
+      'viz::ResourceFormat::P010',
     ],
     'invalid': [
       'viz::ResourceFormat::ETC1',
+    ],
+  },
+  'gpu::raster::MsaaMode': {
+    'type': 'gpu::raster::MsaaMode',
+    'is_complete': True,
+    'valid': [
+      'gpu::raster::MsaaMode::kNoMSAA',
+      'gpu::raster::MsaaMode::kMSAA',
+      'gpu::raster::MsaaMode::kDMSAA',
     ],
   },
 }
@@ -151,7 +162,7 @@ _NAMED_TYPE_INFO = {
 #
 # Must match function names specified in "raster_cmd_buffer_functions.txt".
 #
-# type:         defines which handler will be used to generate code.
+# type :        defines which handler will be used to generate code.
 # decoder_func: defines which function to call in the decoder to execute the
 #               corresponding GL command. If not specified the GL command will
 #               be called directly.
@@ -189,15 +200,59 @@ _FUNCTION_INFO = {
     'unit_test': False,
     'trace_level': 2,
   },
+  'WritePixelsINTERNAL': {
+    'decoder_func': 'DoWritePixelsINTERNAL',
+    'internal': True,
+    'type': 'PUT',
+    'count': 16,  # GL_MAILBOX_SIZE_CHROMIUM
+    'unit_test': False,
+    'trace_level': 2,
+  },
+  'ReadbackARGBImagePixelsINTERNAL': {
+    'decoder_func': 'DoReadbackARGBImagePixelsINTERNAL',
+    'internal': True,
+    'type': 'PUT',
+    'count': 16,  # GL_MAILBOX_SIZE_CHROMIUM
+    'unit_test': False,
+    'result': ['uint32_t'],
+    'trace_level': 2,
+  },
+  'ReadbackYUVImagePixelsINTERNAL': {
+    'decoder_func': 'DoReadbackYUVImagePixelsINTERNAL',
+    'internal': True,
+    'type': 'PUT',
+    'count': 16, # GL_MAILBOX_SIZE_CHROMIUM
+    'unit_test': False,
+    'result': ['uint32_t'],
+    'trace_level': 2,
+  },
+  'ConvertYUVAMailboxesToRGBINTERNAL': {
+    'decoder_func': 'DoConvertYUVAMailboxesToRGBINTERNAL',
+    'internal': True,
+    'type': 'PUT',
+    'count': 144, #GL_MAILBOX_SIZE_CHROMIUM x5 + 16 floats
+    'unit_test': False,
+    'trace_level': 2,
+  },
+  'ConvertRGBAToYUVAMailboxesINTERNAL': {
+    'decoder_func': 'DoConvertRGBAToYUVAMailboxesINTERNAL',
+    'internal': True,
+    'type': 'PUT',
+    'count': 80, #GL_MAILBOX_SIZE_CHROMIUM x5
+    'unit_test': False,
+    'trace_level': 2,
+  },
   'Finish': {
     'impl_func': False,
     'client_test': False,
     'decoder_func': 'DoFinish',
+    'unit_test': False,
     'trace_level': 1,
   },
   'Flush': {
     'impl_func': False,
     'decoder_func': 'DoFlush',
+    'unit_test': False,
     'trace_level': 1,
   },
   'GetError': {
@@ -240,12 +295,21 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glEndnQuery',
     'client_test': False,
   },
+  'QueryCounterEXT' : {
+    'type': 'Custom',
+    'impl_func': False,
+    'cmd_args': 'GLidQuery id, GLenumQueryTarget target, '
+                'void* sync_data, GLuint submit_count',
+    'data_transfer_methods': ['shm'],
+    'gl_test_func': 'glQueryCounter',
+  },
   'GetQueryObjectuivEXT': {
     'type': 'NoCommand',
     'gl_test_func': 'glGetQueryObjectuiv',
   },
-  'ShallowFlushCHROMIUM': {
+  'GetQueryObjectui64vEXT': {
     'type': 'NoCommand',
+    'gl_test_func': 'glGetQueryObjectui64v',
   },
   'OrderingBarrierCHROMIUM': {
     'type': 'NoCommand',
@@ -291,7 +355,7 @@ _FUNCTION_INFO = {
                 'GLsizeiptr raster_shm_size, GLuint font_shm_id,'
                 'GLuint font_shm_offset, GLsizeiptr font_shm_size',
     'extension': 'CHROMIUM_raster_transport',
-    'extension_flag': 'chromium_raster_transport',
+    'unit_test': False,
   },
   'EndRasterCHROMIUM': {
     'decoder_func': 'DoEndRasterCHROMIUM',
@@ -317,15 +381,11 @@ _FUNCTION_INFO = {
     'client_test': False,
     'unit_test': False,
   },
-  'DeletePaintCacheTextBlobsINTERNAL': {
-    'type': 'DELn',
-    'internal': True,
-    'unit_test': False,
-  },
   'DeletePaintCachePathsINTERNAL': {
     'type': 'DELn',
     'internal': True,
     'unit_test': False,
+    'data_transfer_methods': ['immediate', 'shm'],
   },
   'ClearPaintCacheINTERNAL': {
     'decoder_func': 'DoClearPaintCacheINTERNAL',
@@ -406,7 +466,7 @@ def main(argv):
                               chromium_root_dir)
 
   if gen.errors > 0:
-    print "build_raster_cmd_buffer.py: Failed with %d errors" % gen.errors
+    print("build_raster_cmd_buffer.py: Failed with %d errors" % gen.errors)
     return 1
 
   check_failed_filenames = []
@@ -417,10 +477,10 @@ def main(argv):
         check_failed_filenames.append(filename)
 
   if len(check_failed_filenames) > 0:
-    print 'Please run gpu/command_buffer/build_raster_cmd_buffer.py'
-    print 'Failed check on autogenerated command buffer files:'
+    print('Please run gpu/command_buffer/build_raster_cmd_buffer.py')
+    print('Failed check on autogenerated command buffer files:')
     for filename in check_failed_filenames:
-      print filename
+      print(filename)
     return 1
 
   return 0

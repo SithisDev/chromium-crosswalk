@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,11 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/containers/adapters.h"
 #include "base/environment.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/i18n/rtl.h"
 #include "base/json/json_writer.h"
 #include "base/location.h"
 #include "base/memory/weak_ptr.h"
@@ -21,17 +23,20 @@
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
-#include "base/task_runner_util.h"
+#include "base/task/task_runner_util.h"
+#include "base/task/thread_pool.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
-#include "components/os_crypt/os_crypt_switches.h"
 #include "components/viz/common/switches.h"
 #include "content/public/app/content_main.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "headless/app/headless_shell.h"
 #include "headless/app/headless_shell_switches.h"
+#include "headless/lib/browser/headless_browser_impl.h"
+#include "headless/lib/browser/headless_devtools.h"
 #include "headless/lib/headless_content_main_delegate.h"
 #include "headless/public/headless_devtools_target.h"
 #include "net/base/filename_util.h"
@@ -43,18 +48,21 @@
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/ssl_key_logger_impl.h"
 #include "services/network/public/cpp/network_switches.h"
-#include "ui/base/ui_base_switches.h"
+#include "third_party/blink/public/common/switches.h"
 #include "ui/gfx/geometry/size.h"
 
-#if defined(OS_WIN)
-#include "components/crash/content/app/crash_switches.h"
-#include "components/crash/content/app/run_as_crashpad_handler_win.h"
+#if BUILDFLAG(IS_WIN)
+#include "components/crash/core/app/crash_switches.h"  // nogncheck
+#include "components/crash/core/app/run_as_crashpad_handler_win.h"
 #include "sandbox/win/src/sandbox_types.h"
 #endif
 
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
-#include "headless/lib/browser/headless_browser_impl.h"
-#include "headless/lib/browser/headless_devtools.h"
+#if BUILDFLAG(IS_MAC)
+#include "components/os_crypt/os_crypt_switches.h"  // nogncheck
+#endif
+
+#if defined(HEADLESS_USE_POLICY)
+#include "headless/lib/browser/policy/headless_mode_policy.h"
 #endif
 
 namespace headless {
@@ -100,9 +108,12 @@ bool ParseFontRenderHinting(
   return true;
 }
 
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
 GURL ConvertArgumentToURL(const base::CommandLine::StringType& arg) {
+#if BUILDFLAG(IS_WIN)
+  GURL url(base::WideToUTF8(arg));
+#else
   GURL url(arg);
+#endif
   if (url.is_valid() && url.has_scheme())
     return url;
 
@@ -114,8 +125,8 @@ std::vector<GURL> ConvertArgumentsToURLs(
     const base::CommandLine::StringVector& args) {
   std::vector<GURL> urls;
   urls.reserve(args.size());
-  for (auto it = args.rbegin(); it != args.rend(); ++it)
-    urls.push_back(ConvertArgumentToURL(*it));
+  for (const auto& arg : base::Reversed(args))
+    urls.push_back(ConvertArgumentToURL(arg));
   return urls;
 }
 
@@ -133,26 +144,24 @@ base::FilePath GetSSLKeyLogFile(const base::CommandLine* command_line) {
   std::unique_ptr<base::Environment> env(base::Environment::Create());
   std::string path_str;
   env->GetVar("SSLKEYLOGFILE", &path_str);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // base::Environment returns environment variables in UTF-8 on Windows.
-  return base::FilePath(base::UTF8ToUTF16(path_str));
+  return base::FilePath(base::UTF8ToWide(path_str));
 #else
   return base::FilePath(path_str);
 #endif
 }
 
-#endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
-
 int RunContentMain(
     HeadlessBrowser::Options options,
     base::OnceCallback<void(HeadlessBrowser*)> on_browser_start_callback) {
   content::ContentMainParams params(nullptr);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Sandbox info has to be set and initialized.
   CHECK(options.sandbox_info);
   params.instance = options.instance;
   params.sandbox_info = std::move(options.sandbox_info);
-#elif !defined(OS_ANDROID)
+#elif !BUILDFLAG(IS_ANDROID)
   params.argc = options.argc;
   params.argv = options.argv;
 #endif
@@ -160,15 +169,11 @@ int RunContentMain(
   // TODO(skyostil): Implement custom message pumps.
   DCHECK(!options.message_pump);
 
-#if defined(CHROME_MULTIPLE_DLL_CHILD)
-  HeadlessContentMainDelegate delegate(std::move(options));
-#else
   auto browser = std::make_unique<HeadlessBrowserImpl>(
       std::move(on_browser_start_callback), std::move(options));
   HeadlessContentMainDelegate delegate(std::move(browser));
-#endif
   params.delegate = &delegate;
-  return content::ContentMain(params);
+  return content::ContentMain(std::move(params));
 }
 
 bool ValidateCommandLine(const base::CommandLine& command_line) {
@@ -219,15 +224,24 @@ bool ValidateCommandLine(const base::CommandLine& command_line) {
 
 }  // namespace
 
-HeadlessShell::HeadlessShell() : weak_factory_(this) {}
+HeadlessShell::HeadlessShell() = default;
 
 HeadlessShell::~HeadlessShell() = default;
 
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
 void HeadlessShell::OnStart(HeadlessBrowser* browser) {
   browser_ = browser;
+
+#if defined(HEADLESS_USE_POLICY)
+  if (policy::HeadlessModePolicy::IsHeadlessDisabled(
+          static_cast<HeadlessBrowserImpl*>(browser)->GetPrefs())) {
+    LOG(ERROR) << "Headless mode is disabled by policy.";
+    ShutdownSoon();
+    return;
+  }
+#endif
+
   devtools_client_ = HeadlessDevToolsClient::Create();
-  file_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+  file_task_runner_ = base::ThreadPool::CreateSequencedTaskRunner(
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
 
   HeadlessBrowserContext::Builder context_builder =
@@ -241,11 +255,10 @@ void HeadlessShell::OnStart(HeadlessBrowser* browser) {
         std::make_unique<net::SSLKeyLoggerImpl>(ssl_keylog_file));
   }
 
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(::switches::kLang)) {
-    context_builder.SetAcceptLanguage(
-        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-            ::switches::kLang));
-  }
+  // Retrieve the locale set by InitApplicationLocale() in
+  // headless_content_main_delegate.cc in a way that is free of side-effects.
+  context_builder.SetAcceptLanguage(base::i18n::GetConfiguredLocale());
+
   browser_context_ = context_builder.Build();
   browser_->SetDefaultBrowserContext(browser_context_);
 
@@ -256,7 +269,7 @@ void HeadlessShell::OnStart(HeadlessBrowser* browser) {
   // driven by debugger.
   if (args.empty() && !base::CommandLine::ForCurrentProcess()->HasSwitch(
                           switches::kRemoteDebuggingPipe)) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     args.push_back(L"about:blank");
 #else
     args.push_back("about:blank");
@@ -303,16 +316,34 @@ void HeadlessShell::Detach() {
   web_contents_ = nullptr;
 }
 
-void HeadlessShell::Shutdown() {
+void HeadlessShell::ShutdownSoon() {
+  if (shutdown_pending_)
+    return;
+  shutdown_pending_ = true;
+  DCHECK(browser_);
   if (web_contents_)
-    Detach();
-  browser_context_->Close();
+    web_contents_->Close();
+  DCHECK(!web_contents_);
+  browser_->BrowserMainThread()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&HeadlessShell::Shutdown, weak_factory_.GetWeakPtr()));
+}
+
+void HeadlessShell::Shutdown() {
+  DCHECK(!web_contents_);
   browser_->Shutdown();
 }
 
 void HeadlessShell::DevToolsTargetReady() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  web_contents_->GetDevToolsTarget()->AttachClient(devtools_client_.get());
+  HeadlessDevToolsTarget* target = web_contents_->GetDevToolsTarget();
+  target->AttachClient(devtools_client_.get());
+  if (!target->IsAttached()) {
+    LOG(ERROR) << "Could not attach DevTools target.";
+    ShutdownSoon();
+    return;
+  }
+
   devtools_client_->GetInspector()->GetExperimental()->AddObserver(this);
   devtools_client_->GetPage()->GetExperimental()->AddObserver(this);
   devtools_client_->GetPage()->Enable();
@@ -372,7 +403,7 @@ void HeadlessShell::DevToolsTargetReady() {
         FROM_HERE,
         base::BindOnce(&HeadlessShell::FetchTimeout,
                        weak_factory_.GetWeakPtr()),
-        base::TimeDelta::FromMilliseconds(timeout_ms));
+        base::Milliseconds(timeout_ms));
   }
   // TODO(skyostil): Implement more features to demonstrate the devtools API.
 }
@@ -381,23 +412,25 @@ void HeadlessShell::HeadlessWebContentsDestroyed() {
   // Detach now, but defer shutdown till the HeadlessWebContents
   // removal is complete.
   Detach();
-  browser_->BrowserMainThread()->PostTask(
-      FROM_HERE,
-      base::BindOnce(&HeadlessShell::Shutdown, weak_factory_.GetWeakPtr()));
+  ShutdownSoon();
 }
-#endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
 
 void HeadlessShell::FetchTimeout() {
   LOG(INFO) << "Timeout.";
   devtools_client_->GetPage()->GetExperimental()->StopLoading(
       page::StopLoadingParams::Builder().Build());
+  // After calling page.stopLoading() the page will not fire any
+  // life cycle events, so we have to proceed on our own.
+  browser_->BrowserMainThread()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&HeadlessShell::OnPageReady, weak_factory_.GetWeakPtr()));
 }
 
 void HeadlessShell::OnTargetCrashed(
     const inspector::TargetCrashedParams& params) {
   LOG(ERROR) << "Abnormal renderer termination.";
   // NB this never gets called if remote debugging is enabled.
-  Shutdown();
+  ShutdownSoon();
 }
 
 void HeadlessShell::PollReadyState() {
@@ -462,7 +495,7 @@ void HeadlessShell::OnPageReady() {
                  switches::kPrintToPDF)) {
     PrintToPDF();
   } else {
-    Shutdown();
+    ShutdownSoon();
   }
 }
 
@@ -483,7 +516,7 @@ void HeadlessShell::OnDomFetched(
   } else {
     printf("%s\n", result->GetResult()->GetValue()->GetString().c_str());
   }
-  Shutdown();
+  ShutdownSoon();
 }
 
 void HeadlessShell::InputExpression() {
@@ -500,7 +533,7 @@ void HeadlessShell::InputExpression() {
       // If there's no expression, then quit.
       if (expression.str().size() == 0) {
         printf("\n");
-        Shutdown();
+        ShutdownSoon();
         return;
       }
       break;
@@ -508,7 +541,7 @@ void HeadlessShell::InputExpression() {
     expression << static_cast<char>(c);
   }
   if (expression.str() == "quit") {
-    Shutdown();
+    ShutdownSoon();
     return;
   }
   devtools_client_->GetRuntime()->Evaluate(
@@ -537,7 +570,7 @@ void HeadlessShell::OnScreenshotCaptured(
     std::unique_ptr<page::CaptureScreenshotResult> result) {
   if (!result) {
     LOG(ERROR) << "Capture screenshot failed";
-    Shutdown();
+    ShutdownSoon();
     return;
   }
   WriteFile(switches::kScreenshot, kDefaultScreenshotFileName,
@@ -546,9 +579,13 @@ void HeadlessShell::OnScreenshotCaptured(
 
 void HeadlessShell::PrintToPDF() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  bool display_header_footer =
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kPrintToPDFNoHeader);
   devtools_client_->GetPage()->GetExperimental()->PrintToPDF(
       page::PrintToPDFParams::Builder()
-          .SetDisplayHeaderFooter(true)
+          .SetDisplayHeaderFooter(display_header_footer)
           .SetPrintBackground(true)
           .SetPreferCSSPageSize(true)
           .Build(),
@@ -559,7 +596,7 @@ void HeadlessShell::OnPDFCreated(
     std::unique_ptr<page::PrintToPDFResult> result) {
   if (!result) {
     LOG(ERROR) << "Print to PDF failed";
-    Shutdown();
+    ShutdownSoon();
     return;
   }
   WriteFile(switches::kPrintToPDF, kDefaultPDFFileName, result->GetData());
@@ -594,6 +631,7 @@ void HeadlessShell::OnFileOpened(const protocol::Binary& data,
     LOG(ERROR) << "Writing to file " << file_name.value()
                << " was unsuccessful, could not open file: "
                << base::File::ErrorToString(error_code);
+    ShutdownSoon();
     return;
   }
   if (!file_proxy_->Write(
@@ -626,7 +664,7 @@ void HeadlessShell::OnFileWritten(const base::FilePath file_name,
 }
 
 void HeadlessShell::OnFileClosed(base::File::Error error_code) {
-  Shutdown();
+  ShutdownSoon();
 }
 
 bool HeadlessShell::RemoteDebuggingEnabled() const {
@@ -636,7 +674,7 @@ bool HeadlessShell::RemoteDebuggingEnabled() const {
           command_line.HasSwitch(switches::kRemoteDebuggingPipe));
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 int HeadlessShellMain(HINSTANCE instance,
                       sandbox::SandboxInterfaceInfo* sandbox_info) {
   base::CommandLine::Init(0, nullptr);
@@ -659,10 +697,10 @@ int HeadlessShellMain(int argc, const char** argv) {
   base::CommandLine::Init(argc, argv);
   RunChildProcessIfNeeded(argc, argv);
   HeadlessBrowser::Options::Builder builder(argc, argv);
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
   HeadlessShell shell;
 
-#if defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_FUCHSIA)
   // TODO(fuchsia): Remove this when GPU accelerated compositing is ready.
   base::CommandLine::ForCurrentProcess()->AppendSwitch(::switches::kDisableGpu);
 #endif
@@ -671,15 +709,7 @@ int HeadlessShellMain(int argc, const char** argv) {
   if (!ValidateCommandLine(command_line))
     return EXIT_FAILURE;
 
-// Crash reporting in headless mode is enabled by default in official builds.
-#if defined(GOOGLE_CHROME_BUILD)
-  builder.SetCrashReporterEnabled(true);
-  base::FilePath dumps_path;
-  base::PathService::Get(base::DIR_TEMP, &dumps_path);
-  builder.SetCrashDumpsDir(dumps_path);
-#endif
-
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
   command_line.AppendSwitch(os_crypt::switches::kUseMockKeychain);
 #endif
 
@@ -691,11 +721,11 @@ int HeadlessShellMain(int argc, const char** argv) {
     command_line.AppendSwitch(::switches::kDisableNewContentRenderingTimeout);
     // Ensure that image animations don't resync their animation timestamps when
     // looping back around.
-    command_line.AppendSwitch(::switches::kDisableImageAnimationResync);
+    command_line.AppendSwitch(blink::switches::kDisableImageAnimationResync);
 
     // Renderer flags
     command_line.AppendSwitch(cc::switches::kDisableThreadedAnimation);
-    command_line.AppendSwitch(::switches::kDisableThreadedScrolling);
+    command_line.AppendSwitch(blink::switches::kDisableThreadedScrolling);
     command_line.AppendSwitch(cc::switches::kDisableCheckerImaging);
   }
 
@@ -718,7 +748,7 @@ int HeadlessShellMain(int argc, const char** argv) {
       address =
           command_line.GetSwitchValueASCII(switches::kRemoteDebuggingAddress);
       net::IPAddress parsed_address;
-      if (!net::ParseURLHostnameToAddress(address, &parsed_address)) {
+      if (!parsed_address.AssignFromIPLiteral(address)) {
         LOG(ERROR) << "Invalid devtools server address";
         return EXIT_FAILURE;
       }
@@ -756,10 +786,16 @@ int HeadlessShellMain(int argc, const char** argv) {
         command_line.GetSwitchValueASCII(switches::kUseGL));
   }
 
+  if (command_line.HasSwitch(switches::kUseANGLE)) {
+    builder.SetANGLEImplementation(
+        command_line.GetSwitchValueASCII(switches::kUseANGLE));
+  }
+
   if (command_line.HasSwitch(switches::kUserDataDir)) {
     builder.SetUserDataDir(
         command_line.GetSwitchValuePath(switches::kUserDataDir));
-    builder.SetIncognitoMode(false);
+    if (!command_line.HasSwitch(switches::kIncognito))
+      builder.SetIncognitoMode(false);
   }
 
   if (command_line.HasSwitch(switches::kWindowSize)) {
@@ -775,7 +811,7 @@ int HeadlessShellMain(int argc, const char** argv) {
 
   if (command_line.HasSwitch(switches::kHideScrollbars)) {
     builder.SetOverrideWebPreferencesCallback(
-        base::Bind([](WebPreferences* preferences) {
+        base::BindRepeating([](blink::web_pref::WebPreferences* preferences) {
           preferences->hide_scrollbars = true;
         }));
   }
@@ -808,14 +844,14 @@ int HeadlessShellMain(int argc, const char** argv) {
 }
 
 int HeadlessShellMain(const content::ContentMainParams& params) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   return HeadlessShellMain(params.instance, params.sandbox_info);
 #else
   return HeadlessShellMain(params.argc, params.argv);
 #endif
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 void RunChildProcessIfNeeded(HINSTANCE instance,
                              sandbox::SandboxInterfaceInfo* sandbox_info) {
   base::CommandLine::Init(0, nullptr);
@@ -826,7 +862,7 @@ void RunChildProcessIfNeeded(HINSTANCE instance,
 void RunChildProcessIfNeeded(int argc, const char** argv) {
   base::CommandLine::Init(argc, argv);
   HeadlessBrowser::Options::Builder builder(argc, argv);
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
   const base::CommandLine& command_line(
       *base::CommandLine::ForCurrentProcess());
 
@@ -839,8 +875,14 @@ void RunChildProcessIfNeeded(int argc, const char** argv) {
       builder.SetUserAgent(ua);
   }
 
-  exit(RunContentMain(builder.Build(),
-                      base::OnceCallback<void(HeadlessBrowser*)>()));
+  int rc = RunContentMain(builder.Build(),
+                          base::OnceCallback<void(HeadlessBrowser*)>());
+
+  // Note that exiting from here means that base::AtExitManager objects will not
+  // have a chance to be destroyed (typically in main/WinMain).
+  // Use TerminateCurrentProcessImmediately instead of exit to avoid shutdown
+  // crashes and slowdowns on shutdown.
+  base::Process::TerminateCurrentProcessImmediately(rc);
 }
 
 int HeadlessBrowserMain(

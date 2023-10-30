@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -104,6 +104,18 @@ class GLES2_IMPL_EXPORT ProgramInfoManager {
       GLES2Implementation* gl, GLuint program, GLenum program_interface,
       const char* name);
 
+  enum ProgramInfoType {
+    kES2,
+    kES3UniformBlocks,
+    kES3TransformFeedbackVaryings,
+    kES3Uniformsiv,
+    kNone,
+  };
+
+  void UpdateProgramInfo(GLuint program,
+                         base::span<const int8_t> result,
+                         ProgramInfoType type);
+
  private:
   friend class ProgramInfoManagerTest;
 
@@ -113,14 +125,6 @@ class GLES2_IMPL_EXPORT ProgramInfoManager {
                            UpdateES3TransformFeedbackVaryings);
   FRIEND_TEST_ALL_PREFIXES(ProgramInfoManagerTest,
                            GetActiveUniformsivCached);
-
-  enum ProgramInfoType {
-    kES2,
-    kES3UniformBlocks,
-    kES3TransformFeedbackVaryings,
-    kES3Uniformsiv,
-    kNone,
-  };
 
   // Need GLES2_IMPL_EXPORT for tests.
   class GLES2_IMPL_EXPORT Program {
@@ -213,16 +217,16 @@ class GLES2_IMPL_EXPORT ProgramInfoManager {
         GLuint index) const;
 
     // Updates the ES2 only program info after a successful link.
-    void UpdateES2(const std::vector<int8_t>& result);
+    void UpdateES2(base::span<const int8_t> result);
 
     // Updates the ES3 UniformBlock info after a successful link.
-    void UpdateES3UniformBlocks(const std::vector<int8_t>& result);
+    void UpdateES3UniformBlocks(base::span<const int8_t> result);
 
     // Updates the ES3 Uniformsiv info after a successful link.
-    void UpdateES3Uniformsiv(const std::vector<int8_t>& result);
+    void UpdateES3Uniformsiv(base::span<const int8_t> result);
 
     // Updates the ES3 TransformFeedbackVaryings info after a successful link.
-    void UpdateES3TransformFeedbackVaryings(const std::vector<int8_t>& result);
+    void UpdateES3TransformFeedbackVaryings(base::span<const int8_t> result);
 
     bool IsCached(ProgramInfoType type) const;
 

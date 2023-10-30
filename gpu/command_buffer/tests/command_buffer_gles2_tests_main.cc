@@ -1,10 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/task/single_thread_task_executor.h"
-#if defined(OS_MACOSX)
+#include "build/build_config.h"
+#if BUILDFLAG(IS_MAC)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 #include "base/test/launcher/unit_test_launcher.h"
@@ -18,11 +20,11 @@
 namespace {
 
 int RunHelper(base::TestSuite* testSuite) {
+  base::MessagePumpType pump_type = base::MessagePumpType::IO;
 #if defined(USE_OZONE)
-  base::SingleThreadTaskExecutor executor(base::MessagePump::Type::UI);
-#else
-  base::SingleThreadTaskExecutor executor(base::MessagePump::Type::IO);
+  pump_type = base::MessagePumpType::UI;
 #endif
+  base::SingleThreadTaskExecutor executor(pump_type);
   return testSuite->Run();
 }
 
@@ -58,7 +60,7 @@ int main(int argc, char** argv) {
 #endif
 
   base::TestSuite test_suite(argc, argv);
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
   base::mac::ScopedNSAutoreleasePool pool;
 #endif
   testing::InitGoogleMock(&argc, argv);

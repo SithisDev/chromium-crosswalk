@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,49 +9,50 @@
   const FetchHelper = await testRunner.loadScriptAbsolute(
       '../fetch/resources/fetch-test.js');
   const helper = new FetchHelper(testRunner, dp);
+  helper.setEnableLogging(false);
   await helper.enable();
 
-  helper.onceRequest('http://foo.com/').fulfill(
+  helper.onRequest('http://foo.com/').fulfill(
       FetchHelper.makeContentResponse(`
           <script> console.log(document.location.href); </script>
           <iframe src='/a/'></iframe>`)
   );
 
-  helper.onceRequest('http://foo.com/a/').fulfill(
+  helper.onRequest('http://foo.com/a/').fulfill(
       FetchHelper.makeContentResponse(`
           <script> console.log(document.location.href); </script>`)
   );
 
-  helper.onceRequest('http://bar.com/').fulfill(
+  helper.onRequest('http://bar.com/').fulfill(
       FetchHelper.makeContentResponse(`
           <script> console.log(document.location.href); </script>
           <iframe src='/b/' id='frame_b'></iframe>
           <iframe src='/c/'></iframe>`)
   );
 
-  helper.onceRequest('http://bar.com/b/').fulfill(
+  helper.onRequest('http://bar.com/b/').fulfill(
       FetchHelper.makeContentResponse(`
           <script> console.log(document.location.href); </script>
           <iframe src='/d/'></iframe>`)
   );
 
-  helper.onceRequest('http://bar.com/c/').fulfill(
+  helper.onRequest('http://bar.com/c/').fulfill(
       FetchHelper.makeContentResponse(`
           <script> console.log(document.location.href); </script>`)
   );
 
-  helper.onceRequest('http://bar.com/d/').fulfill(
+  helper.onRequest('http://bar.com/d/').fulfill(
       FetchHelper.makeContentResponse(`
           <script> console.log(document.location.href); </script>`)
   );
 
-  helper.onceRequest('http://bar.com/e/').fulfill(
+  helper.onRequest('http://bar.com/e/').fulfill(
       FetchHelper.makeContentResponse(`
           <script> console.log(document.location.href); </script>
           <iframe src='/f/'></iframe>`)
   );
 
-  helper.onceRequest('http://bar.com/f/').fulfill(
+  helper.onRequest('http://bar.com/f/').fulfill(
     FetchHelper.makeContentResponse(`
         <script> console.log(document.location.href); </script>`)
   );
@@ -59,10 +60,16 @@
   const testCommands = [
       `document.location.href = 'http://bar.com/'`,
       `document.getElementById('frame_b').src = '/e/'`,
+      // This should fail the navigation as there's no forward entry yet.
+      `history.forward()`,
       `history.back()`,
+      // This should result in a successful navigation.
       `history.forward()`,
       `history.go(-1)`];
 
+  dp.Runtime.enable();
+  dp.Runtime.onConsoleAPICalled(event =>
+     testRunner.log(`PAGE: ${event.params.args[0].value}`));
   dp.Emulation.onVirtualTimeBudgetExpired(async data => {
     if (!testCommands.length) {
       testRunner.completeTest();
@@ -76,8 +83,7 @@
   });
 
   await dp.Emulation.setVirtualTimePolicy({policy: 'pause'});
+  await dp.Page.navigate({url: 'http://foo.com/'});
   await dp.Emulation.setVirtualTimePolicy({
-      policy: 'pauseIfNetworkFetchesPending', budget: 5000,
-      waitForNavigation: true});
-  dp.Page.navigate({url: 'http://foo.com/'});
+      policy: 'pauseIfNetworkFetchesPending', budget: 5000});
 })

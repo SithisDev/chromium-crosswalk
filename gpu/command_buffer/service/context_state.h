@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,9 @@
 #include <memory>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
+#include "base/notreached.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/sampler_manager.h"
 #include "gpu/command_buffer/service/shader_manager.h"
@@ -364,7 +366,6 @@ struct GPU_GLES2_EXPORT ContextState {
 
   // Which samplers are bound to each texture unit;
   std::vector<scoped_refptr<Sampler>> sampler_units;
-  mutable bool sampler_units_in_ground_state = true;
 
   // We create a transform feedback as the default one per ES3 enabled context
   // instead of using GL's default one to make context switching easier.
@@ -421,8 +422,8 @@ struct GPU_GLES2_EXPORT ContextState {
   // vector<[x,y,w,h]>. Always has space for MAX_WINDOW_RECTANGLES rectangles.
   std::vector<GLint> window_rectangles_;
 
-  gl::GLApi* api_ = nullptr;
-  FeatureInfo* feature_info_;
+  raw_ptr<gl::GLApi> api_ = nullptr;
+  raw_ptr<FeatureInfo> feature_info_;
 
   bool context_lost_ = false;
 };

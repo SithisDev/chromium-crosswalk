@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,13 +25,15 @@ void AssociateMailboxImmediate(GLuint device_id,
                                GLuint id,
                                GLuint generation,
                                GLuint usage,
+                               MailboxFlags flags,
                                const GLbyte* mailbox) {
   const uint32_t size = webgpu::cmds::AssociateMailboxImmediate::ComputeSize();
   webgpu::cmds::AssociateMailboxImmediate* c =
       GetImmediateCmdSpaceTotalSize<webgpu::cmds::AssociateMailboxImmediate>(
           size);
   if (c) {
-    c->Init(device_id, device_generation, id, generation, usage, mailbox);
+    c->Init(device_id, device_generation, id, generation, usage, flags,
+            mailbox);
   }
 }
 
@@ -40,6 +42,29 @@ void DissociateMailbox(GLuint texture_id, GLuint texture_generation) {
       GetCmdSpace<webgpu::cmds::DissociateMailbox>();
   if (c) {
     c->Init(texture_id, texture_generation);
+  }
+}
+
+void DissociateMailboxForPresent(GLuint device_id,
+                                 GLuint device_generation,
+                                 GLuint texture_id,
+                                 GLuint texture_generation) {
+  webgpu::cmds::DissociateMailboxForPresent* c =
+      GetCmdSpace<webgpu::cmds::DissociateMailboxForPresent>();
+  if (c) {
+    c->Init(device_id, device_generation, texture_id, texture_generation);
+  }
+}
+
+void SetExecutionContextToken(uint32_t type,
+                              uint32_t high_high,
+                              uint32_t high_low,
+                              uint32_t low_high,
+                              uint32_t low_low) {
+  webgpu::cmds::SetExecutionContextToken* c =
+      GetCmdSpace<webgpu::cmds::SetExecutionContextToken>();
+  if (c) {
+    c->Init(type, high_high, high_low, low_high, low_low);
   }
 }
 

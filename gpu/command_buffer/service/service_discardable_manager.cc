@@ -1,13 +1,22 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/service_discardable_manager.h"
 
+#include <inttypes.h>
+
+#include "base/command_line.h"
 #include "base/memory/singleton.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
+#include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/command_buffer/service/texture_manager.h"
+#include "gpu/config/gpu_preferences.h"
 
 namespace gpu {
 
@@ -15,8 +24,8 @@ size_t DiscardableCacheSizeLimit() {
 // Cache size values are designed to roughly correspond to existing image cache
 // sizes for 1-1.5 renderers. These will be updated as more types of data are
 // moved to this cache.
-#if defined(OS_ANDROID)
-  const size_t kLowEndCacheSizeBytes = 512 * 1024;
+#if BUILDFLAG(IS_ANDROID)
+  const size_t kLowEndCacheSizeBytes = 1024 * 1024;
   const size_t kNormalCacheSizeBytes = 128 * 1024 * 1024;
 #else
   const size_t kNormalCacheSizeBytes = 192 * 1024 * 1024;
@@ -25,9 +34,9 @@ size_t DiscardableCacheSizeLimit() {
   // While this is a GPU memory cache, we can't read GPU memory reliably, so we
   // use system ram as a proxy.
   const int kLargeCacheSizeMemoryThresholdMB = 4 * 1024;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (base::SysInfo::IsLowEndDevice()) {
     return kLowEndCacheSizeBytes;
   } else {
@@ -48,8 +57,6 @@ size_t DiscardableCacheSizeLimitForPressure(
     base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
   switch (memory_pressure_level) {
     case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE:
-      // This function is only called with moderate or critical pressure.
-      NOTREACHED();
       return base_cache_limit;
     case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE:
       // With moderate pressure, shrink to 1/4 our normal size.
@@ -75,9 +82,20 @@ ServiceDiscardableManager::GpuDiscardableEntry::GpuDiscardableEntry(
 ServiceDiscardableManager::GpuDiscardableEntry::~GpuDiscardableEntry() =
     default;
 
-ServiceDiscardableManager::ServiceDiscardableManager()
+ServiceDiscardableManager::ServiceDiscardableManager(
+    const GpuPreferences& preferences)
     : entries_(EntryCache::NO_AUTO_EVICT),
-      cache_size_limit_(DiscardableCacheSizeLimit()) {}
+      cache_size_limit_(preferences.force_gpu_mem_discardable_limit_bytes
+                            ? preferences.force_gpu_mem_discardable_limit_bytes
+                            : DiscardableCacheSizeLimit()) {
+  // In certain cases, ThreadTaskRunnerHandle isn't set (Android Webview).
+  // Don't register a dump provider in these cases.
+  if (base::ThreadTaskRunnerHandle::IsSet()) {
+    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+        this, "gpu::ServiceDiscardableManager",
+        base::ThreadTaskRunnerHandle::Get());
+  }
+}
 
 ServiceDiscardableManager::~ServiceDiscardableManager() {
 #if DCHECK_IS_ON()
@@ -85,6 +103,46 @@ ServiceDiscardableManager::~ServiceDiscardableManager() {
     DCHECK(nullptr == entry.second.unlocked_texture_ref);
   }
 #endif
+  base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
+      this);
+}
+
+bool ServiceDiscardableManager::OnMemoryDump(
+    const base::trace_event::MemoryDumpArgs& args,
+    base::trace_event::ProcessMemoryDump* pmd) {
+  using base::trace_event::MemoryAllocatorDump;
+  using base::trace_event::MemoryDumpLevelOfDetail;
+
+  if (args.level_of_detail == MemoryDumpLevelOfDetail::BACKGROUND) {
+    std::string dump_name =
+        base::StringPrintf("gpu/discardable_cache/cache_0x%" PRIXPTR,
+                           reinterpret_cast<uintptr_t>(this));
+    MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(dump_name);
+    dump->AddScalar(MemoryAllocatorDump::kNameSize,
+                    MemoryAllocatorDump::kUnitsBytes, total_size_);
+
+    if (!entries_.empty()) {
+      MemoryAllocatorDump* dump_avg_size =
+          pmd->CreateAllocatorDump(dump_name + "/avg_image_size");
+      dump_avg_size->AddScalar("average_size", MemoryAllocatorDump::kUnitsBytes,
+                               total_size_ / entries_.size());
+    }
+
+    // Early out, no need for more detail in a BACKGROUND dump.
+    return true;
+  }
+
+  for (const auto& entry : entries_) {
+    std::string dump_name = base::StringPrintf(
+        "gpu/discardable_cache/cache_0x%" PRIXPTR "/entry_0x%" PRIXPTR,
+        reinterpret_cast<uintptr_t>(this),
+        reinterpret_cast<uintptr_t>(entry.second.unlocked_texture_ref.get()));
+    MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(dump_name);
+    dump->AddScalar(MemoryAllocatorDump::kNameSize,
+                    MemoryAllocatorDump::kUnitsBytes, entry.second.size);
+  }
+
+  return true;
 }
 
 void ServiceDiscardableManager::InsertLockedTexture(
@@ -106,7 +164,7 @@ void ServiceDiscardableManager::InsertLockedTexture(
   }
 
   total_size_ += texture_size;
-  entries_.Put({texture_id, texture_manager},
+  entries_.Put(GpuDiscardableEntryKey{texture_id, texture_manager},
                GpuDiscardableEntry{handle, texture_size});
   EnforceCacheSizeLimit(cache_size_limit_);
 }
@@ -168,6 +226,18 @@ void ServiceDiscardableManager::OnTextureDeleted(
   found->second.handle.ForceDelete();
   total_size_ -= found->second.size;
   entries_.Erase(found);
+}
+
+void ServiceDiscardableManager::OnContextLost() {
+  auto iter = entries_.begin();
+  while (iter != entries_.end()) {
+    iter->second.handle.ForceDelete();
+    if (iter->second.unlocked_texture_ref)
+      iter->second.unlocked_texture_ref->ForceContextLost();
+
+    total_size_ -= iter->second.size;
+    iter = entries_.Erase(iter);
+  }
 }
 
 void ServiceDiscardableManager::OnTextureSizeChanged(

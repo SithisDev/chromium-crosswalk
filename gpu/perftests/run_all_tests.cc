@@ -1,11 +1,11 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
-#include "base/message_loop/message_pump.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/task/single_thread_task_executor.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
@@ -18,15 +18,19 @@
 
 static int RunHelper(base::TestSuite* test_suite) {
   base::FeatureList::InitializeInstance(std::string(), std::string());
+  std::unique_ptr<base::SingleThreadTaskExecutor> executor;
 #if defined(USE_OZONE)
-  base::SingleThreadTaskExecutor executor(base::MessagePump::Type::UI);
+  executor = std::make_unique<base::SingleThreadTaskExecutor>(
+      base::MessagePumpType::UI);
   ui::OzonePlatform::InitParams params;
   params.single_process = true;
   ui::OzonePlatform::InitializeForGPU(params);
 #else
-  base::SingleThreadTaskExecutor executor(base::MessagePump::Type::IO);
+  executor = std::make_unique<base::SingleThreadTaskExecutor>(
+      base::MessagePumpType::IO);
 #endif
-  CHECK(gl::init::InitializeGLOneOff());
+
+  CHECK(gl::init::InitializeGLOneOff(/*system_device_id=*/0));
   return test_suite->Run();
 }
 

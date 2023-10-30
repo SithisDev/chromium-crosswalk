@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,6 @@ static std::string GetStringBufferfv(uint32_t value);
 static std::string GetStringBufferiv(uint32_t value);
 static std::string GetStringBufferuiv(uint32_t value);
 static std::string GetStringCapability(uint32_t value);
-static std::string GetStringClientBufferUsage(uint32_t value);
 static std::string GetStringCmpFunction(uint32_t value);
 static std::string GetStringCompressedTextureFormat(uint32_t value);
 static std::string GetStringCoverageModulationComponents(uint32_t value);
@@ -49,15 +48,6 @@ static std::string GetStringIndexedGLState(uint32_t value);
 static std::string GetStringIndexedStringType(uint32_t value);
 static std::string GetStringInternalFormatParameter(uint32_t value);
 static std::string GetStringMapBufferAccess(uint32_t value);
-static std::string GetStringMatrixMode(uint32_t value);
-static std::string GetStringPathCoordType(uint32_t value);
-static std::string GetStringPathCoverMode(uint32_t value);
-static std::string GetStringPathFillMode(uint32_t value);
-static std::string GetStringPathFragmentInputGenMode(uint32_t value);
-static std::string GetStringPathInstancedCoverMode(uint32_t value);
-static std::string GetStringPathNameType(uint32_t value);
-static std::string GetStringPathParameter(uint32_t value);
-static std::string GetStringPathTransformType(uint32_t value);
 static std::string GetStringPixelStore(uint32_t value);
 static std::string GetStringPixelType(uint32_t value);
 static std::string GetStringProgramParameter(uint32_t value);
@@ -88,6 +78,7 @@ static std::string GetStringTextureCompareFunc(uint32_t value);
 static std::string GetStringTextureCompareMode(uint32_t value);
 static std::string GetStringTextureDepthRenderableInternalFormat(
     uint32_t value);
+static std::string GetStringTextureFboTarget(uint32_t value);
 static std::string GetStringTextureFormat(uint32_t value);
 static std::string GetStringTextureInternalFormat(uint32_t value);
 static std::string GetStringTextureInternalFormatStorage(uint32_t value);

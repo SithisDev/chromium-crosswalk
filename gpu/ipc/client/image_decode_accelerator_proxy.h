@@ -1,14 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef GPU_IPC_CLIENT_IMAGE_DECODE_ACCELERATOR_PROXY_H_
 #define GPU_IPC_CLIENT_IMAGE_DECODE_ACCELERATOR_PROXY_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
 #include "gpu/command_buffer/client/image_decode_accelerator_interface.h"
+#include "gpu/gpu_export.h"
 
 namespace gpu {
 class GpuChannelHost;
@@ -45,16 +46,28 @@ class GpuChannelHost;
 // Objects of this class are thread-safe.
 //
 // TODO(andrescj): actually put the decoder's capabilities in GpuInfo.
-class ImageDecodeAcceleratorProxy : public ImageDecodeAcceleratorInterface {
+class GPU_EXPORT ImageDecodeAcceleratorProxy
+    : public ImageDecodeAcceleratorInterface {
  public:
   ImageDecodeAcceleratorProxy(GpuChannelHost* host, int32_t route_id);
+
+  ImageDecodeAcceleratorProxy(const ImageDecodeAcceleratorProxy&) = delete;
+  ImageDecodeAcceleratorProxy& operator=(const ImageDecodeAcceleratorProxy&) =
+      delete;
+
   ~ImageDecodeAcceleratorProxy() override;
 
-  // Determines if an encoded image is supported by the hardware accelerator.
-  // The ScheduleImageDecode() method should only be called for images for which
-  // IsImageSupported() returns true. Otherwise, the client faces a GPU channel
-  // teardown if the decode fails.
-  bool IsImageSupported(base::span<const uint8_t> encoded_data) const override;
+  // Determines if |image_metadata| corresponds to an image that can be decoded
+  // using hardware decode acceleration. The ScheduleImageDecode() method should
+  // only be called for images for which IsImageSupported() returns true.
+  bool IsImageSupported(
+      const cc::ImageHeaderMetadata* image_metadata) const override;
+
+  // Determines if hardware decode acceleration is supported for JPEG images.
+  bool IsJpegDecodeAccelerationSupported() const override;
+
+  // Determines if hardware decode acceleration is supported for WebP images.
+  bool IsWebPDecodeAccelerationSupported() const override;
 
   // Schedules a hardware-accelerated image decode on the GPU process. The image
   // in |encoded_data| is decoded and scaled to |output_size|. Upon completion
@@ -81,13 +94,11 @@ class ImageDecodeAcceleratorProxy : public ImageDecodeAcceleratorInterface {
       bool needs_mips) override;
 
  private:
-  GpuChannelHost* const host_;
+  const raw_ptr<GpuChannelHost> host_;
   const int32_t route_id_;
 
   base::Lock lock_;
   uint64_t next_release_count_ GUARDED_BY(lock_) = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(ImageDecodeAcceleratorProxy);
 };
 
 }  // namespace gpu

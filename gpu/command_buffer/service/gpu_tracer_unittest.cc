@@ -1,10 +1,13 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/bind.h"
+#include "base/time/time.h"
 #include "gpu/command_buffer/client/client_test_helper.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_mock.h"
 #include "gpu/command_buffer/service/gpu_service_test.h"
@@ -56,8 +59,8 @@ class GPUTracerTester : public GPUTracer {
     gpu_timing_client_->SetCpuTimeForTesting(base::BindRepeating(&FakeCpuTime));
 
     // Force tracing to be dependent on our mock variable here.
-    gpu_trace_srv_category = &tracing_enabled_;
-    gpu_trace_dev_category = &tracing_enabled_;
+    gpu_trace_srv_category_ = &tracing_enabled_;
+    gpu_trace_dev_category_ = &tracing_enabled_;
   }
 
   ~GPUTracerTester() override = default;
@@ -712,12 +715,12 @@ class GPUTracerTest : public GpuServiceTest {
   void SetUp() override {
     g_fakeCPUTime = 0;
     GpuServiceTest::SetUpWithGLVersion("3.2", "");
-    decoder_.reset(
-        new MockGLES2Decoder(&client_, &command_buffer_service_, &outputter_));
+    decoder_ = std::make_unique<MockGLES2Decoder>(
+        &client_, &command_buffer_service_, &outputter_);
     EXPECT_CALL(*decoder_, GetGLContext())
         .Times(AtMost(1))
         .WillRepeatedly(Return(GetGLContext()));
-    tracer_tester_.reset(new GPUTracerTester(decoder_.get()));
+    tracer_tester_ = std::make_unique<GPUTracerTester>(decoder_.get());
   }
 
   void TearDown() override {

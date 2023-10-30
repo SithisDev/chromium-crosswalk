@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,12 +21,9 @@
 
 IPC_ENUM_TRAITS_MAX_VALUE(gpu::SchedulingPriority,
                           gpu::SchedulingPriority::kLast)
-IPC_ENUM_TRAITS_MAX_VALUE(gpu::ContextResult,
-                          gpu::ContextResult::kLastContextResult)
 
 IPC_STRUCT_TRAITS_BEGIN(gpu::SwapBuffersCompleteParams)
   IPC_STRUCT_TRAITS_MEMBER(ca_layer_params)
-  IPC_STRUCT_TRAITS_MEMBER(texture_in_use_responses)
   IPC_STRUCT_TRAITS_MEMBER(swap_response)
 IPC_STRUCT_TRAITS_END()
 

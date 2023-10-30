@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,6 +57,12 @@ const char kPasswordStore[] = "password-store";
 // Save a pdf file of the loaded page.
 const char kPrintToPDF[] = "print-to-pdf";
 
+// Do not display header and footer in the pdf file.
+const char kPrintToPDFNoHeader[] = "print-to-pdf-no-header";
+
+// Do not emit tags when printing PDFs.
+const char kDisablePDFTagging[] = "disable-pdf-tagging";
+
 // Specifies a list of hosts for whom we bypass proxy settings and use direct
 // connections. Ignored unless --proxy-server is also specified. This is a
 // comma-separated list of bypass rules. See:
@@ -66,6 +72,9 @@ const char kProxyBypassList[] = "proxy-bypass-list";
 // Uses a specified proxy server, overrides system settings. This switch only
 // affects HTTP and HTTPS requests.
 const char kProxyServer[] = "proxy-server";
+
+// Do not use system proxy configuration service.
+const char kNoSystemProxyConfigService[] = "no-system-proxy-config-service";
 
 // Use the given address instead of the default loopback for accepting remote
 // debugging connections. Should be used together with --remote-debugging-port.
@@ -94,11 +103,21 @@ const char kTimeout[] = "timeout";
 // rendering.
 const char kUseGL[] = "use-gl";
 
+// Sets the ANGLE implementation to use. Only relevant if "use-gl" is set to
+// "angle"
+const char kUseANGLE[] = "use-angle";
+
 // A string used to override the default user agent with a custom one.
 const char kUserAgent[] = "user-agent";
 
-// Directory where the browser stores the user profile.
+// Directory where the browser stores the user profile. Note that if this switch
+// is added, the session will no longer be Incognito, unless Incognito mode is
+// forced with --incognito switch.
 const char kUserDataDir[] = "user-data-dir";
+
+// Forces Incognito mode even if user data directory is specified using the
+// --user-data-dir switch.
+const char kIncognito[] = "incognito";
 
 // If set the system waits the specified number of virtual milliseconds before
 // deeming the page to be ready.  For determinism virtual time does not advance
@@ -111,8 +130,8 @@ const char kVirtualTimeBudget[] = "virtual-time-budget";
 // Sets the initial window size. Provided as string in the format "800,600".
 const char kWindowSize[] = "window-size";
 
-// Whitelist for Negotitate Auth servers.
-const char kAuthServerWhitelist[] = "auth-server-whitelist";
+// Allowlist for Negotiate Auth servers.
+const char kAuthServerAllowlist[] = "auth-server-allowlist";
 
 // Sets font render hinting when running headless, affects Skia rendering and
 // whether glyph subpixel positioning is enabled.
@@ -121,5 +140,10 @@ const char kFontRenderHinting[] = "font-render-hinting";
 
 // If true, then all pop-ups and calls to window.open will fail.
 const char kBlockNewWebContents[] = "block-new-web-contents";
+
+// Allows overriding the list of restricted ports by passing a comma-separated
+// list of port numbers.
+const char kExplicitlyAllowedPorts[] = "explicitly-allowed-ports";
+
 }  // namespace switches
 }  // namespace headless

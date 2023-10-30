@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,9 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -32,7 +31,7 @@ constexpr const char* kGpuTraceSourceNames[] = {
     "TraceCmd",       // kTraceDecoder,
     "Disjoint",       // kTraceDisjoint, // Used internally.
 };
-static_assert(NUM_TRACER_SOURCES == base::size(kGpuTraceSourceNames),
+static_assert(NUM_TRACER_SOURCES == std::size(kGpuTraceSourceNames),
               "Trace source names must match enumeration.");
 
 TraceMarker::TraceMarker(const std::string& category, const std::string& name)
@@ -168,21 +167,24 @@ void GPUTrace::Process() {
   }
 }
 
-GPUTracer::GPUTracer(DecoderContext* decoder)
-    : gpu_trace_srv_category(TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED(
+GPUTracer::GPUTracer(DecoderContext* decoder, bool context_is_gl)
+    : gpu_trace_srv_category_(TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED(
           TRACE_DISABLED_BY_DEFAULT("gpu.service"))),
-      gpu_trace_dev_category(TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED(
+      gpu_trace_dev_category_(TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED(
           TRACE_DISABLED_BY_DEFAULT("gpu.device"))),
       decoder_(decoder) {
   DCHECK(decoder_);
-  gl::GLContext* context = decoder_->GetGLContext();
-  if (context)
-    gpu_timing_client_ = context->CreateGPUTimingClient();
-  else
-    gpu_timing_client_ = new gl::GPUTimingClient();
-
+  gl::GLContext* gl_context = decoder_->GetGLContext();
+  if (context_is_gl && gl_context) {
+    can_trace_dev_ = true;
+    gpu_timing_client_ = gl_context->CreateGPUTimingClient();
+    disjoint_time_ = gpu_timing_client_->GetCurrentCPUTime();
+  } else {
+    can_trace_dev_ = false;
+    // TODO(crbug.com/1018725): GPUTiming should support backends other than GL.
+    gpu_timing_client_ = nullptr;
+  }
   outputter_ = decoder_->outputter();
-  disjoint_time_ = gpu_timing_client_->GetCurrentCPUTime();
 }
 
 GPUTracer::~GPUTracer() = default;
@@ -201,14 +203,13 @@ bool GPUTracer::BeginDecoding() {
     // Begin a Trace for all active markers
     for (int n = 0; n < NUM_TRACER_SOURCES; n++) {
       for (size_t i = 0; i < markers_[n].size(); i++) {
-        began_device_traces_ |= (*gpu_trace_dev_category != 0);
+        began_device_traces_ |= is_gpu_device_tracing_enabled();
         TraceMarker& trace_marker = markers_[n][i];
-        trace_marker.trace_ =
-            new GPUTrace(outputter_, gpu_timing_client_.get(),
-                         static_cast<GpuTracerSource>(n),
-                         trace_marker.category_, trace_marker.name_,
-                         *gpu_trace_srv_category != 0,
-                         *gpu_trace_dev_category != 0);
+        trace_marker.trace_ = new GPUTrace(
+            outputter_, gpu_timing_client_.get(),
+            static_cast<GpuTracerSource>(n), trace_marker.category_,
+            trace_marker.name_, is_gpu_service_tracing_enabled(),
+            is_gpu_device_tracing_enabled());
         trace_marker.trace_->Start();
       }
     }
@@ -230,7 +231,7 @@ bool GPUTracer::EndDecoding() {
             marker.trace_->End();
 
             finished_traces_.push_back(marker.trace_);
-            marker.trace_ = 0;
+            marker.trace_.reset();
           }
         }
       }
@@ -253,11 +254,10 @@ bool GPUTracer::Begin(const std::string& category, const std::string& name,
 
   // Create trace
   if (IsTracing()) {
-    began_device_traces_ |= (*gpu_trace_dev_category != 0);
+    began_device_traces_ |= is_gpu_device_tracing_enabled();
     scoped_refptr<GPUTrace> trace = new GPUTrace(
         outputter_, gpu_timing_client_.get(), source, category, name,
-        *gpu_trace_srv_category != 0,
-        *gpu_trace_dev_category != 0);
+        is_gpu_service_tracing_enabled(), is_gpu_device_tracing_enabled());
     trace->Start();
     markers_[source].back().trace_ = trace;
   }
@@ -293,7 +293,7 @@ bool GPUTracer::HasTracesToProcess() {
 }
 
 void GPUTracer::ProcessTraces() {
-  if (!gpu_timing_client_->IsAvailable()) {
+  if (gpu_timing_client_ && !gpu_timing_client_->IsAvailable()) {
     while (!finished_traces_.empty()) {
       finished_traces_.front()->Destroy(false);
       finished_traces_.pop_front();
@@ -335,7 +335,7 @@ void GPUTracer::ProcessTraces() {
 }
 
 bool GPUTracer::IsTracing() {
-  return (*gpu_trace_srv_category != 0) || (*gpu_trace_dev_category != 0);
+  return is_gpu_service_tracing_enabled() || is_gpu_device_tracing_enabled();
 }
 
 const std::string& GPUTracer::CurrentCategory(GpuTracerSource source) const {
@@ -357,10 +357,10 @@ const std::string& GPUTracer::CurrentName(GpuTracerSource source) const {
 }
 
 bool GPUTracer::CheckDisjointStatus() {
-  const int64_t current_time = gpu_timing_client_->GetCurrentCPUTime();
-  if (*gpu_trace_dev_category == 0)
+  if (!is_gpu_device_tracing_enabled())
     return false;
 
+  const int64_t current_time = gpu_timing_client_->GetCurrentCPUTime();
   bool status = gpu_timing_client_->CheckAndResetTimerErrors();
   if (status && began_device_traces_) {
     // Log disjoint event if we have active traces.
@@ -382,7 +382,7 @@ void GPUTracer::ClearOngoingTraces(bool have_context) {
       TraceMarker& marker = markers_[n][i];
       if (marker.trace_.get()) {
         marker.trace_->Destroy(have_context);
-        marker.trace_ = 0;
+        marker.trace_.reset();
       }
     }
   }

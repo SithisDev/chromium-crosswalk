@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -215,9 +215,8 @@ TEST(TypesTest, AnyProperty) {
   ASSERT_TRUE(clone);
   EXPECT_EQ(base::Value::Type::INTEGER, clone->GetValue()->type());
 
-  int clone_value;
-  ASSERT_TRUE(clone->GetValue()->GetAsInteger(&clone_value));
-  EXPECT_EQ(123, clone_value);
+  ASSERT_TRUE(clone->GetValue()->is_int());
+  EXPECT_EQ(123, clone->GetValue()->GetInt());
 }
 
 TEST(TypesTest, ComplexObjectClone) {

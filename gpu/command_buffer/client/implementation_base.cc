@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_event.h"
@@ -19,10 +20,8 @@
 
 namespace gpu {
 
-#if !defined(_MSC_VER)
 const uint32_t ImplementationBase::kMaxSizeOfSimpleResult;
 const uint32_t ImplementationBase::kStartingOffset;
-#endif
 
 ImplementationBase::ImplementationBase(CommandBufferHelper* helper,
                                        TransferBufferInterface* transfer_buffer,
@@ -399,7 +398,7 @@ void ImplementationBase::RunIfContextNotLost(base::OnceClosure callback) {
   }
 }
 
-void ImplementationBase::SetGrContext(GrContext* gr) {}
+void ImplementationBase::SetGrContext(GrDirectContext* gr) {}
 
 bool ImplementationBase::HasGrContextSupport() const {
   return false;
@@ -413,11 +412,6 @@ void ImplementationBase::WillCallGLFromSkia() {
 void ImplementationBase::DidCallGLFromSkia() {
   // Should only be called on subclasses that have GrContextSupport
   NOTREACHED();
-}
-
-void ImplementationBase::SetDisplayTransform(gfx::OverlayTransform transform) {
-  helper_->Flush();
-  gpu_control_->SetDisplayTransform(transform);
 }
 
 }  // namespace gpu

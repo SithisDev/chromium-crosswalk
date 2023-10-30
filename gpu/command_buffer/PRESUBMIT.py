@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Enforces command buffer autogen matches script output.
@@ -9,9 +9,11 @@ for more details on the presubmit API built into depot_tools.
 
 import os.path
 
+USE_PYTHON3 = True
 
-def _IsGLES2CmdBufferFile(file):
-  filename = os.path.basename(file.LocalPath())
+
+def _IsGLES2CmdBufferFile(affected_file):
+  filename = os.path.basename(affected_file.LocalPath())
   if filename in [
       'build_cmd_buffer_lib.py', 'build_gles2_cmd_buffer.py',
       'gles2_cmd_buffer_functions.txt', 'gl2.h', 'gl2ext.h', 'gl3.h', 'gl31.h',
@@ -24,8 +26,8 @@ def _IsGLES2CmdBufferFile(file):
           filename.endswith('_autogen.h'))
 
 
-def _IsRasterCmdBufferFile(file):
-  filename = os.path.basename(file.LocalPath())
+def _IsRasterCmdBufferFile(affected_file):
+  filename = os.path.basename(affected_file.LocalPath())
   if filename in [
       'build_cmd_buffer_lib.py', 'build_raster_cmd_buffer.py',
       'raster_cmd_buffer_functions.txt'
@@ -35,8 +37,8 @@ def _IsRasterCmdBufferFile(file):
   return filename.startswith('raster') and filename.endswith('_autogen.h')
 
 
-def _IsWebGPUCmdBufferFile(file):
-  filename = os.path.basename(file.LocalPath())
+def _IsWebGPUCmdBufferFile(affected_file):
+  filename = os.path.basename(affected_file.LocalPath())
   if filename in [
       'build_cmd_buffer_lib.py', 'build_webgpu_cmd_buffer.py',
       'webgpu_cmd_buffer_functions.txt'
@@ -63,7 +65,7 @@ def CommonChecks(input_api, output_api):
           input_api.Command(
               name='build_gles2_cmd_buffer',
               cmd=[
-                  input_api.python_executable, 'build_gles2_cmd_buffer.py',
+                  input_api.python3_executable, 'build_gles2_cmd_buffer.py',
                   '--check', '--output-dir=' + temp_dir
               ],
               kwargs={},
@@ -73,7 +75,7 @@ def CommonChecks(input_api, output_api):
           input_api.Command(
               name='build_raster_cmd_buffer',
               cmd=[
-                  input_api.python_executable, 'build_raster_cmd_buffer.py',
+                  input_api.python3_executable, 'build_raster_cmd_buffer.py',
                   '--check', '--output-dir=' + temp_dir
               ],
               kwargs={},
@@ -83,7 +85,7 @@ def CommonChecks(input_api, output_api):
           input_api.Command(
               name='build_webgpu_cmd_buffer',
               cmd=[
-                  input_api.python_executable, 'build_webgpu_cmd_buffer.py',
+                  input_api.python3_executable, 'build_webgpu_cmd_buffer.py',
                   '--check', '--output-dir=' + temp_dir
               ],
               kwargs={},

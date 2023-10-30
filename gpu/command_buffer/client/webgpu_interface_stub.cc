@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,34 @@
 namespace gpu {
 namespace webgpu {
 
-WebGPUInterfaceStub::WebGPUInterfaceStub() = default;
+namespace {
+
+class APIChannelStub : public APIChannel {
+ public:
+  APIChannelStub() = default;
+
+  const DawnProcTable& GetProcs() const override { return procs_; }
+  WGPUInstance GetWGPUInstance() const override { return nullptr; }
+  void Disconnect() override {}
+
+  DawnProcTable* procs() { return &procs_; }
+
+ private:
+  ~APIChannelStub() override = default;
+
+  DawnProcTable procs_ = {};
+};
+
+}  // anonymous namespace
+
+WebGPUInterfaceStub::WebGPUInterfaceStub()
+    : api_channel_(base::MakeRefCounted<APIChannelStub>()) {}
 
 WebGPUInterfaceStub::~WebGPUInterfaceStub() = default;
+
+DawnProcTable* WebGPUInterfaceStub::procs() {
+  return static_cast<APIChannelStub*>(api_channel_.get())->procs();
+}
 
 // InterfaceBase implementation.
 void WebGPUInterfaceStub::GenSyncTokenCHROMIUM(GLbyte* sync_token) {}
@@ -17,17 +42,25 @@ void WebGPUInterfaceStub::GenUnverifiedSyncTokenCHROMIUM(GLbyte* sync_token) {}
 void WebGPUInterfaceStub::VerifySyncTokensCHROMIUM(GLbyte** sync_tokens,
                                                    GLsizei count) {}
 void WebGPUInterfaceStub::WaitSyncTokenCHROMIUM(const GLbyte* sync_token) {}
+void WebGPUInterfaceStub::ShallowFlushCHROMIUM() {}
 
 // WebGPUInterface implementation
-const DawnProcTable& WebGPUInterfaceStub::GetProcs() const {
-  return null_procs_;
+scoped_refptr<APIChannel> WebGPUInterfaceStub::GetAPIChannel() const {
+  return api_channel_;
 }
 void WebGPUInterfaceStub::FlushCommands() {}
-DawnDevice WebGPUInterfaceStub::GetDefaultDevice() {
-  return nullptr;
+bool WebGPUInterfaceStub::EnsureAwaitingFlush() {
+  return false;
 }
-ReservedTexture WebGPUInterfaceStub::ReserveTexture(DawnDevice device) {
-  return {nullptr, 0, 0};
+void WebGPUInterfaceStub::FlushAwaitingCommands() {}
+ReservedTexture WebGPUInterfaceStub::ReserveTexture(
+    WGPUDevice,
+    const WGPUTextureDescriptor*) {
+  return {nullptr, 0, 0, 0, 0};
+}
+
+WGPUDevice WebGPUInterfaceStub::DeprecatedEnsureDefaultDeviceSync() {
+  return nullptr;
 }
 
 // Include the auto-generated part of this class. We split this because

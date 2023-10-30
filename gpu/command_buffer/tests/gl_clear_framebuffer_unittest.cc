@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 
 #include <vector>
 
+#include "build/build_config.h"
 #include "gpu/command_buffer/tests/gl_manager.h"
 #include "gpu/command_buffer/tests/gl_test_utils.h"
 #include "gpu/config/gpu_test_config.h"
@@ -146,9 +147,17 @@ TEST_P(GLClearFramebufferTest, ClearColorWithMask) {
 }
 
 // crbug.com/434094
-#if !defined(OS_MACOSX)
+#if !BUILDFLAG(IS_MAC)
 TEST_P(GLClearFramebufferTest, ClearColorWithScissor) {
   if (!IsApplicable()) {
+    return;
+  }
+
+  // TODO(jonahr): Test fails on Linux with ANGLE/passthrough
+  // (crbug.com/1099770)
+  gpu::GPUTestBotConfig bot_config;
+  if (bot_config.LoadCurrentConfig(nullptr) &&
+      bot_config.Matches("linux passthrough")) {
     return;
   }
 

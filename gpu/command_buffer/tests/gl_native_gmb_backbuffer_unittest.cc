@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,19 @@
 #include <GLES2/gl2ext.h>
 #include <GLES2/gl2extchromium.h>
 
+#include "base/logging.h"
+#include "build/build_config.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/service/image_factory.h"
 #include "gpu/command_buffer/tests/gl_manager.h"
 #include "gpu/command_buffer/tests/gl_test_utils.h"
 #include "gpu/command_buffer/tests/texture_image_factory.h"
+#include "gpu/config/gpu_test_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_image.h"
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 #include "gpu/ipc/service/gpu_memory_buffer_factory_io_surface.h"
 #endif
 
@@ -50,7 +53,8 @@ class GLNativeGMBTest : public testing::Test {
     EXPECT_NEAR(alpha, pixel[3], 2);
 
     // Resize, then clear the back buffer and check its contents.
-    glResizeCHROMIUM(10, 10, 1, GL_COLOR_SPACE_UNSPECIFIED_CHROMIUM, true);
+    gfx::ColorSpace color_space = gfx::ColorSpace::CreateSRGB();
+    glResizeCHROMIUM(10, 10, 1, color_space.AsGLColorSpace(), true);
     glClearColor(0.5f, 0.6f, 0.7f, 0.8f);
     glClear(GL_COLOR_BUFFER_BIT);
     memset(pixel, 0, 4);
@@ -84,7 +88,16 @@ TEST_F(GLNativeGMBTest, TestNativeGMBBackbufferWithDifferentConfigurations) {
     LOG(INFO) << "GL_ARB_texture_rectangle not supported. Skipping test...";
     return;
   }
-#if defined(OS_MACOSX)
+
+  // TODO(jonahr): Test fails on Linux/Mac with ANGLE/passthrough
+  // (crbug.com/1099768)
+  gpu::GPUTestBotConfig bot_config;
+  if (bot_config.LoadCurrentConfig(nullptr) &&
+      bot_config.Matches("linux mac passthrough")) {
+    return;
+  }
+
+#if BUILDFLAG(IS_MAC)
   GpuMemoryBufferFactoryIOSurface image_factory;
 #else
   TextureImageFactory image_factory;

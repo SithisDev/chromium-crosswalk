@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 
 namespace gpu {
 
-// A collection of tests that exercise the GL_EXT_srgb extension.
+// A collection of tests that exercise the GL_EXT_window_rectangles extension.
 class GLEXTWindowRectanglesTest : public testing::Test {
  protected:
   void SetUp() override {

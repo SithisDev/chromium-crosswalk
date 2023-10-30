@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-#include "gpu/config/gpu_blacklist.h"
+#include "gpu/config/gpu_blocklist.h"
 #include "gpu/config/gpu_driver_bug_list.h"
 #include "gpu/config/gpu_driver_bug_workaround_type.h"
 #include "ui/gl/gl_context.h"
@@ -50,7 +50,7 @@ bool GpuFeatureInfo::IsWorkaroundEnabled(int32_t workaround) const {
 
 bool GpuFeatureInfo::IsInitialized() const {
   // Check if any feature status is undefined.
-  return status_values[GPU_FEATURE_TYPE_GPU_COMPOSITING] !=
+  return status_values[GPU_FEATURE_TYPE_ACCELERATED_GL] !=
          kGpuFeatureStatusUndefined;
 }
 

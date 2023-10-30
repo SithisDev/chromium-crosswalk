@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 
 #include "base/atomicops.h"
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/memory/shared_memory.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/time/time.h"
 #include "gpu/command_buffer/service/error_state.h"
 #include "gpu/command_buffer/service/feature_info.h"

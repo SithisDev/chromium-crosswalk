@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,8 @@
 
 #include <list>
 #include <vector>
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/service/buffer_manager.h"
@@ -84,6 +85,16 @@ class GPU_GLES2_EXPORT VertexAttrib {
   GLuint MaxVertexAccessed(GLsizei primcount,
                            GLuint max_vertex_accessed) const {
     return divisor_ ? ((primcount - 1) / divisor_) : max_vertex_accessed;
+  }
+
+  // For performance issue we are having separate overloading functions
+  // which takes in basevertex and baseinstance
+  GLuint MaxVertexAccessed(GLsizei primcount,
+                           GLuint max_vertex_accessed,
+                           GLint basevertex,
+                           GLuint baseinstance) const {
+    return divisor_ ? ((primcount - 1) / divisor_) + baseinstance
+                    : max_vertex_accessed + basevertex;
   }
 
   bool is_client_side_array() const {
@@ -169,7 +180,7 @@ class GPU_GLES2_EXPORT VertexAttrib {
   scoped_refptr<Buffer> buffer_;
 
   // List this info is on.
-  VertexAttribList* list_;
+  raw_ptr<VertexAttribList> list_;
 
   // Iterator for list this info is on. Enabled/Disabled
   VertexAttribList::iterator it_;
@@ -292,15 +303,16 @@ class GPU_GLES2_EXPORT VertexAttribManager
     return vertex_attribs_.size();
   }
 
-  bool ValidateBindings(
-      const char* function_name,
-      GLES2Decoder* decoder,
-      FeatureInfo* feature_info,
-      BufferManager* buffer_manager,
-      Program* current_program,
-      GLuint max_vertex_accessed,
-      bool instanced,
-      GLsizei primcount);
+  bool ValidateBindings(const char* function_name,
+                        GLES2Decoder* decoder,
+                        FeatureInfo* feature_info,
+                        BufferManager* buffer_manager,
+                        Program* current_program,
+                        GLuint max_vertex_accessed,
+                        bool instanced,
+                        GLsizei primcount,
+                        GLint basevertex,
+                        GLuint baseinstance);
 
   void SetIsBound(bool is_bound);
 
@@ -346,7 +358,7 @@ class GPU_GLES2_EXPORT VertexAttribManager
   VertexAttribList disabled_vertex_attribs_;
 
   // The VertexArrayManager that owns this VertexAttribManager
-  VertexArrayManager* manager_;
+  raw_ptr<VertexArrayManager> manager_;
 
   // True if deleted.
   bool deleted_;

@@ -1,27 +1,25 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef GPU_VULKAN_VULKAN_IMPLEMENTATION_H_
 #define GPU_VULKAN_VULKAN_IMPLEMENTATION_H_
 
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
 
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/component_export.h"
 #include "build/build_config.h"
 #include "gpu/vulkan/semaphore_handle.h"
-#include "gpu/vulkan/vulkan_export.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/native_widget_types.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/scoped_hardware_buffer_handle.h"
-#include "ui/gfx/geometry/size.h"
 #endif
 
 namespace gfx {
@@ -32,15 +30,28 @@ struct GpuMemoryBufferHandle;
 namespace gpu {
 class VulkanDeviceQueue;
 class VulkanSurface;
+class VulkanImage;
 class VulkanInstance;
+struct GPUInfo;
 struct VulkanYCbCrInfo;
+
+#if BUILDFLAG(IS_FUCHSIA)
+class SysmemBufferCollection {
+ public:
+  virtual ~SysmemBufferCollection() {}
+};
+#endif  // BUILDFLAG(IS_FUCHSIA)
 
 // Base class which provides functions for creating vulkan objects for different
 // platforms that use platform-specific extensions (e.g. for creation of
 // VkSurfaceKHR objects). It also provides helper/utility functions.
-class VULKAN_EXPORT VulkanImplementation {
+class COMPONENT_EXPORT(VULKAN) VulkanImplementation {
  public:
-  explicit VulkanImplementation(bool use_swiftshader = false);
+  explicit VulkanImplementation(bool use_swiftshader = false,
+                                bool allow_protected_memory = false);
+
+  VulkanImplementation(const VulkanImplementation&) = delete;
+  VulkanImplementation& operator=(const VulkanImplementation&) = delete;
 
   virtual ~VulkanImplementation();
 
@@ -60,6 +71,7 @@ class VULKAN_EXPORT VulkanImplementation {
       uint32_t queue_family_index) = 0;
 
   virtual std::vector<const char*> GetRequiredDeviceExtensions() = 0;
+  virtual std::vector<const char*> GetOptionalDeviceExtensions() = 0;
 
   // Creates a VkFence that is exportable to a gfx::GpuFence.
   virtual VkFence CreateVkFenceForGpuFence(VkDevice vk_device) = 0;
@@ -92,37 +104,19 @@ class VULKAN_EXPORT VulkanImplementation {
   // Returns true if the GpuMemoryBuffer of the specified type can be imported
   // into VkImage using CreateImageFromGpuMemoryHandle().
   virtual bool CanImportGpuMemoryBuffer(
+      VulkanDeviceQueue* device_queue,
       gfx::GpuMemoryBufferType memory_buffer_type) = 0;
 
-  // Creates a VkImage from a GpuMemoryBuffer. If successful it initializes
-  // |vk_image|, |vk_image_info|, |vk_device_memory| and |mem_allocation_size|.
-  // Implementation must verify that the specified |size| fits in the size
-  // specified when |gmb_handle| was allocated.
-  virtual bool CreateImageFromGpuMemoryHandle(
-      VkDevice vk_device,
+  // Creates a VkImage from a GpuMemoryBuffer. Implementation must verify that
+  // the specified |size| fits in the size specified when |gmb_handle| was
+  // allocated.
+  virtual std::unique_ptr<VulkanImage> CreateImageFromGpuMemoryHandle(
+      VulkanDeviceQueue* device_queue,
       gfx::GpuMemoryBufferHandle gmb_handle,
       gfx::Size size,
-      VkImage* vk_image,
-      VkImageCreateInfo* vk_image_info,
-      VkDeviceMemory* vk_device_memory,
-      VkDeviceSize* mem_allocation_size) = 0;
+      VkFormat vk_format) = 0;
 
-#if defined(OS_ANDROID)
-  // Create a VkImage, import Android AHardwareBuffer object created outside of
-  // the Vulkan device into Vulkan memory object and bind it to the VkImage.
-  // TODO(sergeyu): Remove this method and use
-  // CreateVkImageFromGpuMemoryHandle() instead.
-  virtual bool CreateVkImageAndImportAHB(
-      const VkDevice& vk_device,
-      const VkPhysicalDevice& vk_physical_device,
-      const gfx::Size& size,
-      base::android::ScopedHardwareBufferHandle ahb_handle,
-      VkImage* vk_image,
-      VkImageCreateInfo* vk_image_info,
-      VkDeviceMemory* vk_device_memory,
-      VkDeviceSize* mem_allocation_size,
-      VulkanYCbCrInfo* ycbcr_info = nullptr) = 0;
-
+#if BUILDFLAG(IS_ANDROID)
   // Get the sampler ycbcr conversion information from the AHB.
   virtual bool GetSamplerYcbcrConversionInfo(
       const VkDevice& vk_device,
@@ -130,17 +124,38 @@ class VULKAN_EXPORT VulkanImplementation {
       VulkanYCbCrInfo* ycbcr_info) = 0;
 #endif
 
+#if BUILDFLAG(IS_FUCHSIA)
+  // Registers as sysmem buffer collection. The collection can be released by
+  // destroying the returned SysmemBufferCollection object. Once a collection is
+  // registered the individual buffers in the collection can be referenced by
+  // using the |id| as |buffer_collection_id| in |gmb_handle| passed to
+  // CreateImageFromGpuMemoryHandle().
+  virtual std::unique_ptr<SysmemBufferCollection>
+  RegisterSysmemBufferCollection(VkDevice device,
+                                 gfx::SysmemBufferCollectionId id,
+                                 zx::channel token,
+                                 gfx::BufferFormat format,
+                                 gfx::BufferUsage usage,
+                                 gfx::Size size,
+                                 size_t min_buffer_count,
+                                 bool register_with_image_pipe) = 0;
+#endif  // BUILDFLAG(IS_FUCHSIA)
+
   bool use_swiftshader() const { return use_swiftshader_; }
+  bool allow_protected_memory() const { return allow_protected_memory_; }
 
  private:
   const bool use_swiftshader_;
-  DISALLOW_COPY_AND_ASSIGN(VulkanImplementation);
+  const bool allow_protected_memory_;
 };
 
-VULKAN_EXPORT
+COMPONENT_EXPORT(VULKAN)
 std::unique_ptr<VulkanDeviceQueue> CreateVulkanDeviceQueue(
     VulkanImplementation* vulkan_implementation,
-    uint32_t option);
+    uint32_t option,
+    const GPUInfo* gpu_info = nullptr,
+    uint32_t heap_memory_limit = 0,
+    const bool is_thread_safe = false);
 
 }  // namespace gpu
 

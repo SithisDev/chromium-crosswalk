@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,7 @@
 
 namespace gpu {
 
-using GpuMemoryBufferConfigurationKey =
-    std::pair<gfx::BufferFormat, gfx::BufferUsage>;
+using GpuMemoryBufferConfigurationKey = gfx::BufferUsageAndFormat;
 using GpuMemoryBufferConfigurationSet =
     std::unordered_set<GpuMemoryBufferConfigurationKey>;
 
@@ -27,8 +26,8 @@ namespace std {
 template <>
 struct hash<gpu::GpuMemoryBufferConfigurationKey> {
   size_t operator()(const gpu::GpuMemoryBufferConfigurationKey& key) const {
-    return base::HashInts(static_cast<int>(key.first),
-                          static_cast<int>(key.second));
+    return base::HashInts(static_cast<int>(key.format),
+                          static_cast<int>(key.usage));
   }
 };
 

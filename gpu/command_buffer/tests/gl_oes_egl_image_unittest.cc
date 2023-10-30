@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,14 @@
 #include "build/build_config.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/tests/gl_test_utils.h"
+#include "gpu/config/gpu_test_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gl/gl_image.h"
 #include "ui/gl/init/gl_factory.h"
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #include "ui/gl/gl_image_native_pixmap.h"
 #endif
 
@@ -34,15 +35,15 @@ class GpuOESEGLImageTest : public testing::Test,
                            public gpu::GpuCommandBufferTestEGL {
  protected:
   void SetUp() override {
-    egl_gles2_initialized_ = InitializeEGLGLES2(kImageWidth, kImageHeight);
+    egl_initialized_ = InitializeEGL(kImageWidth, kImageHeight);
   }
 
   void TearDown() override { RestoreGLDefault(); }
 
-  bool egl_gles2_initialized_;
+  bool egl_initialized_{false};
 };
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 // TODO(crbug.com/835072): re-enable this test on ASAN once bugs are fixed.
 #if !defined(ADDRESS_SANITIZER)
 
@@ -77,7 +78,7 @@ SHADER(
 // texture and verifies that the colors match with the pixels uploaded into
 // the initial GL texture.
 TEST_F(GpuOESEGLImageTest, EGLImageToTexture) {
-  SKIP_TEST_IF(!egl_gles2_initialized_);
+  SKIP_TEST_IF(!egl_initialized_);
 
   // This extension is required for creating an EGLImage from a GL texture.
   SKIP_TEST_IF(!HasEGLExtension("EGL_KHR_image_base"));
@@ -127,10 +128,10 @@ TEST_F(GpuOESEGLImageTest, EGLImageToTexture) {
 
   // Bind the image.
   EXPECT_TRUE(image->BindTexImage(GL_TEXTURE_2D));
-  unsigned internal_format = image->GetInternalFormat();
   gl_.decoder()->SetLevelInfo(
-      texture_id, 0 /* level */, internal_format, size.width(), size.height(),
-      1 /* depth */, internal_format, GL_UNSIGNED_BYTE, gfx::Rect(size));
+      texture_id, 0 /* level */, image->GetInternalFormat(), size.width(),
+      size.height(), 1 /* depth */, image->GetDataFormat(),
+      image->GetDataType(), gfx::Rect(size));
   gl_.decoder()->BindImage(texture_id, GL_TEXTURE_2D, image.get(),
                            true /* can_bind_to_sampler */);
 
@@ -175,6 +176,6 @@ TEST_F(GpuOESEGLImageTest, EGLImageToTexture) {
   glDeleteTextures(1, &texture_id);
 }
 #endif  // !defined(ADDRESS_SANITIZER)
-#endif  // defined(OS_LINUX)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 }  // namespace

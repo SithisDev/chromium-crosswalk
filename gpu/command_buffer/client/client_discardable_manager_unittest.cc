@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,8 +31,11 @@ class FakeCommandBuffer : public CommandBuffer {
     return State();
   }
   void SetGetBuffer(int32_t transfer_buffer_id) override { NOTREACHED(); }
-  scoped_refptr<gpu::Buffer> CreateTransferBuffer(uint32_t size,
-                                                  int32_t* id) override {
+  scoped_refptr<gpu::Buffer> CreateTransferBuffer(
+      uint32_t size,
+      int32_t* id,
+      TransferBufferAllocationOption option =
+          TransferBufferAllocationOption::kLoseContextOnOOM) override {
     *id = next_id_++;
     active_ids_.insert(*id);
     return MakeMemoryBuffer(size);
@@ -41,6 +44,9 @@ class FakeCommandBuffer : public CommandBuffer {
     auto found = active_ids_.find(id);
     EXPECT_TRUE(found != active_ids_.end());
     active_ids_.erase(found);
+  }
+  void ForceLostContext(error::ContextLostReason reason) override {
+    // No-op; doesn't need to be exercised here.
   }
 
  private:

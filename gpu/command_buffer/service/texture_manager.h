@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,53 +9,36 @@
 #include <stdint.h>
 
 #include <algorithm>
-#include <list>
 #include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/notreached.h"
 #include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
 #include "gpu/command_buffer/service/sampler_manager.h"
+#include "gpu/command_buffer/service/shared_image/shared_image_representation.h"
 #include "gpu/command_buffer/service/texture_base.h"
 #include "gpu/gpu_gles2_export.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gl/gl_image.h"
 
 namespace gl {
+class GLImage;
 class ProgressReporter;
-}
-
-namespace media {
-class SharedImageVideo;
 }
 
 namespace gpu {
 class DecoderContext;
-class ExternalVkImageBacking;
-class ExternalVkImageGlRepresentation;
 class ServiceDiscardableManager;
-class SharedImageBackingGLTexture;
-class SharedImageBackingFactoryGLTexture;
-class SharedImageBackingAHB;
-class SharedImageRepresentationGLTexture;
-class SharedImageRepresentationGLTextureAHB;
-class SharedImageRepresentationSkiaGLAHB;
-class SharedImageBackingIOSurface;
-class SharedImageRepresentationGLTextureIOSurface;
-class SharedImageRepresentationSkiaIOSurface;
-class SharedImageBackingDXGISwapChain;
-class StreamTexture;
-class SwapChainFactoryDXGI;
 
 namespace gles2 {
-class GLStreamTextureImage;
 struct ContextState;
 struct DecoderFramebufferState;
 class ErrorState;
@@ -83,6 +66,9 @@ class GPU_GLES2_EXPORT TexturePassthrough final
                      GLenum format,
                      GLenum type);
 
+  TexturePassthrough(const TexturePassthrough&) = delete;
+  TexturePassthrough& operator=(const TexturePassthrough&) = delete;
+
   // TextureBase implementation:
   TextureBase::Type GetType() const override;
 
@@ -97,9 +83,8 @@ class GPU_GLES2_EXPORT TexturePassthrough final
 
   void SetStreamLevelImage(GLenum target,
                            GLint level,
-                           GLStreamTextureImage* stream_texture_image,
+                           gl::GLImage* stream_texture_image,
                            GLuint service_id);
-  GLStreamTextureImage* GetStreamLevelImage(GLenum target, GLint level) const;
 
   // Return true if and only if the decoder should BindTexImage / CopyTexImage
   // us before sampling.
@@ -120,12 +105,12 @@ class GPU_GLES2_EXPORT TexturePassthrough final
   void SetLevelImageInternal(GLenum target,
                              GLint level,
                              gl::GLImage* image,
-                             GLStreamTextureImage* stream_texture_image,
                              GLuint service_id);
+  void UpdateStreamTextureServiceId(GLenum target, GLint level);
 
   friend class base::RefCounted<TexturePassthrough>;
 
-  GLuint owned_service_id_ = 0;
+  const GLuint owned_service_id_ = 0;
 
   bool have_context_;
   bool is_bind_pending_ = false;
@@ -147,14 +132,11 @@ class GPU_GLES2_EXPORT TexturePassthrough final
     GLenum type = 0;
 
     scoped_refptr<gl::GLImage> image;
-    scoped_refptr<GLStreamTextureImage> stream_texture_image;
   };
 
   LevelInfo* GetLevelInfo(GLenum target, GLint level);
 
   std::vector<std::vector<LevelInfo>> level_images_;
-
-  DISALLOW_COPY_AND_ASSIGN(TexturePassthrough);
 };
 
 // Info about Textures currently in the system.
@@ -187,7 +169,31 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
     GLenum alpha;
   };
 
+  struct LevelInfo {
+    LevelInfo();
+    LevelInfo(const LevelInfo& rhs);
+    ~LevelInfo();
+
+    gfx::Rect cleared_rect;
+    GLenum target = 0;
+    GLint level = -1;
+    GLenum internal_format = 0;
+    GLsizei width = 0;
+    GLsizei height = 0;
+    GLsizei depth = 0;
+    GLint border = 0;
+    GLenum format = 0;
+    GLenum type = 0;
+    scoped_refptr<gl::GLImage> image;
+    ImageState image_state = UNBOUND;
+    uint32_t estimated_size = 0;
+    bool internal_workaround = false;
+  };
+
   explicit Texture(GLuint service_id);
+
+  Texture(const Texture&) = delete;
+  Texture& operator=(const Texture&) = delete;
 
   // TextureBase implementation:
   TextureBase::Type GetType() const override;
@@ -198,21 +204,35 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
     return sampler_state_;
   }
 
+  void set_min_filter(GLenum min_filter) {
+    sampler_state_.min_filter = min_filter;
+  }
+
   GLenum min_filter() const {
     return sampler_state_.min_filter;
+  }
+
+  void set_mag_filter(GLenum mag_filter) {
+    sampler_state_.mag_filter = mag_filter;
   }
 
   GLenum mag_filter() const {
     return sampler_state_.mag_filter;
   }
 
+  void set_wrap_r(GLenum wrap_r) { sampler_state_.wrap_r = wrap_r; }
+
   GLenum wrap_r() const {
     return sampler_state_.wrap_r;
   }
 
+  void set_wrap_s(GLenum wrap_s) { sampler_state_.wrap_s = wrap_s; }
+
   GLenum wrap_s() const {
     return sampler_state_.wrap_s;
   }
+
+  void set_wrap_t(GLenum wrap_t) { sampler_state_.wrap_t = wrap_t; }
 
   GLenum wrap_t() const {
     return sampler_state_.wrap_t;
@@ -266,13 +286,6 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
 
   bool CanRenderTo(const FeatureInfo* feature_info, GLint level) const;
 
-  void SetServiceId(GLuint service_id) {
-    DCHECK(service_id);
-    DCHECK_EQ(owned_service_id_, service_id_);
-    service_id_ = service_id;
-    owned_service_id_ = service_id;
-  }
-
   bool SafeToRenderFrom() const {
     return cleared_;
   }
@@ -288,23 +301,22 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
   bool GetLevelType(
       GLint target, GLint level, GLenum* type, GLenum* internal_format) const;
 
-  // Set the image for a particular level. If a GLStreamTextureImage was
-  // previously set with SetLevelStreamTextureImage(), this will reset
-  // |service_id_| back to |owned_service_id_|, removing the service id override
-  // set by the GLStreamTextureImage.
+  // Set the image for a particular level. If a GLImage was previously set with
+  // SetLevelStreamTextureImage(), this will reset |service_id_| back to
+  // |owned_service_id_|, removing the service id override set by the
+  // SetLevelStreamTextureImage.
   void SetLevelImage(GLenum target,
                      GLint level,
                      gl::GLImage* image,
                      ImageState state);
 
-  // Set the GLStreamTextureImage for a particular level.  This is like
-  // SetLevelImage, but it also makes it optional to override |service_id_| with
-  // a texture bound to the stream texture, and permits
-  // GetLevelStreamTextureImage to return the image. See
-  // SetStreamTextureServiceId() for the details of how |service_id| is used.
+  // Set the GLImage for a particular level.  This is like SetLevelImage, but it
+  // also makes it optional to override |service_id_| with a texture bound to
+  // the stream texture. See SetStreamTextureServiceId() for the details of how
+  // |service_id| is used.
   void SetLevelStreamTextureImage(GLenum target,
                                   GLint level,
-                                  GLStreamTextureImage* image,
+                                  gl::GLImage* image,
                                   ImageState state,
                                   GLuint service_id);
 
@@ -321,11 +333,6 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
                              GLint level,
                              ImageState* state) const;
   gl::GLImage* GetLevelImage(GLint target, GLint level) const;
-
-  // Like GetLevelImage, but will return NULL if the image wasn't set via
-  // a call to SetLevelStreamTextureImage.
-  GLStreamTextureImage* GetLevelStreamTextureImage(GLint target,
-                                                   GLint level) const;
 
   bool HasImages() const {
     return has_images_;
@@ -429,36 +436,55 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
   // Returns GL_NONE on error.
   GLenum GetInternalFormatOfBaseLevel() const;
 
+  void SetLightweightRef();
+
+  void RemoveLightweightRef(bool have_context);
+
+  // Set the info for a particular level.
+  void SetLevelInfo(GLenum target,
+                    GLint level,
+                    GLenum internal_format,
+                    GLsizei width,
+                    GLsizei height,
+                    GLsizei depth,
+                    GLint border,
+                    GLenum format,
+                    GLenum type,
+                    const gfx::Rect& cleared_rect);
+
+  // Returns the LevelInfo for |target| and |level| if it's set, else nullptr.
+  const LevelInfo* GetLevelInfo(GLint target, GLint level) const;
+
+  // Sets the Texture's target
+  // Parameters:
+  //   target: GL_TEXTURE_2D or GL_TEXTURE_CUBE_MAP or
+  //           GL_TEXTURE_EXTERNAL_OES or GL_TEXTURE_RECTANGLE_ARB
+  //           GL_TEXTURE_2D_ARRAY or GL_TEXTURE_3D (for GLES3)
+  //   max_levels: The maximum levels this type of target can have.
+  void SetTarget(GLenum target, GLint max_levels);
+
+  void SetCompatibilitySwizzle(const CompatibilitySwizzle* swizzle);
+
+  bool NeedsMips() const {
+    return sampler_state_.min_filter != GL_NEAREST &&
+           sampler_state_.min_filter != GL_LINEAR;
+  }
+
+  size_t MaxValidMipLevel() const {
+    DCHECK(!face_infos_.empty());
+    return face_infos_[0].level_infos.size();
+  }
+
  private:
-  friend class MailboxManagerSync;
   friend class MailboxManagerTest;
-  friend class gpu::ExternalVkImageBacking;
-  friend class gpu::ExternalVkImageGlRepresentation;
-  friend class media::SharedImageVideo;
-  friend class gpu::SharedImageBackingGLTexture;
-  friend class gpu::SharedImageBackingFactoryGLTexture;
-  friend class gpu::SharedImageBackingAHB;
-  friend class gpu::SharedImageRepresentationGLTextureAHB;
-  friend class gpu::SharedImageRepresentationSkiaGLAHB;
-  friend class gpu::SharedImageBackingIOSurface;
-  friend class gpu::SharedImageBackingDXGISwapChain;
-  friend class gpu::SwapChainFactoryDXGI;
-  friend class gpu::SharedImageRepresentationGLTextureIOSurface;
-  friend class gpu::SharedImageRepresentationSkiaIOSurface;
-  friend class gpu::StreamTexture;
-  friend class AbstractTextureImplOnSharedContext;
-  friend class TextureDefinition;
   friend class TextureManager;
   friend class TextureRef;
   friend class TextureTestHelper;
-  friend class TestSharedImageBacking;
   FRIEND_TEST_ALL_PREFIXES(TextureMemoryTrackerTest, LightweightRef);
 
   ~Texture() override;
   void AddTextureRef(TextureRef* ref);
   void RemoveTextureRef(TextureRef* ref, bool have_context);
-  void SetLightweightRef();
-  void RemoveLightweightRef(bool have_context);
   void MaybeDeleteThis(bool have_context);
 
   // Condition on which this texture is renderable. Can be ONLY_IF_NPOT if it
@@ -473,28 +499,6 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
     CAN_RENDER_NEEDS_VALIDATION,
   };
 
-  struct LevelInfo {
-    LevelInfo();
-    LevelInfo(const LevelInfo& rhs);
-    ~LevelInfo();
-
-    gfx::Rect cleared_rect;
-    GLenum target;
-    GLint level;
-    GLenum internal_format;
-    GLsizei width;
-    GLsizei height;
-    GLsizei depth;
-    GLint border;
-    GLenum format;
-    GLenum type;
-    scoped_refptr<gl::GLImage> image;
-    scoped_refptr<GLStreamTextureImage> stream_texture_image;
-    ImageState image_state;
-    uint32_t estimated_size;
-    bool internal_workaround;
-  };
-
   struct FaceInfo {
     FaceInfo();
     FaceInfo(const FaceInfo& other);
@@ -506,29 +510,14 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
     std::vector<LevelInfo> level_infos;
   };
 
-  // Helper for SetLevel*Image.  |stream_texture_image| may be null.
+  // Helper for SetLevel*Image.
   void SetLevelImageInternal(GLenum target,
                              GLint level,
                              gl::GLImage* image,
-                             GLStreamTextureImage* stream_texture_image,
                              ImageState state);
 
-  // Returns the LevelInfo for |target| and |level| if it's set, else NULL.
-  const LevelInfo* GetLevelInfo(GLint target, GLint level) const;
   // Returns NULL if the base level is not defined.
   const LevelInfo* GetBaseLevelInfo() const;
-
-  // Set the info for a particular level.
-  void SetLevelInfo(GLenum target,
-                    GLint level,
-                    GLenum internal_format,
-                    GLsizei width,
-                    GLsizei height,
-                    GLsizei depth,
-                    GLint border,
-                    GLenum format,
-                    GLenum type,
-                    const gfx::Rect& cleared_rect);
 
   // Causes us to report |service_id| as our service id, but does not delete
   // it when we are destroyed.  Will rebind any OES_EXTERNAL texture units to
@@ -572,11 +561,6 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
   // Makes each of the mip levels as though they were generated.
   void MarkMipmapsGenerated();
 
-  bool NeedsMips() const {
-    return sampler_state_.min_filter != GL_NEAREST &&
-           sampler_state_.min_filter != GL_LINEAR;
-  }
-
   // True if this texture meets all the GLES2 criteria for rendering.
   // See section 3.8.2 of the GLES2 spec.
   bool CanRender(const FeatureInfo* feature_info) const;
@@ -616,14 +600,6 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
                                 GLenum internal_format,
                                 GLenum type,
                                 bool immutable);
-
-  // Sets the Texture's target
-  // Parameters:
-  //   target: GL_TEXTURE_2D or GL_TEXTURE_CUBE_MAP or
-  //           GL_TEXTURE_EXTERNAL_OES or GL_TEXTURE_RECTANGLE_ARB
-  //           GL_TEXTURE_2D_ARRAY or GL_TEXTURE_3D (for GLES3)
-  //   max_levels: The maximum levels this type of target can have.
-  void SetTarget(GLenum target, GLint max_levels);
 
   // Update info about this texture.
   void Update();
@@ -681,7 +657,6 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
   GLuint owned_service_id() const { return owned_service_id_; }
 
   GLenum GetCompatibilitySwizzleForChannel(GLenum channel);
-  void SetCompatibilitySwizzle(const CompatibilitySwizzle* swizzle);
 
   // Info about each face and level of texture.
   std::vector<FaceInfo> face_infos_;
@@ -693,11 +668,11 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
 
   // The single TextureRef that accounts for memory for this texture. Must be
   // one of refs_.
-  TextureRef* memory_tracking_ref_ = nullptr;
+  raw_ptr<TextureRef> memory_tracking_ref_ = nullptr;
 
   // The id of the texture that we are responsible for deleting.  Normally, this
-  // is the same as |service_id_|, unless a GLStreamTextureImage with its own
-  // service id is bound. In that case the GLStreamTextureImage service id is
+  // is the same as |service_id_|, unless a StreamTexture Image with its own
+  // service id is bound. In that case the StreamTexture service id is
   // stored in |service_id_| and overrides the owned service id for all purposes
   // except deleting the texture name.
   GLuint owned_service_id_;
@@ -763,11 +738,9 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
   // Whether we have initialized TEXTURE_MAX_ANISOTROPY to 1.
   bool texture_max_anisotropy_initialized_ = false;
 
-  const CompatibilitySwizzle* compatibility_swizzle_ = nullptr;
+  raw_ptr<const CompatibilitySwizzle> compatibility_swizzle_ = nullptr;
 
   bool emulating_rgb_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(Texture);
 };
 
 // This class represents a texture in a client context group. It's mostly 1:1
@@ -777,6 +750,10 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
 class GPU_GLES2_EXPORT TextureRef : public base::RefCounted<TextureRef> {
  public:
   TextureRef(TextureManager* manager, GLuint client_id, Texture* texture);
+
+  TextureRef(const TextureRef&) = delete;
+  TextureRef& operator=(const TextureRef&) = delete;
+
   static scoped_refptr<TextureRef> Create(TextureManager* manager,
                                           GLuint client_id,
                                           GLuint service_id);
@@ -787,15 +764,22 @@ class GPU_GLES2_EXPORT TextureRef : public base::RefCounted<TextureRef> {
   // TODO(ericrk): Remove this once the Texture itself is generated from and
   // owns the SharedImageRepresentation.
   void SetSharedImageRepresentation(
-      std::unique_ptr<SharedImageRepresentationGLTexture> shared_image);
+      std::unique_ptr<GLTextureImageRepresentation> shared_image);
   const Texture* texture() const { return texture_; }
   Texture* texture() { return texture_; }
   GLuint client_id() const { return client_id_; }
   GLuint service_id() const { return texture_->service_id(); }
   GLint num_observers() const { return num_observers_; }
-  SharedImageRepresentationGLTexture* shared_image() const {
+  GLTextureImageRepresentation* shared_image() const {
     return shared_image_.get();
   }
+  const std::unique_ptr<GLTextureImageRepresentation::ScopedAccess>&
+  shared_image_scoped_access() const {
+    return shared_image_scoped_access_;
+  }
+
+  bool BeginAccessSharedImage(GLenum mode);
+  void EndAccessSharedImage();
 
   // When the TextureRef is destroyed, it will assume that the context has been
   // lost, regardless of the state of the TextureManager.
@@ -811,15 +795,15 @@ class GPU_GLES2_EXPORT TextureRef : public base::RefCounted<TextureRef> {
   TextureManager* manager() { return manager_; }
   void reset_client_id() { client_id_ = 0; }
 
-  TextureManager* manager_;
-  Texture* texture_;
+  raw_ptr<TextureManager> manager_;
+  raw_ptr<Texture> texture_;
   GLuint client_id_;
   GLint num_observers_;
   bool force_context_lost_;
 
-  std::unique_ptr<SharedImageRepresentationGLTexture> shared_image_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextureRef);
+  std::unique_ptr<GLTextureImageRepresentation> shared_image_;
+  std::unique_ptr<GLTextureImageRepresentation::ScopedAccess>
+      shared_image_scoped_access_;
 };
 
 // Holds data that is per gles2_cmd_decoder, but is related to to the
@@ -854,6 +838,10 @@ class GPU_GLES2_EXPORT TextureManager
   class GPU_GLES2_EXPORT DestructionObserver {
    public:
     DestructionObserver();
+
+    DestructionObserver(const DestructionObserver&) = delete;
+    DestructionObserver& operator=(const DestructionObserver&) = delete;
+
     virtual ~DestructionObserver();
 
     // Called in ~TextureManager.
@@ -861,9 +849,6 @@ class GPU_GLES2_EXPORT TextureManager
 
     // Called via ~TextureRef.
     virtual void OnTextureRefDestroying(TextureRef* texture) = 0;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(DestructionObserver);
   };
 
   enum DefaultAndBlackTextures {
@@ -886,6 +871,10 @@ class GPU_GLES2_EXPORT TextureManager
                  bool use_default_textures,
                  gl::ProgressReporter* progress_reporter,
                  ServiceDiscardableManager* discardable_manager);
+
+  TextureManager(const TextureManager&) = delete;
+  TextureManager& operator=(const TextureManager&) = delete;
+
   ~TextureManager() override;
 
   void AddFramebufferManager(FramebufferManager* framebuffer_manager);
@@ -948,6 +937,11 @@ class GPU_GLES2_EXPORT TextureManager
   bool ValidForTarget(
       GLenum target, GLint level,
       GLsizei width, GLsizei height, GLsizei depth);
+  bool ValidForTextureTarget(const Texture* texture,
+                             GLint level,
+                             GLsizei width,
+                             GLsizei height,
+                             GLsizei depth);
 
   // True if this texture meets all the GLES2 criteria for rendering.
   // See section 3.8.2 of the GLES2 spec.
@@ -995,7 +989,7 @@ class GPU_GLES2_EXPORT TextureManager
   // ID.
   TextureRef* ConsumeSharedImage(
       GLuint client_id,
-      std::unique_ptr<SharedImageRepresentationGLTexture> shared_image);
+      std::unique_ptr<GLTextureImageRepresentation> shared_image);
 
   // Sets |rect| of mip as cleared.
   void SetLevelClearedRect(TextureRef* ref,
@@ -1122,7 +1116,7 @@ class GPU_GLES2_EXPORT TextureManager
   void SetLevelStreamTextureImage(TextureRef* ref,
                                   GLenum target,
                                   GLint level,
-                                  GLStreamTextureImage* image,
+                                  gl::GLImage* image,
                                   Texture::ImageState state,
                                   GLuint service_id);
 
@@ -1155,7 +1149,7 @@ class GPU_GLES2_EXPORT TextureManager
   }
 
   struct DoTexImageArguments {
-    enum TexImageCommandType {
+    enum class CommandType {
       kTexImage2D,
       kTexImage3D,
     };
@@ -1172,7 +1166,7 @@ class GPU_GLES2_EXPORT TextureManager
     const void* pixels;
     uint32_t pixels_size;
     uint32_t padding;
-    TexImageCommandType command_type;
+    CommandType command_type;
   };
 
   bool ValidateTexImage(ContextState* state,
@@ -1191,7 +1185,7 @@ class GPU_GLES2_EXPORT TextureManager
                              const DoTexImageArguments& args);
 
   struct DoTexSubImageArguments {
-    enum TexSubImageCommandType {
+    enum class CommandType {
       kTexSubImage2D,
       kTexSubImage3D,
     };
@@ -1209,7 +1203,7 @@ class GPU_GLES2_EXPORT TextureManager
     const void* pixels;
     uint32_t pixels_size;
     uint32_t padding;
-    TexSubImageCommandType command_type;
+    CommandType command_type;
   };
 
   bool ValidateTexSubImage(ContextState* state,
@@ -1349,7 +1343,7 @@ class GPU_GLES2_EXPORT TextureManager
 
   MemoryTypeTracker* GetMemTracker();
   std::unique_ptr<MemoryTypeTracker> memory_type_tracker_;
-  MemoryTracker* memory_tracker_;
+  raw_ptr<MemoryTracker> memory_tracker_;
 
   scoped_refptr<FeatureInfo> feature_info_;
 
@@ -1395,11 +1389,9 @@ class GPU_GLES2_EXPORT TextureManager
   // Used to notify the watchdog thread of progress during destruction,
   // preventing time-outs when destruction takes a long time. May be null when
   // using in-process command buffer.
-  gl::ProgressReporter* progress_reporter_;
+  raw_ptr<gl::ProgressReporter> progress_reporter_;
 
-  ServiceDiscardableManager* discardable_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextureManager);
+  raw_ptr<ServiceDiscardableManager> discardable_manager_;
 };
 
 }  // namespace gles2

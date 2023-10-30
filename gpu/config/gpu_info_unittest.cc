@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@ class TestGPUInfoEnumerator : public gpu::GPUInfo::Enumerator {
         video_decode_accelerator_profile_active_(false),
         video_encode_accelerator_profile_active_(false),
         image_decode_accelerator_profile_active_(false),
-        dx12_vulkan_version_info_active_(false),
+        overlay_info_active_(false),
         aux_attributes_active_(false) {}
 
   void AddInt64(const char* name, int64_t value) override {}
@@ -26,6 +26,9 @@ class TestGPUInfoEnumerator : public gpu::GPUInfo::Enumerator {
   void AddString(const char* name, const std::string& value) override {}
 
   void AddBool(const char* name, bool value) override {}
+
+  void AddBinary(const char* name,
+                 const base::span<const uint8_t>& blob) override {}
 
   void AddTimeDeltaInSecondsF(const char* name,
                               const base::TimeDelta& value) override {}
@@ -59,13 +62,9 @@ class TestGPUInfoEnumerator : public gpu::GPUInfo::Enumerator {
     image_decode_accelerator_profile_active_ = false;
   }
 
-  void BeginDx12VulkanVersionInfo() override {
-    dx12_vulkan_version_info_active_ = true;
-  }
+  void BeginOverlayInfo() override { overlay_info_active_ = true; }
 
-  void EndDx12VulkanVersionInfo() override {
-    dx12_vulkan_version_info_active_ = false;
-  }
+  void EndOverlayInfo() override { overlay_info_active_ = false; }
 
   void BeginAuxAttributes() override { aux_attributes_active_ = true; }
 
@@ -86,10 +85,6 @@ class TestGPUInfoEnumerator : public gpu::GPUInfo::Enumerator {
     return image_decode_accelerator_profile_active_;
   }
 
-  bool dx12_vulkan_version_info_active() const {
-    return dx12_vulkan_version_info_active_;
-  }
-
   bool aux_attributes_active() const { return aux_attributes_active_; }
 
  private:
@@ -97,7 +92,7 @@ class TestGPUInfoEnumerator : public gpu::GPUInfo::Enumerator {
   bool video_decode_accelerator_profile_active_;
   bool video_encode_accelerator_profile_active_;
   bool image_decode_accelerator_profile_active_;
-  bool dx12_vulkan_version_info_active_;
+  bool overlay_info_active_;
   bool aux_attributes_active_;
 };
 }  // namespace
@@ -112,7 +107,6 @@ TEST(GpuInfoTest, FieldEditStates) {
   EXPECT_FALSE(enumerator.video_decode_accelerator_profile_active());
   EXPECT_FALSE(enumerator.video_encode_accelerator_profile_active());
   EXPECT_FALSE(enumerator.image_decode_accelerator_profile_active());
-  EXPECT_FALSE(enumerator.dx12_vulkan_version_info_active());
   EXPECT_FALSE(enumerator.aux_attributes_active());
 }
 

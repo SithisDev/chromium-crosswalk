@@ -1,10 +1,11 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/common/discardable_handle.h"
 
 #include "base/atomicops.h"
+#include "base/logging.h"
 #include "gpu/command_buffer/common/buffer.h"
 
 namespace gpu {

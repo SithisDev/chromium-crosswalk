@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,12 +43,13 @@ CommandBuffer::State CommandBufferDirectLocked::WaitForGetOffsetInRange(
 
 scoped_refptr<Buffer> CommandBufferDirectLocked::CreateTransferBuffer(
     uint32_t size,
-    int32_t* id) {
+    int32_t* id,
+    TransferBufferAllocationOption option) {
   if (fail_create_transfer_buffer_) {
     *id = -1;
     return nullptr;
   } else {
-    return CommandBufferDirect::CreateTransferBuffer(size, id);
+    return CommandBufferDirect::CreateTransferBuffer(size, id, option);
   }
 }
 

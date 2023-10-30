@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <stdint.h>
 
-#include "base/logging.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/base/ime/input_method.h"
@@ -33,6 +32,12 @@ bool HeadlessScreen::IsWindowUnderCursor(gfx::NativeWindow window) {
 
 gfx::NativeWindow HeadlessScreen::GetWindowAtScreenPoint(
     const gfx::Point& point) {
+  return nullptr;
+}
+
+gfx::NativeWindow HeadlessScreen::GetLocalProcessWindowAtPoint(
+    const gfx::Point& point,
+    const std::set<gfx::NativeWindow>& ignore) {
   return nullptr;
 }
 

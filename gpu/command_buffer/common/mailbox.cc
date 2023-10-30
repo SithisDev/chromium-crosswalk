@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/rand_util.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 
 namespace gpu {
@@ -51,7 +50,7 @@ Mailbox::Mailbox() {
 }
 
 bool Mailbox::IsZero() const {
-  for (size_t i = 0; i < base::size(name); ++i) {
+  for (size_t i = 0; i < std::size(name); ++i) {
     if (name[i])
       return false;
   }

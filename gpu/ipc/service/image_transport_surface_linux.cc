@@ -1,17 +1,17 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gpu/ipc/service/image_transport_surface.h"
 
 #include "gpu/ipc/service/pass_through_image_transport_surface.h"
-#include "ui/gl/gl_surface_glx.h"
 #include "ui/gl/init/gl_factory.h"
 
 namespace gpu {
 
 // static
 scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeSurface(
+    gl::GLDisplay* display,
     base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
     SurfaceHandle surface_handle,
     gl::GLSurfaceFormat format) {
@@ -19,12 +19,14 @@ scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeSurface(
   scoped_refptr<gl::GLSurface> surface;
   bool override_vsync_for_multi_window_swap = false;
 #if defined(USE_OZONE)
-  surface = gl::init::CreateSurfacelessViewGLSurface(surface_handle);
+  surface = gl::init::CreateSurfacelessViewGLSurface(display, surface_handle);
 #endif
   if (!surface) {
-    surface = gl::init::CreateViewGLSurface(surface_handle);
-    if (gl::GetGLImplementation() == gl::kGLImplementationDesktopGL)
+    surface = gl::init::CreateViewGLSurface(display, surface_handle);
+    if (gl::GetGLImplementation() == gl::kGLImplementationDesktopGL ||
+        gl::GetGLImplementation() == gl::kGLImplementationEGLANGLE) {
       override_vsync_for_multi_window_swap = true;
+    }
   }
   if (!surface)
     return surface;

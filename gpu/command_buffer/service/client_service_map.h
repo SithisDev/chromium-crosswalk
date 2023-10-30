@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check.h"
 
 namespace gpu {
 
@@ -76,7 +76,7 @@ class ClientServiceMap {
       return true;
     }
     if (client_id == 0) {
-      *service_id = 0;
+      *service_id = ServiceType{};
       return true;
     }
     return false;

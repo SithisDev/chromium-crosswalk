@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "gpu/command_buffer/service/error_state.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "ui/gl/gl_context.h"
+#include "ui/gl/gl_image.h"
 #include "ui/gl/scoped_binders.h"
 #include "ui/gl/scoped_make_current.h"
 
@@ -78,9 +79,8 @@ void ValidatingAbstractTextureImpl::BindImage(gl::GLImage* image,
                                        image);
 }
 
-void ValidatingAbstractTextureImpl::BindStreamTextureImage(
-    GLStreamTextureImage* image,
-    GLuint service_id) {
+void ValidatingAbstractTextureImpl::BindStreamTextureImage(gl::GLImage* image,
+                                                           GLuint service_id) {
   DCHECK(image);
   DCHECK(!decoder_managed_image_);
 
@@ -97,7 +97,7 @@ void ValidatingAbstractTextureImpl::BindStreamTextureImage(
   SetCleared();
 }
 
-gl::GLImage* ValidatingAbstractTextureImpl::GetImage() const {
+gl::GLImage* ValidatingAbstractTextureImpl::GetImageForTesting() const {
   if (!texture_ref_)
     return nullptr;
 
@@ -132,6 +132,10 @@ ContextGroup* ValidatingAbstractTextureImpl::GetContextGroup() const {
 ErrorState* ValidatingAbstractTextureImpl::GetErrorState() const {
   DCHECK(decoder_context_);
   return decoder_context_->GetErrorState();
+}
+
+void ValidatingAbstractTextureImpl::NotifyOnContextLost() {
+  NOTIMPLEMENTED();
 }
 
 void ValidatingAbstractTextureImpl::OnDecoderWillDestroy(bool have_context) {

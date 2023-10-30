@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,15 +9,14 @@
 #include <utility>
 
 #include "base/lazy_instance.h"
-#include "base/macros.h"
 #include "base/system/sys_info.h"
 #include "base/trace_event/trace_event.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/capabilities.h"
 #include "gpu/skia_bindings/gl_bindings_skia_cmd_buffer.h"
 #include "gpu/skia_bindings/gles2_implementation_with_grcontext_support.h"
-#include "third_party/skia/include/gpu/GrContext.h"
 #include "third_party/skia/include/gpu/GrContextOptions.h"
+#include "third_party/skia/include/gpu/GrDirectContext.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
 
 namespace skia_bindings {
@@ -27,26 +26,23 @@ GrContextForGLES2Interface::GrContextForGLES2Interface(
     gpu::ContextSupport* context_support,
     const gpu::Capabilities& capabilities,
     size_t max_resource_cache_bytes,
-    size_t max_glyph_cache_texture_bytes)
+    size_t max_glyph_cache_texture_bytes,
+    bool support_bilerp_from_flyph_atlas)
     : context_support_(context_support) {
-  // The limit of the number of GPU resources we hold in the GrContext's
-  // GPU cache.
-  static const int kMaxGaneshResourceCacheCount = 16384;
-
   GrContextOptions options;
   options.fGlyphCacheTextureMaximumBytes = max_glyph_cache_texture_bytes;
   options.fAvoidStencilBuffers = capabilities.avoid_stencil_buffers;
   options.fAllowPathMaskCaching = false;
-  options.fSharpenMipmappedTextures = true;
+  options.fShaderErrorHandler = this;
   // TODO(csmartdalton): enable internal multisampling after the related Skia
   // rolls are in.
   options.fInternalMultisampleCount = 0;
+  options.fSupportBilerpFromGlyphAtlas = support_bilerp_from_flyph_atlas;
   sk_sp<GrGLInterface> interface(
       skia_bindings::CreateGLES2InterfaceBindings(gl, context_support));
-  gr_context_ = GrContext::MakeGL(std::move(interface), options);
+  gr_context_ = GrDirectContext::MakeGL(std::move(interface), options);
   if (gr_context_) {
-    gr_context_->setResourceCacheLimits(kMaxGaneshResourceCacheCount,
-                                        max_resource_cache_bytes);
+    gr_context_->setResourceCacheLimit(max_resource_cache_bytes);
     context_support_->SetGrContext(gr_context_.get());
   }
 }
@@ -58,6 +54,14 @@ GrContextForGLES2Interface::~GrContextForGLES2Interface() {
     gr_context_->releaseResourcesAndAbandonContext();
     context_support_->SetGrContext(nullptr);
   }
+}
+
+void GrContextForGLES2Interface::compileError(const char* shader,
+                                              const char* errors) {
+  LOG(ERROR) << "Skia shader compilation error\n"
+             << "------------------------\n"
+             << shader << "\nErrors:\n"
+             << errors;
 }
 
 void GrContextForGLES2Interface::OnLostContext() {
@@ -73,7 +77,7 @@ void GrContextForGLES2Interface::FreeGpuResources() {
   }
 }
 
-GrContext* GrContextForGLES2Interface::get() {
+GrDirectContext* GrContextForGLES2Interface::get() {
   return gr_context_.get();
 }
 

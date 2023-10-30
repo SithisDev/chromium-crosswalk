@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,44 +31,15 @@
         </body>
       </html>`);
 
-  await virtualTimeController.grantInitialTime(500, 1000,
-    null,
-    async () => {
-      const frameTimeTicks = virtualTimeController.currentFrameTime();
-      const screenshotData =
-          (await dp.HeadlessExperimental.beginFrame(
-              {frameTimeTicks, screenshot: {format: 'png'}}))
-          .result.screenshotData;
-      await logScreenShotData(screenshotData);
-      testRunner.completeTest();
-    }
-  );
 
-  function logScreenShotData(pngBase64) {
-    const image = new Image();
-
-    let callback;
-    let promise = new Promise(fulfill => callback = fulfill);
-    image.onload = function() {
-      testRunner.log(`Screenshot size: `
-          + `${image.naturalWidth} x ${image.naturalHeight}`);
-      const canvas = document.createElement('canvas');
-      canvas.width = image.naturalWidth;
-      canvas.height = image.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(image, 0, 0);
-      // Expected rgba @(0,0): 255,255,255,255
-      const rgba = ctx.getImageData(0, 0, 1, 1).data;
-      testRunner.log(`rgba @(0,0): ${rgba}`);
-      // Expected rgba @(25,25): 255,0,0,255
-      const rgba2 = ctx.getImageData(25, 25, 1, 1).data;
-      testRunner.log(`rgba @(25,25): ${rgba2}`);
-      callback();
-    }
-
-    image.src = `data:image/png;base64,${pngBase64}`;
-
-    return promise;
-  }
+  await virtualTimeController.initialize(1000);
   await frameNavigationHelper.navigate('http://example.com/');
+  await virtualTimeController.grantTime(500);
+  const ctx = await virtualTimeController.captureScreenshot();
+  const rgba = ctx.getImageData(0, 0, 1, 1).data;
+  testRunner.log(`rgba @(0,0): ${rgba}`);
+  // Expected rgba @(25,25): 255,0,0,255
+  const rgba2 = ctx.getImageData(25, 25, 1, 1).data;
+  testRunner.log(`rgba @(25,25): ${rgba2}`);
+  testRunner.completeTest();
 })

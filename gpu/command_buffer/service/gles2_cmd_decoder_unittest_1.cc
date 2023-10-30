@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -173,21 +173,6 @@ void GLES2DecoderTestBase::SpecializedSetup<
     cmds::GetFramebufferAttachmentParameteriv, 0>(bool /* valid */) {
   DoBindFramebuffer(GL_FRAMEBUFFER, client_framebuffer_id_,
                     kServiceFramebufferId);
-}
-
-template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::GetProgramiv, 0>(
-    bool valid) {
-  if (valid) {
-    // GetProgramiv calls ClearGLError then GetError to make sure
-    // it actually got a value so it can report correctly to the client.
-    EXPECT_CALL(*gl_, GetError())
-        .WillOnce(Return(GL_NO_ERROR))
-        .RetiresOnSaturation();
-    EXPECT_CALL(*gl_, GetError())
-        .WillOnce(Return(GL_NO_ERROR))
-        .RetiresOnSaturation();
-  }
 }
 
 template <>

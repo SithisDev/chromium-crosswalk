@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,20 +21,29 @@ class WebGPUInterfaceStub : public WebGPUInterface {
   void GenUnverifiedSyncTokenCHROMIUM(GLbyte* sync_token) override;
   void VerifySyncTokensCHROMIUM(GLbyte** sync_tokens, GLsizei count) override;
   void WaitSyncTokenCHROMIUM(const GLbyte* sync_token) override;
+  void ShallowFlushCHROMIUM() override;
 
   // WebGPUInterface implementation
-  const DawnProcTable& GetProcs() const override;
+  scoped_refptr<APIChannel> GetAPIChannel() const override;
   void FlushCommands() override;
-  DawnDevice GetDefaultDevice() override;
-  ReservedTexture ReserveTexture(DawnDevice device) override;
+  bool EnsureAwaitingFlush() override;
+  void FlushAwaitingCommands() override;
+  ReservedTexture ReserveTexture(
+      WGPUDevice device,
+      const WGPUTextureDescriptor* optionalDesc) override;
+
+  WGPUDevice DeprecatedEnsureDefaultDeviceSync() override;
 
 // Include the auto-generated part of this class. We split this because
 // it means we can easily edit the non-auto generated parts right here in
 // this file instead of having to edit some template or the code generator.
 #include "gpu/command_buffer/client/webgpu_interface_stub_autogen.h"
 
+ protected:
+  DawnProcTable* procs();
+
  private:
-  DawnProcTable null_procs_;
+  scoped_refptr<APIChannel> api_channel_;
 };
 
 }  // namespace webgpu

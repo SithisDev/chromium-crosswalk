@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "headless/lib/browser/protocol/base_string_adapter.h"
+#include "base/values.h"
 #include "headless/public/util/error_reporter.h"
 
 namespace headless {
@@ -49,7 +49,7 @@ inline std::unique_ptr<base::Value> ToValue(const std::string& value) {
 
 template <>
 inline std::unique_ptr<base::Value> ToValue(const base::Value& value) {
-  return value.CreateDeepCopy();
+  return base::Value::ToUniquePtrValue(value.Clone());
 }
 
 template <>
@@ -69,8 +69,8 @@ template <typename T>
 std::unique_ptr<base::Value> ToValue(const std::vector<T>& vector_of_values) {
   std::unique_ptr<base::ListValue> result(new base::ListValue());
   for (const T& value : vector_of_values)
-    result->Append(ToValue(value));
-  return std::move(result);
+    result->GetList().Append(base::Value::FromUniquePtrValue(ToValue(value)));
+  return result;
 }
 
 template <>
@@ -140,7 +140,7 @@ template <>
 struct FromValue<base::Value> {
   static std::unique_ptr<base::Value> Parse(const base::Value& value,
                                             ErrorReporter* errors) {
-    return value.CreateDeepCopy();
+    return base::Value::ToUniquePtrValue(value.Clone());
   }
 };
 
@@ -178,7 +178,7 @@ struct FromValue<std::vector<T>> {
       return result;
     }
     errors->Push();
-    for (const auto& item : value.GetList())
+    for (const auto& item : value.GetListDeprecated())
       result.push_back(FromValue<T>::Parse(item, errors));
     errors->Pop();
     return result;
