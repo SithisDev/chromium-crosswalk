@@ -1,6 +1,6 @@
 Name: S2 CellId Library
 Short Name: s2cellid
-URL: 0
+URL: https://github.com/google/s2geometry
 Version: 0
 License: License: Apache Version 2.0
 License File: NOT_SHIPPED
@@ -17,6 +17,7 @@ Local Modifications:
  - math/
    - mathutil.h mathutil.cc
    - vector.h
+     - Change comparison operator implementations to be C++20-compliant
  - _fpcontractoff.h
  - r1interval.h
  - r2.h
@@ -44,7 +45,7 @@ Local Modifications:
   - Change int64 -> int64
   - Change GG_ULONGLONG -> static_cast<uint64_t>
   - Remove absl/base/macros.h and use chromium base/macros.h
-- Change glog to use chromium base/logging.h
+- Change glog to use chromium base/{logging.h, check.h, etc.}
 - Remove s2/base/strings/stringprintf.h to use chromium base/strings/stringprintf.h
 - Remove base/casts.h and change implicit_cast to static_cast.
 - Append std:: to string type.
