@@ -1,4 +1,4 @@
-// Copyright 2015 The Crashpad Authors. All rights reserved.
+// Copyright 2015 The Crashpad Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,6 +35,9 @@ class SystemSnapshotWinTest : public testing::Test {
         system_snapshot_() {
   }
 
+  SystemSnapshotWinTest(const SystemSnapshotWinTest&) = delete;
+  SystemSnapshotWinTest& operator=(const SystemSnapshotWinTest&) = delete;
+
   const internal::SystemSnapshotWin& system_snapshot() const {
     return system_snapshot_;
   }
@@ -49,8 +52,6 @@ class SystemSnapshotWinTest : public testing::Test {
  private:
   ProcessReaderWin process_reader_;
   internal::SystemSnapshotWin system_snapshot_;
-
-  DISALLOW_COPY_AND_ASSIGN(SystemSnapshotWinTest);
 };
 
 TEST_F(SystemSnapshotWinTest, GetCPUArchitecture) {
@@ -73,10 +74,13 @@ TEST_F(SystemSnapshotWinTest, CPUCount) {
 
 TEST_F(SystemSnapshotWinTest, CPUVendor) {
   std::string cpu_vendor = system_snapshot().CPUVendor();
-
-  // There are a variety of other values, but we don't expect to run our tests
-  // on them.
+#if defined(ARCH_CPU_X86_FAMILY)
   EXPECT_TRUE(cpu_vendor == "GenuineIntel" || cpu_vendor == "AuthenticAMD");
+#elif defined(ARCH_CPU_ARM64)
+  EXPECT_FALSE(cpu_vendor.empty());
+#else
+#error Unsupported Windows Arch
+#endif
 }
 
 #if defined(ARCH_CPU_X86_FAMILY)

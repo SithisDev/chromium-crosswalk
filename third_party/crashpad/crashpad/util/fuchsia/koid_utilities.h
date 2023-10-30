@@ -1,4 +1,4 @@
-// Copyright 2018 The Crashpad Authors. All rights reserved.
+// Copyright 2018 The Crashpad Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,13 +70,6 @@ std::vector<zx::thread> GetHandlesForThreadKoids(
 //!     handle could not be retrieved, in which case an error will be logged.
 zx::thread GetThreadHandleByKoid(const zx::process& parent,
                                  zx_koid_t child_koid);
-
-//! \brief Gets a process handle given the process' koid.
-//!
-//! \param[in] koid The process id.
-//! \return A zx_handle_t (owned by a base::ScopedZxHandle) for the process. If
-//!     the handle is invalid, an error will have been logged.
-zx::process GetProcessFromKoid(zx_koid_t koid);
 
 //! \brief Retrieves the koid for a given object handle.
 //!

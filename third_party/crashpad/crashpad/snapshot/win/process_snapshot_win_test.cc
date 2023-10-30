@@ -1,4 +1,4 @@
-// Copyright 2015 The Crashpad Authors. All rights reserved.
+// Copyright 2015 The Crashpad Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@
 #include "snapshot/win/pe_image_reader.h"
 #include "snapshot/win/process_reader_win.h"
 #include "test/errors.h"
-#include "test/gtest_disabled.h"
 #include "test/test_paths.h"
 #include "test/win/child_launcher.h"
 #include "util/file/file_io.h"
@@ -36,7 +35,7 @@ void TestImageReaderChild(const TestPaths::Architecture architecture) {
   UUID done_uuid;
   done_uuid.InitializeWithNew();
   ScopedKernelHANDLE done(
-      CreateEvent(nullptr, true, false, done_uuid.ToString16().c_str()));
+      CreateEvent(nullptr, true, false, done_uuid.ToWString().c_str()));
   ASSERT_TRUE(done.is_valid()) << ErrorMessage("CreateEvent");
 
   base::FilePath child_test_executable =
@@ -44,7 +43,7 @@ void TestImageReaderChild(const TestPaths::Architecture architecture) {
                                L"image_reader",
                                TestPaths::FileType::kExecutable,
                                architecture);
-  ChildLauncher child(child_test_executable, done_uuid.ToString16());
+  ChildLauncher child(child_test_executable, done_uuid.ToWString());
   ASSERT_NO_FATAL_FAILURE(child.Start());
 
   ScopedSetEvent set_done(done.get());
@@ -120,7 +119,7 @@ TEST(ProcessSnapshotTest, CrashpadInfoChild) {
 #if defined(ARCH_CPU_64_BITS)
 TEST(ProcessSnapshotTest, CrashpadInfoChildWOW64) {
   if (!TestPaths::Has32BitBuildArtifacts()) {
-    DISABLED_TEST();
+    GTEST_SKIP();
   }
 
   TestImageReaderChild(TestPaths::Architecture::k32Bit);

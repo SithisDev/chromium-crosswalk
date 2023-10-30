@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,18 @@
 // NOTE: The format of types has changed. 'FooType' is now
 //   'chrome.autofillPrivate.FooType'.
 // Please run the closure compiler before committing changes.
-// See https://chromium.googlesource.com/chromium/src/+/master/docs/closure_compilation.md
+// See https://chromium.googlesource.com/chromium/src/+/main/docs/closure_compilation.md
 
 /** @fileoverview Externs generated from namespace: autofillPrivate */
 
-/**
- * @const
- */
+/** @const */
 chrome.autofillPrivate = {};
 
 /**
  * @enum {string}
  */
 chrome.autofillPrivate.AddressField = {
+  HONORIFIC: 'HONORIFIC',
   FULL_NAME: 'FULL_NAME',
   COMPANY_NAME: 'COMPANY_NAME',
   ADDRESS_LINES: 'ADDRESS_LINES',
@@ -37,7 +36,9 @@ chrome.autofillPrivate.AddressField = {
  *   summarySublabel: (string|undefined),
  *   isLocal: (boolean|undefined),
  *   isCached: (boolean|undefined),
- *   isMigratable: (boolean|undefined)
+ *   isMigratable: (boolean|undefined),
+ *   isVirtualCardEnrollmentEligible: (boolean|undefined),
+ *   isVirtualCardEnrolled: (boolean|undefined)
  * }}
  */
 chrome.autofillPrivate.AutofillMetadata;
@@ -46,6 +47,7 @@ chrome.autofillPrivate.AutofillMetadata;
  * @typedef {{
  *   guid: (string|undefined),
  *   fullNames: (!Array<string>|undefined),
+ *   honorific: (string|undefined),
  *   companyName: (string|undefined),
  *   addressLines: (string|undefined),
  *   addressLevel1: (string|undefined),
@@ -102,6 +104,9 @@ chrome.autofillPrivate.AddressComponents;
  *   cardNumber: (string|undefined),
  *   expirationMonth: (string|undefined),
  *   expirationYear: (string|undefined),
+ *   nickname: (string|undefined),
+ *   network: (string|undefined),
+ *   imageSrc: (string|undefined),
  *   metadata: (!chrome.autofillPrivate.AutofillMetadata|undefined)
  * }}
  */
@@ -126,8 +131,8 @@ chrome.autofillPrivate.saveAddress = function(address) {};
 
 /**
  * Gets the list of all countries.
- * @param {function(!Array<!chrome.autofillPrivate.CountryEntry>):void} callback
- *     Callback which will be called with the countries.
+ * @param {function(!Array<!chrome.autofillPrivate.CountryEntry>): void}
+ *     callback Callback which will be called with the countries.
  */
 chrome.autofillPrivate.getCountryList = function(callback) {};
 
@@ -136,15 +141,15 @@ chrome.autofillPrivate.getCountryList = function(callback) {};
  * @param {string} countryCode A two-character string representing the address'
  *     country     whose components should be returned. See autofill_country.cc
  *     for a     list of valid codes.
- * @param {function(!chrome.autofillPrivate.AddressComponents):void} callback
+ * @param {function(!chrome.autofillPrivate.AddressComponents): void} callback
  *     Callback which will be called with components.
  */
 chrome.autofillPrivate.getAddressComponents = function(countryCode, callback) {};
 
 /**
  * Gets the list of addresses.
- * @param {function(!Array<!chrome.autofillPrivate.AddressEntry>):void} callback
- *     Callback which will be called with the list of addresses.
+ * @param {function(!Array<!chrome.autofillPrivate.AddressEntry>): void}
+ *     callback Callback which will be called with the list of addresses.
  */
 chrome.autofillPrivate.getAddressList = function(callback) {};
 
@@ -167,14 +172,14 @@ chrome.autofillPrivate.removeEntry = function(guid) {};
  * not be returned in the list of valid numbers.
  * @param {!chrome.autofillPrivate.ValidatePhoneParams} params The parameters to
  *     this function.
- * @param {function(!Array<string>):void} callback Callback which will be called
- *     with validated phone numbers.
+ * @param {function(!Array<string>): void} callback Callback which will be
+ *     called with validated phone numbers.
  */
 chrome.autofillPrivate.validatePhoneNumbers = function(params, callback) {};
 
 /**
  * Gets the list of credit cards.
- * @param {function(!Array<!chrome.autofillPrivate.CreditCardEntry>):void}
+ * @param {function(!Array<!chrome.autofillPrivate.CreditCardEntry>): void}
  *     callback Callback which will be called with the list of credit cards.
  */
 chrome.autofillPrivate.getCreditCardList = function(callback) {};
@@ -197,15 +202,37 @@ chrome.autofillPrivate.migrateCreditCards = function() {};
 chrome.autofillPrivate.logServerCardLinkClicked = function() {};
 
 /**
- * Fired when the address list has changed, meaning that an entry has been
- * added, removed, or changed. |entries| The updated list of entries.
- * @type {!ChromeEvent}
+ * Enables or disables FIDO Authentication for credit card unmasking.
+ * @param {boolean} enabled
  */
-chrome.autofillPrivate.onAddressListChanged;
+chrome.autofillPrivate.setCreditCardFIDOAuthEnabledState = function(enabled) {};
 
 /**
- * Fired when the credit card list has changed, meaning that an entry has been
+ * Gets the list of UPI IDs (a.k.a. Virtual Payment Addresses).
+ * @param {function(!Array<string>): void} callback Callback which will be
+ *     called with the list of UPI IDs.
+ */
+chrome.autofillPrivate.getUpiIdList = function(callback) {};
+
+/**
+ * Enrolls a credit card into virtual cards.
+ * @param {string} cardId The server side id of the credit card to be
+ *     enrolled. Note it refers to the legacy server id of credit cards, not the
+ *     instrument ids.
+ */
+chrome.autofillPrivate.addVirtualCard = function(cardId) {};
+
+/**
+ * Unenrolls a credit card from virtual cards.
+ * @param {string} cardId The server side id of the credit card to be
+ *     unenrolled. Note it refers to the legacy server id of credit cards, not
+ *     the instrument ids.
+ */
+chrome.autofillPrivate.removeVirtualCard = function(cardId) {};
+
+/**
+ * Fired when the personal data has changed, meaning that an entry has been
  * added, removed, or changed. |entries| The updated list of entries.
  * @type {!ChromeEvent}
  */
-chrome.autofillPrivate.onCreditCardListChanged;
+chrome.autofillPrivate.onPersonalDataChanged;
