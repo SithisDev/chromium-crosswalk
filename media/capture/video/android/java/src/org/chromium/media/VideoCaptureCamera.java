@@ -1,15 +1,13 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.media;
 
-import android.annotation.TargetApi;
 import android.graphics.ImageFormat;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.opengl.GLES20;
-import android.os.Build;
 import android.util.SparseArray;
 
 import org.chromium.base.Log;
@@ -30,8 +28,6 @@ import java.util.concurrent.locks.ReentrantLock;
  **/
 @JNINamespace("media")
 @SuppressWarnings("deprecation")
-// TODO: is this class only used on ICS MR1 (or some later version) and above?
-@TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1)
 public class VideoCaptureCamera
         extends VideoCapture implements android.hardware.Camera.PreviewCallback {
     private static final String TAG = "VideoCapture";
@@ -142,7 +138,7 @@ public class VideoCaptureCamera
     private class CrErrorCallback implements android.hardware.Camera.ErrorCallback {
         @Override
         public void onError(int error, android.hardware.Camera camera) {
-            nativeOnError(mNativeVideoCaptureDeviceAndroid,
+            VideoCaptureJni.get().onError(mNativeVideoCaptureDeviceAndroid, VideoCaptureCamera.this,
                     AndroidVideoCaptureError.ANDROID_API_1_CAMERA_ERROR_CALLBACK_RECEIVED,
                     "Error id: " + error);
 
@@ -170,8 +166,8 @@ public class VideoCaptureCamera
             }
             synchronized (mPhotoTakenCallbackLock) {
                 if (mPhotoTakenCallbackId != 0) {
-                    nativeOnPhotoTaken(
-                            mNativeVideoCaptureDeviceAndroid, mPhotoTakenCallbackId, data);
+                    VideoCaptureJni.get().onPhotoTaken(mNativeVideoCaptureDeviceAndroid,
+                            VideoCaptureCamera.this, mPhotoTakenCallbackId, data);
                 }
                 mPhotoTakenCallbackId = 0;
             }
@@ -187,6 +183,24 @@ public class VideoCaptureCamera
             return VideoCaptureApi.UNKNOWN;
         }
         return VideoCaptureApi.ANDROID_API1;
+    }
+
+    static boolean isZoomSupported(int id) {
+        android.hardware.Camera camera;
+        try {
+            camera = android.hardware.Camera.open(id);
+        } catch (RuntimeException ex) {
+            Log.e(TAG, "Camera.open: ", ex);
+            return false;
+        }
+        android.hardware.Camera.Parameters parameters = getCameraParameters(camera);
+        if (parameters == null) {
+            return false;
+        }
+
+        final boolean isZoomSupported = parameters.isZoomSupported();
+        camera.release();
+        return isZoomSupported;
     }
 
     static int getFacingMode(int id) {
@@ -213,6 +227,10 @@ public class VideoCaptureCamera
                 + (cameraInfo.facing == android.hardware.Camera.CameraInfo.CAMERA_FACING_FRONT
                                   ? "front"
                                   : "back");
+    }
+
+    static String getDeviceId(int id) {
+        return Integer.toString(id);
     }
 
     static VideoCaptureFormat[] getDeviceSupportedFormats(int id) {
@@ -451,7 +469,8 @@ public class VideoCaptureCamera
 
         mPreviewBufferLock.lock();
         try {
-            nativeOnStarted(mNativeVideoCaptureDeviceAndroid);
+            VideoCaptureJni.get().onStarted(
+                    mNativeVideoCaptureDeviceAndroid, VideoCaptureCamera.this);
             mIsRunning = true;
         } finally {
             mPreviewBufferLock.unlock();
@@ -485,7 +504,9 @@ public class VideoCaptureCamera
     public void getPhotoCapabilitiesAsync(long callbackId) {
         final android.hardware.Camera.Parameters parameters = getCameraParameters(mCamera);
         if (parameters == null) {
-            nativeOnGetPhotoCapabilitiesReply(mNativeVideoCaptureDeviceAndroid, callbackId, null);
+            mCamera = null;
+            VideoCaptureJni.get().onGetPhotoCapabilitiesReply(
+                    mNativeVideoCaptureDeviceAndroid, VideoCaptureCamera.this, callbackId, null);
             return;
         }
         PhotoCapabilities.Builder builder = new PhotoCapabilities.Builder();
@@ -628,9 +649,10 @@ public class VideoCaptureCamera
                 .setInt(PhotoCapabilityInt.STEP_COLOR_TEMPERATURE, 50);
         if (jniWhiteBalanceMode == AndroidMeteringMode.FIXED) {
             final int index = COLOR_TEMPERATURES_MAP.indexOfValue(parameters.getWhiteBalance());
-            if (index >= 0)
+            if (index >= 0) {
                 builder.setInt(PhotoCapabilityInt.CURRENT_COLOR_TEMPERATURE,
                         COLOR_TEMPERATURES_MAP.keyAt(index));
+            }
         }
 
         final List<String> flashModes = parameters.getSupportedFlashModes();
@@ -657,8 +679,8 @@ public class VideoCaptureCamera
             builder.setFillLightModeArray(integerArrayListToArray(modes));
         }
 
-        nativeOnGetPhotoCapabilitiesReply(
-                mNativeVideoCaptureDeviceAndroid, callbackId, builder.build());
+        VideoCaptureJni.get().onGetPhotoCapabilitiesReply(mNativeVideoCaptureDeviceAndroid,
+                VideoCaptureCamera.this, callbackId, builder.build());
     }
 
     @Override
@@ -669,6 +691,7 @@ public class VideoCaptureCamera
             int fillLightMode, boolean hasTorch, boolean torch, double colorTemperature) {
         android.hardware.Camera.Parameters parameters = getCameraParameters(mCamera);
         if (parameters == null) {
+            mCamera = null;
             return;
         }
 
@@ -820,12 +843,14 @@ public class VideoCaptureCamera
         }
         mPreviewParameters = getCameraParameters(mCamera);
         if (mPreviewParameters == null) {
+            mCamera = null;
             notifyTakePhotoError(callbackId);
             return;
         }
 
         android.hardware.Camera.Parameters photoParameters = getCameraParameters(mCamera);
         if (photoParameters == null) {
+            mCamera = null;
             notifyTakePhotoError(callbackId);
             return;
         }
@@ -892,10 +917,11 @@ public class VideoCaptureCamera
                 return;
             }
             if (data.length == mExpectedFrameSize) {
-                nativeOnFrameAvailable(mNativeVideoCaptureDeviceAndroid, data, mExpectedFrameSize,
-                        getCameraRotation());
+                VideoCaptureJni.get().onFrameAvailable(mNativeVideoCaptureDeviceAndroid,
+                        VideoCaptureCamera.this, data, mExpectedFrameSize, getCameraRotation());
             } else {
-                nativeOnFrameDropped(mNativeVideoCaptureDeviceAndroid,
+                VideoCaptureJni.get().onFrameDropped(mNativeVideoCaptureDeviceAndroid,
+                        VideoCaptureCamera.this,
                         AndroidVideoCaptureFrameDropReason.ANDROID_API_1_UNEXPECTED_DATA_LENGTH);
             }
         } finally {

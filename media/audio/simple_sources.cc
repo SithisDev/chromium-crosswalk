@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,14 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
 
 #include "base/files/file.h"
 #include "base/logging.h"
 #include "base/numerics/math_constants.h"
 #include "base/thread_annotations.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "media/audio/wav_audio_handler.h"
 #include "media/base/audio_bus.h"
 
@@ -28,7 +30,8 @@ std::unique_ptr<char[]> ReadWavFile(const base::FilePath& wav_filename,
       wav_filename, base::File::FLAG_OPEN | base::File::FLAG_READ);
   if (!wav_file.IsValid()) {
     LOG(ERROR) << "Failed to read " << wav_filename.value()
-               << " as input to the fake device.";
+               << " as input to the fake device."
+                  " Try disabling the sandbox with --no-sandbox.";
     return nullptr;
   }
 
@@ -43,7 +46,7 @@ std::unique_ptr<char[]> ReadWavFile(const base::FilePath& wav_filename,
     return nullptr;
   }
 
-  std::unique_ptr<char[]> data(new char[wav_file_length]);
+  auto data = std::make_unique<char[]>(wav_file_length);
   int read_bytes = wav_file.Read(0, data.get(), wav_file_length);
   if (read_bytes != wav_file_length) {
     LOG(ERROR) << "Failed to read all bytes of " << wav_filename.value();
@@ -141,7 +144,7 @@ int SineWaveAudioSource::OnMoreData(base::TimeDelta /* delay */,
   return max_frames;
 }
 
-void SineWaveAudioSource::OnError() {
+void SineWaveAudioSource::OnError(ErrorType type) {
   errors_++;
 }
 
@@ -196,11 +199,11 @@ void FileSource::LoadWavFile(const base::FilePath& path_to_wav_file) {
   // of it at a time and not the whole thing (like 10 ms at a time).
   AudioParameters file_audio_slice(
       AudioParameters::AUDIO_PCM_LOW_LATENCY,
-      GuessChannelLayout(wav_audio_handler_->num_channels()),
+      ChannelLayoutConfig::Guess(wav_audio_handler_->num_channels()),
       wav_audio_handler_->sample_rate(), params_.frames_per_buffer());
 
-  file_audio_converter_.reset(
-      new AudioConverter(file_audio_slice, params_, false));
+  file_audio_converter_ =
+      std::make_unique<AudioConverter>(file_audio_slice, params_, false);
   file_audio_converter_->AddInput(this);
 }
 
@@ -244,7 +247,7 @@ double FileSource::ProvideInput(AudioBus* audio_bus_into_converter,
   return 1.0;
 }
 
-void FileSource::OnError() {}
+void FileSource::OnError(ErrorType type) {}
 
 BeepingSource::BeepingSource(const AudioParameters& params)
     : buffer_size_(params.GetBytesPerBuffer(kSampleFormatU8)),
@@ -271,8 +274,8 @@ int BeepingSource::OnMoreData(base::TimeDelta /* delay */,
   BeepContext* beep_context = GetBeepContext();
   if (beep_context->automatic_beep()) {
     base::TimeDelta delta = interval_from_last_beep_ -
-        base::TimeDelta::FromMilliseconds(kAutomaticBeepIntervalInMs);
-    if (delta > base::TimeDelta()) {
+                            base::Milliseconds(kAutomaticBeepIntervalInMs);
+    if (delta.is_positive()) {
       should_beep = true;
       interval_from_last_beep_ = delta;
     }
@@ -310,7 +313,7 @@ int BeepingSource::OnMoreData(base::TimeDelta /* delay */,
   return dest->frames();
 }
 
-void BeepingSource::OnError() {}
+void BeepingSource::OnError(ErrorType type) {}
 
 void BeepingSource::BeepOnce() {
   GetBeepContext()->SetBeepOnce(true);

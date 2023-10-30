@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,11 @@
 
 namespace media {
 
-MojoMediaLog::MojoMediaLog(mojom::MediaLogAssociatedPtrInfo remote_media_log,
-                           scoped_refptr<base::SequencedTaskRunner> task_runner)
+MojoMediaLog::MojoMediaLog(
+    mojo::PendingRemote<mojom::MediaLog> remote_media_log,
+    scoped_refptr<base::SequencedTaskRunner> task_runner)
     : remote_media_log_(std::move(remote_media_log)),
       task_runner_(std::move(task_runner)) {
-  weak_this_ = weak_ptr_factory_.GetWeakPtr();
   DVLOG(1) << __func__;
 }
 
@@ -26,8 +26,8 @@ MojoMediaLog::~MojoMediaLog() {
   InvalidateLog();
 }
 
-void MojoMediaLog::AddEventLocked(std::unique_ptr<MediaLogEvent> event) {
-  DVLOG(1) << __func__;
+void MojoMediaLog::AddLogRecordLocked(std::unique_ptr<MediaLogRecord> event) {
+  DVLOG(2) << __func__;
   DCHECK(event);
 
   // Don't post unless we need to.  Otherwise, we can order a log entry after
@@ -37,14 +37,15 @@ void MojoMediaLog::AddEventLocked(std::unique_ptr<MediaLogEvent> event) {
   //
   // Also, we post here, so this is the base case.  :)
   if (task_runner_->RunsTasksInCurrentSequence()) {
-    remote_media_log_->AddEvent(*event);
+    remote_media_log_->AddLogRecord(*event);
     return;
   }
 
   // From other threads, we have little choice.
   task_runner_->PostTask(
       FROM_HERE,
-      base::BindOnce(&MojoMediaLog::AddEvent, weak_this_, std::move(event)));
+      base::BindOnce(&MojoMediaLog::AddLogRecord,
+                     weak_ptr_factory_.GetWeakPtr(), std::move(event)));
 }
 
 }  // namespace media

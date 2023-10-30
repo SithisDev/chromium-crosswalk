@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,6 @@
 
 #include "media/capture/video/video_capture_device_factory.h"
 #include "media/capture/video/video_capture_device_info.h"
-
-#if defined(OS_CHROMEOS)
-#include "media/capture/video/chromeos/mojo/cros_image_capture.mojom.h"
-#endif  // defined(OS_CHROMEOS)
 
 namespace media {
 
@@ -29,16 +25,12 @@ class CAPTURE_EXPORT VideoCaptureSystem {
   // that calls GetDeviceInfosAsync()
   virtual void GetDeviceInfosAsync(DeviceInfoCallback result_callback) = 0;
 
-  // Creates a VideoCaptureDevice object. Returns nullptr if something goes
-  // wrong.
-  virtual std::unique_ptr<VideoCaptureDevice> CreateDevice(
+  // Creates a VideoCaptureErrorOrDevice object. Contains an error code if
+  // something goes wrong.
+  virtual VideoCaptureErrorOrDevice CreateDevice(
       const std::string& device_id) = 0;
 
-#if defined(OS_CHROMEOS)
-  // Pass the mojo request to bind with DeviceFactory for Chrome OS.
-  virtual void BindCrosImageCaptureRequest(
-      cros::mojom::CrosImageCaptureRequest request) = 0;
-#endif  // defined(OS_CHROMEOS)
+  virtual VideoCaptureDeviceFactory* GetFactory() = 0;
 };
 
 }  // namespace media

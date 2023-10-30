@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,11 @@
 namespace media {
 
 AudioSourceParameters::AudioSourceParameters() = default;
-AudioSourceParameters::AudioSourceParameters(int session_id)
+AudioSourceParameters::AudioSourceParameters(
+    const base::UnguessableToken& session_id)
     : session_id(session_id) {}
 AudioSourceParameters::AudioSourceParameters(
     const AudioSourceParameters& params) = default;
 AudioSourceParameters::~AudioSourceParameters() = default;
-
-AudioSourceParameters::ProcessingConfig::ProcessingConfig(
-    base::UnguessableToken id,
-    AudioProcessingSettings settings)
-    : id(id), settings(settings) {
-  DCHECK(!id.is_empty());
-}
 
 }  // namespace media

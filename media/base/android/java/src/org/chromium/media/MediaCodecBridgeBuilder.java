@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,14 +12,14 @@ import android.view.Surface;
 import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.MainDex;
+import org.chromium.build.annotations.MainDex;
 import org.chromium.media.MediaCodecUtil.CodecCreationInfo;
 import org.chromium.media.MediaCodecUtil.MimeTypes;
 
 @JNINamespace("media")
 @MainDex
 class MediaCodecBridgeBuilder {
-    private static final String TAG = "cr_MediaCodecBridge";
+    private static final String TAG = "MediaCodecBridge";
 
     @CalledByNative
     static MediaCodecBridge createVideoDecoder(String mime, @CodecType int codecType,
@@ -30,31 +30,34 @@ class MediaCodecBridgeBuilder {
         try {
             Log.i(TAG, "create MediaCodec video decoder, mime %s", mime);
             info = MediaCodecUtil.createDecoder(mime, codecType, mediaCrypto);
+
+            if (info.mediaCodec == null) return null;
+
+            MediaCodecBridge bridge =
+                    new MediaCodecBridge(info.mediaCodec, info.bitrateAdjuster, useAsyncApi);
+            byte[][] csds = {csd0, csd1};
+            MediaFormat format = MediaFormatBuilder.createVideoDecoderFormat(mime, width, height,
+                    csds, hdrMetadata, info.supportsAdaptivePlayback && allowAdaptivePlayback);
+
+            if (!bridge.configureVideo(format, surface, mediaCrypto, 0)) return null;
+
+            if (!bridge.start()) {
+                bridge.release();
+                return null;
+            }
+
+            return bridge;
         } catch (Exception e) {
             Log.e(TAG, "Failed to create MediaCodec video decoder: %s, codecType: %d", mime,
                     codecType, e);
         }
 
-        if (info.mediaCodec == null) return null;
-
-        MediaCodecBridge bridge =
-                new MediaCodecBridge(info.mediaCodec, info.bitrateAdjuster, useAsyncApi);
-        byte[][] csds = {csd0, csd1};
-        MediaFormat format = MediaFormatBuilder.createVideoDecoderFormat(mime, width, height, csds,
-                hdrMetadata, info.supportsAdaptivePlayback && allowAdaptivePlayback);
-
-        if (!bridge.configureVideo(format, surface, mediaCrypto, 0)) return null;
-
-        if (!bridge.start()) {
-            bridge.release();
-            return null;
-        }
-        return bridge;
+        return null;
     }
 
     @CalledByNative
-    static MediaCodecBridge createVideoEncoder(String mime, int width, int height, int bitRate,
-            int frameRate, int iFrameInterval, int colorFormat) {
+    static MediaCodecBridge createVideoEncoder(String mime, int width, int height, int bitrateMode,
+            int bitRate, int frameRate, int iFrameInterval, int colorFormat) {
         CodecCreationInfo info = new CodecCreationInfo();
         try {
             Log.i(TAG, "create MediaCodec video encoder, mime %s", mime);
@@ -71,7 +74,8 @@ class MediaCodecBridgeBuilder {
                 ? new MediaCodecEncoder(info.mediaCodec, info.bitrateAdjuster)
                 : new MediaCodecBridge(info.mediaCodec, info.bitrateAdjuster, false);
         MediaFormat format = MediaFormatBuilder.createVideoEncoderFormat(mime, width, height,
-                bitRate, BitrateAdjuster.getInitialFrameRate(info.bitrateAdjuster, frameRate),
+                bitrateMode, bitRate,
+                BitrateAdjuster.getInitialFrameRate(info.bitrateAdjuster, frameRate),
                 iFrameInterval, colorFormat, info.supportsAdaptivePlayback);
 
         if (!bridge.configureVideo(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)) {

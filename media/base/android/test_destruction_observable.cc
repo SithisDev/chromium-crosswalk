@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,12 +19,12 @@ DestructionObservable::CreateDestructionObserver() {
 }
 
 DestructionObserver::DestructionObserver(DestructionObservable* observable)
-    : destructed_(false), weak_factory_(this) {
+    : destructed_(false) {
   // Only one observer is allowed.
   DCHECK(!observable->destruction_cb.Release());
   observable->destruction_cb.ReplaceClosure(
-      base::Bind(&DestructionObserver::OnObservableDestructed,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&DestructionObserver::OnObservableDestructed,
+                     weak_factory_.GetWeakPtr()));
 }
 
 DestructionObserver::~DestructionObserver() {

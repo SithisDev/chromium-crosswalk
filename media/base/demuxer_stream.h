@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/time/time.h"
 #include "media/base/media_export.h"
 #include "media/base/video_transformation.h"
 
@@ -16,6 +15,15 @@ namespace media {
 class AudioDecoderConfig;
 class DecoderBuffer;
 class VideoDecoderConfig;
+
+enum class StreamLiveness {
+  kUnknown,
+  kRecorded,
+  kLive,
+  kMaxValue = kLive,
+};
+
+MEDIA_EXPORT std::string GetStreamLivenessName(StreamLiveness liveness);
 
 class MEDIA_EXPORT DemuxerStream {
  public:
@@ -29,13 +37,6 @@ class MEDIA_EXPORT DemuxerStream {
 
   // Returns a string representation of |type|.
   static const char* GetTypeName(Type type);
-
-  enum Liveness {
-    LIVENESS_UNKNOWN,
-    LIVENESS_RECORDED,
-    LIVENESS_LIVE,
-    LIVENESS_MAX = LIVENESS_LIVE,
-  };
 
   // Status returned in the Read() callback.
   //  kOk : Indicates the second parameter is Non-NULL and contains media data
@@ -70,12 +71,8 @@ class MEDIA_EXPORT DemuxerStream {
   // The first parameter indicates the status of the read.
   // The second parameter is non-NULL and contains media data
   // or the end of the stream if the first parameter is kOk. NULL otherwise.
-  typedef base::Callback<void(Status, scoped_refptr<DecoderBuffer>)> ReadCB;
-  virtual void Read(const ReadCB& read_cb) = 0;
-
-  // Returns true if a Read() call has been made but the |read_cb| has not yet
-  // been run.
-  virtual bool IsReadPending() const = 0;
+  typedef base::OnceCallback<void(Status, scoped_refptr<DecoderBuffer>)> ReadCB;
+  virtual void Read(ReadCB read_cb) = 0;
 
   // Returns the audio/video decoder configuration. It is an error to call the
   // audio method on a video stream and vice versa. After |kConfigChanged| is
@@ -88,7 +85,7 @@ class MEDIA_EXPORT DemuxerStream {
   virtual Type type() const = 0;
 
   // Returns liveness of the streams provided, i.e. whether recorded or live.
-  virtual Liveness liveness() const;
+  virtual StreamLiveness liveness() const;
 
   virtual void EnableBitstreamConverter();
 

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/callback.h"
+#include "url/gurl.h"
 
 namespace media {
 
@@ -19,7 +20,7 @@ class ProvisionFetcher {
   // with the status flag (success/failure) and the provision response in
   // case of success.
   using ResponseCB =
-      base::Callback<void(bool success, const std::string& response)>;
+      base::OnceCallback<void(bool success, const std::string& response)>;
 
   virtual ~ProvisionFetcher() {}
 
@@ -29,12 +30,13 @@ class ProvisionFetcher {
   // MediaDrm.ProvisionRequest.
   // The implementation must call |response_cb| asynchronously on the same
   // thread that this method is called.
-  virtual void Retrieve(const std::string& default_url,
+  virtual void Retrieve(const GURL& default_url,
                         const std::string& request_data,
-                        const ResponseCB& response_cb) = 0;
+                        ResponseCB response_cb) = 0;
 };
 
-using CreateFetcherCB = base::Callback<std::unique_ptr<ProvisionFetcher>()>;
+using CreateFetcherCB =
+    base::RepeatingCallback<std::unique_ptr<ProvisionFetcher>()>;
 
 }  // namespace media
 

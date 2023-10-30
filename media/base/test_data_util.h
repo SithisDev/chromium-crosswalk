@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,10 @@ namespace media {
 class DecoderBuffer;
 
 // Common test results.
-extern const char kFailed[];
-extern const char kEnded[];
-extern const char kErrorEvent[];
-extern const char kError[];
+extern const char kFailedTitle[];
+extern const char kEndedTitle[];
+extern const char kErrorEventTitle[];
+extern const char kErrorTitle[];
 
 // Returns a file path for a file in the media/test/data directory.
 base::FilePath GetTestDataFilePath(const std::string& name);

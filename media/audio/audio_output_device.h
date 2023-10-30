@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -67,7 +67,7 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/thread_annotations.h"
@@ -98,6 +98,9 @@ class MEDIA_EXPORT AudioOutputDevice : public AudioRendererSink,
       const AudioSinkParameters& sink_params,
       base::TimeDelta authorization_timeout);
 
+  AudioOutputDevice(const AudioOutputDevice&) = delete;
+  AudioOutputDevice& operator=(const AudioOutputDevice&) = delete;
+
   // Request authorization to use the device specified in the constructor.
   void RequestDeviceAuthorization();
 
@@ -122,7 +125,7 @@ class MEDIA_EXPORT AudioOutputDevice : public AudioRendererSink,
                           const AudioParameters& output_params,
                           const std::string& matched_device_id) override;
   void OnStreamCreated(base::UnsafeSharedMemoryRegion shared_memory_region,
-                       base::SyncSocket::Handle socket_handle,
+                       base::SyncSocket::ScopedHandle socket_handle,
                        bool play_automatically) override;
   void OnIPCClosed() override;
 
@@ -181,7 +184,7 @@ class MEDIA_EXPORT AudioOutputDevice : public AudioRendererSink,
 
   AudioParameters audio_parameters_;
 
-  RenderCallback* callback_;
+  raw_ptr<RenderCallback> callback_;
 
   // A pointer to the IPC layer that takes care of sending requests over to
   // the implementation. May be set to nullptr after errors.
@@ -199,7 +202,7 @@ class MEDIA_EXPORT AudioOutputDevice : public AudioRendererSink,
 
   // The media session ID used to identify which input device to be started.
   // Only used by Unified IO.
-  int session_id_;
+  base::UnguessableToken session_id_;
 
   // ID of hardware output device to be used (provided |session_id_| is zero)
   const std::string device_id_;
@@ -207,8 +210,6 @@ class MEDIA_EXPORT AudioOutputDevice : public AudioRendererSink,
   // If |device_id_| is empty and |session_id_| is not, |matched_device_id_| is
   // received in OnDeviceAuthorized().
   std::string matched_device_id_;
-
-  base::Optional<base::UnguessableToken> processing_id_;
 
   // In order to avoid a race between OnStreamCreated and Stop(), we use this
   // guard to control stopping and starting the audio thread.
@@ -239,8 +240,6 @@ class MEDIA_EXPORT AudioOutputDevice : public AudioRendererSink,
   // if you add more usage of this lock ensure you have not added a deadlock.
   base::Lock device_info_lock_;
   OutputDeviceInfoCB pending_device_info_cb_ GUARDED_BY(device_info_lock_);
-
-  DISALLOW_COPY_AND_ASSIGN(AudioOutputDevice);
 };
 
 }  // namespace media

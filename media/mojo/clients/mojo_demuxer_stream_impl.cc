@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,8 @@ namespace media {
 
 MojoDemuxerStreamImpl::MojoDemuxerStreamImpl(
     media::DemuxerStream* stream,
-    mojo::InterfaceRequest<mojom::DemuxerStream> request)
-    : binding_(this, std::move(request)), stream_(stream) {}
+    mojo::PendingReceiver<mojom::DemuxerStream> receiver)
+    : receiver_(this, std::move(receiver)), stream_(stream) {}
 
 MojoDemuxerStreamImpl::~MojoDemuxerStreamImpl() = default;
 
@@ -31,8 +31,8 @@ void MojoDemuxerStreamImpl::Initialize(InitializeCallback callback) {
   DVLOG(2) << __func__;
 
   // Prepare the initial config.
-  base::Optional<AudioDecoderConfig> audio_config;
-  base::Optional<VideoDecoderConfig> video_config;
+  absl::optional<AudioDecoderConfig> audio_config;
+  absl::optional<VideoDecoderConfig> video_config;
   if (stream_->type() == Type::AUDIO) {
     audio_config = stream_->audio_decoder_config();
   } else if (stream_->type() == Type::VIDEO) {
@@ -52,9 +52,9 @@ void MojoDemuxerStreamImpl::Initialize(InitializeCallback callback) {
 }
 
 void MojoDemuxerStreamImpl::Read(ReadCallback callback) {
-  stream_->Read(base::Bind(&MojoDemuxerStreamImpl::OnBufferReady,
-                           weak_factory_.GetWeakPtr(),
-                           base::Passed(&callback)));
+  stream_->Read(base::BindOnce(&MojoDemuxerStreamImpl::OnBufferReady,
+                               weak_factory_.GetWeakPtr(),
+                               std::move(callback)));
 }
 
 void MojoDemuxerStreamImpl::EnableBitstreamConverter() {
@@ -64,8 +64,8 @@ void MojoDemuxerStreamImpl::EnableBitstreamConverter() {
 void MojoDemuxerStreamImpl::OnBufferReady(ReadCallback callback,
                                           Status status,
                                           scoped_refptr<DecoderBuffer> buffer) {
-  base::Optional<AudioDecoderConfig> audio_config;
-  base::Optional<VideoDecoderConfig> video_config;
+  absl::optional<AudioDecoderConfig> audio_config;
+  absl::optional<VideoDecoderConfig> video_config;
 
   if (status == Status::kConfigChanged) {
     DVLOG(2) << __func__ << ": ConfigChange!";

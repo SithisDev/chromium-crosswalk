@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,9 @@
 
 #include "base/bind.h"
 #include "base/debug/stack_trace.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/serial_runner.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -21,12 +20,17 @@ class SerialRunnerTest : public ::testing::Test {
  public:
   SerialRunnerTest()
       : inside_start_(false), done_called_(false), done_status_(PIPELINE_OK) {}
+
+  SerialRunnerTest(const SerialRunnerTest&) = delete;
+  SerialRunnerTest& operator=(const SerialRunnerTest&) = delete;
+
   ~SerialRunnerTest() override = default;
 
   void RunSerialRunner() {
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
-        FROM_HERE, base::BindOnce(&SerialRunnerTest::StartRunnerInternal,
-                                  base::Unretained(this), bound_fns_));
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&SerialRunnerTest::StartRunnerInternal,
+                       base::Unretained(this), std::move(bound_fns_)));
     base::RunLoop().RunUntilIdle();
   }
 
@@ -34,32 +38,29 @@ class SerialRunnerTest : public ::testing::Test {
   // |status|. called(i) returns whether the i'th bound function pushed to the
   // queue was called while running the SerialRunner.
   void PushBoundFunction(PipelineStatus status) {
-    bound_fns_.Push(base::Bind(&SerialRunnerTest::RunBoundFunction,
-                               base::Unretained(this),
-                               status,
-                               called_.size()));
+    bound_fns_.Push(base::BindOnce(&SerialRunnerTest::RunBoundFunction,
+                                   base::Unretained(this), status,
+                                   called_.size()));
     called_.push_back(false);
   }
 
   void PushBoundClosure() {
-    bound_fns_.Push(base::Bind(&SerialRunnerTest::RunBoundClosure,
-                               base::Unretained(this),
-                               called_.size()));
+    bound_fns_.Push(base::BindOnce(&SerialRunnerTest::RunBoundClosure,
+                                   base::Unretained(this), called_.size()));
     called_.push_back(false);
   }
 
   void PushClosure() {
-    bound_fns_.Push(base::Bind(&SerialRunnerTest::RunClosure,
-                               base::Unretained(this),
-                               called_.size()));
+    bound_fns_.Push(base::BindOnce(&SerialRunnerTest::RunClosure,
+                                   base::Unretained(this), called_.size()));
     called_.push_back(false);
   }
 
   // Push a bound function to the queue that will delete the SerialRunner,
   // which should cancel all remaining queued work.
   void PushCancellation() {
-    bound_fns_.Push(base::Bind(&SerialRunnerTest::CancelSerialRunner,
-                               base::Unretained(this)));
+    bound_fns_.Push(base::BindOnce(&SerialRunnerTest::CancelSerialRunner,
+                                   base::Unretained(this)));
   }
 
   // Queries final status of pushed functions and done callback. Valid only
@@ -71,25 +72,24 @@ class SerialRunnerTest : public ::testing::Test {
  private:
   void RunBoundFunction(PipelineStatus status,
                         size_t index,
-                        const PipelineStatusCB& status_cb) {
+                        PipelineStatusCallback status_cb) {
     EXPECT_EQ(index == 0u, inside_start_)
         << "First bound function should run on same stack as "
         << "SerialRunner::Run() while all others should not\n"
         << base::debug::StackTrace().ToString();
 
     called_[index] = true;
-    status_cb.Run(status);
+    std::move(status_cb).Run(status);
   }
 
-  void RunBoundClosure(size_t index,
-                       const base::Closure& done_cb) {
+  void RunBoundClosure(size_t index, base::OnceClosure done_cb) {
     EXPECT_EQ(index == 0u, inside_start_)
         << "First bound function should run on same stack as "
         << "SerialRunner::Run() while all others should not\n"
         << base::debug::StackTrace().ToString();
 
     called_[index] = true;
-    done_cb.Run();
+    std::move(done_cb).Run();
   }
 
   void RunClosure(size_t index) {
@@ -101,10 +101,11 @@ class SerialRunnerTest : public ::testing::Test {
     called_[index] = true;
   }
 
-  void StartRunnerInternal(const SerialRunner::Queue& bound_fns) {
+  void StartRunnerInternal(SerialRunner::Queue bound_fns) {
     inside_start_ = true;
-    runner_ = SerialRunner::Run(bound_fns_, base::Bind(
-        &SerialRunnerTest::DoneCallback, base::Unretained(this)));
+    runner_ = SerialRunner::Run(std::move(bound_fns),
+                                base::BindOnce(&SerialRunnerTest::DoneCallback,
+                                               base::Unretained(this)));
     inside_start_ = false;
   }
 
@@ -117,19 +118,19 @@ class SerialRunnerTest : public ::testing::Test {
     done_status_ = status;
   }
 
-  void CancelSerialRunner(const PipelineStatusCB& status_cb) {
+  void CancelSerialRunner(PipelineStatusCallback status_cb) {
     // Tasks run by |runner_| shouldn't reset it, hence we post a task to do so.
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(&SerialRunnerTest::ResetSerialRunner,
                                   base::Unretained(this)));
-    status_cb.Run(PIPELINE_OK);
+    std::move(status_cb).Run(PIPELINE_OK);
   }
 
   void ResetSerialRunner() {
     runner_.reset();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   SerialRunner::Queue bound_fns_;
   std::unique_ptr<SerialRunner> runner_;
 
@@ -142,8 +143,6 @@ class SerialRunnerTest : public ::testing::Test {
   // Tracks whether the final done callback was called + resulting status.
   bool done_called_;
   PipelineStatus done_status_;
-
-  DISALLOW_COPY_AND_ASSIGN(SerialRunnerTest);
 };
 
 TEST_F(SerialRunnerTest, Empty) {

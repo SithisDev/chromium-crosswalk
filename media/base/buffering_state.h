@@ -1,9 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef MEDIA_BASE_BUFFERING_STATE_H_
 #define MEDIA_BASE_BUFFERING_STATE_H_
+
+#include <string>
 
 #include "base/callback_forward.h"
 
@@ -48,9 +50,28 @@ enum BufferingStateChangeReason {
   BUFFERING_STATE_CHANGE_REASON_MAX = REMOTING_NETWORK_CONGESTION,
 };
 
+enum class SerializableBufferingStateType {
+  kPipeline,
+  kVideo,
+  kAudio,
+};
+
+// A serializable combo of the state, type, and reason.
+template <SerializableBufferingStateType T>
+struct SerializableBufferingState {
+  BufferingState state;
+  BufferingStateChangeReason reason;
+  // Only included in the serialized state if |type == kPipeline|
+  bool suspended_start = false;
+};
+
 // Used to indicate changes in buffering state;
-typedef base::Callback<void(BufferingState, BufferingStateChangeReason)>
-    BufferingStateCB;
+using BufferingStateCB =
+    base::RepeatingCallback<void(BufferingState, BufferingStateChangeReason)>;
+
+std::string BufferingStateToString(
+    BufferingState state,
+    BufferingStateChangeReason reason = BUFFERING_CHANGE_REASON_UNKNOWN);
 
 }  // namespace media
 

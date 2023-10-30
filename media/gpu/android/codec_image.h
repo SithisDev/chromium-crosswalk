@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,15 @@
 #include <stdint.h>
 
 #include <memory>
+#include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted_delete_on_sequence.h"
-#include "gpu/command_buffer/service/gl_stream_texture_image.h"
-#include "media/gpu/android/codec_wrapper.h"
+#include "gpu/command_buffer/service/ref_counted_lock.h"
+#include "gpu/command_buffer/service/stream_texture_shared_image_interface.h"
+#include "media/gpu/android/codec_output_buffer_renderer.h"
 #include "media/gpu/android/promotion_hint_aggregator.h"
-#include "media/gpu/android/surface_texture_gl_owner.h"
 #include "media/gpu/media_gpu_export.h"
 
 namespace base {
@@ -27,8 +28,14 @@ class ScopedHardwareBufferFenceSync;
 namespace media {
 
 // A GLImage that renders MediaCodec buffers to a TextureOwner or overlay
-// as needed in order to draw them.
-class MEDIA_GPU_EXPORT CodecImage : public gpu::gles2::GLStreamTextureImage {
+// as needed in order to draw them. Note that when DrDc is enabled(kEnableDrDc),
+// a per codec dr-dc lock is expected to be held while calling methods of this
+// class. This is ensured by adding AssertAcquiredDrDcLock() to those methods.
+// We are not adding a Locked suffix on those methods since many of those
+// methods are either overrides or virtual.
+class MEDIA_GPU_EXPORT CodecImage
+    : public gpu::StreamTextureSharedImageInterface,
+      gpu::RefCountedLockHelperDrDc {
  public:
   // Callback to notify that a codec image is now unused in the sense of not
   // being out for display.  This lets us signal interested folks once a video
@@ -39,28 +46,31 @@ class MEDIA_GPU_EXPORT CodecImage : public gpu::gles2::GLStreamTextureImage {
   // Also note that, presently, only destruction does this.  However, with
   // pooling, there will be a way to mark a CodecImage as unused without
   // destroying it.
-  using NowUnusedCB = base::OnceCallback<void(CodecImage*)>;
+  using UnusedCB = base::OnceCallback<void(CodecImage*)>;
 
-  // A callback for observing CodecImage destruction.
-  using DestructionCB = base::OnceCallback<void(CodecImage*)>;
+  CodecImage(const gfx::Size& coded_size,
+             scoped_refptr<gpu::RefCountedLock> drdc_lock);
 
-  CodecImage();
+  CodecImage(const CodecImage&) = delete;
+  CodecImage& operator=(const CodecImage&) = delete;
 
   // (Re-)Initialize this CodecImage to use |output_buffer| et. al.
   //
   // May be called on a random thread, but only if the CodecImage is otherwise
   // not in use.
   void Initialize(
-      std::unique_ptr<CodecOutputBuffer> output_buffer,
-      scoped_refptr<TextureOwner> texture_owner,
+      std::unique_ptr<CodecOutputBufferRenderer> output_buffer_renderer,
+      bool is_texture_owner_backed,
       PromotionHintAggregator::NotifyPromotionHintCB promotion_hint_cb);
 
-  void SetNowUnusedCB(NowUnusedCB now_unused_cb);
-  void SetDestructionCB(DestructionCB destruction_cb);
+  // Add a callback that will be called when we're marked as unused.  Does not
+  // replace previous callbacks.  Order of callbacks is not guaranteed.
+  void AddUnusedCB(UnusedCB unused_cb);
 
   // gl::GLImage implementation
   gfx::Size GetSize() override;
   unsigned GetInternalFormat() override;
+  unsigned GetDataType() override;
   BindOrCopy ShouldBindOrCopy() override;
   bool BindTexImage(unsigned target) override;
   void ReleaseTexImage(unsigned target) override;
@@ -68,13 +78,6 @@ class MEDIA_GPU_EXPORT CodecImage : public gpu::gles2::GLStreamTextureImage {
   bool CopyTexSubImage(unsigned target,
                        const gfx::Point& offset,
                        const gfx::Rect& rect) override;
-  bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
-                            int z_order,
-                            gfx::OverlayTransform transform,
-                            const gfx::Rect& bounds_rect,
-                            const gfx::RectF& crop_rect,
-                            bool enable_blend,
-                            std::unique_ptr<gfx::GpuFence> gpu_fence) override;
   void SetColorSpace(const gfx::ColorSpace& color_space) override {}
   void Flush() override {}
   void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
@@ -82,27 +85,38 @@ class MEDIA_GPU_EXPORT CodecImage : public gpu::gles2::GLStreamTextureImage {
                     const std::string& dump_name) override;
   std::unique_ptr<base::android::ScopedHardwareBufferFenceSync>
   GetAHardwareBuffer() override;
-  // gpu::gles2::GLStreamTextureMatrix implementation
-  void GetTextureMatrix(float xform[16]) override;
-  void NotifyPromotionHint(bool promotion_hint,
-                           int display_x,
-                           int display_y,
-                           int display_width,
-                           int display_height) override;
+
+  // Notify us that we're no longer in-use for display, and may be pointed at
+  // another output buffer via a call to Initialize.
+  void NotifyUnused();
+
+  // gpu::StreamTextureSharedImageInterface implementation.
+  void ReleaseResources() override;
+  bool IsUsingGpuMemory() const override;
+  void UpdateAndBindTexImage(GLuint service_id) override;
+  bool HasTextureOwner() const override;
+  gpu::TextureBase* GetTextureBase() const override;
+  void NotifyOverlayPromotion(bool promotion, const gfx::Rect& bounds) override;
+  // Renders this image to the overlay. Returns true if the buffer is in the
+  // overlay front buffer. Returns false if the buffer was invalidated.
+  bool RenderToOverlay() override;
+  bool TextureOwnerBindsTextureOnUpdate() override;
 
   // Whether the codec buffer has been rendered to the front buffer.
   bool was_rendered_to_front_buffer() const {
-    return phase_ == Phase::kInFrontBuffer;
+    return output_buffer_renderer_
+               ? output_buffer_renderer_->was_rendered_to_front_buffer()
+               : false;
   }
 
-  // Whether the TextureOwner's texture is in the front buffer and bound to the
-  // latest image.
-  bool was_tex_image_bound() const { return was_tex_image_bound_; }
 
   // Whether this image is backed by a texture owner.
-  bool is_texture_owner_backed() const { return !!texture_owner_; }
+  bool is_texture_owner_backed() const { return is_texture_owner_backed_; }
 
-  scoped_refptr<TextureOwner> texture_owner() const { return texture_owner_; }
+  scoped_refptr<gpu::TextureOwner> texture_owner() const {
+    return output_buffer_renderer_ ? output_buffer_renderer_->texture_owner()
+                                   : nullptr;
+  }
 
   // Renders this image to the front buffer of its backing surface.
   // Returns true if the buffer is in the front buffer. Returns false if the
@@ -113,70 +127,54 @@ class MEDIA_GPU_EXPORT CodecImage : public gpu::gles2::GLStreamTextureImage {
   // Renders this image to the back buffer of its texture owner. Only valid if
   // is_texture_owner_backed(). Returns true if the buffer is in the back
   // buffer. Returns false if the buffer was invalidated.
+  // RenderToTextureOwnerBackBuffer() will not block if there is any previously
+  // pending frame and will return false in this case.
   bool RenderToTextureOwnerBackBuffer();
 
   // Release any codec buffer without rendering, if we have one.
   virtual void ReleaseCodecBuffer();
 
   CodecOutputBuffer* get_codec_output_buffer_for_testing() const {
-    return output_buffer_.get();
+    return output_buffer_renderer_
+               ? output_buffer_renderer_->get_codec_output_buffer_for_testing()
+               : nullptr;
   }
 
  protected:
   ~CodecImage() override;
 
  private:
-  // The lifecycle phases of an image.
-  // The only possible transitions are from left to right. Both
-  // kInFrontBuffer and kInvalidated are terminal.
-  enum class Phase { kInCodec, kInBackBuffer, kInFrontBuffer, kInvalidated };
+  FRIEND_TEST_ALL_PREFIXES(CodecImageTest, RenderAfterUnusedDoesntCrash);
+
+  std::unique_ptr<CodecOutputBufferRenderer> output_buffer_renderer_;
 
   // Renders this image to the texture owner front buffer by first rendering
   // it to the back buffer if it's not already there, and then waiting for the
   // frame available event before calling UpdateTexImage().
-  enum class BindingsMode {
-    // Ensures that the TextureOwner's texture is bound to the latest image, if
-    // it requires explicit binding.
-    kEnsureTexImageBound,
+  // Also bind the latest image
+  // to the provided |service_id| if TextureOwner does not binds texture on
+  // update. If |bindings_mode| is other than kEnsureTexImageBound, then
+  // |service_id| is not required.
+  bool RenderToTextureOwnerFrontBuffer(BindingsMode bindings_mode,
+                                       GLuint service_id);
 
-    // Updates the current image but does not bind it. If updating the image
-    // implicitly binds the texture, the current bindings will be restored.
-    kRestoreIfBound,
-
-    // Updates the current image but does not bind it. If updating the image
-    // implicitly binds the texture, the current bindings will not be restored.
-    kDontRestoreIfBound
-  };
-  bool RenderToTextureOwnerFrontBuffer(BindingsMode bindings_mode);
-  void EnsureBoundIfNeeded(BindingsMode mode);
-
-  // Renders this image to the overlay. Returns true if the buffer is in the
-  // overlay front buffer. Returns false if the buffer was invalidated.
-  bool RenderToOverlay();
-
-  // The phase of the image buffer's lifecycle.
-  Phase phase_ = Phase::kInvalidated;
-
-  // The buffer backing this image.
-  std::unique_ptr<CodecOutputBuffer> output_buffer_;
-
-  // The TextureOwner that |output_buffer_| will be rendered to. Or null, if
-  // this image is backed by an overlay.
-  scoped_refptr<TextureOwner> texture_owner_;
+  // Whether this image is texture_owner or overlay backed.
+  bool is_texture_owner_backed_ = false;
 
   // The bounds last sent to the overlay.
   gfx::Rect most_recent_bounds_;
 
+  // Coded size of the image.
+  gfx::Size coded_size_;
+
   // Callback to notify about promotion hints and overlay position.
   PromotionHintAggregator::NotifyPromotionHintCB promotion_hint_cb_;
 
-  NowUnusedCB now_unused_cb_;
+  std::vector<UnusedCB> unused_cbs_;
 
-  DestructionCB destruction_cb_;
-
-  bool was_tex_image_bound_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(CodecImage);
+  // Bound to the gpu main thread on which this CodecImage is created. Some
+  // methods can only be called on this thread.
+  THREAD_CHECKER(gpu_main_thread_checker_);
 };
 
 // Temporary helper class to prevent touching a non-threadsafe-ref-counted
@@ -184,10 +182,15 @@ class MEDIA_GPU_EXPORT CodecImage : public gpu::gles2::GLStreamTextureImage {
 // Passing a raw pointer around isn't safe, since stub destruction could still
 // destroy the consumers of the codec image.
 class MEDIA_GPU_EXPORT CodecImageHolder
-    : public base::RefCountedDeleteOnSequence<CodecImageHolder> {
+    : public base::RefCountedDeleteOnSequence<CodecImageHolder>,
+      public gpu::RefCountedLockHelperDrDc {
  public:
   CodecImageHolder(scoped_refptr<base::SequencedTaskRunner> task_runner,
-                   scoped_refptr<CodecImage> codec_image);
+                   scoped_refptr<CodecImage> codec_image,
+                   scoped_refptr<gpu::RefCountedLock> drdc_lock);
+
+  CodecImageHolder(const CodecImageHolder&) = delete;
+  CodecImageHolder& operator=(const CodecImageHolder&) = delete;
 
   // Safe from any thread.
   CodecImage* codec_image_raw() const { return codec_image_.get(); }
@@ -199,8 +202,6 @@ class MEDIA_GPU_EXPORT CodecImageHolder
   friend class base::DeleteHelper<CodecImageHolder>;
 
   scoped_refptr<CodecImage> codec_image_;
-
-  DISALLOW_COPY_AND_ASSIGN(CodecImageHolder);
 };
 
 }  // namespace media

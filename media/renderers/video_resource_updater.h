@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,27 +8,25 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <list>
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time/time.h"
 #include "base/trace_event/memory_dump_provider.h"
 #include "base/unguessable_token.h"
 #include "components/viz/common/resources/release_callback.h"
 #include "components/viz/common/resources/resource_format.h"
 #include "components/viz/common/resources/resource_id.h"
 #include "components/viz/common/resources/transferable_resource.h"
+#include "gpu/command_buffer/client/gles2_interface.h"
 #include "media/base/media_export.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace gfx {
 class Rect;
-class RRectF;
 class Transform;
 }  // namespace gfx
 
@@ -36,9 +34,13 @@ namespace viz {
 class ClientResourceProvider;
 class ContextProvider;
 class RasterContextProvider;
-class RenderPass;
+class CompositorRenderPass;
 class SharedBitmapReporter;
 }  // namespace viz
+
+namespace gfx {
+class MaskFilterInfo;
+}
 
 namespace media {
 class PaintCanvasVideoRenderer;
@@ -94,6 +96,9 @@ class MEDIA_EXPORT VideoResourceUpdater
                        bool use_r16_texture,
                        int max_resource_size);
 
+  VideoResourceUpdater(const VideoResourceUpdater&) = delete;
+  VideoResourceUpdater& operator=(const VideoResourceUpdater&) = delete;
+
   ~VideoResourceUpdater() override;
 
   // For each CompositorFrame the following sequence is expected:
@@ -110,14 +115,13 @@ class MEDIA_EXPORT VideoResourceUpdater
   // of this class (e.g: VideoFrameSubmitter). Producing only one quad will
   // allow viz to optimize compositing when the only content changing per-frame
   // is the video.
-  void AppendQuads(viz::RenderPass* render_pass,
+  void AppendQuads(viz::CompositorRenderPass* render_pass,
                    scoped_refptr<VideoFrame> frame,
                    gfx::Transform transform,
                    gfx::Rect quad_rect,
                    gfx::Rect visible_quad_rect,
-                   const gfx::RRectF& rounded_corner_bounds,
-                   gfx::Rect clip_rect,
-                   bool is_clipped,
+                   const gfx::MaskFilterInfo& mask_filter_info,
+                   absl::optional<gfx::Rect> clip_rect,
                    bool context_opaque,
                    float draw_opacity,
                    int sorting_context_id);
@@ -136,6 +140,9 @@ class MEDIA_EXPORT VideoResourceUpdater
   // A resource that will be embedded in a DrawQuad in the next CompositorFrame.
   // Each video plane will correspond to one FrameResource.
   struct FrameResource {
+    FrameResource();
+    FrameResource(viz::ResourceId id, const gfx::Size& size);
+
     viz::ResourceId id;
     gfx::Size size_in_pixels;
   };
@@ -182,6 +189,8 @@ class MEDIA_EXPORT VideoResourceUpdater
   VideoFrameExternalResources CreateForSoftwarePlanes(
       scoped_refptr<VideoFrame> video_frame);
 
+  gpu::gles2::GLES2Interface* ContextGL();
+
   void RecycleResource(uint32_t plane_resource_id,
                        const gpu::SyncToken& sync_token,
                        bool lost_resource);
@@ -192,11 +201,10 @@ class MEDIA_EXPORT VideoResourceUpdater
   // base::trace_event::MemoryDumpProvider implementation.
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
                     base::trace_event::ProcessMemoryDump* pmd) override;
-
-  viz::ContextProvider* const context_provider_;
-  viz::RasterContextProvider* const raster_context_provider_;
-  viz::SharedBitmapReporter* const shared_bitmap_reporter_;
-  viz::ClientResourceProvider* const resource_provider_;
+  const raw_ptr<viz::ContextProvider> context_provider_;
+  const raw_ptr<viz::RasterContextProvider> raster_context_provider_;
+  const raw_ptr<viz::SharedBitmapReporter> shared_bitmap_reporter_;
+  const raw_ptr<viz::ClientResourceProvider> resource_provider_;
   const bool use_stream_video_draw_quad_;
   const bool use_gpu_memory_buffer_resources_;
   // TODO(crbug.com/759456): Remove after r16 is used without the flag.
@@ -229,8 +237,6 @@ class MEDIA_EXPORT VideoResourceUpdater
   std::vector<std::unique_ptr<PlaneResource>> all_resources_;
 
   base::WeakPtrFactory<VideoResourceUpdater> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(VideoResourceUpdater);
 };
 
 }  // namespace media

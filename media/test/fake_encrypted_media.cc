@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,20 +17,16 @@ Decryptor* FakeEncryptedMedia::TestCdmContext::GetDecryptor() {
   return decryptor_;
 }
 
-int FakeEncryptedMedia::TestCdmContext::GetCdmId() const {
-  return kInvalidCdmId;
-}
-
 FakeEncryptedMedia::FakeEncryptedMedia(AppBase* app)
     : decryptor_(new AesDecryptor(
-          base::Bind(&FakeEncryptedMedia::OnSessionMessage,
-                     base::Unretained(this)),
-          base::Bind(&FakeEncryptedMedia::OnSessionClosed,
-                     base::Unretained(this)),
-          base::Bind(&FakeEncryptedMedia::OnSessionKeysChange,
-                     base::Unretained(this)),
-          base::Bind(&FakeEncryptedMedia::OnSessionExpirationUpdate,
-                     base::Unretained(this)))),
+          base::BindRepeating(&FakeEncryptedMedia::OnSessionMessage,
+                              base::Unretained(this)),
+          base::BindRepeating(&FakeEncryptedMedia::OnSessionClosed,
+                              base::Unretained(this)),
+          base::BindRepeating(&FakeEncryptedMedia::OnSessionKeysChange,
+                              base::Unretained(this)),
+          base::BindRepeating(&FakeEncryptedMedia::OnSessionExpirationUpdate,
+                              base::Unretained(this)))),
       cdm_context_(decryptor_.get()),
       app_(app) {}
 
@@ -47,8 +43,9 @@ void FakeEncryptedMedia::OnSessionMessage(const std::string& session_id,
   app_->OnSessionMessage(session_id, message_type, message, decryptor_.get());
 }
 
-void FakeEncryptedMedia::OnSessionClosed(const std::string& session_id) {
-  app_->OnSessionClosed(session_id);
+void FakeEncryptedMedia::OnSessionClosed(const std::string& session_id,
+                                         CdmSessionClosedReason reason) {
+  app_->OnSessionClosed(session_id, reason);
 }
 
 void FakeEncryptedMedia::OnSessionKeysChange(const std::string& session_id,

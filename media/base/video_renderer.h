@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,10 @@
 #define MEDIA_BASE_VIDEO_RENDERER_H_
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
 #include "media/base/media_export.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/time_source.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -20,6 +20,8 @@ class RendererClient;
 class MEDIA_EXPORT VideoRenderer {
  public:
   VideoRenderer();
+  VideoRenderer(const VideoRenderer&) = delete;
+  VideoRenderer& operator=(const VideoRenderer&) = delete;
 
   // Stops all operations and fires all pending callbacks.
   virtual ~VideoRenderer();
@@ -42,14 +44,14 @@ class MEDIA_EXPORT VideoRenderer {
                           CdmContext* cdm_context,
                           RendererClient* client,
                           const TimeSource::WallClockTimeCB& wall_clock_time_cb,
-                          const PipelineStatusCB& init_cb) = 0;
+                          PipelineStatusCallback init_cb) = 0;
 
   // Discards any video data and stops reading from |stream|, executing
   // |callback| when completed.
   //
   // Clients should expect |buffering_state_cb| to be called with
   // BUFFERING_HAVE_NOTHING while flushing is in progress.
-  virtual void Flush(const base::Closure& callback) = 0;
+  virtual void Flush(base::OnceClosure callback) = 0;
 
   // Starts playback at |timestamp| by reading from |stream| and decoding and
   // rendering video.
@@ -63,8 +65,11 @@ class MEDIA_EXPORT VideoRenderer {
   virtual void OnTimeProgressing() = 0;
   virtual void OnTimeStopped() = 0;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(VideoRenderer);
+  // Sets a hint indicating target latency. See comment in header for
+  // media::Renderer::SetLatencyHint().
+  // |latency_hint| may be nullopt to indicate the hint has been cleared
+  // (restore UA default).
+  virtual void SetLatencyHint(absl::optional<base::TimeDelta> latency_hint) = 0;
 };
 
 }  // namespace media

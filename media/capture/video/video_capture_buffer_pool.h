@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "media/capture/capture_export.h"
+#include "media/capture/mojom/video_capture_buffer.mojom.h"
 #include "media/capture/mojom/video_capture_types.mojom.h"
 #include "media/capture/video/video_capture_device.h"
 #include "media/capture/video_capture_types.h"
@@ -43,13 +44,13 @@ class CAPTURE_EXPORT VideoCaptureBufferPool
  public:
   static constexpr int kInvalidId = -1;
 
-  // Provides a duplicate handle to the buffer. Destruction of this scoped Mojo
-  // handle does not result in releasing the shared memory held by the pool.
-  virtual mojo::ScopedSharedBufferHandle GetHandleForInterProcessTransit(
-      int buffer_id,
-      bool read_only) = 0;
-
-  virtual base::SharedMemoryHandle GetNonOwnedSharedMemoryHandleForLegacyIPC(
+  // Provides a duplicate region referring to the buffer. Destruction of this
+  // duplicate does not result in releasing the shared memory held by the
+  // pool. The buffer will be writable. This may be called as necessary to
+  // create regions.
+  virtual base::UnsafeSharedMemoryRegion DuplicateAsUnsafeRegion(
+      int buffer_id) = 0;
+  virtual mojo::ScopedSharedBufferHandle DuplicateAsMojoBuffer(
       int buffer_id) = 0;
 
   virtual mojom::SharedMemoryViaRawFileDescriptorPtr
@@ -59,10 +60,8 @@ class CAPTURE_EXPORT VideoCaptureBufferPool
   virtual std::unique_ptr<VideoCaptureBufferHandle> GetHandleForInProcessAccess(
       int buffer_id) = 0;
 
-#if defined(OS_CHROMEOS)
   virtual gfx::GpuMemoryBufferHandle GetGpuMemoryBufferHandle(
       int buffer_id) = 0;
-#endif
 
   // Reserve or allocate a buffer to support a packed frame of |dimensions| of
   // pixel |format| and return its id. If the pool is already at maximum
@@ -89,6 +88,15 @@ class CAPTURE_EXPORT VideoCaptureBufferPool
   // pool without passing on to the consumer. This effectively is the opposite
   // of ReserveForProducer().
   virtual void RelinquishProducerReservation(int buffer_id) = 0;
+
+  // Reserve a buffer id to use for a buffer specified by |handle| (which was
+  // allocated by some external source). This call cannot fail (no allocation is
+  // done). It may return a new id, or may reuse an existing id, if the buffer
+  // represented by |handle| is already being tracked. The behavior of
+  // |buffer_id_to_drop| is the same as ReserveForProducer.
+  virtual int ReserveIdForExternalBuffer(
+      const gfx::GpuMemoryBufferHandle& handle,
+      int* buffer_id_to_drop) = 0;
 
   // Returns a snapshot of the current number of buffers in-use divided by the
   // maximum |count_|.

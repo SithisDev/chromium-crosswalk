@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/task/post_task.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 
@@ -45,8 +45,10 @@ const char* ConvertFileStatus(FileStatus status) {
 
 MojoCdmFileIO::MojoCdmFileIO(Delegate* delegate,
                              cdm::FileIOClient* client,
-                             mojom::CdmStorage* cdm_storage)
-    : delegate_(delegate), client_(client), cdm_storage_(cdm_storage) {
+                             mojo::Remote<mojom::CdmStorage> cdm_storage)
+    : delegate_(delegate),
+      client_(client),
+      cdm_storage_(std::move(cdm_storage)) {
   DVLOG(1) << __func__;
   DCHECK(delegate_);
   DCHECK(client_);
@@ -80,12 +82,13 @@ void MojoCdmFileIO::Open(const char* file_name, uint32_t file_name_size) {
   // Open() failed.
   auto callback = mojo::WrapCallbackWithDefaultInvokeIfNotRun(
       base::BindOnce(&MojoCdmFileIO::OnFileOpened, weak_factory_.GetWeakPtr()),
-      StorageStatus::kFailure, nullptr);
+      StorageStatus::kFailure, mojo::NullAssociatedRemote());
   cdm_storage_->Open(file_name_string, std::move(callback));
 }
 
-void MojoCdmFileIO::OnFileOpened(StorageStatus status,
-                                 mojom::CdmFileAssociatedPtrInfo cdm_file) {
+void MojoCdmFileIO::OnFileOpened(
+    StorageStatus status,
+    mojo::PendingAssociatedRemote<mojom::CdmFile> cdm_file) {
   DVLOG(3) << __func__ << " file: " << file_name_ << ", status: " << status;
 
   // This logs the end of the async Open() request, and separately logs

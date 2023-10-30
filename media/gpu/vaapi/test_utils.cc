@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,16 +52,11 @@ bool CompareImages(const DecodedImage& reference_image,
     return false;
 
   // Uses the reference image's size as the ground truth.
-  // Note the use of > instead of !=. This is to handle the case in the Intel
-  // iHD driver where, for example, the size of an image is 1280x720 while the
-  // size of the VAAPI surface is 1280x736 because of additional alignment. See
-  // https://git.io/fj6nA.
   const gfx::Size image_size = reference_image.size;
-  if (image_size.width() > hw_decoded_image.size.width() ||
-      image_size.height() > hw_decoded_image.size.height()) {
-    DLOG(ERROR) << "Wrong expected software decoded image size, "
-                << image_size.ToString() << " versus VaAPI provided "
-                << hw_decoded_image.size.ToString();
+  if (image_size != hw_decoded_image.size) {
+    LOG(ERROR) << "Wrong expected software decoded image size, "
+               << image_size.ToString() << " versus VaAPI provided "
+               << hw_decoded_image.size.ToString();
     return false;
   }
 
@@ -105,7 +100,7 @@ bool CompareImages(const DecodedImage& reference_image,
           image_size.width(), image_size.height());
     }
     if (conversion_result != 0) {
-      DLOG(ERROR) << "libyuv conversion error";
+      LOG(ERROR) << "libyuv conversion error";
       return false;
     }
 
@@ -117,12 +112,12 @@ bool CompareImages(const DecodedImage& reference_image,
         temp_v.get(), half_image_size.width(), image_size.width(),
         image_size.height());
   } else {
-    DLOG(ERROR) << "HW FourCC not supported: " << FourccToString(hw_fourcc);
+    LOG(ERROR) << "HW FourCC not supported: " << FourccToString(hw_fourcc);
     return false;
   }
 
   if (ssim < min_ssim) {
-    DLOG(ERROR) << "SSIM too low: " << ssim << " < " << min_ssim;
+    LOG(ERROR) << "SSIM too low: " << ssim << " < " << min_ssim;
     return false;
   }
 

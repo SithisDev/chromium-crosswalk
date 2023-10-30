@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <set>
 
+#include "base/big_endian.h"
 #include "media/formats/mp4/box_definitions.h"
 
 namespace media {
@@ -27,12 +28,9 @@ bool BufferReader::Read1(uint8_t* v) {
 template<typename T> bool BufferReader::Read(T* v) {
   RCHECK(HasBytes(sizeof(T)));
 
-  T tmp = 0;
-  for (size_t i = 0; i < sizeof(T); i++) {
-    tmp <<= 8;
-    tmp += buf_[pos_++];
-  }
-  *v = tmp;
+  // MPEG-4 uses big endian byte order
+  base::ReadBigEndian(buf_ + pos_, v);
+  pos_ += sizeof(T);
   return true;
 }
 
@@ -177,9 +175,9 @@ bool BoxReader::IsValidTopLevelBox(const FourCC& type, MediaLog* media_log) {
     case FOURCC_EMSG:
       return true;
     default:
-      // Hex is used to show nonprintable characters and aid in debugging
-      MEDIA_LOG(DEBUG, media_log) << "Unrecognized top-level box type "
-                                  << FourCCToString(type);
+      // Hex is used to show nonprintable characters and aid in debugging.
+      MEDIA_LOG(ERROR, media_log)
+          << "Invalid top-level ISO BMFF box type " << FourCCToString(type);
       return false;
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,13 @@
 #define MEDIA_MOJO_SERVICES_VIDEO_DECODE_STATS_RECORDER_H_
 
 #include <stdint.h>
-#include <string>
 
-#include "base/time/time.h"
 #include "media/base/video_codecs.h"
 #include "media/learning/common/value.h"
-#include "media/mojo/interfaces/media_types.mojom.h"
-#include "media/mojo/interfaces/video_decode_stats_recorder.mojom.h"
+#include "media/mojo/mojom/media_types.mojom.h"
+#include "media/mojo/mojom/video_decode_stats_recorder.mojom.h"
 #include "media/mojo/services/media_mojo_export.h"
 #include "media/mojo/services/video_decode_perf_history.h"
-#include "services/service_manager/public/cpp/bind_source_info.h"
 #include "url/gurl.h"
 
 namespace media {
@@ -32,6 +29,10 @@ class MEDIA_MOJO_EXPORT VideoDecodeStatsRecorder
                            learning::FeatureValue origin,
                            bool is_top_frame,
                            uint64_t player_id);
+
+  VideoDecodeStatsRecorder(const VideoDecodeStatsRecorder&) = delete;
+  VideoDecodeStatsRecorder& operator=(const VideoDecodeStatsRecorder&) = delete;
+
   ~VideoDecodeStatsRecorder() override;
 
   // mojom::VideoDecodeStatsRecorder implementation:
@@ -51,8 +52,6 @@ class MEDIA_MOJO_EXPORT VideoDecodeStatsRecorder
 
   mojom::PredictionFeatures features_;
   mojom::PredictionTargets targets_;
-
-  DISALLOW_COPY_AND_ASSIGN(VideoDecodeStatsRecorder);
 };
 
 }  // namespace media

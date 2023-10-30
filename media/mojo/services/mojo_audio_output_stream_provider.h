@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,13 @@
 
 #include "base/sequence_checker.h"
 #include "media/audio/audio_output_delegate.h"
-#include "media/mojo/interfaces/audio_output_stream.mojom.h"
+#include "media/mojo/mojom/audio_output_stream.mojom.h"
 #include "media/mojo/services/media_mojo_export.h"
 #include "media/mojo/services/mojo_audio_output_stream.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace media {
 
@@ -24,7 +27,7 @@ class MEDIA_MOJO_EXPORT MojoAudioOutputStreamProvider
   using CreateDelegateCallback =
       base::OnceCallback<std::unique_ptr<AudioOutputDelegate>(
           const AudioParameters& params,
-          mojom::AudioOutputStreamObserverPtr observer,
+          mojo::PendingRemote<mojom::AudioOutputStreamObserver>,
           AudioOutputDelegate::EventHandler*)>;
   using DeleterCallback = base::OnceCallback<void(AudioOutputStreamProvider*)>;
 
@@ -33,19 +36,22 @@ class MEDIA_MOJO_EXPORT MojoAudioOutputStreamProvider
   // this class should be removed (stream ended/error). |deleter_callback| is
   // required to destroy |this| synchronously.
   MojoAudioOutputStreamProvider(
-      mojom::AudioOutputStreamProviderRequest request,
+      mojo::PendingReceiver<mojom::AudioOutputStreamProvider> pending_receiver,
       CreateDelegateCallback create_delegate_callback,
       DeleterCallback deleter_callback,
       std::unique_ptr<mojom::AudioOutputStreamObserver> observer);
+
+  MojoAudioOutputStreamProvider(const MojoAudioOutputStreamProvider&) = delete;
+  MojoAudioOutputStreamProvider& operator=(
+      const MojoAudioOutputStreamProvider&) = delete;
 
   ~MojoAudioOutputStreamProvider() override;
 
  private:
   // mojom::AudioOutputStreamProvider implementation.
-  void Acquire(
-      const AudioParameters& params,
-      mojom::AudioOutputStreamProviderClientPtr provider_client,
-      const base::Optional<base::UnguessableToken>& processing_id) override;
+  void Acquire(const AudioParameters& params,
+               mojo::PendingRemote<mojom::AudioOutputStreamProviderClient>
+                   provider_client) override;
 
   // Called when |audio_output_| had an error.
   void CleanUp(bool had_error);
@@ -55,15 +61,13 @@ class MEDIA_MOJO_EXPORT MojoAudioOutputStreamProvider
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  mojo::Binding<AudioOutputStreamProvider> binding_;
+  mojo::Receiver<AudioOutputStreamProvider> receiver_;
   CreateDelegateCallback create_delegate_callback_;
   DeleterCallback deleter_callback_;
   std::unique_ptr<mojom::AudioOutputStreamObserver> observer_;
-  mojo::Binding<mojom::AudioOutputStreamObserver> observer_binding_;
-  base::Optional<MojoAudioOutputStream> audio_output_;
-  mojom::AudioOutputStreamProviderClientPtr provider_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(MojoAudioOutputStreamProvider);
+  mojo::Receiver<mojom::AudioOutputStreamObserver> observer_receiver_;
+  absl::optional<MojoAudioOutputStream> audio_output_;
+  mojo::Remote<mojom::AudioOutputStreamProviderClient> provider_client_;
 };
 
 }  // namespace media

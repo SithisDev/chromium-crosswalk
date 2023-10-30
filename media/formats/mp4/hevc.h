@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,6 +62,9 @@ struct MEDIA_EXPORT HEVCDecoderConfigurationRecord : Box {
   std::vector<HVCCNALArray> arrays;
 
   VideoCodecProfile GetVideoProfile() const;
+#if BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
+  VideoColorSpace GetColorSpace();
+#endif  // BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
 
  private:
   bool ParseInternal(BufferReader* reader, MediaLog* media_log);

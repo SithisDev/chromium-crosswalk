@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -20,7 +20,6 @@
 
 #include "base/callback.h"
 #include "base/containers/circular_deque.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "media/base/decrypt_config.h"
 #include "media/base/media_export.h"
@@ -272,7 +271,8 @@ class MEDIA_EXPORT Vp9Parser {
  public:
   // If context update is needed after decoding a frame, the client must
   // execute this callback, passing the updated context state.
-  using ContextRefreshCallback = base::Callback<void(const Vp9FrameContext&)>;
+  using ContextRefreshCallback =
+      base::OnceCallback<void(const Vp9FrameContext&)>;
 
   // ParseNextFrame() return values. See documentation for ParseNextFrame().
   enum Result {
@@ -299,7 +299,7 @@ class MEDIA_EXPORT Vp9Parser {
   // The parsing context that persists across frames.
   class Context {
    public:
-    class Vp9FrameContextManager {
+    class MEDIA_EXPORT Vp9FrameContextManager {
      public:
       Vp9FrameContextManager();
       ~Vp9FrameContextManager();
@@ -354,6 +354,7 @@ class MEDIA_EXPORT Vp9Parser {
    private:
     friend class Vp9UncompressedHeaderParser;
     friend class Vp9Parser;
+    friend class Vp9ParserTest;
 
     // Segmentation and loop filter state.
     Vp9SegmentationParams segmentation_;
@@ -365,9 +366,13 @@ class MEDIA_EXPORT Vp9Parser {
     Vp9FrameContextManager frame_context_managers_[kVp9NumFrameContexts];
   };
 
-  // The constructor. See ParseNextFrame() for comments for
-  // |parsing_compressed_header|.
+  // See homonymous member variables for information on the parameters.
   explicit Vp9Parser(bool parsing_compressed_header);
+  Vp9Parser(bool parsing_compressed_header, bool needs_external_context_update);
+
+  Vp9Parser(const Vp9Parser&) = delete;
+  Vp9Parser& operator=(const Vp9Parser&) = delete;
+
   ~Vp9Parser();
 
   // Set a new stream buffer to read from, starting at |stream| and of size
@@ -380,6 +385,10 @@ class MEDIA_EXPORT Vp9Parser {
   void SetStream(const uint8_t* stream,
                  off_t stream_size,
                  const std::vector<uint32_t>& spatial_layer_frame_size,
+                 std::unique_ptr<DecryptConfig> stream_config);
+
+  void SetStream(const uint8_t* stream,
+                 off_t stream_size,
                  std::unique_ptr<DecryptConfig> stream_config);
 
   // Parse the next frame in the current stream buffer, filling |fhdr| with
@@ -471,7 +480,14 @@ class MEDIA_EXPORT Vp9Parser {
   // Remaining bytes in stream_.
   off_t bytes_left_;
 
+  // Set on ctor if the client needs VP9Parser to also parse compressed headers,
+  // otherwise they'll be skipped.
   const bool parsing_compressed_header_;
+
+  // Set on ctor if the client needs to call the ContextRefreshCallback obtained
+  // via GetContextRefreshCb() with the updated Vp9FrameContext; otherwise
+  // VP9Parser will update it internally.
+  const bool needs_external_context_update_;
 
   // FrameInfo for the remaining frames in the current superframe to be parsed.
   base::circular_deque<FrameInfo> frames_;
@@ -486,8 +502,6 @@ class MEDIA_EXPORT Vp9Parser {
 
   FrameInfo curr_frame_info_;
   Vp9FrameHeader curr_frame_header_;
-
-  DISALLOW_COPY_AND_ASSIGN(Vp9Parser);
 };
 
 }  // namespace media

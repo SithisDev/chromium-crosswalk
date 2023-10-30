@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@ import android.util.SparseArray;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -187,7 +188,7 @@ class UsbMidiDeviceAndroid {
                 if (mIsClosed) {
                     return;
                 }
-                nativeOnData(mNativePointer, endpointNumber, bs);
+                UsbMidiDeviceAndroidJni.get().onData(mNativePointer, endpointNumber, bs);
             }
         });
     }
@@ -318,6 +319,8 @@ class UsbMidiDeviceAndroid {
         return position;
     }
 
-    private static native void nativeOnData(
-            long nativeUsbMidiDeviceAndroid, int endpointNumber, byte[] data);
+    @NativeMethods
+    interface Natives {
+        void onData(long nativeUsbMidiDeviceAndroid, int endpointNumber, byte[] data);
+    }
 }

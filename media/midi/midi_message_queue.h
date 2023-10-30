@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <deque>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/containers/circular_deque.h"
 #include "media/midi/midi_export.h"
 
 namespace midi {
@@ -46,6 +45,10 @@ class MIDI_EXPORT MidiMessageQueue {
   // Initializes the queue. Set true to |allow_running_status| to enable
   // "MIDI running status" reconstruction.
   explicit MidiMessageQueue(bool allow_running_status);
+
+  MidiMessageQueue(const MidiMessageQueue&) = delete;
+  MidiMessageQueue& operator=(const MidiMessageQueue&) = delete;
+
   ~MidiMessageQueue();
 
   // Enqueues |data| to the internal buffer.
@@ -64,17 +67,9 @@ class MIDI_EXPORT MidiMessageQueue {
   void Get(std::vector<uint8_t>* message);
 
  private:
-  // While we should be using base::circular_deque here, the Chrome OS version
-  // hasn't been upreved to contain that implementation yet. Since for the
-  // purposes of this class the semantics of std::deque and
-  // base::circular_deque are the same, we can use the former.
-  // Once Chrome OS has upreved to a version of libchrome which includes
-  // base::circular_deque, we can switch back to it.
-  // TODO(pmalani): http://crbug.com/787643 tracking this.
-  std::deque<uint8_t> queue_;
+  base::circular_deque<uint8_t> queue_;
   std::vector<uint8_t> next_message_;
   const bool allow_running_status_;
-  DISALLOW_COPY_AND_ASSIGN(MidiMessageQueue);
 };
 
 }  // namespace midi

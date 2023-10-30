@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/sys_byteorder.h"
 #include "media/base/audio_bus.h"
 #include "media/base/audio_sample_types.h"
@@ -59,6 +60,9 @@ class CharBufferWriter {
   CharBufferWriter(char* buf, int max_size)
       : buf_(buf), max_size_(max_size), size_(0) {}
 
+  CharBufferWriter(const CharBufferWriter&) = delete;
+  CharBufferWriter& operator=(const CharBufferWriter&) = delete;
+
   void Write(const char* data, int data_size) {
     CHECK_LE(size_ + data_size, max_size_);
     memcpy(&buf_[size_], data, data_size);
@@ -80,11 +84,9 @@ class CharBufferWriter {
   }
 
  private:
-  char* buf_;
+  raw_ptr<char> buf_;
   const int max_size_;
   int size_;
-
-  DISALLOW_COPY_AND_ASSIGN(CharBufferWriter);
 };
 
 // Writes Wave header to the specified address, there should be at least
@@ -289,8 +291,9 @@ void AudioDebugFileWriter::Write(std::unique_ptr<AudioBus> data) {
   file_task_runner_->PostTask(
       FROM_HERE,
       // Callback takes ownership of |data|:
-      base::Bind(&AudioFileWriter::Write, base::Unretained(file_writer_.get()),
-                 base::Owned(data.release())));
+      base::BindOnce(&AudioFileWriter::Write,
+                     base::Unretained(file_writer_.get()),
+                     base::Owned(data.release())));
 }
 
 bool AudioDebugFileWriter::WillWrite() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,11 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/system/system_monitor.h"
 #include "base/test/simple_test_tick_clock.h"
+#include "base/test/task_environment.h"
 #include "base/win/scoped_com_initializer.h"
 #include "media/audio/audio_manager.h"
 #include "media/audio/audio_unittest_util.h"
@@ -23,53 +24,66 @@ using base::win::ScopedCOMInitializer;
 
 namespace media {
 
-static const char kFirstTestDevice[] = "test_device_0";
-static const char kSecondTestDevice[] = "test_device_1";
+constexpr char kFirstTestDevice[] = "test_device_0";
+constexpr char kSecondTestDevice[] = "test_device_1";
 
-class AudioDeviceListenerWinTest : public testing::Test {
+class AudioDeviceListenerWinTest
+    : public testing::Test,
+      public base::SystemMonitor::DevicesChangedObserver {
  public:
   AudioDeviceListenerWinTest() {
     DCHECK(com_init_.Succeeded());
-  }
-
-  virtual void SetUp() {
     if (!CoreAudioUtil::IsSupported())
       return;
 
-    output_device_listener_.reset(new AudioDeviceListenerWin(base::Bind(
-        &AudioDeviceListenerWinTest::OnDeviceChange, base::Unretained(this))));
+    system_monitor_.AddDevicesChangedObserver(this);
 
-    tick_clock_.Advance(base::TimeDelta::FromSeconds(12345));
+    output_device_listener_ = std::make_unique<AudioDeviceListenerWin>(
+        base::BindRepeating(&AudioDeviceListenerWinTest::OnDeviceChange,
+                            base::Unretained(this)));
+
+    tick_clock_.Advance(base::Seconds(12345));
     output_device_listener_->tick_clock_ = &tick_clock_;
   }
 
+  AudioDeviceListenerWinTest(const AudioDeviceListenerWinTest&) = delete;
+  AudioDeviceListenerWinTest& operator=(const AudioDeviceListenerWinTest&) =
+      delete;
+
+  ~AudioDeviceListenerWinTest() override {
+    system_monitor_.RemoveDevicesChangedObserver(this);
+  }
+
   void AdvanceLastDeviceChangeTime() {
-    tick_clock_.Advance(base::TimeDelta::FromMilliseconds(
-        AudioDeviceListenerWin::kDeviceChangeLimitMs + 1));
+    tick_clock_.Advance(AudioDeviceListenerWin::kDeviceChangeLimit +
+                        base::Milliseconds(1));
   }
 
   // Simulate a device change where no output devices are available.
   bool SimulateNullDefaultOutputDeviceChange() {
-    return output_device_listener_->OnDefaultDeviceChanged(
-        static_cast<EDataFlow>(eConsole), static_cast<ERole>(eRender),
-        NULL) == S_OK;
+    auto result = output_device_listener_->OnDefaultDeviceChanged(
+        static_cast<EDataFlow>(eConsole), static_cast<ERole>(eRender), nullptr);
+    task_environment_.RunUntilIdle();
+    return result == S_OK;
   }
 
   bool SimulateDefaultOutputDeviceChange(const char* new_device_id) {
-    return output_device_listener_->OnDefaultDeviceChanged(
+    auto result = output_device_listener_->OnDefaultDeviceChanged(
         static_cast<EDataFlow>(eConsole), static_cast<ERole>(eRender),
-        base::ASCIIToUTF16(new_device_id).c_str()) == S_OK;
+        base::ASCIIToWide(new_device_id).c_str());
+    task_environment_.RunUntilIdle();
+    return result == S_OK;
   }
 
-
   MOCK_METHOD0(OnDeviceChange, void());
+  MOCK_METHOD1(OnDevicesChanged, void(base::SystemMonitor::DeviceType));
 
  private:
   ScopedCOMInitializer com_init_;
-  std::unique_ptr<AudioDeviceListenerWin> output_device_listener_;
+  base::test::TaskEnvironment task_environment_;
+  base::SystemMonitor system_monitor_;
   base::SimpleTestTickClock tick_clock_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioDeviceListenerWinTest);
+  std::unique_ptr<AudioDeviceListenerWin> output_device_listener_;
 };
 
 // Simulate a device change events and ensure we get the right callbacks.
@@ -77,14 +91,22 @@ TEST_F(AudioDeviceListenerWinTest, OutputDeviceChange) {
   ABORT_AUDIO_TEST_IF_NOT(CoreAudioUtil::IsSupported());
 
   EXPECT_CALL(*this, OnDeviceChange()).Times(1);
+  EXPECT_CALL(*this, OnDevicesChanged(base::SystemMonitor::DEVTYPE_AUDIO))
+      .Times(1);
   ASSERT_TRUE(SimulateDefaultOutputDeviceChange(kFirstTestDevice));
 
   testing::Mock::VerifyAndClear(this);
   AdvanceLastDeviceChangeTime();
   EXPECT_CALL(*this, OnDeviceChange()).Times(1);
+  EXPECT_CALL(*this, OnDevicesChanged(base::SystemMonitor::DEVTYPE_AUDIO))
+      .Times(1);
   ASSERT_TRUE(SimulateDefaultOutputDeviceChange(kSecondTestDevice));
 
-  // The second device event should be ignored since it occurs too soon.
+  // Since it occurs too soon, the second device event shouldn't call
+  // OnDeviceChange(), but it should notify OnDevicesChanged().
+  EXPECT_CALL(*this, OnDeviceChange()).Times(0);
+  EXPECT_CALL(*this, OnDevicesChanged(base::SystemMonitor::DEVTYPE_AUDIO))
+      .Times(1);
   ASSERT_TRUE(SimulateDefaultOutputDeviceChange(kSecondTestDevice));
 }
 
@@ -94,16 +116,22 @@ TEST_F(AudioDeviceListenerWinTest, NullOutputDeviceChange) {
   ABORT_AUDIO_TEST_IF_NOT(CoreAudioUtil::IsSupported());
 
   EXPECT_CALL(*this, OnDeviceChange()).Times(1);
+  EXPECT_CALL(*this, OnDevicesChanged(base::SystemMonitor::DEVTYPE_AUDIO))
+      .Times(1);
   ASSERT_TRUE(SimulateNullDefaultOutputDeviceChange());
 
   testing::Mock::VerifyAndClear(this);
   AdvanceLastDeviceChangeTime();
   EXPECT_CALL(*this, OnDeviceChange()).Times(1);
+  EXPECT_CALL(*this, OnDevicesChanged(base::SystemMonitor::DEVTYPE_AUDIO))
+      .Times(1);
   ASSERT_TRUE(SimulateDefaultOutputDeviceChange(kFirstTestDevice));
 
+  // Since it occurs too soon, the second device event shouldn't call
+  // OnDeviceChange(), but it should notify OnDevicesChanged().
   testing::Mock::VerifyAndClear(this);
-  AdvanceLastDeviceChangeTime();
-  EXPECT_CALL(*this, OnDeviceChange()).Times(1);
+  EXPECT_CALL(*this, OnDevicesChanged(base::SystemMonitor::DEVTYPE_AUDIO))
+      .Times(1);
   ASSERT_TRUE(SimulateNullDefaultOutputDeviceChange());
 }
 

@@ -1,14 +1,20 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/gpu/test/video_player/video_player_test_environment.h"
 
+#include <algorithm>
+#include <iterator>
 #include <utility>
 
 #include "base/system/sys_info.h"
+#include "build/chromeos_buildflags.h"
+#include "media/base/media_switches.h"
 #include "media/base/video_types.h"
-#include "media/gpu/test/video_player/video.h"
+#include "media/gpu/buildflags.h"
+#include "media/gpu/test/video.h"
+#include "media/gpu/test/video_player/decoder_wrapper.h"
 
 namespace media {
 namespace test {
@@ -21,10 +27,13 @@ constexpr base::FilePath::CharType kDefaultTestVideoPath[] =
 VideoPlayerTestEnvironment* VideoPlayerTestEnvironment::Create(
     const base::FilePath& video_path,
     const base::FilePath& video_metadata_path,
-    bool enable_validator,
-    bool output_frames,
+    ValidatorType validator_type,
+    const DecoderImplementation implementation,
+    bool linear_output,
     const base::FilePath& output_folder,
-    bool use_vd) {
+    const FrameOutputConfig& frame_output_config,
+    const std::vector<base::Feature>& enabled_features,
+    const std::vector<base::Feature>& disabled_features) {
   auto video = std::make_unique<media::test::Video>(
       video_path.empty() ? base::FilePath(kDefaultTestVideoPath) : video_path,
       video_metadata_path);
@@ -33,65 +42,84 @@ VideoPlayerTestEnvironment* VideoPlayerTestEnvironment::Create(
     return nullptr;
   }
 
-  return new VideoPlayerTestEnvironment(std::move(video), enable_validator,
-                                        output_frames, output_folder, use_vd);
+  // TODO(b/182008564) Add checks to make sure no features are duplicated, and
+  // there is no intersection between the enabled and disabled set.
+  std::vector<base::Feature> combined_enabled_features(enabled_features);
+  combined_enabled_features.push_back(media::kVp9kSVCHWDecoding);
+  std::vector<base::Feature> combined_disabled_features(disabled_features);
+#if BUILDFLAG(USE_VAAPI)
+  // TODO(b/172217032): remove once enabled by default.
+  combined_enabled_features.push_back(media::kVaapiAV1Decoder);
+
+  // Disable this feature so that the decoder test can test a
+  // resolution which is denied for the sake of performance. See
+  // b/171041334.
+  combined_disabled_features.push_back(
+      media::kVaapiEnforceVideoMinMaxResolution);
+#endif
+
+  return new VideoPlayerTestEnvironment(
+      std::move(video), validator_type, implementation, linear_output,
+      output_folder, frame_output_config, combined_enabled_features,
+      combined_disabled_features);
 }
 
 VideoPlayerTestEnvironment::VideoPlayerTestEnvironment(
     std::unique_ptr<media::test::Video> video,
-    bool enable_validator,
-    bool output_frames,
+    ValidatorType validator_type,
+    const DecoderImplementation implementation,
+    bool linear_output,
     const base::FilePath& output_folder,
-    bool use_vd)
-    : video_(std::move(video)),
-      enable_validator_(enable_validator),
-      output_frames_(output_frames),
-      output_folder_(output_folder),
-      use_vd_(use_vd) {}
+    const FrameOutputConfig& frame_output_config,
+    const std::vector<base::Feature>& enabled_features,
+    const std::vector<base::Feature>& disabled_features)
+    : VideoTestEnvironment(enabled_features, disabled_features),
+      video_(std::move(video)),
+      validator_type_(validator_type),
+      implementation_(implementation),
+      linear_output_(linear_output),
+      frame_output_config_(frame_output_config),
+      output_folder_(output_folder) {}
 
 VideoPlayerTestEnvironment::~VideoPlayerTestEnvironment() = default;
-
-void VideoPlayerTestEnvironment::SetUp() {
-  VideoTestEnvironment::SetUp();
-
-  // TODO(dstaessens): Remove this check once all platforms support import mode.
-  // Some older platforms do not support importing buffers, but need to allocate
-  // buffers internally in the decoder.
-#if defined(OS_CHROMEOS)
-  constexpr const char* kImportModeBlacklist[] = {"nyan_big", "nyan_blaze",
-                                                  "nyan_kitty"};
-  const std::string board = base::SysInfo::GetLsbReleaseBoard();
-  import_supported_ = (std::find(std::begin(kImportModeBlacklist),
-                                 std::end(kImportModeBlacklist),
-                                 board) == std::end(kImportModeBlacklist));
-#endif  // defined(OS_CHROMEOS)
-
-  // VideoDecoders always require import mode to be supported.
-  DCHECK(!use_vd_ || import_supported_);
-}
 
 const media::test::Video* VideoPlayerTestEnvironment::Video() const {
   return video_.get();
 }
 
 bool VideoPlayerTestEnvironment::IsValidatorEnabled() const {
-  return enable_validator_;
+  return validator_type_ != ValidatorType::kNone;
 }
 
-bool VideoPlayerTestEnvironment::IsFramesOutputEnabled() const {
-  return output_frames_;
+VideoPlayerTestEnvironment::ValidatorType
+VideoPlayerTestEnvironment::GetValidatorType() const {
+  return validator_type_;
+}
+
+DecoderImplementation VideoPlayerTestEnvironment::GetDecoderImplementation()
+    const {
+  return implementation_;
+}
+
+bool VideoPlayerTestEnvironment::ShouldOutputLinearBuffers() const {
+  return linear_output_;
+}
+
+FrameOutputMode VideoPlayerTestEnvironment::GetFrameOutputMode() const {
+  return frame_output_config_.output_mode;
+}
+
+VideoFrameFileWriter::OutputFormat
+VideoPlayerTestEnvironment::GetFrameOutputFormat() const {
+  return frame_output_config_.output_format;
+}
+
+uint64_t VideoPlayerTestEnvironment::GetFrameOutputLimit() const {
+  return frame_output_config_.output_limit;
 }
 
 const base::FilePath& VideoPlayerTestEnvironment::OutputFolder() const {
   return output_folder_;
-}
-
-bool VideoPlayerTestEnvironment::UseVD() const {
-  return use_vd_;
-}
-
-bool VideoPlayerTestEnvironment::ImportSupported() const {
-  return import_supported_;
 }
 
 }  // namespace test

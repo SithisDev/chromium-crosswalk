@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,22 @@
 
 #include <stdint.h>
 
-#include "base/callback.h"
-#include "base/macros.h"
-#include "base/time/time.h"
+#include "base/callback_forward.h"
 #include "media/base/media_export.h"
 
 namespace media {
 
 class MEDIA_EXPORT DataSource {
  public:
-  typedef base::Callback<void(int64_t, int64_t)> StatusCallback;
-  typedef base::Callback<void(int)> ReadCB;
+  using ReadCB = base::OnceCallback<void(int)>;
 
   enum { kReadError = -1, kAborted = -2 };
 
   DataSource();
+
+  DataSource(const DataSource&) = delete;
+  DataSource& operator=(const DataSource&) = delete;
+
   virtual ~DataSource();
 
   // Reads |size| bytes from |position| into |data|. And when the read is done
@@ -30,7 +31,7 @@ class MEDIA_EXPORT DataSource {
   virtual void Read(int64_t position,
                     int size,
                     uint8_t* data,
-                    const DataSource::ReadCB& read_cb) = 0;
+                    DataSource::ReadCB read_cb) = 0;
 
   // Stops the DataSource. Once this is called all future Read() calls will
   // return an error. This is a synchronous call and may be called from any
@@ -43,7 +44,7 @@ class MEDIA_EXPORT DataSource {
 
   // Returns true and the file size, false if the file size could not be
   // retrieved.
-  virtual bool GetSize(int64_t* size_out) = 0;
+  [[nodiscard]] virtual bool GetSize(int64_t* size_out) = 0;
 
   // Returns true if we are performing streaming. In this case seeking is
   // not possible.
@@ -58,9 +59,6 @@ class MEDIA_EXPORT DataSource {
 
   // By default this just returns GetSize().
   virtual int64_t GetMemoryUsage();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DataSource);
 };
 
 }  // namespace media

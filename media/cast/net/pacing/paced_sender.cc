@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/big_endian.h"
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
 
 namespace media {
@@ -157,9 +158,6 @@ bool PacedSender::ShouldResend(const PacketKey& packet_key,
   // packet Y sent just before X. Reject retransmission of X if ACK for
   // Y has not been received.
   // Only do this for video packets.
-  //
-  // TODO(miu): This sounds wrong.  Audio packets are always transmitted first
-  // (because they are put in |priority_packet_list_|, see PopNextPacket()).
   auto session_it = sessions_.find(packet_key.ssrc);
   // The session should always have been registered in |sessions_|.
   DCHECK(session_it != sessions_.end());
@@ -224,10 +222,9 @@ bool PacedSender::SendRtcpPacket(uint32_t ssrc, PacketRef packet) {
     priority_packet_list_[key] = make_pair(PacketType_RTCP, packet);
   } else {
     // We pass the RTCP packets straight through.
-    if (!transport_->SendPacket(
-            packet,
-            base::Bind(&PacedSender::SendStoredPackets,
-                       weak_factory_.GetWeakPtr()))) {
+    if (!transport_->SendPacket(packet,
+                                base::BindOnce(&PacedSender::SendStoredPackets,
+                                               weak_factory_.GetWeakPtr()))) {
       state_ = State_TransportBlocked;
     }
   }
@@ -248,8 +245,8 @@ void PacedSender::CancelSendingPacket(const PacketKey& packet_key) {
 PacketRef PacedSender::PopNextPacket(PacketType* packet_type,
                                      PacketKey* packet_key) {
   // Always pop from the priority list first.
-  PacketList* list = !priority_packet_list_.empty() ?
-      &priority_packet_list_ : &packet_list_;
+  PacketList* list =
+      !priority_packet_list_.empty() ? &priority_packet_list_ : &packet_list_;
   DCHECK(!list->empty());
 
   // Determine which packet in the frame should be popped by examining the
@@ -334,7 +331,7 @@ void PacedSender::SendStoredPackets() {
   if (now >= burst_end_ || previous_state == State_BurstFull) {
     // Start a new burst.
     current_burst_size_ = 0;
-    burst_end_ = now + base::TimeDelta::FromMilliseconds(kPacingIntervalMs);
+    burst_end_ = now + base::Milliseconds(kPacingIntervalMs);
 
     // The goal here is to try to send out the queued packets over the next
     // three bursts, while trying to keep the burst size below 10 if possible.
@@ -354,8 +351,8 @@ void PacedSender::SendStoredPackets() {
     next_next_max_burst_size_ = max_burst_size;
   }
 
-  base::Closure cb = base::Bind(&PacedSender::SendStoredPackets,
-                                weak_factory_.GetWeakPtr());
+  base::RepeatingClosure cb = base::BindRepeating(
+      &PacedSender::SendStoredPackets, weak_factory_.GetWeakPtr());
   while (!empty()) {
     if (current_burst_size_ >= current_max_burst_size_) {
       transport_task_runner_->PostDelayedTask(FROM_HERE,
@@ -411,9 +408,6 @@ void PacedSender::SendStoredPackets() {
   }
 
   // Keep ~0.5 seconds of data (1000 packets).
-  //
-  // TODO(miu): This has no relation to the actual size of the frames, and so
-  // there's no way to reason whether 1000 is enough or too much, or whatever.
   if (send_history_buffer_.size() >=
       max_burst_size_ * kMaxDedupeWindowMs / kPacingIntervalMs) {
     send_history_.swap(send_history_buffer_);
@@ -432,12 +426,9 @@ void PacedSender::LogPacketEvent(const Packet& packet, CastLoggingEvent type) {
   PacketEvent& event = recent_packet_events_->back();
 
   // Populate the new PacketEvent by parsing the wire-format |packet|.
-  //
-  // TODO(miu): This parsing logic belongs in RtpParser.
   event.timestamp = clock_->NowTicks();
   event.type = type;
-  base::BigEndianReader reader(reinterpret_cast<const char*>(&packet[0]),
-                               packet.size());
+  base::BigEndianReader reader(packet);
   bool success = reader.Skip(4);
   uint32_t truncated_rtp_timestamp;
   success &= reader.ReadU32(&truncated_rtp_timestamp);

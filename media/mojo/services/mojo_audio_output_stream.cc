@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,10 @@
 #include "base/callback_helpers.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "base/sync_socket.h"
-#include "media/mojo/interfaces/audio_data_pipe.mojom.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "media/mojo/mojom/audio_data_pipe.mojom.h"
 #include "mojo/public/cpp/system/platform_handle.h"
+#include "third_party/abseil-cpp/absl/utility/utility.h"
 
 namespace media {
 
@@ -21,8 +23,7 @@ MojoAudioOutputStream::MojoAudioOutputStream(
     StreamCreatedCallback stream_created_callback,
     DeleterCallback deleter_callback)
     : stream_created_callback_(std::move(stream_created_callback)),
-      deleter_callback_(std::move(deleter_callback)),
-      binding_(this) {
+      deleter_callback_(std::move(deleter_callback)) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(stream_created_callback_);
   DCHECK(deleter_callback_);
@@ -80,20 +81,19 @@ void MojoAudioOutputStream::OnStreamCreated(
     return;
   }
 
-  mojo::ScopedHandle socket_handle =
-      mojo::WrapPlatformFile(foreign_socket->Release());
-
+  mojo::PlatformHandle socket_handle(foreign_socket->Take());
   DCHECK(socket_handle.is_valid());
 
-  mojom::AudioOutputStreamPtr stream;
-  binding_.Bind(mojo::MakeRequest(&stream));
-  // |this| owns |binding_| so unretained is safe.
-  binding_.set_connection_error_handler(base::BindOnce(
+  mojo::PendingRemote<mojom::AudioOutputStream> pending_stream;
+  receiver_.Bind(pending_stream.InitWithNewPipeAndPassReceiver());
+  // |this| owns |receiver_| so unretained is safe.
+  receiver_.set_disconnect_handler(base::BindOnce(
       &MojoAudioOutputStream::StreamConnectionLost, base::Unretained(this)));
 
   std::move(stream_created_callback_)
-      .Run(std::move(stream), {base::in_place, std::move(shared_memory_region),
-                               std::move(socket_handle)});
+      .Run(std::move(pending_stream),
+           {absl::in_place, std::move(shared_memory_region),
+            std::move(socket_handle)});
 }
 
 void MojoAudioOutputStream::OnStreamError(int stream_id) {

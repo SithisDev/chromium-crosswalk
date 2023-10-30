@@ -1,11 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/capture/video/video_frame_receiver_on_task_runner.h"
 
+#include <utility>
+
 #include "base/bind.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 
 namespace media {
 
@@ -25,16 +27,12 @@ void VideoFrameReceiverOnTaskRunner::OnNewBuffer(
 }
 
 void VideoFrameReceiverOnTaskRunner::OnFrameReadyInBuffer(
-    int buffer_id,
-    int frame_feedback_id,
-    std::unique_ptr<VideoCaptureDevice::Client::Buffer::ScopedAccessPermission>
-        buffer_read_permission,
-    mojom::VideoFrameInfoPtr frame_info) {
+    ReadyFrameInBuffer frame,
+    std::vector<ReadyFrameInBuffer> scaled_frames) {
   task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(&VideoFrameReceiver::OnFrameReadyInBuffer,
-                                receiver_, buffer_id, frame_feedback_id,
-                                base::Passed(&buffer_read_permission),
-                                base::Passed(&frame_info)));
+      FROM_HERE,
+      base::BindOnce(&VideoFrameReceiver::OnFrameReadyInBuffer, receiver_,
+                     std::move(frame), std::move(scaled_frames)));
 }
 
 void VideoFrameReceiverOnTaskRunner::OnBufferRetired(int buffer_id) {
@@ -53,6 +51,19 @@ void VideoFrameReceiverOnTaskRunner::OnFrameDropped(
   task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&VideoFrameReceiver::OnFrameDropped, receiver_, reason));
+}
+
+void VideoFrameReceiverOnTaskRunner::OnNewCropVersion(uint32_t crop_version) {
+  task_runner_->PostTask(FROM_HERE,
+                         base::BindOnce(&VideoFrameReceiver::OnNewCropVersion,
+                                        receiver_, crop_version));
+}
+
+void VideoFrameReceiverOnTaskRunner::OnFrameWithEmptyRegionCapture() {
+  task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&VideoFrameReceiver::OnFrameWithEmptyRegionCapture,
+                     receiver_));
 }
 
 void VideoFrameReceiverOnTaskRunner::OnLog(const std::string& message) {

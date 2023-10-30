@@ -1,10 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/capture/video/win/sink_filter_win.h"
 
-#include "base/logging.h"
 #include "media/capture/video/win/sink_input_pin_win.h"
 
 namespace media {
@@ -12,7 +11,7 @@ namespace media {
 SinkFilterObserver::~SinkFilterObserver() {
 }
 
-SinkFilter::SinkFilter(SinkFilterObserver* observer) : input_pin_(NULL) {
+SinkFilter::SinkFilter(SinkFilterObserver* observer) {
   input_pin_ = new SinkInputPin(this, observer);
 }
 
@@ -27,16 +26,16 @@ size_t SinkFilter::NoOfPins() {
 }
 
 IPin* SinkFilter::GetPin(int index) {
-  return index == 0 ? input_pin_.get() : NULL;
+  return index == 0 ? input_pin_.get() : nullptr;
 }
 
-STDMETHODIMP SinkFilter::GetClassID(CLSID* clsid) {
+HRESULT SinkFilter::GetClassID(CLSID* clsid) {
   *clsid = __uuidof(SinkFilter);
   return S_OK;
 }
 
 SinkFilter::~SinkFilter() {
-  input_pin_->SetOwner(NULL);
+  input_pin_->SetOwner(nullptr);
 }
 
 }  // namespace media

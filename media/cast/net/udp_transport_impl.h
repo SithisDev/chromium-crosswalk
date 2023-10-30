@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
@@ -45,15 +45,18 @@ class UdpTransportImpl final : public PacketTransport, public UdpTransport {
       const scoped_refptr<base::SingleThreadTaskRunner>& io_thread_proxy,
       const net::IPEndPoint& local_end_point,
       const net::IPEndPoint& remote_end_point,
-      const CastTransportStatusCallback& status_callback);
+      CastTransportStatusCallback status_callback);
+
+  UdpTransportImpl(const UdpTransportImpl&) = delete;
+  UdpTransportImpl& operator=(const UdpTransportImpl&) = delete;
+
   ~UdpTransportImpl() final;
 
   // PacketTransport implementations.
-  bool SendPacket(PacketRef packet, const base::RepeatingClosure& cb) final;
+  bool SendPacket(PacketRef packet, base::OnceClosure cb) final;
   int64_t GetBytesSent() final;
   // Start receiving packets. Packets are submitted to |packet_receiver|.
-  void StartReceiving(
-      const PacketReceiverCallbackWithStatus& packet_receiver) final;
+  void StartReceiving(PacketReceiverCallbackWithStatus packet_receiver) final;
   void StopReceiving() final;
 
   // UdpTransport implementations.
@@ -75,13 +78,13 @@ class UdpTransportImpl final : public PacketTransport, public UdpTransport {
   //   "disable_non_blocking_io" (value ignored)
   //       - Windows only.  Turns off non-blocking IO for the socket.
   //         Note: Non-blocking IO is, by default, enabled on all platforms.
-  void SetUdpOptions(const base::DictionaryValue& options);
+  void SetUdpOptions(const base::Value::Dict& options);
 
   // This has to be called before |StartReceiving()| to change the
   // |send_buffer_size_|. Calling |SetUdpOptions()| will automatically call it.
   void SetSendBufferSize(int32_t send_buffer_size);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Switch to use non-blocking IO. Must be called before StartReceiving().
   void UseNonBlockingIO();
 #endif
@@ -98,7 +101,7 @@ class UdpTransportImpl final : public PacketTransport, public UdpTransport {
 
   void OnSent(const scoped_refptr<net::IOBuffer>& buf,
               PacketRef packet,
-              const base::RepeatingClosure& cb,
+              base::OnceClosure cb,
               int result);
 
   // Called by |reader_| when it completes reading a packet from the data pipe.
@@ -129,7 +132,7 @@ class UdpTransportImpl final : public PacketTransport, public UdpTransport {
   int bytes_sent_;
 
   // TODO(xjz): Replace this with a mojo ptr.
-  UdpTransportReceiver* mojo_packet_receiver_ = nullptr;
+  raw_ptr<UdpTransportReceiver> mojo_packet_receiver_ = nullptr;
 
   // Used to read packets from the data pipe. Created when StartSending() is
   // called.
@@ -137,8 +140,6 @@ class UdpTransportImpl final : public PacketTransport, public UdpTransport {
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<UdpTransportImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(UdpTransportImpl);
 };
 
 }  // namespace cast

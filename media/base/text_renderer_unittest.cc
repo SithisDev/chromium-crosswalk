@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "base/time/time.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/demuxer_stream.h"
@@ -29,9 +29,13 @@ namespace media {
 // Local implementation of the TextTrack interface.
 class FakeTextTrack : public TextTrack {
  public:
-  FakeTextTrack(const base::Closure& destroy_cb, const TextTrackConfig& config)
-      : destroy_cb_(destroy_cb), config_(config) {}
-  ~FakeTextTrack() override { destroy_cb_.Run(); }
+  FakeTextTrack(base::OnceClosure destroy_cb, const TextTrackConfig& config)
+      : destroy_cb_(std::move(destroy_cb)), config_(config) {}
+
+  FakeTextTrack(const FakeTextTrack&) = delete;
+  FakeTextTrack& operator=(const FakeTextTrack&) = delete;
+
+  ~FakeTextTrack() override { std::move(destroy_cb_).Run(); }
 
   MOCK_METHOD5(addWebVTTCue,
                void(base::TimeDelta start,
@@ -40,25 +44,26 @@ class FakeTextTrack : public TextTrack {
                     const std::string& content,
                     const std::string& settings));
 
-  const base::Closure destroy_cb_;
+  base::OnceClosure destroy_cb_;
   const TextTrackConfig config_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FakeTextTrack);
 };
 
 class TextRendererTest : public testing::Test {
  public:
   TextRendererTest() = default;
 
+  TextRendererTest(const TextRendererTest&) = delete;
+  TextRendererTest& operator=(const TextRendererTest&) = delete;
+
   void CreateTextRenderer() {
     DCHECK(!text_renderer_);
 
-    text_renderer_.reset(new TextRenderer(
-        scoped_task_environment_.GetMainThreadTaskRunner(),
-        base::Bind(&TextRendererTest::OnAddTextTrack, base::Unretained(this))));
+    text_renderer_ = std::make_unique<TextRenderer>(
+        task_environment_.GetMainThreadTaskRunner(),
+        base::BindRepeating(&TextRendererTest::OnAddTextTrack,
+                            base::Unretained(this)));
     text_renderer_->Initialize(
-        base::Bind(&TextRendererTest::OnEnd, base::Unretained(this)));
+        base::BindRepeating(&TextRendererTest::OnEnd, base::Unretained(this)));
   }
 
   void Destroy() {
@@ -87,16 +92,16 @@ class TextRendererTest : public testing::Test {
   }
 
   void OnAddTextTrack(const TextTrackConfig& config,
-                      const AddTextTrackDoneCB& done_cb) {
-    base::Closure destroy_cb =
-        base::Bind(&TextRendererTest::OnDestroyTextTrack,
-                   base::Unretained(this), text_tracks_.size());
+                      AddTextTrackDoneCB done_cb) {
+    base::OnceClosure destroy_cb =
+        base::BindOnce(&TextRendererTest::OnDestroyTextTrack,
+                       base::Unretained(this), text_tracks_.size());
     // Text track objects are owned by the text renderer, but we cache them
     // here so we can inspect them.  They get removed from our cache when the
     // text renderer deallocates them.
-    text_tracks_.push_back(new FakeTextTrack(destroy_cb, config));
+    text_tracks_.push_back(new FakeTextTrack(std::move(destroy_cb), config));
     std::unique_ptr<TextTrack> text_track(text_tracks_.back());
-    done_cb.Run(std::move(text_track));
+    std::move(done_cb).Run(std::move(text_track));
   }
 
   void RemoveTextTrack(unsigned idx) {
@@ -144,7 +149,7 @@ class TextRendererTest : public testing::Test {
     FakeTextTrackStream* const text_stream = text_track_streams_[idx].get();
 
     const base::TimeDelta start;
-    const base::TimeDelta duration = base::TimeDelta::FromSeconds(42);
+    const base::TimeDelta duration = base::Seconds(42);
     const std::string id = "id";
     const std::string content = "subtitle";
     const std::string settings;
@@ -171,14 +176,14 @@ class TextRendererTest : public testing::Test {
 
   void Pause() {
     text_renderer_->Pause(
-        base::Bind(&TextRendererTest::OnPause, base::Unretained(this)));
+        base::BindOnce(&TextRendererTest::OnPause, base::Unretained(this)));
     base::RunLoop().RunUntilIdle();
   }
 
   void Flush() {
     EXPECT_CALL(*this, OnFlush());
     text_renderer_->Flush(
-        base::Bind(&TextRendererTest::OnFlush, base::Unretained(this)));
+        base::BindOnce(&TextRendererTest::OnFlush, base::Unretained(this)));
   }
 
   void ExpectRead(size_t idx) {
@@ -190,7 +195,7 @@ class TextRendererTest : public testing::Test {
   MOCK_METHOD0(OnPause, void());
   MOCK_METHOD0(OnFlush, void());
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
   typedef std::vector<std::unique_ptr<FakeTextTrackStream>> TextTrackStreams;
   TextTrackStreams text_track_streams_;
@@ -199,15 +204,13 @@ class TextRendererTest : public testing::Test {
   TextTracks text_tracks_;
 
   std::unique_ptr<TextRenderer> text_renderer_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TextRendererTest);
 };
 
 TEST_F(TextRendererTest, CreateTextRendererNoInit) {
-  text_renderer_.reset(new TextRenderer(
-      scoped_task_environment_.GetMainThreadTaskRunner(),
-      base::Bind(&TextRendererTest::OnAddTextTrack, base::Unretained(this))));
+  text_renderer_ = std::make_unique<TextRenderer>(
+      task_environment_.GetMainThreadTaskRunner(),
+      base::BindRepeating(&TextRendererTest::OnAddTextTrack,
+                          base::Unretained(this)));
   text_renderer_.reset();
 }
 

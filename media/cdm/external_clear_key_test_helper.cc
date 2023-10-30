@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/files/file_util.h"
 #include "base/native_library.h"
 #include "base/path_service.h"
+#include "build/build_config.h"
 #include "media/cdm/api/content_decryption_module.h"
 #include "media/cdm/cdm_paths.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -33,7 +34,7 @@ void ExternalClearKeyTestHelper::LoadLibrary() {
   // Determine the location of the CDM. It is expected to be in the same
   // directory as the current module.
   base::FilePath cdm_base_path;
-  ASSERT_TRUE(base::PathService::Get(base::DIR_MODULE, &cdm_base_path));
+  ASSERT_TRUE(base::PathService::Get(base::DIR_ASSETS, &cdm_base_path));
   cdm_base_path = cdm_base_path.Append(
       GetPlatformSpecificDirectory(kClearKeyCdmBaseDirectory));
   library_path_ = cdm_base_path.AppendASCII(

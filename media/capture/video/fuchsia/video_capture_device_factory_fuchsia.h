@@ -1,11 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef MEDIA_CAPTURE_VIDEO_FUCHSIA_VIDEO_CAPTURE_DEVICE_FACTORY_FUCHSIA_H_
 #define MEDIA_CAPTURE_VIDEO_FUCHSIA_VIDEO_CAPTURE_DEVICE_FACTORY_FUCHSIA_H_
 
+#include <fuchsia/camera3/cpp/fidl.h>
+
+#include <map>
+
+#include "base/containers/small_map.h"
 #include "media/capture/video/video_capture_device_factory.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -15,15 +21,48 @@ class CAPTURE_EXPORT VideoCaptureDeviceFactoryFuchsia
   VideoCaptureDeviceFactoryFuchsia();
   ~VideoCaptureDeviceFactoryFuchsia() override;
 
-  std::unique_ptr<VideoCaptureDevice> CreateDevice(
+  VideoCaptureDeviceFactoryFuchsia(const VideoCaptureDeviceFactoryFuchsia&) =
+      delete;
+  VideoCaptureDeviceFactoryFuchsia& operator=(
+      const VideoCaptureDeviceFactoryFuchsia&) = delete;
+
+  // VideoCaptureDeviceFactory implementation.
+  VideoCaptureErrorOrDevice CreateDevice(
       const VideoCaptureDeviceDescriptor& device_descriptor) override;
-  void GetDeviceDescriptors(
-      VideoCaptureDeviceDescriptors* device_descriptors) override;
-  void GetSupportedFormats(const VideoCaptureDeviceDescriptor& device,
-                           VideoCaptureFormats* supported_formats) override;
+  void GetDevicesInfo(GetDevicesInfoCallback callback) override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(VideoCaptureDeviceFactoryFuchsia);
+  // Helper class used to fetch per-device information.
+  class DeviceConfigFetcher;
+
+  void Initialize();
+
+  void OnDeviceWatcherDisconnected(zx_status_t status);
+
+  void WatchDevices();
+  void OnWatchDevicesResult(
+      std::vector<fuchsia::camera3::WatchDevicesEvent> events);
+
+  void OnDeviceInfoFetched();
+
+  std::vector<VideoCaptureDeviceInfo> MakeDevicesInfo();
+  void MaybeResolvePendingDeviceInfoCallbacks();
+
+  bool received_initial_list_ = false;
+
+  fuchsia::camera3::DeviceWatcherPtr device_watcher_;
+
+  // Current list of devices. Set to nullopt if the list hasn't been received
+  // yet.
+  absl::optional<
+      base::small_map<std::map<uint64_t, std::unique_ptr<DeviceConfigFetcher>>>>
+      devices_;
+
+  size_t num_pending_device_info_requests_ = 0;
+
+  std::vector<GetDevicesInfoCallback> pending_devices_info_requests_;
+
+  base::WeakPtrFactory<VideoCaptureDeviceFactoryFuchsia> weak_factory_{this};
 };
 
 }  // namespace media

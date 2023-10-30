@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,9 @@
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/filters/blocking_url_protocol.h"
 #include "media/filters/ffmpeg_bitstream_converter.h"
-#include "media/filters/ffmpeg_demuxer.h"
 #include "media/filters/ffmpeg_glue.h"
 
-#if BUILDFLAG(ENABLE_HEVC_DEMUXING)
+#if BUILDFLAG(ENABLE_PLATFORM_HEVC)
 #include "media/filters/ffmpeg_h265_to_annex_b_bitstream_converter.h"
 #endif
 
@@ -29,7 +28,7 @@
 namespace media {
 
 VideoFrameExtractor::VideoFrameExtractor(DataSource* data_source)
-    : data_source_(data_source), video_stream_index_(-1), weak_factory_(this) {}
+    : data_source_(data_source), video_stream_index_(-1) {}
 
 VideoFrameExtractor::~VideoFrameExtractor() = default;
 
@@ -98,7 +97,7 @@ void VideoFrameExtractor::ConvertPacket(AVPacket* packet) {
       bitstream_converter_.reset(
           new FFmpegH264ToAnnexBBitstreamConverter(video_stream_->codecpar));
       break;
-#if BUILDFLAG(ENABLE_HEVC_DEMUXING)
+#if BUILDFLAG(ENABLE_PLATFORM_HEVC)
     case AV_CODEC_ID_HEVC:
       bitstream_converter_.reset(
           new FFmpegH265ToAnnexBBitstreamConverter(video_stream_->codecpar));
@@ -119,7 +118,7 @@ void VideoFrameExtractor::ConvertPacket(AVPacket* packet) {
 
 ScopedAVPacket VideoFrameExtractor::ReadVideoFrame() {
   AVFormatContext* format_context = glue_->format_context();
-  ScopedAVPacket packet(new AVPacket());
+  auto packet = ScopedAVPacket::Allocate();
   while (av_read_frame(format_context, packet.get()) >= 0) {
     // Skip frames from streams other than video.
     if (packet->stream_index != video_stream_index_)
@@ -128,7 +127,7 @@ ScopedAVPacket VideoFrameExtractor::ReadVideoFrame() {
     DCHECK(packet->flags & AV_PKT_FLAG_KEY);
     return packet;
   }
-  return nullptr;
+  return {};
 }
 
 void VideoFrameExtractor::NotifyComplete(std::vector<uint8_t> encoded_frame,

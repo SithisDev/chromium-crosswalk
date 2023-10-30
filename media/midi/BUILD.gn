@@ -1,8 +1,9 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//build/config/android/config.gni")
+import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//media/media_options.gni")
@@ -49,9 +50,13 @@ if (is_android) {
   android_library("midi_java") {
     deps = [
       "//base:base_java",
+      "//base:jni_java",
+      "//build/android:build_java",
+      "//third_party/androidx:androidx_annotation_annotation_java",
     ]
+    annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
 
-    java_files = [
+    sources = [
       "java/src/org/chromium/midi/MidiDeviceAndroid.java",
       "java/src/org/chromium/midi/MidiInputPortAndroid.java",
       "java/src/org/chromium/midi/MidiManagerAndroid.java",
@@ -80,8 +85,6 @@ component("midi") {
     "midi_export.h",
     "midi_manager.cc",
     "midi_manager.h",
-    "midi_manager_mac.cc",
-    "midi_manager_mac.h",
     "midi_message_queue.cc",
     "midi_message_queue.h",
     "midi_service.cc",
@@ -128,7 +131,11 @@ component("midi") {
   }
 
   if (is_mac) {
-    libs += [
+    sources += [
+      "midi_manager_mac.cc",
+      "midi_manager_mac.h",
+    ]
+    frameworks = [
       "CoreAudio.framework",
       "CoreFoundation.framework",
       "CoreMIDI.framework",
@@ -153,10 +160,7 @@ component("midi") {
   }
 
   if (use_alsa && use_udev) {
-    deps += [
-      "//crypto",
-      "//crypto:platform",
-    ]
+    deps += [ "//crypto" ]
     libs += [ "asound" ]
     sources += [
       "midi_manager_alsa.cc",
@@ -170,16 +174,14 @@ component("midi") {
 }
 
 mojom("mojo") {
-  sources = [
-    "midi_service.mojom",
-  ]
+  sources = [ "midi_service.mojom" ]
 
-  deps = [
-    "//mojo/public/mojom/base",
-  ]
+  deps = [ "//mojo/public/mojom/base" ]
 }
 
 test("midi_unittests") {
+  use_xvfb = use_xvfb_in_this_config
+
   sources = [
     "message_util_unittest.cc",
     "midi_manager_unittest.cc",
@@ -208,33 +210,38 @@ test("midi_unittests") {
 
   if (is_mac) {
     sources += [ "midi_manager_mac_unittest.cc" ]
-    libs = [ "CoreMIDI.framework" ]
+    frameworks = [ "CoreMIDI.framework" ]
   }
 
   if (use_alsa && use_udev) {
     sources += [ "midi_manager_alsa_unittest.cc" ]
   }
 
-  # This target should not require the Chrome executable to run.
-  assert_no_deps = [ "//chrome" ]
+  # On LaCrOS, tests use ash-chrome as a window manager, thus the dependency.
+  # On other platforms, this target should not require the Chrome to run.
+  if (!is_chromeos_lacros) {
+    assert_no_deps = [ "//chrome" ]
+  }
 }
 
 fuzzer_test("midi_webmidi_data_validator_fuzzer") {
-  sources = [
-    "midi_webmidi_data_validator_fuzzer.cc",
-  ]
+  sources = [ "midi_webmidi_data_validator_fuzzer.cc" ]
   seed_corpus = "fuzz/corpus"
-  deps = [
-    ":midi",
-  ]
+  deps = [ ":midi" ]
 }
 
 fuzzer_test("midi_message_queue_fuzzer") {
-  sources = [
-    "midi_message_queue_fuzzer.cc",
-  ]
+  sources = [ "midi_message_queue_fuzzer.cc" ]
   seed_corpus = "fuzz/corpus"
+  deps = [ ":midi" ]
+}
+
+fuzzer_test("usb_midi_descriptor_parser_fuzzer") {
+  sources = [ "usb_midi_descriptor_parser_fuzzer.cc" ] + usb_midi_sources
+  seed_corpus = "fuzz/usb_midi_descriptor_corpus"
   deps = [
     ":midi",
+    ":mojo",
+    "//base",
   ]
 }

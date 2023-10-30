@@ -1,10 +1,9 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.midi;
 
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.media.midi.MidiDevice;
@@ -13,10 +12,13 @@ import android.media.midi.MidiManager;
 import android.os.Build;
 import android.os.Handler;
 
+import androidx.annotation.RequiresApi;
+
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -27,7 +29,7 @@ import java.util.Set;
  * A Java class implementing midi::MidiManagerAndroid functionality.
  */
 @JNINamespace("midi")
-@TargetApi(Build.VERSION_CODES.M)
+@RequiresApi(Build.VERSION_CODES.M)
 class MidiManagerAndroid {
     /**
      * Set true when this instance is successfully initialized.
@@ -106,7 +108,7 @@ class MidiManagerAndroid {
                         if (mStopped) {
                             return;
                         }
-                        nativeOnInitializationFailed(mNativeManagerPointer);
+                        MidiManagerAndroidJni.get().onInitializationFailed(mNativeManagerPointer);
                     }
                 }
             });
@@ -137,7 +139,7 @@ class MidiManagerAndroid {
                         return;
                     }
                     if (mPendingDevices.isEmpty() && !mIsInitialized) {
-                        nativeOnInitialized(
+                        MidiManagerAndroidJni.get().onInitialized(
                                 mNativeManagerPointer, mDevices.toArray(new MidiDeviceAndroid[0]));
                         mIsInitialized = true;
                     }
@@ -185,7 +187,7 @@ class MidiManagerAndroid {
         for (MidiDeviceAndroid device : mDevices) {
             if (device.isOpen() && device.getInfo().getId() == info.getId()) {
                 device.close();
-                nativeOnDetached(mNativeManagerPointer, device);
+                MidiManagerAndroidJni.get().onDetached(mNativeManagerPointer, device);
             }
         }
     }
@@ -199,18 +201,21 @@ class MidiManagerAndroid {
             MidiDeviceAndroid xdevice = new MidiDeviceAndroid(device);
             mDevices.add(xdevice);
             if (mIsInitialized) {
-                nativeOnAttached(mNativeManagerPointer, xdevice);
+                MidiManagerAndroidJni.get().onAttached(mNativeManagerPointer, xdevice);
             }
         }
         if (!mIsInitialized && mPendingDevices.isEmpty()) {
-            nativeOnInitialized(mNativeManagerPointer, mDevices.toArray(new MidiDeviceAndroid[0]));
+            MidiManagerAndroidJni.get().onInitialized(
+                    mNativeManagerPointer, mDevices.toArray(new MidiDeviceAndroid[0]));
             mIsInitialized = true;
         }
     }
 
-    static native void nativeOnInitialized(
-            long nativeMidiManagerAndroid, MidiDeviceAndroid[] devices);
-    static native void nativeOnInitializationFailed(long nativeMidiManagerAndroid);
-    static native void nativeOnAttached(long nativeMidiManagerAndroid, MidiDeviceAndroid device);
-    static native void nativeOnDetached(long nativeMidiManagerAndroid, MidiDeviceAndroid device);
+    @NativeMethods
+    interface Natives {
+        void onInitialized(long nativeMidiManagerAndroid, MidiDeviceAndroid[] devices);
+        void onInitializationFailed(long nativeMidiManagerAndroid);
+        void onAttached(long nativeMidiManagerAndroid, MidiDeviceAndroid device);
+        void onDetached(long nativeMidiManagerAndroid, MidiDeviceAndroid device);
+    }
 }

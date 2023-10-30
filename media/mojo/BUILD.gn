@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -13,53 +13,48 @@ buildflag_header("buildflags") {
   enable_mojo_renderer = false
   enable_mojo_cdm = false
   enable_mojo_audio_decoder = false
+  enable_mojo_audio_encoder = false
   enable_mojo_video_decoder = false
   enable_mojo_media_in_browser_process = false
   enable_mojo_media_in_gpu_process = false
-  enable_mojo_media_in_utility_process = false
 
-  if (!enable_mojo_media) {
-    assert(mojo_media_services == [], "Mojo media is not enabled")
-    assert(mojo_media_host == "none", "Mojo media is not enabled")
-    assert(!enable_test_mojo_media_client, "Mojo media is not enabled")
-  } else {
-    assert(mojo_media_services != [], "No mojo media service specified")
-    foreach(service, mojo_media_services) {
-      if (service == "renderer") {
-        enable_mojo_renderer = true
-      } else if (service == "cdm") {
+  foreach(service, mojo_media_services) {
+    if (service == "renderer") {
+      enable_mojo_renderer = true
+    } else if (service == "cdm") {
+      # Fuchsia communicates directly with the platform CDM via FIDL instead of
+      # the mojo service.
+      if (!is_fuchsia) {
         enable_mojo_cdm = true
-      } else if (service == "audio_decoder") {
-        enable_mojo_audio_decoder = true
-      } else if (service == "video_decoder") {
-        enable_mojo_video_decoder = true
-      } else {
-        assert(false, "Invalid mojo media service: $service")
       }
-    }
-
-    if (mojo_media_host == "browser") {
-      enable_mojo_media_in_browser_process = true
-    } else if (mojo_media_host == "gpu") {
-      enable_mojo_media_in_gpu_process = true
-    } else if (mojo_media_host == "utility") {
-      enable_mojo_media_in_utility_process = true
+    } else if (service == "audio_decoder") {
+      enable_mojo_audio_decoder = true
+    } else if (service == "audio_encoder") {
+      enable_mojo_audio_encoder = true
+    } else if (service == "video_decoder") {
+      enable_mojo_video_decoder = true
     } else {
-      assert(false, "Invalid mojo media host: $mojo_media_host")
+      assert(false, "Invalid mojo media service: $service")
     }
+  }
+
+  if (mojo_media_host == "browser") {
+    enable_mojo_media_in_browser_process = true
+  } else if (mojo_media_host == "gpu") {
+    enable_mojo_media_in_gpu_process = true
+  } else if (mojo_media_host != "") {
+    assert(false, "Invalid mojo media host: $mojo_media_host")
   }
 
   flags = [
     "ENABLE_CAST_RENDERER=$enable_cast_renderer",
-    "ENABLE_MOJO_MEDIA=$enable_mojo_media",
-    "ENABLE_TEST_MOJO_MEDIA_CLIENT=$enable_test_mojo_media_client",
     "ENABLE_MOJO_RENDERER=$enable_mojo_renderer",
     "ENABLE_MOJO_CDM=$enable_mojo_cdm",
     "ENABLE_MOJO_AUDIO_DECODER=$enable_mojo_audio_decoder",
+    "ENABLE_MOJO_AUDIO_ENCODER=$enable_mojo_audio_encoder",
     "ENABLE_MOJO_VIDEO_DECODER=$enable_mojo_video_decoder",
     "ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS=$enable_mojo_media_in_browser_process",
     "ENABLE_MOJO_MEDIA_IN_GPU_PROCESS=$enable_mojo_media_in_gpu_process",
-    "ENABLE_MOJO_MEDIA_IN_UTILITY_PROCESS=$enable_mojo_media_in_utility_process",
   ]
 }
 
@@ -68,9 +63,8 @@ source_set("test_support") {
   public_deps = [
     "//media/mojo/clients",
     "//media/mojo/common",
-    "//media/mojo/common:mojo_shared_buffer_video_frame",
-    "//media/mojo/interfaces",
-    "//media/mojo/interfaces:test_interfaces",
+    "//media/mojo/mojom",
+    "//media/mojo/mojom:test_interfaces",
     "//media/mojo/services",
   ]
 }
@@ -82,7 +76,7 @@ source_set("unit_tests") {
     "//media/learning/mojo:unit_tests",
     "//media/mojo/clients:unit_tests",
     "//media/mojo/common:unit_tests",
-    "//media/mojo/interfaces:unit_tests",
+    "//media/mojo/mojom:unit_tests",
     "//media/mojo/services:unit_tests",
     "//media/mojo/test:unit_tests",
   ]

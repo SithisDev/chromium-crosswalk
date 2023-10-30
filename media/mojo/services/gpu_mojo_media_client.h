@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,75 +7,171 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "gpu/config/gpu_feature_info.h"
+#include "gpu/config/gpu_info.h"
 #include "gpu/config/gpu_preferences.h"
+#include "gpu/ipc/service/command_buffer_stub.h"
 #include "media/base/android_overlay_mojo_factory.h"
-#include "media/cdm/cdm_proxy.h"
+#include "media/base/supported_video_decoder_config.h"
+#include "media/media_buildflags.h"
 #include "media/mojo/services/mojo_media_client.h"
-#include "media/video/supported_video_decoder_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+
+namespace gpu {
+class GpuMemoryBufferFactory;
+}  // namespace gpu
 
 namespace media {
 
 class MediaGpuChannelManager;
+class GpuMojoMediaClient;
 
-class GpuMojoMediaClient : public MojoMediaClient {
+using GetConfigCacheCB =
+    base::RepeatingCallback<SupportedVideoDecoderConfigs()>;
+using GetCommandBufferStubCB =
+    base::RepeatingCallback<gpu::CommandBufferStub*()>;
+
+// Encapsulate parameters to pass to platform-specific helpers.
+struct VideoDecoderTraits {
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner;
+  scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner;
+  std::unique_ptr<MediaLog> media_log;
+  RequestOverlayInfoCB request_overlay_info_cb;
+  const raw_ptr<const gfx::ColorSpace> target_color_space;
+  gpu::GpuPreferences gpu_preferences;
+  gpu::GpuFeatureInfo gpu_feature_info;
+  gpu::GPUInfo gpu_info;
+  const raw_ptr<const gpu::GpuDriverBugWorkarounds> gpu_workarounds;
+  const raw_ptr<gpu::GpuMemoryBufferFactory> gpu_memory_buffer_factory;
+
+  // Windows decoders need to ensure that the cache is populated.
+  GetConfigCacheCB get_cached_configs_cb;
+
+  // Android uses this twice.
+  GetCommandBufferStubCB get_command_buffer_stub_cb;
+
+  AndroidOverlayMojoFactoryCB android_overlay_factory_cb;
+
+  mojo::PendingRemote<stable::mojom::StableVideoDecoder> oop_video_decoder;
+
+  VideoDecoderTraits(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner,
+      std::unique_ptr<MediaLog> media_log,
+      RequestOverlayInfoCB request_overlay_info_cb,
+      const gfx::ColorSpace* target_color_space,
+      gpu::GpuPreferences gpu_preferences,
+      gpu::GpuFeatureInfo gpu_feature_info,
+      gpu::GPUInfo gpu_info,
+      const gpu::GpuDriverBugWorkarounds* gpu_workarounds,
+      gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory,
+      GetConfigCacheCB get_cached_configs_cb,
+      GetCommandBufferStubCB get_command_buffer_stub_cb,
+      AndroidOverlayMojoFactoryCB android_overlay_factory_cb,
+      mojo::PendingRemote<stable::mojom::StableVideoDecoder> oop_video_decoder);
+  ~VideoDecoderTraits();
+};
+
+// Find platform specific implementations of these in
+// gpu_mojo_media_client_{platform}.cc
+// Creates a platform-specific media::VideoDecoder.
+std::unique_ptr<VideoDecoder> CreatePlatformVideoDecoder(VideoDecoderTraits&);
+
+// Queries the platform-specific VideoDecoder implementation for its
+// supported profiles. Many platforms fall back to use the VDAVideoDecoder
+// so that implementation is shared, and its supported configs can be
+// queries using the |get_vda_configs| callback.
+absl::optional<SupportedVideoDecoderConfigs>
+GetPlatformSupportedVideoDecoderConfigs(
+    gpu::GpuDriverBugWorkarounds gpu_workarounds,
+    gpu::GpuPreferences gpu_preferences,
+    const gpu::GPUInfo& gpu_info,
+    base::OnceCallback<SupportedVideoDecoderConfigs()> get_vda_configs);
+
+// Creates a platform-specific media::AudioDecoder. Most platforms don't do
+// anything here, but android, for example, does.
+std::unique_ptr<AudioDecoder> CreatePlatformAudioDecoder(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+
+// Creates a platform-specific media::AudioEncoder. Most platforms don't do
+// anything here.
+std::unique_ptr<AudioEncoder> CreatePlatformAudioEncoder(
+    scoped_refptr<base::SequencedTaskRunner> task_runner);
+
+// Creates a CDM factory, right now only used on android and chromeos.
+std::unique_ptr<CdmFactory> CreatePlatformCdmFactory(
+    mojom::FrameInterfaceFactory* frame_interfaces);
+
+// Queries the platform decoder type.
+VideoDecoderType GetPlatformDecoderImplementationType(
+    gpu::GpuDriverBugWorkarounds gpu_workarounds,
+    gpu::GpuPreferences gpu_preferences,
+    const gpu::GPUInfo& gpu_info);
+
+class MEDIA_MOJO_EXPORT GpuMojoMediaClient final : public MojoMediaClient {
  public:
   // |media_gpu_channel_manager| must only be used on |gpu_task_runner|, which
   // is expected to be the GPU main thread task runner.
-  // |cdm_proxy_factory_cb| can be used to create a CdmProxy. May be null if
-  // CdmProxy is not supported on the platform.
   GpuMojoMediaClient(
       const gpu::GpuPreferences& gpu_preferences,
       const gpu::GpuDriverBugWorkarounds& gpu_workarounds,
       const gpu::GpuFeatureInfo& gpu_feature_info,
+      const gpu::GPUInfo& gpu_info,
       scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner,
       base::WeakPtr<MediaGpuChannelManager> media_gpu_channel_manager,
-      AndroidOverlayMojoFactoryCB android_overlay_factory_cb,
-      CdmProxyFactoryCB cdm_proxy_factory_cb);
+      gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory,
+      AndroidOverlayMojoFactoryCB android_overlay_factory_cb);
+
+  GpuMojoMediaClient(const GpuMojoMediaClient&) = delete;
+  GpuMojoMediaClient& operator=(const GpuMojoMediaClient&) = delete;
+
   ~GpuMojoMediaClient() final;
 
+  const gpu::GPUInfo& gpu_info() const { return gpu_info_; }
+
   // MojoMediaClient implementation.
-  SupportedVideoDecoderConfigMap GetSupportedVideoDecoderConfigs() final;
-  void Initialize(service_manager::Connector* connector) final;
+  SupportedVideoDecoderConfigs GetSupportedVideoDecoderConfigs() final;
+  VideoDecoderType GetDecoderImplementationType() final;
   std::unique_ptr<AudioDecoder> CreateAudioDecoder(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner) final;
+  std::unique_ptr<AudioEncoder> CreateAudioEncoder(
+      scoped_refptr<base::SequencedTaskRunner> task_runner) final;
+
   std::unique_ptr<VideoDecoder> CreateVideoDecoder(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       MediaLog* media_log,
       mojom::CommandBufferIdPtr command_buffer_id,
-      VideoDecoderImplementation implementation,
       RequestOverlayInfoCB request_overlay_info_cb,
-      const gfx::ColorSpace& target_color_space) final;
+      const gfx::ColorSpace& target_color_space,
+      mojo::PendingRemote<stable::mojom::StableVideoDecoder> oop_video_decoder)
+      final;
   std::unique_ptr<CdmFactory> CreateCdmFactory(
-      service_manager::mojom::InterfaceProvider* interface_provider) final;
-#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
-  std::unique_ptr<CdmProxy> CreateCdmProxy(const base::Token& cdm_guid) final;
-#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
+      mojom::FrameInterfaceFactory* interface_provider) final;
+
+  static absl::optional<SupportedVideoDecoderConfigs>
+  GetSupportedVideoDecoderConfigsStatic(
+      const gpu::GpuPreferences& gpu_preferences,
+      const gpu::GpuDriverBugWorkarounds& gpu_workarounds,
+      const gpu::GPUInfo& gpu_info);
 
  private:
+  // Cross-platform cache supported config cache.
+  absl::optional<SupportedVideoDecoderConfigs> supported_config_cache_;
+
   gpu::GpuPreferences gpu_preferences_;
   gpu::GpuDriverBugWorkarounds gpu_workarounds_;
   gpu::GpuFeatureInfo gpu_feature_info_;
+  gpu::GPUInfo gpu_info_;
   scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner_;
   base::WeakPtr<MediaGpuChannelManager> media_gpu_channel_manager_;
   AndroidOverlayMojoFactoryCB android_overlay_factory_cb_;
-  CdmProxyFactoryCB cdm_proxy_factory_cb_;
-#if defined(OS_WIN)
-  base::Optional<SupportedVideoDecoderConfigs> d3d11_supported_configs_;
-#endif  // defined(OS_WIN)
-
-#if defined(OS_CHROMEOS)
-  base::Optional<SupportedVideoDecoderConfigs> cros_supported_configs_;
-#endif  // defined(OS_CHROMEOS)
-
-  DISALLOW_COPY_AND_ASSIGN(GpuMojoMediaClient);
+  const raw_ptr<gpu::GpuMemoryBufferFactory> gpu_memory_buffer_factory_;
 };
 
 }  // namespace media

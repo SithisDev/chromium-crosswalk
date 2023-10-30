@@ -1,20 +1,21 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/mojo/services/mojo_cdm_helper.h"
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "build/build_config.h"
 #include "media/cdm/api/content_decryption_module.h"
-#include "media/mojo/interfaces/cdm_storage.mojom.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
-#include "services/service_manager/public/mojom/interface_provider.mojom.h"
+#include "media/mojo/mojom/cdm_storage.mojom.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/origin.h"
 
 using Status = cdm::FileIOClient::Status;
 
@@ -51,51 +52,47 @@ class TestCdmFile : public mojom::CdmFile {
 
 class MockCdmStorage : public mojom::CdmStorage {
  public:
-  MockCdmStorage() : client_binding_(&cdm_file_) {}
+  MockCdmStorage() = default;
   ~MockCdmStorage() override = default;
 
   void Open(const std::string& file_name, OpenCallback callback) override {
-    mojom::CdmFileAssociatedPtrInfo client_ptr_info;
-    client_binding_.Bind(mojo::MakeRequest(&client_ptr_info));
     std::move(callback).Run(mojom::CdmStorage::Status::kSuccess,
-                            std::move(client_ptr_info));
+                            client_receiver_.BindNewEndpointAndPassRemote());
   }
 
  private:
   TestCdmFile cdm_file_;
-  mojo::AssociatedBinding<mojom::CdmFile> client_binding_;
+  mojo::AssociatedReceiver<mojom::CdmFile> client_receiver_{&cdm_file_};
 };
 
-void CreateCdmStorage(mojom::CdmStorageRequest request) {
-  mojo::MakeStrongBinding(std::make_unique<MockCdmStorage>(),
-                          std::move(request));
-}
-
-class TestInterfaceProvider : public service_manager::mojom::InterfaceProvider {
+class TestFrameInterfaceFactory : public mojom::FrameInterfaceFactory {
  public:
-  TestInterfaceProvider() {
-    registry_.AddInterface(base::Bind(&CreateCdmStorage));
+  void CreateProvisionFetcher(
+      mojo::PendingReceiver<mojom::ProvisionFetcher>) override {}
+  void CreateCdmStorage(
+      mojo::PendingReceiver<mojom::CdmStorage> receiver) override {
+    mojo::MakeSelfOwnedReceiver(std::make_unique<MockCdmStorage>(),
+                                std::move(receiver));
   }
-  ~TestInterfaceProvider() override = default;
-
-  void GetInterface(const std::string& interface_name,
-                    mojo::ScopedMessagePipeHandle handle) override {
-    registry_.BindInterface(interface_name, std::move(handle));
-  }
-
- private:
-  service_manager::BinderRegistry registry_;
+#if BUILDFLAG(IS_WIN)
+  void RegisterMuteStateObserver(
+      mojo::PendingRemote<mojom::MuteStateObserver> observer) override {}
+  void CreateDCOMPSurfaceRegistry(
+      mojo::PendingReceiver<mojom::DCOMPSurfaceRegistry> receiver) override {}
+#endif  // BUILDFLAG(IS_WIN)
+  void GetCdmOrigin(GetCdmOriginCallback callback) override {}
+  void BindEmbedderReceiver(mojo::GenericPendingReceiver) override {}
 };
 
 }  // namespace
 
 class MojoCdmHelperTest : public testing::Test {
  protected:
-  MojoCdmHelperTest() : helper_(&test_interface_provider_) {}
+  MojoCdmHelperTest() : helper_(&frame_interfaces_) {}
   ~MojoCdmHelperTest() override = default;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-  TestInterfaceProvider test_interface_provider_;
+  base::test::TaskEnvironment task_environment_;
+  TestFrameInterfaceFactory frame_interfaces_;
   MockFileIOClient file_io_client_;
   MojoCdmHelper helper_;
 };

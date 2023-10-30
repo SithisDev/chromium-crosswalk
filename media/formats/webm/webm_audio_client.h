@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,22 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "media/base/encryption_scheme.h"
 #include "media/base/media_log.h"
 #include "media/formats/webm/webm_parser.h"
 
 namespace media {
 class AudioDecoderConfig;
-class EncryptionScheme;
 
 // Helper class used to parse an Audio element inside a TrackEntry element.
 class WebMAudioClient : public WebMParserClient {
  public:
   explicit WebMAudioClient(MediaLog* media_log);
+
+  WebMAudioClient(const WebMAudioClient&) = delete;
+  WebMAudioClient& operator=(const WebMAudioClient&) = delete;
+
   ~WebMAudioClient() override;
 
   // Reset this object's state so it can process a new audio track element.
@@ -37,7 +41,7 @@ class WebMAudioClient : public WebMParserClient {
                         const std::vector<uint8_t>& codec_private,
                         const int64_t seek_preroll,
                         const int64_t codec_delay,
-                        const EncryptionScheme& encryption_scheme,
+                        EncryptionScheme encryption_scheme,
                         AudioDecoderConfig* config);
 
  private:
@@ -45,12 +49,10 @@ class WebMAudioClient : public WebMParserClient {
   bool OnUInt(int id, int64_t val) override;
   bool OnFloat(int id, double val) override;
 
-  MediaLog* media_log_;
+  raw_ptr<MediaLog> media_log_;
   int channels_;
   double samples_per_second_;
   double output_samples_per_second_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebMAudioClient);
 };
 
 }  // namespace media

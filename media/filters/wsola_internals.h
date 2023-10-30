@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -78,7 +78,7 @@ MEDIA_EXPORT int OptimalIndex(const AudioBus* search_block,
 
 // Return a "periodic" Hann window. This is the first L samples of an L+1
 // Hann window. It is perfect reconstruction for overlap-and-add.
-MEDIA_EXPORT void GetSymmetricHanningWindow(int window_length, float* window);
+MEDIA_EXPORT void GetPeriodicHanningWindow(int window_length, float* window);
 
 }  // namespace internal
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include <algorithm>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "media/base/channel_mixer.h"
 
 namespace media {
@@ -105,7 +105,9 @@ bool ChannelMixingMatrix::CreateTransformationMatrix(
       continue;
 
     int output_ch_index = ChannelOrder(output_layout_, ch);
-    if (output_ch_index < 0) {
+    if (output_ch_index < 0 ||
+        (ch == CENTER && input_layout_ == CHANNEL_LAYOUT_MONO &&
+         input_layout_ != output_layout_)) {
       unaccounted_inputs_.push_back(ch);
       continue;
     }

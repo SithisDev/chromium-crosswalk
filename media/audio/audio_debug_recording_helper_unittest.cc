@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,15 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "media/base/audio_bus.h"
 #include "media/base/audio_sample_types.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -38,6 +40,10 @@ class MockAudioDebugFileWriter : public AudioDebugFileWriter {
  public:
   explicit MockAudioDebugFileWriter(const AudioParameters& params)
       : AudioDebugFileWriter(params), reference_data_(nullptr) {}
+
+  MockAudioDebugFileWriter(const MockAudioDebugFileWriter&) = delete;
+  MockAudioDebugFileWriter& operator=(const MockAudioDebugFileWriter&) = delete;
+
   ~MockAudioDebugFileWriter() override = default;
 
   MOCK_METHOD1(DoStart, void(bool));
@@ -71,9 +77,7 @@ class MockAudioDebugFileWriter : public AudioDebugFileWriter {
   }
 
  private:
-  AudioBus* reference_data_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockAudioDebugFileWriter);
+  raw_ptr<AudioBus> reference_data_;
 };
 
 // Sub-class of the helper that overrides the CreateAudioDebugFileWriter
@@ -87,6 +91,12 @@ class AudioDebugRecordingHelperUnderTest : public AudioDebugRecordingHelper {
       : AudioDebugRecordingHelper(params,
                                   std::move(task_runner),
                                   std::move(on_destruction_closure)) {}
+
+  AudioDebugRecordingHelperUnderTest(
+      const AudioDebugRecordingHelperUnderTest&) = delete;
+  AudioDebugRecordingHelperUnderTest& operator=(
+      const AudioDebugRecordingHelperUnderTest&) = delete;
+
   ~AudioDebugRecordingHelperUnderTest() override = default;
 
  private:
@@ -98,13 +108,16 @@ class AudioDebugRecordingHelperUnderTest : public AudioDebugRecordingHelper {
     EXPECT_CALL(*writer, DoStart(true));
     return base::WrapUnique<AudioDebugFileWriter>(writer);
   }
-
-  DISALLOW_COPY_AND_ASSIGN(AudioDebugRecordingHelperUnderTest);
 };
 
 class AudioDebugRecordingHelperTest : public ::testing::Test {
  public:
   AudioDebugRecordingHelperTest() {}
+
+  AudioDebugRecordingHelperTest(const AudioDebugRecordingHelperTest&) = delete;
+  AudioDebugRecordingHelperTest& operator=(
+      const AudioDebugRecordingHelperTest&) = delete;
+
   ~AudioDebugRecordingHelperTest() override = default;
 
   // Helper function that creates a recording helper.
@@ -112,7 +125,7 @@ class AudioDebugRecordingHelperTest : public ::testing::Test {
       const AudioParameters& params,
       base::OnceClosure on_destruction_closure) {
     return std::make_unique<AudioDebugRecordingHelperUnderTest>(
-        params, scoped_task_environment_.GetMainThreadTaskRunner(),
+        params, task_environment_.GetMainThreadTaskRunner(),
         std::move(on_destruction_closure));
   }
 
@@ -137,7 +150,7 @@ class AudioDebugRecordingHelperTest : public ::testing::Test {
     std::move(reply_callback).Run(std::move(debug_file));
     // File can be removed right away because MockAudioDebugFileWriter::Start is
     // called synchronously.
-    ASSERT_TRUE(base::DeleteFile(path, false));
+    ASSERT_TRUE(base::DeleteFile(path));
   }
 
  protected:
@@ -146,10 +159,7 @@ class AudioDebugRecordingHelperTest : public ::testing::Test {
   const uint32_t id_ = 1;
 
   // The test task environment.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AudioDebugRecordingHelperTest);
+  base::test::TaskEnvironment task_environment_;
 };
 
 // Creates a helper with an on destruction closure, and verifies that it's run.
@@ -202,7 +212,7 @@ TEST_F(AudioDebugRecordingHelperTest, OnData) {
   // AudioBus, the other parameters are ignored.
   const int number_of_frames = 100;
   const AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR,
-                               ChannelLayout::CHANNEL_LAYOUT_STEREO, 0,
+                               ChannelLayoutConfig::Stereo(), 0,
                                number_of_frames);
 
   // Setup some data.

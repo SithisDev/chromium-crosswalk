@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "media/base/audio_parameters.h"
 #include "media/base/media_export.h"
 #include "media/base/output_device_info.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -32,13 +33,13 @@ class MEDIA_EXPORT AudioOutputIPCDelegate {
                                   const std::string& matched_device_id) = 0;
 
   // Called when an audio stream has been created.
-  // See media/mojo/interfaces/audio_data_pipe.mojom for documentation of
+  // See media/mojo/mojom/audio_data_pipe.mojom for documentation of
   // |handle| and |socket_handle|. |playing_automatically| indicates if the
   // AudioOutputIPCDelegate is playing right away due to an earlier call to
   // Play();
   virtual void OnStreamCreated(
       base::UnsafeSharedMemoryRegion shared_memory_region,
-      base::SyncSocket::Handle socket_handle,
+      base::SyncSocket::ScopedHandle socket_handle,
       bool playing_automatically) = 0;
 
   // Called when the AudioOutputIPC object is going away and/or when the IPC
@@ -71,9 +72,10 @@ class MEDIA_EXPORT AudioOutputIPC {
   // the default device.
   // Once the authorization process is complete, the implementation will
   // notify |delegate| by calling OnDeviceAuthorized().
-  virtual void RequestDeviceAuthorization(AudioOutputIPCDelegate* delegate,
-                                          int session_id,
-                                          const std::string& device_id) = 0;
+  virtual void RequestDeviceAuthorization(
+      AudioOutputIPCDelegate* delegate,
+      const base::UnguessableToken& session_id,
+      const std::string& device_id) = 0;
 
   // Sends a request to create an AudioOutputController object in the peer
   // process and configures it to use the specified audio |params| including
@@ -82,10 +84,8 @@ class MEDIA_EXPORT AudioOutputIPC {
   // the default device will be used.
   // Once the stream has been created, the implementation will notify
   // |delegate| by calling OnStreamCreated().
-  virtual void CreateStream(
-      AudioOutputIPCDelegate* delegate,
-      const AudioParameters& params,
-      const base::Optional<base::UnguessableToken>& processing_id) = 0;
+  virtual void CreateStream(AudioOutputIPCDelegate* delegate,
+                            const AudioParameters& params) = 0;
 
   // Starts playing the stream.  This should generate a call to
   // AudioOutputController::Play().

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,9 +51,7 @@ MEDIA_EXPORT CdmKeyInformation::KeyStatus ToMediaKeyStatus(
 MEDIA_EXPORT cdm::KeyStatus ToCdmKeyStatus(CdmKeyInformation::KeyStatus status);
 
 MEDIA_EXPORT cdm::EncryptionScheme ToCdmEncryptionScheme(
-    const EncryptionScheme& scheme);
-MEDIA_EXPORT cdm::EncryptionScheme ToCdmEncryptionScheme(
-    const EncryptionMode& mode);
+    EncryptionScheme scheme);
 
 MEDIA_EXPORT CdmPromise::Exception ToMediaCdmPromiseException(
     cdm::Exception exception);

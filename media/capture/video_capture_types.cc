@@ -1,14 +1,12 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/capture/video_capture_types.h"
 
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/check.h"
 #include "base/strings/stringprintf.h"
 #include "media/base/limits.h"
-#include "media/base/video_frame.h"
 
 namespace media {
 
@@ -30,18 +28,14 @@ VideoCaptureFormat::VideoCaptureFormat(const gfx::Size& frame_size,
       pixel_format(pixel_format) {}
 
 bool VideoCaptureFormat::IsValid() const {
-  return (frame_size.width() < media::limits::kMaxDimension) &&
-         (frame_size.height() < media::limits::kMaxDimension) &&
+  return (frame_size.width() <= media::limits::kMaxDimension) &&
+         (frame_size.height() <= media::limits::kMaxDimension) &&
          (frame_size.GetArea() >= 0) &&
-         (frame_size.GetArea() < media::limits::kMaxCanvas) &&
+         (frame_size.GetArea() <= media::limits::kMaxCanvas) &&
          (frame_rate >= 0.0f) &&
-         (frame_rate < media::limits::kMaxFramesPerSecond) &&
+         (frame_rate <= media::limits::kMaxFramesPerSecond) &&
          (pixel_format >= PIXEL_FORMAT_UNKNOWN &&
           pixel_format <= PIXEL_FORMAT_MAX);
-}
-
-size_t VideoCaptureFormat::ImageAllocationSize() const {
-  return VideoFrame::AllocationSize(pixel_format, frame_size);
 }
 
 // static
@@ -59,11 +53,11 @@ bool VideoCaptureFormat::ComparePixelFormatPreference(
     const VideoPixelFormat& rhs) {
   auto* format_lhs = std::find(
       kSupportedCapturePixelFormats,
-      kSupportedCapturePixelFormats + base::size(kSupportedCapturePixelFormats),
+      kSupportedCapturePixelFormats + std::size(kSupportedCapturePixelFormats),
       lhs);
   auto* format_rhs = std::find(
       kSupportedCapturePixelFormats,
-      kSupportedCapturePixelFormats + base::size(kSupportedCapturePixelFormats),
+      kSupportedCapturePixelFormats + std::size(kSupportedCapturePixelFormats),
       rhs);
   return format_lhs < format_rhs;
 }
@@ -101,8 +95,6 @@ VideoCaptureParams::SuggestConstraints() const {
       break;
 
     case ResolutionChangePolicy::FIXED_ASPECT_RATIO: {
-      // TODO(miu): This is a place-holder until "min constraints" are plumbed-
-      // in from the MediaStream framework.  http://crbug.com/473336
       constexpr int kMinLines = 180;
       if (max_frame_size.height() <= kMinLines) {
         min_frame_size = max_frame_size;

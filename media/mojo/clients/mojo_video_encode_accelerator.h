@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,13 @@
 
 #include "base/sequence_checker.h"
 #include "gpu/config/gpu_info.h"
-#include "media/mojo/interfaces/video_encode_accelerator.mojom.h"
+#include "media/mojo/mojom/video_encode_accelerator.mojom.h"
 #include "media/video/video_encode_accelerator.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace media {
+class MediaLog;
 class VideoFrame;
 }  // namespace media
 
@@ -28,35 +31,39 @@ namespace media {
 // Destroy() upon destruction.
 class MojoVideoEncodeAccelerator : public VideoEncodeAccelerator {
  public:
-  MojoVideoEncodeAccelerator(
-      mojom::VideoEncodeAcceleratorPtr vea,
-      const gpu::VideoEncodeAcceleratorSupportedProfiles& supported_profiles);
+  explicit MojoVideoEncodeAccelerator(
+      mojo::PendingRemote<mojom::VideoEncodeAccelerator> vea);
+
+  MojoVideoEncodeAccelerator(const MojoVideoEncodeAccelerator&) = delete;
+  MojoVideoEncodeAccelerator& operator=(const MojoVideoEncodeAccelerator&) =
+      delete;
 
   // VideoEncodeAccelerator implementation.
   SupportedProfiles GetSupportedProfiles() override;
-  bool Initialize(const Config& config, Client* client) override;
+  bool Initialize(const Config& config,
+                  Client* client,
+                  std::unique_ptr<MediaLog> media_log = nullptr) override;
   void Encode(scoped_refptr<VideoFrame> frame, bool force_keyframe) override;
   void UseOutputBitstreamBuffer(BitstreamBuffer buffer) override;
-  void RequestEncodingParametersChange(uint32_t bitrate,
+  void RequestEncodingParametersChange(const Bitrate& bitrate,
                                        uint32_t framerate_num) override;
   void RequestEncodingParametersChange(const VideoBitrateAllocation& bitrate,
                                        uint32_t framerate) override;
+  bool IsFlushSupported() override;
+  void Flush(FlushCallback flush_callback) override;
   void Destroy() override;
 
  private:
   // Only Destroy() should be deleting |this|.
   ~MojoVideoEncodeAccelerator() override;
+  void MojoDisconnectionHandler();
 
-  mojom::VideoEncodeAcceleratorPtr vea_;
+  mojo::Remote<mojom::VideoEncodeAccelerator> vea_;
 
   // Constructed during Initialize().
   std::unique_ptr<mojom::VideoEncodeAcceleratorClient> vea_client_;
 
-  const gpu::VideoEncodeAcceleratorSupportedProfiles supported_profiles_;
-
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(MojoVideoEncodeAccelerator);
 };
 
 }  // namespace media

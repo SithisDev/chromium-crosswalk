@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/logging.h"
+#include "media/base/stream_parser_buffer.h"
 #include "media/base/timestamp_constants.h"
 
 namespace media {
@@ -17,15 +18,15 @@ SourceBufferRange::SourceBufferRange(
     GapPolicy gap_policy,
     const BufferQueue& new_buffers,
     base::TimeDelta range_start_pts,
-    const InterbufferDistanceCB& interbuffer_distance_cb)
+    InterbufferDistanceCB interbuffer_distance_cb)
     : gap_policy_(gap_policy),
       next_buffer_index_(-1),
-      interbuffer_distance_cb_(interbuffer_distance_cb),
+      interbuffer_distance_cb_(std::move(interbuffer_distance_cb)),
       size_in_bytes_(0),
       range_start_pts_(range_start_pts),
       keyframe_map_index_base_(0) {
   DVLOG(3) << __func__;
-  DCHECK(interbuffer_distance_cb);
+  DCHECK(interbuffer_distance_cb_);
   CHECK(!new_buffers.empty());
   DCHECK(new_buffers.front()->is_key_frame());
   AppendBuffersToEnd(new_buffers, range_start_pts_);
@@ -117,7 +118,7 @@ void SourceBufferRange::AppendBuffersToEnd(
   for (BufferQueue::const_iterator itr = new_buffers.begin();
        itr != new_buffers.end(); ++itr) {
     DCHECK((*itr)->timestamp() != kNoTimestamp);
-    DCHECK((*itr)->GetDecodeTimestamp() != kNoDecodeTimestamp());
+    DCHECK((*itr)->GetDecodeTimestamp() != kNoDecodeTimestamp);
 
     buffers_.push_back(*itr);
     UpdateEndTime(*itr);
@@ -537,7 +538,7 @@ base::TimeDelta SourceBufferRange::GetBufferedEndTimestamp() const {
   // report 1 microsecond for the last buffer's duration if it is a 0 duration
   // buffer.
   if (duration.is_zero())
-    duration = base::TimeDelta::FromMicroseconds(1);
+    duration = base::Microseconds(1);
 
   return GetEndTimestamp() + duration;
 }
@@ -665,7 +666,6 @@ bool SourceBufferRange::GetBuffersInRange(base::TimeDelta start,
     if (buffer->timestamp() + buffer->duration() <= start)
       continue;
 
-    DCHECK(buffer->is_key_frame());
     buffers->emplace_back(std::move(buffer));
   }
   return previous_size < buffers->size();
@@ -952,9 +952,9 @@ std::string SourceBufferRange::ToStringForDebugging() const {
          << ", buffers.size()=" << buffers_.size()
          << ", keyframe_map_.size()=" << keyframe_map_.size()
          << ", keyframe_map_:\n";
-  for (const auto& entry : keyframe_map_) {
-    result << "\t pts " << entry.first.InMicroseconds()
-           << ", unadjusted idx = " << entry.second << "\n";
+  for (const auto& [time_delta, idx] : keyframe_map_) {
+    result << "\t pts " << time_delta.InMicroseconds()
+           << ", unadjusted idx = " << idx << "\n";
   }
 #endif  // !defined(NDEBUG) || defined(DCHECK_ALWAYS_ON)
 

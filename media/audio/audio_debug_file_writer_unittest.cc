@@ -1,9 +1,11 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stdint.h>
+
 #include <limits>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -11,7 +13,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/sys_byteorder.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "media/audio/audio_debug_file_writer.h"
 #include "media/base/audio_bus.h"
@@ -44,16 +46,16 @@ base::File OpenFile(const base::FilePath& file_path) {
 }  // namespace
 
 // <channel layout, sample rate, frames per buffer, number of buffer writes
-typedef std::tuple<ChannelLayout, int, int, int> AudioDebugFileWriterTestData;
+typedef std::tuple<ChannelLayoutConfig, int, int, int>
+    AudioDebugFileWriterTestData;
 
 class AudioDebugFileWriterTest
     : public testing::TestWithParam<AudioDebugFileWriterTestData> {
  public:
   explicit AudioDebugFileWriterTest(
-      base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode execution_mode)
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::DEFAULT,
-            execution_mode),
+      base::test::TaskEnvironment::ThreadPoolExecutionMode execution_mode)
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::DEFAULT,
+                          execution_mode),
         params_(AudioParameters::Format::AUDIO_PCM_LINEAR,
                 std::get<0>(GetParam()),
                 std::get<1>(GetParam()),
@@ -67,8 +69,10 @@ class AudioDebugFileWriterTest
   }
   AudioDebugFileWriterTest()
       : AudioDebugFileWriterTest(
-            base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::ASYNC) {
-  }
+            base::test::TaskEnvironment::ThreadPoolExecutionMode::ASYNC) {}
+
+  AudioDebugFileWriterTest(const AudioDebugFileWriterTest&) = delete;
+  AudioDebugFileWriterTest& operator=(const AudioDebugFileWriterTest&) = delete;
 
  protected:
   virtual ~AudioDebugFileWriterTest() = default;
@@ -192,7 +196,7 @@ class AudioDebugFileWriterTest
 
     debug_writer_->Stop();
 
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
 
     VerifyRecording(file_path);
 
@@ -200,13 +204,13 @@ class AudioDebugFileWriterTest
       LOG(ERROR) << "Test failed; keeping recording(s) at ["
                  << file_path.value().c_str() << "].";
     } else {
-      ASSERT_TRUE(base::DeleteFile(file_path, false));
+      ASSERT_TRUE(base::DeleteFile(file_path));
     }
   }
 
  protected:
   // The test task environment.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   // Writer under test.
   std::unique_ptr<AudioDebugFileWriter> debug_writer_;
@@ -222,9 +226,6 @@ class AudioDebugFileWriterTest
 
   // Source data.
   std::unique_ptr<int16_t[]> source_interleaved_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AudioDebugFileWriterTest);
 };
 
 class AudioDebugFileWriterBehavioralTest : public AudioDebugFileWriterTest {};
@@ -232,18 +233,18 @@ class AudioDebugFileWriterBehavioralTest : public AudioDebugFileWriterTest {};
 class AudioDebugFileWriterSingleThreadTest : public AudioDebugFileWriterTest {
  public:
   AudioDebugFileWriterSingleThreadTest()
-      : AudioDebugFileWriterTest(base::test::ScopedTaskEnvironment::
-                                     ThreadPoolExecutionMode::QUEUED) {}
+      : AudioDebugFileWriterTest(
+            base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED) {}
 };
 
 TEST_P(AudioDebugFileWriterTest, WaveRecordingTest) {
-  debug_writer_.reset(new AudioDebugFileWriter(params_));
+  debug_writer_ = std::make_unique<AudioDebugFileWriter>(params_);
   RecordAndVerifyOnce();
 }
 
 TEST_P(AudioDebugFileWriterSingleThreadTest,
        DeletedBeforeRecordingFinishedOnFileThread) {
-  debug_writer_.reset(new AudioDebugFileWriter(params_));
+  debug_writer_ = std::make_unique<AudioDebugFileWriter>(params_);
 
   base::FilePath file_path;
   ASSERT_TRUE(base::CreateTemporaryFile(&file_path));
@@ -256,7 +257,7 @@ TEST_P(AudioDebugFileWriterSingleThreadTest,
 
   debug_writer_.reset();
 
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   VerifyRecording(file_path);
 
@@ -264,30 +265,30 @@ TEST_P(AudioDebugFileWriterSingleThreadTest,
     LOG(ERROR) << "Test failed; keeping recording(s) at ["
                << file_path.value().c_str() << "].";
   } else {
-    ASSERT_TRUE(base::DeleteFile(file_path, false));
+    ASSERT_TRUE(base::DeleteFile(file_path));
   }
 }
 
 TEST_P(AudioDebugFileWriterBehavioralTest, StartWithInvalidFile) {
-  debug_writer_.reset(new AudioDebugFileWriter(params_));
+  debug_writer_ = std::make_unique<AudioDebugFileWriter>(params_);
   base::File file;  // Invalid file, recording should not crash
   debug_writer_->Start(std::move(file));
   DoDebugRecording();
 }
 
 TEST_P(AudioDebugFileWriterBehavioralTest, StartStopStartStop) {
-  debug_writer_.reset(new AudioDebugFileWriter(params_));
+  debug_writer_ = std::make_unique<AudioDebugFileWriter>(params_);
   RecordAndVerifyOnce();
   RecordAndVerifyOnce();
 }
 
 TEST_P(AudioDebugFileWriterBehavioralTest, DestroyNotStarted) {
-  debug_writer_.reset(new AudioDebugFileWriter(params_));
+  debug_writer_ = std::make_unique<AudioDebugFileWriter>(params_);
   debug_writer_.reset();
 }
 
 TEST_P(AudioDebugFileWriterBehavioralTest, DestroyStarted) {
-  debug_writer_.reset(new AudioDebugFileWriter(params_));
+  debug_writer_ = std::make_unique<AudioDebugFileWriter>(params_);
   base::FilePath file_path;
   ASSERT_TRUE(base::CreateTemporaryFile(&file_path));
   base::File file = OpenFile(file_path);
@@ -302,53 +303,34 @@ INSTANTIATE_TEST_SUITE_P(
     // Using 10ms frames per buffer everywhere.
     testing::Values(
         // No writes.
-        std::make_tuple(ChannelLayout::CHANNEL_LAYOUT_MONO,
-                        44100,
-                        44100 / 100,
-                        0),
+        std::make_tuple(ChannelLayoutConfig::Mono(), 44100, 44100 / 100, 0),
         // 1 write of mono.
-        std::make_tuple(ChannelLayout::CHANNEL_LAYOUT_MONO,
-                        44100,
-                        44100 / 100,
-                        1),
+        std::make_tuple(ChannelLayoutConfig::Mono(), 44100, 44100 / 100, 1),
         // 1 second of mono.
-        std::make_tuple(ChannelLayout::CHANNEL_LAYOUT_MONO,
-                        44100,
-                        44100 / 100,
-                        100),
+        std::make_tuple(ChannelLayoutConfig::Mono(), 44100, 44100 / 100, 100),
         // 1 second of mono, higher rate.
-        std::make_tuple(ChannelLayout::CHANNEL_LAYOUT_MONO,
-                        48000,
-                        48000 / 100,
-                        100),
+        std::make_tuple(ChannelLayoutConfig::Mono(), 48000, 48000 / 100, 100),
         // 1 second of stereo.
-        std::make_tuple(ChannelLayout::CHANNEL_LAYOUT_STEREO,
-                        44100,
-                        44100 / 100,
-                        100),
+        std::make_tuple(ChannelLayoutConfig::Stereo(), 44100, 44100 / 100, 100),
         // 15 seconds of stereo, higher rate.
-        std::make_tuple(ChannelLayout::CHANNEL_LAYOUT_STEREO,
+        std::make_tuple(ChannelLayoutConfig::Stereo(),
                         48000,
                         48000 / 100,
                         1500)));
 
-INSTANTIATE_TEST_SUITE_P(AudioDebugFileWriterBehavioralTest,
-                         AudioDebugFileWriterBehavioralTest,
-                         // Using 10ms frames per buffer everywhere.
-                         testing::Values(
-                             // No writes.
-                             std::make_tuple(ChannelLayout::CHANNEL_LAYOUT_MONO,
-                                             44100,
-                                             44100 / 100,
-                                             100)));
+INSTANTIATE_TEST_SUITE_P(
+    AudioDebugFileWriterBehavioralTest,
+    AudioDebugFileWriterBehavioralTest,
+    // Using 10ms frames per buffer everywhere.
+    testing::Values(
+        // No writes.
+        std::make_tuple(ChannelLayoutConfig::Mono(), 44100, 44100 / 100, 100)));
 
-INSTANTIATE_TEST_SUITE_P(AudioDebugFileWriterSingleThreadTest,
-                         AudioDebugFileWriterSingleThreadTest,
-                         // Using 10ms frames per buffer everywhere.
-                         testing::Values(
-                             // No writes.
-                             std::make_tuple(ChannelLayout::CHANNEL_LAYOUT_MONO,
-                                             44100,
-                                             44100 / 100,
-                                             100)));
+INSTANTIATE_TEST_SUITE_P(
+    AudioDebugFileWriterSingleThreadTest,
+    AudioDebugFileWriterSingleThreadTest,
+    // Using 10ms frames per buffer everywhere.
+    testing::Values(
+        // No writes.
+        std::make_tuple(ChannelLayoutConfig::Mono(), 44100, 44100 / 100, 100)));
 }  // namespace media

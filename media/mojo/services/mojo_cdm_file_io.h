@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,14 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "media/cdm/api/content_decryption_module.h"
-#include "media/mojo/interfaces/cdm_storage.mojom.h"
+#include "media/mojo/mojom/cdm_storage.mojom.h"
 #include "media/mojo/services/media_mojo_export.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace media {
 
@@ -37,7 +40,9 @@ class MEDIA_MOJO_EXPORT MojoCdmFileIO : public cdm::FileIO {
   // management.
   MojoCdmFileIO(Delegate* delegate,
                 cdm::FileIOClient* client,
-                mojom::CdmStorage* cdm_storage);
+                mojo::Remote<mojom::CdmStorage> cdm_storage);
+  MojoCdmFileIO(const MojoCdmFileIO&) = delete;
+  MojoCdmFileIO operator=(const MojoCdmFileIO&) = delete;
   ~MojoCdmFileIO() override;
 
   // cdm::FileIO implementation.
@@ -68,7 +73,7 @@ class MEDIA_MOJO_EXPORT MojoCdmFileIO : public cdm::FileIO {
 
   // Called when the file is opened (or not).
   void OnFileOpened(mojom::CdmStorage::Status status,
-                    mojom::CdmFileAssociatedPtrInfo cdm_file);
+                    mojo::PendingAssociatedRemote<mojom::CdmFile> cdm_file);
 
   // Called when the read operation is done.
   void OnFileRead(mojom::CdmFile::Status status,
@@ -86,12 +91,12 @@ class MEDIA_MOJO_EXPORT MojoCdmFileIO : public cdm::FileIO {
   // Callback to notify client of error asynchronously.
   void NotifyClientOfError(ErrorType error);
 
-  Delegate* delegate_ = nullptr;
+  raw_ptr<Delegate> delegate_ = nullptr;
 
   // Results of cdm::FileIO operations are sent asynchronously via |client_|.
-  cdm::FileIOClient* client_ = nullptr;
+  raw_ptr<cdm::FileIOClient> client_ = nullptr;
 
-  mojom::CdmStorage* cdm_storage_ = nullptr;
+  mojo::Remote<mojom::CdmStorage> cdm_storage_;
 
   // Keep track of the file being used. As this class can only be used for
   // accessing a single file, once |file_name_| is set it shouldn't be changed.
@@ -101,15 +106,13 @@ class MEDIA_MOJO_EXPORT MojoCdmFileIO : public cdm::FileIO {
   // |cdm_file_| is used to read and write the file and is released when the
   // file is closed so that CdmStorage can tell that the file is no longer being
   // used.
-  mojom::CdmFileAssociatedPtr cdm_file_;
+  mojo::AssociatedRemote<mojom::CdmFile> cdm_file_;
 
   // Keep track of operations in progress.
   State state_ = State::kUnopened;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<MojoCdmFileIO> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MojoCdmFileIO);
 };
 
 }  // namespace media

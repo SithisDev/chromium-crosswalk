@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,13 @@
 #include "base/bind.h"
 #include "base/environment.h"
 #include "base/files/file_util.h"
-#include "base/macros.h"
+#include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -73,6 +74,12 @@ void OnLogMessage(const std::string& message) {}
 
 // Test fixture class.
 class AudioLowLatencyInputOutputTest : public testing::Test {
+ public:
+  AudioLowLatencyInputOutputTest(const AudioLowLatencyInputOutputTest&) =
+      delete;
+  AudioLowLatencyInputOutputTest& operator=(
+      const AudioLowLatencyInputOutputTest&) = delete;
+
  protected:
   AudioLowLatencyInputOutputTest() {
     audio_manager_ =
@@ -87,11 +94,9 @@ class AudioLowLatencyInputOutputTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_{
-      base::test::ScopedTaskEnvironment::MainThreadType::UI};
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::MainThreadType::UI};
   std::unique_ptr<AudioManager> audio_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioLowLatencyInputOutputTest);
 };
 
 // This audio source/sink implementation should be used for manual tests
@@ -118,11 +123,11 @@ class FullDuplexAudioSinkSource
 
     // Start with the smallest possible buffer size. It will be increased
     // dynamically during the test if required.
-    buffer_.reset(
-        new media::SeekableBuffer(0, samples_per_packet_ * frame_size_));
+    buffer_ = std::make_unique<media::SeekableBuffer>(
+        0, samples_per_packet_ * frame_size_);
 
     frames_to_ms_ = static_cast<double>(1000.0 / sample_rate_);
-    delay_states_.reset(new AudioDelayState[kMaxDelayMeasurements]);
+    delay_states_ = std::make_unique<AudioDelayState[]>(kMaxDelayMeasurements);
   }
 
   ~FullDuplexAudioSinkSource() override {
@@ -154,6 +159,7 @@ class FullDuplexAudioSinkSource
   }
 
   // AudioInputStream::AudioInputCallback.
+  void OnError() override {}
   void OnData(const AudioBus* src,
               base::TimeTicks capture_time,
               double volume) override {
@@ -184,9 +190,8 @@ class FullDuplexAudioSinkSource
     // }
   }
 
-  void OnError() override {}
-
   // AudioOutputStream::AudioSourceCallback.
+  void OnError(ErrorType type) override {}
   int OnMoreData(base::TimeDelta delay,
                  base::TimeTicks /* delay_timestamp */,
                  int /* prior_frames_skipped */,
@@ -209,8 +214,12 @@ class FullDuplexAudioSinkSource
       EXPECT_EQ(channels_, dest->channels());
       size = std::min(dest->frames() * frame_size_, size);
       EXPECT_EQ(static_cast<size_t>(size) % sizeof(*dest->channel(0)), 0U);
-      dest->FromInterleaved(source, size / frame_size_,
-                            frame_size_ / channels_);
+
+      // We should only have 16 bits per sample.
+      DCHECK_EQ(frame_size_ / channels_, 2);
+      dest->FromInterleaved<SignedInt16SampleTypeTraits>(
+          reinterpret_cast<const int16_t*>(source), size / channels_);
+
       buffer_->Seek(size);
       return size / frame_size_;
     }
@@ -253,7 +262,7 @@ class AudioInputStreamTraits {
       const AudioParameters& params) {
     return audio_manager->MakeAudioInputStream(
         params, AudioDeviceDescription::kDefaultDeviceId,
-        base::Bind(&OnLogMessage));
+        base::BindRepeating(&OnLogMessage));
   }
 };
 
@@ -269,8 +278,8 @@ class AudioOutputStreamTraits {
 
   static StreamType* CreateStream(AudioManager* audio_manager,
       const AudioParameters& params) {
-    return audio_manager->MakeAudioOutputStream(params, std::string(),
-                                                base::Bind(&OnLogMessage));
+    return audio_manager->MakeAudioOutputStream(
+        params, std::string(), base::BindRepeating(&OnLogMessage));
   }
 };
 
@@ -284,7 +293,7 @@ class StreamWrapper {
   explicit StreamWrapper(AudioManager* audio_manager)
       : audio_manager_(audio_manager),
         format_(AudioParameters::AUDIO_PCM_LOW_LATENCY),
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
         channel_layout_(CHANNEL_LAYOUT_MONO)
 #else
         channel_layout_(CHANNEL_LAYOUT_STEREO)
@@ -317,13 +326,15 @@ class StreamWrapper {
  private:
   StreamType* CreateStream() {
     StreamType* stream = StreamTraits::CreateStream(
-        audio_manager_, AudioParameters(format_, channel_layout_, sample_rate_,
-                                        samples_per_packet_));
+        audio_manager_,
+        AudioParameters(format_,
+                        ChannelLayoutConfig(channel_layout_, channels()),
+                        sample_rate_, samples_per_packet_));
     EXPECT_TRUE(stream);
     return stream;
   }
 
-  AudioManager* audio_manager_;
+  raw_ptr<AudioManager> audio_manager_;
   AudioParameters::Format format_;
   ChannelLayout channel_layout_;
   int sample_rate_;
@@ -373,7 +384,7 @@ TEST_F(AudioLowLatencyInputOutputTest, DISABLED_FullDuplexDelayMeasurement) {
     return;
   }
 
-  EXPECT_TRUE(ais->Open());
+  EXPECT_EQ(ais->Open(), AudioInputStream::OpenOutcome::kSuccess);
   EXPECT_TRUE(aos->Open());
 
   FullDuplexAudioSinkSource full_duplex(
@@ -390,10 +401,10 @@ TEST_F(AudioLowLatencyInputOutputTest, DISABLED_FullDuplexDelayMeasurement) {
   // Wait for approximately 10 seconds. The user will hear their own voice
   // in loop back during this time. At the same time, delay recordings are
   // performed and stored in the output text file.
+  base::RunLoop run_loop;
   task_runner()->PostDelayedTask(
-      FROM_HERE, base::RunLoop::QuitCurrentWhenIdleClosureDeprecated(),
-      TestTimeouts::action_timeout());
-  base::RunLoop().Run();
+      FROM_HERE, run_loop.QuitClosure(), TestTimeouts::action_timeout());
+  run_loop.Run();
 
   aos->Stop();
   ais->Stop();

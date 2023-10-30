@@ -1,11 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef MEDIA_BASE_ANDROID_STREAM_TEXTURE_WRAPPER_H_
 #define MEDIA_BASE_ANDROID_STREAM_TEXTURE_WRAPPER_H_
 
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/unguessable_token.h"
 #include "media/base/video_frame.h"
 
@@ -15,7 +15,7 @@ namespace media {
 // and registration for later retrieval (in the Browser process).
 class MEDIA_EXPORT StreamTextureWrapper {
  public:
-  using StreamTextureWrapperInitCB = base::Callback<void(bool)>;
+  using StreamTextureWrapperInitCB = base::OnceCallback<void(bool)>;
 
   StreamTextureWrapper() {}
 
@@ -23,9 +23,8 @@ class MEDIA_EXPORT StreamTextureWrapper {
   // See StreamTextureWrapperImpl.
   virtual void Initialize(
       const base::RepeatingClosure& received_frame_cb,
-      const gfx::Size& natural_size,
       scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
-      const StreamTextureWrapperInitCB& init_cb) = 0;
+      StreamTextureWrapperInitCB init_cb) = 0;
 
   // Called whenever the video's natural size changes.
   // See StreamTextureWrapperImpl.

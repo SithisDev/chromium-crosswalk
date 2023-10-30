@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "media/audio/mock_audio_debug_recording_manager.h"
 #include "media/base/audio_parameters.h"
 
@@ -139,6 +139,12 @@ void MockAudioManager::InitializeDebugRecording() {
 AudioDebugRecordingManager* MockAudioManager::GetAudioDebugRecordingManager() {
   DCHECK(GetTaskRunner()->BelongsToCurrentThread());
   return debug_recording_manager_.get();
+}
+
+void MockAudioManager::SetAecDumpRecordingManager(
+    base::WeakPtr<AecdumpRecordingManager>) {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
+  // This is no-op by default.
 }
 
 const char* MockAudioManager::GetName() {

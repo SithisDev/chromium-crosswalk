@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,17 +11,21 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "media/base/content_decryption_module.h"
 #include "media/base/eme_constants.h"
-#include "media/mojo/interfaces/content_decryption_module.mojom.h"
+#include "media/mojo/mojom/content_decryption_module.mojom.h"
 #include "media/mojo/services/media_mojo_export.h"
 #include "media/mojo/services/mojo_cdm_promise.h"
 #include "media/mojo/services/mojo_cdm_service_context.h"
 #include "media/mojo/services/mojo_decryptor_service.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -29,35 +33,33 @@ class CdmFactory;
 
 // A mojom::ContentDecryptionModule implementation backed by a
 // media::ContentDecryptionModule.
-class MEDIA_MOJO_EXPORT MojoCdmService : public mojom::ContentDecryptionModule {
+class MEDIA_MOJO_EXPORT MojoCdmService final
+    : public mojom::ContentDecryptionModule {
  public:
-  // Get the CDM associated with |cdm_id|, which is unique per process.
-  // Can be called on any thread. The returned CDM is not guaranteed to be
-  // thread safe.
-  // Note: This provides a generic hack to get the CDM in the process where
-  // MediaService is running, regardless of which render process or
-  // render frame the caller is associated with. In the future, we should move
-  // all out-of-process media players into the MediaService so that we can use
-  // MojoCdmServiceContext (per render frame) to get the CDM.
-  static scoped_refptr<::media::ContentDecryptionModule> LegacyGetCdm(
-      int cdm_id);
+  // Callback for Initialize(). Non-null `cdm_context` indicates success. Null
+  // `cdm_context` indicates failure and the `error_message` provides a reason.
+  using InitializeCB =
+      base::OnceCallback<void(mojom::CdmContextPtr cdm_context,
+                              const std::string& error_message)>;
 
-  // Constructs a MojoCdmService and strongly binds it to the |request|.
-  // - |cdm_factory| is used to create CDM instances. Must not be null.
-  // - |context| is used to keep track of all CDM instances such that we can
-  //   connect the CDM with a media player (e.g. decoder). Can be null if the
-  //   CDM does not need to be connected with any media player in this process.
-  MojoCdmService(CdmFactory* cdm_factory, MojoCdmServiceContext* context);
+  explicit MojoCdmService(MojoCdmServiceContext* context);
+
+  MojoCdmService(const MojoCdmService&) = delete;
+  MojoCdmService& operator=(const MojoCdmService&) = delete;
 
   ~MojoCdmService() final;
 
+  // Initialize the MojoCdmService, including creating the real CDM using the
+  // `cdm_factory`, which must not be null. The MojoCdmService should NOT be
+  // used before the `init_cb` is returned.
+  void Initialize(CdmFactory* cdm_factory,
+                  const CdmConfig& cdm_config,
+                  InitializeCB init_cb);
+
   // mojom::ContentDecryptionModule implementation.
   void SetClient(
-      mojom::ContentDecryptionModuleClientAssociatedPtrInfo client) final;
-  void Initialize(const std::string& key_system,
-                  const url::Origin& security_origin,
-                  const CdmConfig& cdm_config,
-                  InitializeCallback callback) final;
+      mojo::PendingAssociatedRemote<mojom::ContentDecryptionModuleClient>
+          client) final;
   void SetServerCertificate(const std::vector<uint8_t>& certificate_data,
                             SetServerCertificateCallback callback) final;
   void GetStatusForPolicy(HdcpVersion min_hdcp_version,
@@ -81,9 +83,12 @@ class MEDIA_MOJO_EXPORT MojoCdmService : public mojom::ContentDecryptionModule {
   // Get CDM to be used by the media pipeline.
   scoped_refptr<::media::ContentDecryptionModule> GetCdm();
 
+  // Gets the remote ID of the CDM this is holding.
+  base::UnguessableToken cdm_id() const { return cdm_id_.value(); }
+
  private:
   // Callback for CdmFactory::Create().
-  void OnCdmCreated(InitializeCallback callback,
+  void OnCdmCreated(InitializeCB callback,
                     const scoped_refptr<::media::ContentDecryptionModule>& cdm,
                     const std::string& error_message);
 
@@ -96,30 +101,27 @@ class MEDIA_MOJO_EXPORT MojoCdmService : public mojom::ContentDecryptionModule {
                            CdmKeysInfo keys_info);
   void OnSessionExpirationUpdate(const std::string& session_id,
                                  base::Time new_expiry_time);
-  void OnSessionClosed(const std::string& session_id);
+  void OnSessionClosed(const std::string& session_id,
+                       CdmSessionClosedReason reason);
 
   // Callback for when |decryptor_| loses connectivity.
   void OnDecryptorConnectionError();
 
-  bool has_initialize_been_called_ = false;
-
-  CdmFactory* cdm_factory_;
-  MojoCdmServiceContext* const context_ = nullptr;
+  const raw_ptr<MojoCdmServiceContext> context_;
   scoped_refptr<::media::ContentDecryptionModule> cdm_;
 
   // MojoDecryptorService is passed the Decryptor from |cdm_|, so
   // |decryptor_| must not outlive |cdm_|.
   std::unique_ptr<MojoDecryptorService> decryptor_;
-  std::unique_ptr<mojo::Binding<mojom::Decryptor>> decryptor_binding_;
+  mojo::PendingRemote<mojom::Decryptor> decryptor_remote_;
+  std::unique_ptr<mojo::Receiver<mojom::Decryptor>> decryptor_receiver_;
 
   // Set to a valid CDM ID if the |cdm_| is successfully created.
-  int cdm_id_;
+  absl::optional<base::UnguessableToken> cdm_id_;
 
-  mojom::ContentDecryptionModuleClientAssociatedPtr client_;
+  mojo::AssociatedRemote<mojom::ContentDecryptionModuleClient> client_;
 
   base::WeakPtrFactory<MojoCdmService> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MojoCdmService);
 };
 
 }  // namespace media

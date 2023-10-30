@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -25,9 +25,10 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "media/audio/audio_io.h"
+#include "media/audio/audio_manager.h"
 #include "media/base/audio_parameters.h"
 
 struct pa_context;
@@ -41,7 +42,11 @@ class PulseAudioOutputStream : public AudioOutputStream {
  public:
   PulseAudioOutputStream(const AudioParameters& params,
                          const std::string& device_id,
-                         AudioManagerBase* manager);
+                         AudioManagerBase* manager,
+                         AudioManager::LogCallback log_callback);
+
+  PulseAudioOutputStream(const PulseAudioOutputStream&) = delete;
+  PulseAudioOutputStream& operator=(const PulseAudioOutputStream&) = delete;
 
   ~PulseAudioOutputStream() override;
 
@@ -55,6 +60,9 @@ class PulseAudioOutputStream : public AudioOutputStream {
   void GetVolume(double* volume) override;
 
  private:
+  // Helper method used for sending native logs to the registered client.
+  void SendLogMessage(const char* format, ...) PRINTF_FORMAT(2, 3);
+
   // Called by PulseAudio when |pa_stream_| change state.  If an unexpected
   // failure state change happens and |source_callback_| is set
   // this method will forward the error via OnError().
@@ -77,7 +85,10 @@ class PulseAudioOutputStream : public AudioOutputStream {
   const std::string device_id_;
 
   // Audio manager that created us.  Used to report that we've closed.
-  AudioManagerBase* manager_;
+  raw_ptr<AudioManagerBase> manager_;
+
+  // Callback to send log messages to registered clients.
+  AudioManager::LogCallback log_callback_;
 
   // PulseAudio API structs.
   pa_context* pa_context_;
@@ -89,7 +100,7 @@ class PulseAudioOutputStream : public AudioOutputStream {
 
   // Callback to audio data source.  Must only be modified while holding a lock
   // on |pa_mainloop_| via pa_threaded_mainloop_lock().
-  AudioSourceCallback* source_callback_;
+  raw_ptr<AudioSourceCallback> source_callback_;
 
   // Container for retrieving data from AudioSourceCallback::OnMoreData().
   std::unique_ptr<AudioBus> audio_bus_;
@@ -97,8 +108,6 @@ class PulseAudioOutputStream : public AudioOutputStream {
   const size_t buffer_size_;
 
   base::ThreadChecker thread_checker_;
-
-  DISALLOW_COPY_AND_ASSIGN(PulseAudioOutputStream);
 };
 
 }  // namespace media

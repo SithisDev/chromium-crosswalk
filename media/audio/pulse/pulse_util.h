@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "media/audio/audio_device_name.h"
 #include "media/base/audio_parameters.h"
@@ -31,13 +31,15 @@ class AutoPulseLock {
     pa_threaded_mainloop_lock(pa_mainloop_);
   }
 
+  AutoPulseLock(const AutoPulseLock&) = delete;
+  AutoPulseLock& operator=(const AutoPulseLock&) = delete;
+
   ~AutoPulseLock() {
     pa_threaded_mainloop_unlock(pa_mainloop_);
   }
 
  private:
-  pa_threaded_mainloop* pa_mainloop_;
-  DISALLOW_COPY_AND_ASSIGN(AutoPulseLock);
+  raw_ptr<pa_threaded_mainloop> pa_mainloop_;
 };
 
 bool MEDIA_EXPORT InitPulse(pa_threaded_mainloop** mainloop,
@@ -50,8 +52,13 @@ void ContextStateCallback(pa_context* context, void* mainloop);
 
 pa_channel_map ChannelLayoutToPAChannelMap(ChannelLayout channel_layout);
 
-void WaitForOperationCompletion(pa_threaded_mainloop* mainloop,
-                                pa_operation* operation);
+// Blocks until pa_operation completes. If |optional_context| and/or
+// |optional_stream| are provided, the method will cancel |operation| and return
+// false if either the context or stream enter a bad state while waiting.
+bool WaitForOperationCompletion(pa_threaded_mainloop* mainloop,
+                                pa_operation* operation,
+                                pa_context* optional_context = nullptr,
+                                pa_stream* optional_stream = nullptr);
 
 base::TimeDelta GetHardwareLatency(pa_stream* stream);
 

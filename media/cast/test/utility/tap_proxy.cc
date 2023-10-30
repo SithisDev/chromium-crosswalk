@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,15 +27,16 @@
 #include "base/command_line.h"
 #include "base/containers/circular_deque.h"
 #include "base/files/file_descriptor_watcher_posix.h"
-#include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_tick_clock.h"
+#include "base/time/time.h"
 #include "media/cast/test/utility/udp_proxy.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -52,7 +53,7 @@ class SendToFDPipe : public PacketPipe {
   explicit SendToFDPipe(int fd) : fd_(fd) {
   }
   void Send(std::unique_ptr<Packet> packet) final {
-    while (1) {
+    while (true) {
       int written = write(
           fd_,
           reinterpret_cast<char*>(&packet->front()),
@@ -78,8 +79,9 @@ class QueueManager {
   QueueManager(int input_fd, int output_fd, std::unique_ptr<PacketPipe> pipe)
       : input_fd_(input_fd), packet_pipe_(std::move(pipe)) {
     read_socket_watch_controller_ = base::FileDescriptorWatcher::WatchReadable(
-        input_fd_, base::Bind(&QueueManager::OnFileCanReadWithoutBlocking,
-                              base::Unretained(this)));
+        input_fd_,
+        base::BindRepeating(&QueueManager::OnFileCanReadWithoutBlocking,
+                            base::Unretained(this)));
 
     std::unique_ptr<PacketPipe> tmp(new SendToFDPipe(output_fd));
     if (packet_pipe_) {
@@ -176,7 +178,7 @@ class ByteCounterPipe : public media::cast::test::PacketPipe {
     pipe_->Send(std::move(packet));
   }
  private:
-  ByteCounter* counter_;
+  raw_ptr<ByteCounter> counter_;
 };
 
 void SetupByteCounters(std::unique_ptr<media::cast::test::PacketPipe>* pipe,
@@ -211,8 +213,7 @@ void CheckByteCounters() {
     last_printout = now;
   }
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::BindOnce(&CheckByteCounters),
-      base::TimeDelta::FromMilliseconds(100));
+      FROM_HERE, base::BindOnce(&CheckByteCounters), base::Milliseconds(100));
 }
 
 int tun_alloc(char *dev, int flags) {
@@ -304,8 +305,8 @@ int main(int argc, char **argv) {
   int fd1 = tun_alloc(argv[1], IFF_TAP);
   int fd2 = tun_alloc(argv[2], IFF_TAP);
 
-  base::test::ScopedTaskEnvironment task_environment(
-      base::test::ScopedTaskEnvironment::MainThreadType::IO);
+  base::test::TaskEnvironment task_environment(
+      base::test::TaskEnvironment::MainThreadType::IO);
   last_printout = base::TimeTicks::Now();
   media::cast::test::QueueManager qm1(fd1, fd2, std::move(in_pipe));
   media::cast::test::QueueManager qm2(fd2, fd1, std::move(out_pipe));

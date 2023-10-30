@@ -1,22 +1,22 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 #include <stdint.h>
 
+#include <cstring>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "media/base/media_log.h"
 #include "media/base/media_util.h"
@@ -28,6 +28,7 @@
 #include "media/filters/frame_processor.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using base::Milliseconds;
 using ::testing::_;
 using ::testing::InSequence;
 using ::testing::StrictMock;
@@ -35,10 +36,19 @@ using ::testing::Values;
 
 namespace {
 
-// Helper to shorten "base::TimeDelta::FromMilliseconds(...)" in these test
-// cases for integer milliseconds.
-constexpr base::TimeDelta Milliseconds(int64_t milliseconds) {
-  return base::TimeDelta::FromMilliseconds(milliseconds);
+// Helpers to encode/decode a base::TimeDelta to/from a string, used in these
+// tests to populate coded frame payloads with an encoded version of the
+// original frame timestamp while (slightly) obfuscating the payload itself to
+// help ensure the payload itself is neither changed by frame processing nor
+// interpreted directly and mistakenly as a base::TimeDelta by frame processing.
+std::string EncodeTestPayload(base::TimeDelta timestamp) {
+  return base::NumberToString(timestamp.InMicroseconds());
+}
+
+base::TimeDelta DecodeTestPayload(std::string payload) {
+  int64_t microseconds = 0;
+  CHECK(base::StringToInt64(payload, &microseconds));
+  return base::Microseconds(microseconds);
 }
 
 }  // namespace
@@ -53,6 +63,12 @@ typedef StreamParser::TrackId TrackId;
 class FrameProcessorTestCallbackHelper {
  public:
   FrameProcessorTestCallbackHelper() = default;
+
+  FrameProcessorTestCallbackHelper(const FrameProcessorTestCallbackHelper&) =
+      delete;
+  FrameProcessorTestCallbackHelper& operator=(
+      const FrameProcessorTestCallbackHelper&) = delete;
+
   virtual ~FrameProcessorTestCallbackHelper() = default;
 
   MOCK_METHOD1(OnParseWarning, void(const SourceBufferParseWarning));
@@ -73,12 +89,13 @@ class FrameProcessorTestCallbackHelper {
                void(const DemuxerStream::Type type,
                     DecodeTimestamp start_dts,
                     base::TimeDelta start_pts));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FrameProcessorTestCallbackHelper);
 };
 
 class FrameProcessorTest : public ::testing::TestWithParam<bool> {
+ public:
+  FrameProcessorTest(const FrameProcessorTest&) = delete;
+  FrameProcessorTest& operator=(const FrameProcessorTest&) = delete;
+
  protected:
   FrameProcessorTest()
       : append_window_end_(kInfiniteDuration),
@@ -87,19 +104,20 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
         video_id_(2) {
     use_sequence_mode_ = GetParam();
     frame_processor_ = std::make_unique<FrameProcessor>(
-        base::Bind(
+        base::BindRepeating(
             &FrameProcessorTestCallbackHelper::OnPossibleDurationIncrease,
             base::Unretained(&callbacks_)),
         &media_log_);
     frame_processor_->SetParseWarningCallback(
-        base::Bind(&FrameProcessorTestCallbackHelper::OnParseWarning,
-                   base::Unretained(&callbacks_)));
+        base::BindRepeating(&FrameProcessorTestCallbackHelper::OnParseWarning,
+                            base::Unretained(&callbacks_)));
   }
 
   enum StreamFlags {
     HAS_AUDIO = 1 << 0,
     HAS_VIDEO = 1 << 1,
-    OBSERVE_APPENDS_AND_GROUP_STARTS = 1 << 2
+    OBSERVE_APPENDS_AND_GROUP_STARTS = 1 << 2,
+    USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES = 1 << 3
   };
 
   void AddTestTracks(int stream_flags) {
@@ -110,14 +128,19 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
     const bool setup_observers =
         (stream_flags & OBSERVE_APPENDS_AND_GROUP_STARTS) != 0;
 
+    const bool support_audio_nonkeyframes =
+        (stream_flags & USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES) != 0;
+    ASSERT_TRUE(has_audio || !support_audio_nonkeyframes);
+
     if (has_audio) {
-      CreateAndConfigureStream(DemuxerStream::AUDIO, setup_observers);
+      CreateAndConfigureStream(DemuxerStream::AUDIO, setup_observers,
+                               support_audio_nonkeyframes);
       ASSERT_TRUE(audio_);
       EXPECT_TRUE(frame_processor_->AddTrack(audio_id_, audio_.get()));
       SeekStream(audio_.get(), Milliseconds(0));
     }
     if (has_video) {
-      CreateAndConfigureStream(DemuxerStream::VIDEO, setup_observers);
+      CreateAndConfigureStream(DemuxerStream::VIDEO, setup_observers, false);
       ASSERT_TRUE(video_);
       EXPECT_TRUE(frame_processor_->AddTrack(video_id_, video_.get()));
       SeekStream(video_.get(), Milliseconds(0));
@@ -127,6 +150,27 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
   void SetTimestampOffset(base::TimeDelta new_offset) {
     timestamp_offset_ = new_offset;
     frame_processor_->SetGroupStartTimestampIfInSequenceMode(timestamp_offset_);
+  }
+
+  base::TimeDelta MillisecondStringToTimestamp(std::string ts_string) {
+    if (ts_string == "Min") {
+      return kNoTimestamp;
+    }
+
+    if (ts_string == "Max") {
+      return kInfiniteDuration;
+    }
+
+    // Handle large integers precisely without converting through a double.
+    if (ts_string.find('.') == std::string::npos) {
+      int64_t milliseconds;
+      CHECK(base::StringToInt64(ts_string, &milliseconds));
+      return Milliseconds(milliseconds);
+    }
+
+    double ts_double;
+    CHECK(base::StringToDouble(ts_string, &ts_double));
+    return Milliseconds(ts_double);
   }
 
   BufferQueue StringToBufferQueue(const std::string& buffers_to_append,
@@ -151,22 +195,26 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
         buffer_timestamps.push_back(buffer_timestamps[0]);
       CHECK_EQ(2u, buffer_timestamps.size());
 
-      double time_in_ms, decode_time_in_ms;
-      CHECK(base::StringToDouble(buffer_timestamps[0], &time_in_ms));
-      CHECK(base::StringToDouble(buffer_timestamps[1], &decode_time_in_ms));
+      const base::TimeDelta pts =
+          MillisecondStringToTimestamp(buffer_timestamps[0]);
+      const DecodeTimestamp dts = DecodeTimestamp::FromPresentationTime(
+          MillisecondStringToTimestamp(buffer_timestamps[1]));
 
-      // Create buffer. Encode the original time_in_ms as the buffer's data to
-      // enable later verification of possible buffer relocation in presentation
+      // Create buffer. Encode the original pts as the buffer's data to enable
+      // later verification of possible buffer relocation in presentation
       // timeline due to coded frame processing.
-      const uint8_t* timestamp_as_data =
-          reinterpret_cast<uint8_t*>(&time_in_ms);
-      scoped_refptr<StreamParserBuffer> buffer =
-          StreamParserBuffer::CopyFrom(timestamp_as_data, sizeof(time_in_ms),
-                                       is_keyframe, type, track_id);
-      buffer->set_timestamp(base::TimeDelta::FromMillisecondsD(time_in_ms));
-      if (time_in_ms != decode_time_in_ms) {
-        buffer->SetDecodeTimestamp(DecodeTimestamp::FromPresentationTime(
-            base::TimeDelta::FromMillisecondsD(decode_time_in_ms)));
+      const std::string payload_string = EncodeTestPayload(pts);
+      const char* pts_as_cstr = payload_string.c_str();
+      scoped_refptr<StreamParserBuffer> buffer = StreamParserBuffer::CopyFrom(
+          reinterpret_cast<const uint8_t*>(pts_as_cstr), strlen(pts_as_cstr),
+          is_keyframe, type, track_id);
+      CHECK(DecodeTestPayload(
+                std::string(reinterpret_cast<const char*>(buffer->data()),
+                            buffer->data_size())) == pts);
+
+      buffer->set_timestamp(pts);
+      if (DecodeTimestamp::FromPresentationTime(pts) != dts) {
+        buffer->SetDecodeTimestamp(dts);
       }
 
       buffer->set_duration(frame_duration_);
@@ -222,8 +270,8 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
 
     do {
       read_callback_called_ = false;
-      stream->Read(base::Bind(&FrameProcessorTest::StoreStatusAndBuffer,
-                              base::Unretained(this)));
+      stream->Read(base::BindOnce(&FrameProcessorTest::StoreStatusAndBuffer,
+                                  base::Unretained(this)));
       base::RunLoop().RunUntilIdle();
     } while (++loop_count < 2 && read_callback_called_ &&
              last_read_status_ == DemuxerStream::kAborted);
@@ -234,12 +282,30 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
     EXPECT_FALSE(read_callback_called_);
   }
 
-  // Format of |expected| is a space-delimited sequence of
-  // timestamp_in_ms:original_timestamp_in_ms
-  // original_timestamp_in_ms (and the colon) must be omitted if it is the same
-  // as timestamp_in_ms.
+  // Doesn't check keyframeness, but otherwise is the same as
+  // CheckReadsAndOptionallyKeyframenessThenReadStalls().
   void CheckReadsThenReadStalls(ChunkDemuxerStream* stream,
                                 const std::string& expected) {
+    CheckReadsAndOptionallyKeyframenessThenReadStalls(stream, expected, false);
+  }
+
+  // Checks keyframeness using
+  // CheckReadsAndOptionallyKeyframenessThenReadStalls().
+  void CheckReadsAndKeyframenessThenReadStalls(ChunkDemuxerStream* stream,
+                                               const std::string& expected) {
+    CheckReadsAndOptionallyKeyframenessThenReadStalls(stream, expected, true);
+  }
+
+  // Format of |expected| is a space-delimited sequence of
+  // timestamp_in_ms:original_timestamp_in_ms. original_timestamp_in_ms (and the
+  // colon) must be omitted if it is the same as timestamp_in_ms. If
+  // |check_keyframeness| is true, then each frame in |expected| must end with
+  // 'K' or 'N', which respectively must match the read result frames'
+  // keyframeness.
+  void CheckReadsAndOptionallyKeyframenessThenReadStalls(
+      ChunkDemuxerStream* stream,
+      const std::string& expected,
+      bool check_keyframeness) {
     std::vector<std::string> timestamps = base::SplitString(
         expected, " ", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     std::stringstream ss;
@@ -248,8 +314,8 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
 
       do {
         read_callback_called_ = false;
-        stream->Read(base::Bind(&FrameProcessorTest::StoreStatusAndBuffer,
-                                base::Unretained(this)));
+        stream->Read(base::BindOnce(&FrameProcessorTest::StoreStatusAndBuffer,
+                                    base::Unretained(this)));
         base::RunLoop().RunUntilIdle();
         EXPECT_TRUE(read_callback_called_);
       } while (++loop_count < 2 &&
@@ -268,9 +334,11 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
 
       // Decode the original_time_in_ms from the buffer's data.
       double original_time_in_ms;
-      ASSERT_EQ(sizeof(original_time_in_ms), last_read_buffer_->data_size());
-      original_time_in_ms = *(reinterpret_cast<const double*>(
-          last_read_buffer_->data()));
+      original_time_in_ms =
+          DecodeTestPayload(std::string(reinterpret_cast<const char*>(
+                                            last_read_buffer_->data()),
+                                        last_read_buffer_->data_size()))
+              .InMillisecondsF();
       if (original_time_in_ms != time_in_ms)
         ss << ":" << original_time_in_ms;
 
@@ -278,6 +346,14 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
       if (last_read_buffer_->discard_padding().first == kInfiniteDuration &&
           last_read_buffer_->discard_padding().second.is_zero()) {
         ss << "P";
+      }
+
+      // Conditionally check keyframeness.
+      if (check_keyframeness) {
+        if (last_read_buffer_->is_key_frame())
+          ss << "K";
+        else
+          ss << "N";
       }
     }
 
@@ -298,7 +374,7 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
     stream->StartReturningData();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   StrictMock<MockMediaLog> media_log_;
   StrictMock<FrameProcessorTestCallbackHelper> callbacks_;
 
@@ -336,18 +412,28 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
   }
 
   void CreateAndConfigureStream(DemuxerStream::Type type,
-                                bool setup_observers) {
+                                bool setup_observers,
+                                bool support_audio_nonkeyframes) {
     // TODO(wolenetz/dalecurtis): Also test with splicing disabled?
 
     ChunkDemuxerStream* stream;
     switch (type) {
       case DemuxerStream::AUDIO: {
         ASSERT_FALSE(audio_);
-        audio_.reset(
-            new ChunkDemuxerStream(DemuxerStream::AUDIO, MediaTrack::Id("1")));
-        AudioDecoderConfig decoder_config(kCodecVorbis, kSampleFormatPlanarF32,
-                                          CHANNEL_LAYOUT_STEREO, 1000,
-                                          EmptyExtraData(), Unencrypted());
+        audio_ = std::make_unique<ChunkDemuxerStream>(DemuxerStream::AUDIO,
+                                                      MediaTrack::Id("1"));
+        AudioDecoderConfig decoder_config;
+        if (support_audio_nonkeyframes) {
+          decoder_config = AudioDecoderConfig(
+              AudioCodec::kAAC, kSampleFormatPlanarF32, CHANNEL_LAYOUT_STEREO,
+              1000, EmptyExtraData(), EncryptionScheme::kUnencrypted);
+          decoder_config.set_profile(AudioCodecProfile::kXHE_AAC);
+        } else {
+          decoder_config =
+              AudioDecoderConfig(AudioCodec::kVorbis, kSampleFormatPlanarF32,
+                                 CHANNEL_LAYOUT_STEREO, 1000, EmptyExtraData(),
+                                 EncryptionScheme::kUnencrypted);
+        }
         frame_processor_->OnPossibleAudioConfigUpdate(decoder_config);
         ASSERT_TRUE(
             audio_->UpdateAudioConfig(decoder_config, false, &media_log_));
@@ -357,8 +443,9 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
       }
       case DemuxerStream::VIDEO: {
         ASSERT_FALSE(video_);
-        video_.reset(
-            new ChunkDemuxerStream(DemuxerStream::VIDEO, MediaTrack::Id("2")));
+        ASSERT_FALSE(support_audio_nonkeyframes);
+        video_ = std::make_unique<ChunkDemuxerStream>(DemuxerStream::VIDEO,
+                                                      MediaTrack::Id("2"));
         ASSERT_TRUE(video_->UpdateVideoConfig(TestVideoConfig::Normal(), false,
                                               &media_log_));
         stream = video_.get();
@@ -380,8 +467,6 @@ class FrameProcessorTest : public ::testing::TestWithParam<bool> {
                               base::Unretained(&callbacks_), type));
     }
   }
-
-  DISALLOW_COPY_AND_ASSIGN(FrameProcessorTest);
 };
 
 TEST_P(FrameProcessorTest, WrongTypeInAppendedBuffer) {
@@ -882,8 +967,7 @@ TEST_P(FrameProcessorTest, AppendWindowFilterWithInexactPreroll_2) {
     EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(0)));
   EXPECT_TRUE(ProcessFrames("0K", ""));
 
-  EXPECT_CALL(callbacks_, PossibleDurationIncrease(
-                              base::TimeDelta::FromMicroseconds(10250)));
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(base::Microseconds(10250)));
   EXPECT_TRUE(ProcessFrames("10.25K", ""));
 
   EXPECT_MEDIA_LOG(SkippingSpliceTooLittleOverlap(10000, 250));
@@ -1199,6 +1283,8 @@ TEST_P(FrameProcessorTest, AudioNonKeyframeChangedToKeyframe) {
   // to a keyframe, so no longer depends on the original preceding keyframe).
   // The sequence mode test version uses SetTimestampOffset to make it behave
   // like segments mode to simplify the tests.
+  // Note, see the NonkeyframeAudioBuffering tests to verify buffering of audio
+  // nonkeyframes for codec(s) that use nonkeyframes.
   InSequence s;
   AddTestTracks(HAS_AUDIO);
   frame_processor_->SetSequenceMode(use_sequence_mode_);
@@ -1840,7 +1926,7 @@ TEST_P(FrameProcessorTest,
   if (use_sequence_mode_)
     frame_processor_->SetSequenceMode(true);
 
-  frame_duration_ = base::TimeDelta::FromMicroseconds(4999);
+  frame_duration_ = base::Microseconds(4999);
 
   EXPECT_CALL(callbacks_, OnGroupStart(DemuxerStream::AUDIO, DecodeTimestamp(),
                                        base::TimeDelta()));
@@ -1869,8 +1955,7 @@ TEST_P(FrameProcessorTest,
                    Milliseconds(20) + frame_duration_));
   EXPECT_CALL(callbacks_, OnAppend(DemuxerStream::AUDIO, _));
 
-  EXPECT_CALL(callbacks_, PossibleDurationIncrease(
-                              base::TimeDelta::FromMicroseconds(34999)));
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(base::Microseconds(34999)));
   EXPECT_TRUE(ProcessFrames("0K 10|5K 20|10K 30|15K", ""));
   EXPECT_EQ(Milliseconds(0), timestamp_offset_);
 
@@ -1880,6 +1965,614 @@ TEST_P(FrameProcessorTest,
   // group, if any.)
   CheckExpectedRangesByTimestamp(audio_.get(), "{ [0,34) }");
   CheckReadsThenReadStalls(audio_.get(), "0 10 20 30");
+}
+
+TEST_P(FrameProcessorTest,
+       GroupEndTimestampDecreaseWithinMediaSegmentShouldWarn) {
+  // This parse warning requires:
+  // 1) a decode time discontinuity within the set of frames being processed,
+  // 2) the highest frame end time of any frame successfully processed
+  //    before that discontinuity is higher than the highest frame end time of
+  //    all frames processed after that discontinuity.
+  // TODO(wolenetz): Adjust this case once direction on spec is informed by
+  // data. See https://crbug.com/920853 and
+  // https://github.com/w3c/media-source/issues/203.
+  if (use_sequence_mode_) {
+    // Sequence mode modifies the presentation timestamps following a decode
+    // discontinuity such that this scenario should not repro with that mode.
+    DVLOG(1) << "Skipping segments mode variant; inapplicable to this case.";
+    return;
+  }
+
+  InSequence s;
+  AddTestTracks(HAS_VIDEO);
+
+  EXPECT_CALL(callbacks_,
+              OnParseWarning(SourceBufferParseWarning::
+                                 kGroupEndTimestampDecreaseWithinMediaSegment));
+
+  frame_duration_ = Milliseconds(10);
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(15)));
+  EXPECT_TRUE(ProcessFrames("", "0K 10K 5|40K"));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+
+  CheckExpectedRangesByTimestamp(video_.get(), "{ [0,15) }");
+  CheckReadsThenReadStalls(video_.get(), "0 5");
+}
+
+TEST_P(FrameProcessorTest, NonkeyframeAudioBuffering_BasicOperation) {
+  // With the support for audio nonkeyframe buffering enabled, buffer a couple
+  // continuous groups of audio key and nonkey frames.
+  // Note, see the AudioNonKeyframeChangedToKeyframe test that tests where
+  // nonkeyframe audio buffering is not supported, and instead takes a
+  // workaround that forces all audio to be keyframe.
+  InSequence s;
+  AddTestTracks(HAS_AUDIO | USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES);
+  if (use_sequence_mode_)
+    frame_processor_->SetSequenceMode(true);
+
+  // Default test frame duration is 10 milliseconds.
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(80)));
+  EXPECT_TRUE(ProcessFrames("0K 10 20 30 40K 50 60 70", ""));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [0,80) }");
+  CheckReadsAndKeyframenessThenReadStalls(audio_.get(),
+                                          "0K 10N 20N 30N 40K 50N 60N 70N");
+}
+
+TEST_P(FrameProcessorTest, NonkeyframeAudioBuffering_BasicOverlaps) {
+  // With the support for audio nonkeyframe buffering enabled, buffer a few
+  // groups of audio key and nonkey frames which overlap each other.
+  // For sequence mode versions, timestampOffset is adjusted to make it act like
+  // segments mode.
+  InSequence s;
+  AddTestTracks(HAS_AUDIO | USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES);
+  if (use_sequence_mode_) {
+    frame_processor_->SetSequenceMode(true);
+    SetTimestampOffset(Milliseconds(10));
+  }
+
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(60)));
+  EXPECT_TRUE(ProcessFrames("10K 20 30 40 50", ""));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [10,60) }");
+
+  // End-overlap the last nonkeyframe appended with a keyframe.
+
+  if (use_sequence_mode_)
+    SetTimestampOffset(Milliseconds(50));
+
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(70)));
+  EXPECT_TRUE(ProcessFrames("50K 60", ""));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [10,70) }");
+
+  // Front-overlap the original group of frames.
+
+  if (use_sequence_mode_)
+    SetTimestampOffset(Milliseconds(0));
+
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(20)));
+  EXPECT_TRUE(ProcessFrames("0K 10", ""));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [0,70) }");
+
+  SeekStream(audio_.get(), Milliseconds(0));
+  CheckReadsAndKeyframenessThenReadStalls(audio_.get(), "0K 10N 50K 60N");
+}
+
+TEST_P(FrameProcessorTest,
+       NonkeyframeAudioBuffering_InitialNonkeyframesNotBuffered) {
+  // With the support for audio nonkeyframe buffering enabled, try to buffer
+  // some frames beginning with a nonkeyframe and observe initial nonkeyframe(s)
+  // are not buffered.
+  InSequence s;
+  AddTestTracks(HAS_AUDIO | USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES);
+  if (use_sequence_mode_)
+    frame_processor_->SetSequenceMode(true);
+
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(60)));
+  EXPECT_TRUE(ProcessFrames("0 10 20K 30 40 50", ""));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [20,60) }");
+  CheckReadsAndKeyframenessThenReadStalls(audio_.get(), "20K 30N 40N 50N");
+}
+
+TEST_P(FrameProcessorTest,
+       NonkeyframeAudioBuffering_InvalidDecreasingNonkeyframePts) {
+  // With the support for audio nonkeyframe buffering enabled, try to buffer an
+  // invalid sequence of nonkeyframes: decreasing presentation timestamps are
+  // not supported for audio nonkeyframes. For sequence mode versions,
+  // timestampOffset is adjusted to make it act like segments mode.
+  InSequence s;
+  AddTestTracks(HAS_AUDIO | USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES);
+  if (use_sequence_mode_) {
+    frame_processor_->SetSequenceMode(true);
+    SetTimestampOffset(Milliseconds(100));
+  }
+
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(110)));
+  EXPECT_TRUE(ProcessFrames("100K", ""));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [100,110) }");
+
+  // Processing an audio nonkeyframe with lower PTS than the previous frame
+  // should fail.
+  EXPECT_MEDIA_LOG(AudioNonKeyframeOutOfOrder());
+  EXPECT_FALSE(ProcessFrames("90|110", ""));
+}
+
+TEST_P(FrameProcessorTest,
+       NonkeyframeAudioBuffering_ValidDecreasingKeyframePts) {
+  // With the support for audio nonkeyframe buffering enabled, try to buffer a
+  // valid sequence of key and nonkeyframes: decreasing presentation timestamps
+  // are supported for keyframes. For sequence mode versions, timestampOffset is
+  // adjusted to make it act like segments mode.
+  InSequence s;
+  AddTestTracks(HAS_AUDIO | USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES);
+  if (use_sequence_mode_) {
+    frame_processor_->SetSequenceMode(true);
+    SetTimestampOffset(Milliseconds(100));
+  }
+
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(130)));
+  EXPECT_TRUE(ProcessFrames("100K 110 120", ""));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [100,130) }");
+
+  // Processing an audio keyframe with lower PTS than the previous frame
+  // should succeed, since it is a keyframe. Here, we use continuous DTS to
+  // ensure we precisely target the nonkeyframe monotonicity check when a
+  // keyframe is not required by the track buffer currently (and to make
+  // sequence mode versions act like segments mode without further manual
+  // adjustment of timestamp offset.) The original nonkeyframe at PTS 110 should
+  // be overlap-removed, and the one at PTS 120 should have be removed as a
+  // result of depending on that removed PTS 110 nonkeyframe.
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(130)));
+  EXPECT_TRUE(ProcessFrames("110|130K", ""));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [100,120) }");
+  CheckReadsAndKeyframenessThenReadStalls(audio_.get(), "100K 110K");
+}
+
+TEST_P(FrameProcessorTest,
+       NonkeyframeAudioBuffering_ValidSameNonKeyframePts_1) {
+  // With the support for audio nonkeyframe buffering enabled, try to buffer a
+  // valid sequence of a keyframe and a nonkeyframe: non-increasing presentation
+  // timestamps are supported for audio nonkeyframes, so long as they don't
+  // decrease. For sequence mode versions, timestampOffset is adjusted to make
+  // it act like segments mode.
+  InSequence s;
+  AddTestTracks(HAS_AUDIO | USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES);
+  if (use_sequence_mode_) {
+    frame_processor_->SetSequenceMode(true);
+    SetTimestampOffset(Milliseconds(100));
+  }
+
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(110)));
+  EXPECT_TRUE(ProcessFrames("100K", ""));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [100,110) }");
+
+  // Processing an audio nonkeyframe with same PTS as the previous frame should
+  // succeed, though there is presentation interval overlap causing removal of
+  // the previous frame (in this case, a keyframe), and hence the new dependent
+  // nonkeyframe is not buffered.
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(110)));
+  EXPECT_TRUE(ProcessFrames("100|110", ""));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ }");
+  CheckReadsAndKeyframenessThenReadStalls(audio_.get(), "");
+}
+
+TEST_P(FrameProcessorTest,
+       NonkeyframeAudioBuffering_ValidSameNonKeyframePts_2) {
+  // With the support for audio nonkeyframe buffering enabled, try to buffer a
+  // valid sequence of nonkeyframes: non-increasing presentation timestamps are
+  // supported for audio nonkeyframes, so long as they don't decrease. For
+  // sequence mode versions, timestampOffset is adjusted to make it act like
+  // segments mode.
+  InSequence s;
+  AddTestTracks(HAS_AUDIO | USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES);
+  if (use_sequence_mode_) {
+    frame_processor_->SetSequenceMode(true);
+    SetTimestampOffset(Milliseconds(100));
+  }
+
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(120)));
+  EXPECT_TRUE(ProcessFrames("100K 110", ""));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [100,120) }");
+
+  // Processing an audio nonkeyframe with same PTS as the previous frame should
+  // succeed, though there is presentation interval overlap causing removal of
+  // the previous nonkeyframe, and hence the new dependent nonkeyframe is not
+  // buffered.
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(120)));
+  EXPECT_TRUE(ProcessFrames("110|120", ""));
+  EXPECT_EQ(Milliseconds(0), timestamp_offset_);
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [100,110) }");
+  CheckReadsAndKeyframenessThenReadStalls(audio_.get(), "100K");
+}
+
+TEST_P(FrameProcessorTest,
+       NonkeyframeAudioBuffering_AppendWindowFilterDroppedPrerollKeyframe) {
+  // For simplicity currently, if the preroll (keyframe) buffer was entirely
+  // prior to the append window and dropped, an approximately continuous
+  // keyframe is still required to use that dropped frame as preroll (for
+  // simplicity). This may change in future if append window trimming of
+  // nonkeyframes with a fully excluded preroll keyframe is commonly needed to
+  // be supported.
+  InSequence s;
+  AddTestTracks(HAS_AUDIO | USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES);
+  if (use_sequence_mode_)
+    frame_processor_->SetSequenceMode(true);
+  SetTimestampOffset(Milliseconds(-10));
+
+  EXPECT_MEDIA_LOG(DroppedFrame("audio", -10000));
+  if (use_sequence_mode_)
+    EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(-10)));
+  else
+    EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(0)));
+  EXPECT_TRUE(ProcessFrames("0K", ""));
+
+  // This nonkeyframe is dropped for simplicity since it depends on a preroll
+  // keyframe which was entirely outside the append window.
+  if (use_sequence_mode_)
+    EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(-10)));
+  else
+    EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(0)));
+  EXPECT_TRUE(ProcessFrames("10", ""));
+
+  // Only the following keyframe should buffer successfully, with no preroll.
+  EXPECT_MEDIA_LOG(DroppedAppendWindowUnusedPreroll(-10000, -10000, 10000));
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(20)));
+  EXPECT_TRUE(ProcessFrames("20K", ""));
+
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [10,20) }");
+  CheckReadsAndKeyframenessThenReadStalls(audio_.get(), "10:20K");
+}
+
+TEST_P(FrameProcessorTest,
+       NonkeyframeAudioBuffering_AppendWindowFilter_TrimFront) {
+  InSequence s;
+  AddTestTracks(HAS_AUDIO | USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES);
+  if (use_sequence_mode_)
+    frame_processor_->SetSequenceMode(true);
+  SetTimestampOffset(Milliseconds(-4));
+  EXPECT_MEDIA_LOG(TruncatedFrame(-4000, 6000, "start", 0));
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(26)));
+  EXPECT_TRUE(ProcessFrames("0K 10 20", ""));
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [0,26) }");
+  CheckReadsAndKeyframenessThenReadStalls(audio_.get(), "0K 6:10N 16:20N");
+}
+
+TEST_P(FrameProcessorTest,
+       NonkeyframeAudioBuffering_AppendWindowFilter_TrimEnd) {
+  InSequence s;
+  AddTestTracks(HAS_AUDIO | USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES);
+  if (use_sequence_mode_)
+    frame_processor_->SetSequenceMode(true);
+
+  append_window_end_ = Milliseconds(26);
+
+  EXPECT_MEDIA_LOG(TruncatedFrame(20000, 30000, "end", 26000));
+  EXPECT_MEDIA_LOG(DroppedFrameCheckAppendWindow("audio", 0, 26000));
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(26)));
+  EXPECT_TRUE(ProcessFrames("0K 10 20 30", ""));
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [0,26) }");
+  CheckReadsAndKeyframenessThenReadStalls(audio_.get(), "0K 10N 20N");
+}
+
+TEST_P(FrameProcessorTest, NonkeyframeAudioBuffering_TrimSpliceOverlap) {
+  // White-box test which focuses on the behavior of underlying
+  // SourceBufferStream::TrimSpliceOverlap() for frame sequences involving
+  // nonkeyframes appended by the FrameProcessor. That method detects and
+  // performs splice trimming on every audio frame following either a
+  // discontinuity or the beginning of ProcessFrames(), and also on audio frames
+  // with PTS not directly continuous with the highest frame end PTS already
+  // processed. We vary |frame_duration_| in this test to avoid confusing
+  // int:decimal pairs in the eventual CheckReads* call.
+  InSequence s;
+  AddTestTracks(HAS_AUDIO | USE_AUDIO_CODEC_SUPPORTING_NONKEYFRAMES);
+  if (use_sequence_mode_)
+    frame_processor_->SetSequenceMode(true);
+
+  frame_duration_ = base::Microseconds(9750);
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(frame_duration_));
+  EXPECT_TRUE(ProcessFrames("0K", ""));
+
+  // As with all-keyframe streams, a slight jump forward should not trigger any
+  // splicing logic, though accumulations of these may result in loss of A/V
+  // sync.
+  frame_duration_ = base::Microseconds(10250);
+  EXPECT_CALL(callbacks_,
+              PossibleDurationIncrease(Milliseconds(10) + frame_duration_));
+  EXPECT_TRUE(ProcessFrames("10", ""));
+
+  // As with all-keyframe streams, a slightly end-overlapping nonkeyframe should
+  // not trigger any splicing logic, though accumulations of these may result in
+  // loss of A/V sync. The difference here is there isn't even any emission of a
+  // "too little splice overlap" media log, since the new frame is a
+  // nonkeyframe.
+  frame_duration_ = Milliseconds(10);
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(30)));
+  EXPECT_TRUE(ProcessFrames("20", ""));
+
+  // A heavily overlapping nonkeyframe should not trigger any splicing logic,
+  // so long as it isn't completely discontinuous. This is unlike all-keyframe
+  // audio streams, where such a heavy overlap would end-trim the overlapped
+  // frame. Accumulations of these could rapidly lead to loss of A/V sync.
+  // Nonkeyframe timestamp & duration metadata sequences need to be correctly
+  // muxed to avoid this.
+  frame_duration_ = base::Microseconds(10250);
+  EXPECT_CALL(callbacks_,
+              PossibleDurationIncrease(Milliseconds(22) + frame_duration_));
+  EXPECT_TRUE(ProcessFrames("22", ""));
+
+  // A keyframe that end-overlaps a nonkeyframe will trigger splicing logic.
+  // Here, we test a "too little splice overlap" case.
+  frame_duration_ = Milliseconds(10);
+  EXPECT_MEDIA_LOG(SkippingSpliceTooLittleOverlap(32000, 250));
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(42)));
+  EXPECT_TRUE(ProcessFrames("32K", ""));
+
+  // And a keyframe that significantly end-overlaps a nonkeyframe will trigger
+  // splicing logic that can perform end-trimming of the overlapped frame.
+  // First, we buffer another nonkeyframe.
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(52)));
+  EXPECT_TRUE(ProcessFrames("42", ""));
+  // Verify correct splice behavior on significant overlap of the nonkeyframe by
+  // a new keyframe.
+  EXPECT_MEDIA_LOG(TrimmedSpliceOverlap(45000, 42000, 7000));
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(55)));
+  EXPECT_TRUE(ProcessFrames("45K", ""));
+
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [0,55) }");
+  CheckReadsAndKeyframenessThenReadStalls(audio_.get(),
+                                          "0K 10N 20N 22N 32K 42N 45K");
+}
+
+TEST_P(FrameProcessorTest, FrameDuration_kNoTimestamp_Fails) {
+  InSequence s;
+  AddTestTracks(HAS_AUDIO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  frame_duration_ = kNoTimestamp;
+  EXPECT_MEDIA_LOG(FrameDurationUnknown("audio", 1000));
+  EXPECT_FALSE(ProcessFrames("1K", ""));
+}
+
+TEST_P(FrameProcessorTest,
+       Pts_BeforeTimestampOffsetApplied_kNoTimestamp_Fails) {
+  InSequence s;
+  AddTestTracks(HAS_AUDIO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  EXPECT_MEDIA_LOG(PtsUnknown("audio"));
+  EXPECT_FALSE(ProcessFrames("MinK", ""));
+}
+
+TEST_P(FrameProcessorTest,
+       Pts_BeforeTimestampOffsetApplied_kInfiniteDuration_Fails) {
+  InSequence s;
+  AddTestTracks(HAS_AUDIO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  EXPECT_MEDIA_LOG(FrameTimeOutOfRange("Before adjusting by timestampOffset",
+                                       "PTS", "audio"));
+  EXPECT_FALSE(ProcessFrames("MaxK", ""));
+}
+
+TEST_P(FrameProcessorTest,
+       Dts_BeforeTimestampOffsetApplied_kNoDecodeTimestamp_UsesPtsIfValid) {
+  InSequence s;
+  AddTestTracks(HAS_AUDIO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  // When PTS is valid, but DTS is kNoDecodeTimestamp, then
+  // StreamParserBuffer::GetDecodeTimestamp() just returns the frame's PTS.
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(Milliseconds(10)));
+  EXPECT_TRUE(ProcessFrames("0|MinK", ""));
+
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [0,10) }");
+  CheckReadsAndKeyframenessThenReadStalls(audio_.get(), "0K");
+}
+
+TEST_P(FrameProcessorTest,
+       Dts_BeforeTimestampOffsetApplied_kMaxDecodeTimestamp_Fails) {
+  InSequence s;
+  AddTestTracks(HAS_AUDIO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  EXPECT_MEDIA_LOG(FrameTimeOutOfRange("Before adjusting by timestampOffset",
+                                       "DTS", "audio"));
+  EXPECT_FALSE(ProcessFrames("0|MaxK", ""));
+}
+
+TEST_P(FrameProcessorTest, After_Sequence_OffsetUpdate_kNoTimestamp_Fails) {
+  if (!use_sequence_mode_) {
+    DVLOG(1) << "Skipping segments mode variant; inapplicable to this case.";
+    return;
+  }
+  InSequence s;
+
+  AddTestTracks(HAS_AUDIO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  // (-Infinity + 5)ms minus 10ms saturates to (-Infinity)ms.
+  SetTimestampOffset(kNoTimestamp + Milliseconds(5));
+  EXPECT_MEDIA_LOG(SequenceOffsetUpdateOutOfRange());
+  EXPECT_FALSE(ProcessFrames("10K", ""));
+}
+
+TEST_P(FrameProcessorTest,
+       After_Sequence_OffsetUpdate_kInfiniteDuration_Fails) {
+  if (!use_sequence_mode_) {
+    DVLOG(1) << "Skipping segments mode variant; inapplicable to this case.";
+    return;
+  }
+  InSequence s;
+
+  AddTestTracks(HAS_AUDIO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  // (+Infinity - 5)ms minus -10ms saturates to (+Infinity)ms.
+  SetTimestampOffset(kInfiniteDuration - Milliseconds(5));
+  EXPECT_MEDIA_LOG(SequenceOffsetUpdateOutOfRange());
+  EXPECT_FALSE(ProcessFrames("-10K", ""));
+}
+
+TEST_P(FrameProcessorTest,
+       Before_Sequence_OffsetUpdate_kInfiniteDuration_Fails) {
+  if (!use_sequence_mode_) {
+    DVLOG(1) << "Skipping segments mode variant; inapplicable to this case.";
+    return;
+  }
+  InSequence s;
+
+  AddTestTracks(HAS_AUDIO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  // Effectively sets group start timestamp to +Infinity.
+  SetTimestampOffset(kInfiniteDuration);
+  EXPECT_MEDIA_LOG(
+      SequenceOffsetUpdatePreventedByOutOfRangeGroupStartTimestamp());
+
+  // That infinite value fails precondition of finite value for group start
+  // timestamp when about to update timestampOffset based upon it.
+  EXPECT_FALSE(ProcessFrames("0K", ""));
+}
+
+TEST_P(FrameProcessorTest, Segments_InfiniteTimestampOffset_Fails) {
+  if (use_sequence_mode_) {
+    DVLOG(1) << "Skipping sequence mode variant; inapplicable to this case.";
+    return;
+  }
+  InSequence s;
+
+  AddTestTracks(HAS_AUDIO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  SetTimestampOffset(kInfiniteDuration);
+  EXPECT_MEDIA_LOG(OffsetOutOfRange());
+  EXPECT_FALSE(ProcessFrames("0K", ""));
+}
+
+TEST_P(FrameProcessorTest, Pts_AfterTimestampOffsetApplied_kNoTimestamp_Fails) {
+  InSequence s;
+  AddTestTracks(HAS_VIDEO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  // Note, SetTimestampOffset(kNoTimestamp) hits DCHECK. This test instead
+  // checks that the result of offset application to PTS gives parse error if
+  // the result is <= kNoTimestamp. Getting such a result requires different
+  // test logic for segments vs sequence append modes.
+  if (use_sequence_mode_) {
+    // Use an extremely out-of-order DTS/PTS GOP to get the resulting
+    // timestampOffset needed for application to a nonkeyframe PTS (continuous
+    // in DTS time with its GOP's keyframe), resulting with kNoTimestamp PTS.
+    // First, calculate (-kNoTimestamp - 10ms), truncated down to nearest
+    // millisecond, for use as keyframe PTS and DTS.
+    frame_duration_ = Milliseconds(1);
+    base::TimeDelta ts =
+        Milliseconds(((kNoTimestamp + Milliseconds(10)) * -1).InMilliseconds());
+    std::string ts_str = base::NumberToString(ts.InMilliseconds());
+
+    // Append the keyframe and expect success for this step.
+    EXPECT_CALL(callbacks_, PossibleDurationIncrease(frame_duration_));
+    EXPECT_TRUE(ProcessFrames("", ts_str + "|" + ts_str + "K"));
+    EXPECT_EQ(timestamp_offset_.InMicroseconds(), (-1 * ts).InMicroseconds());
+
+    // A nonkeyframe with the same DTS as previous frame does not cause any
+    // discontinuity. Append such a frame, with PTS before offset applied that
+    // saturates to kNoTimestamp when the offset is applied.
+    EXPECT_MEDIA_LOG(FrameTimeOutOfRange("After adjusting by timestampOffset",
+                                         "PTS", "video"));
+    EXPECT_FALSE(ProcessFrames("", "-20|" + ts_str));
+  } else {
+    // Set the offset to be just above kNoTimestamp, and append a frame with a
+    // PTS that is negative by at least that small amount. The result should
+    // saturate to kNoTimestamp for PTS.
+    SetTimestampOffset(kNoTimestamp + Milliseconds(1));
+    EXPECT_MEDIA_LOG(FrameTimeOutOfRange("After adjusting by timestampOffset",
+                                         "PTS", "video"));
+    EXPECT_FALSE(ProcessFrames("", "-2K"));
+  }
+}
+
+TEST_P(FrameProcessorTest,
+       Pts_AfterTimestampOffsetApplied_kInfiniteDuration_Fails) {
+  InSequence s;
+
+  AddTestTracks(HAS_VIDEO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  // Use a video GOP with a nonkeyframe PTS that jumps forward far enough to
+  // saturate to kInfiniteDuration after timestampOffset is applied. Take care
+  // to avoid saturating the (earlier) keyframe's frame_end_timestamp to
+  // kInfiniteDuration, avoiding a different parse error case.
+  // First, calculate (kInfiniteDuration - 2ms), truncated down to nearest
+  // millisecond for use as keyframe PTS (after timestamp offset application).
+  // It's also used for start of DTS sequence.
+  frame_duration_ = Milliseconds(1);
+  base::TimeDelta ts =
+      Milliseconds((kInfiniteDuration - Milliseconds(2)).InMilliseconds());
+
+  // Append the keyframe and expect success for this step.
+  SetTimestampOffset(ts);
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(ts + frame_duration_));
+  EXPECT_TRUE(ProcessFrames("", "0K"));
+
+  // Sequence mode might adjust the offset. This test's logic should ensure the
+  // offset is the same as in segments mode at this point.
+  EXPECT_EQ(timestamp_offset_.InMicroseconds(), ts.InMicroseconds());
+
+  // A nonkeyframe with same DTS as previous frame does not cause any
+  // discontinuity. Append such a frame, with PTS jumped 3ms forwards such that
+  // it saturates to kInfiniteDuration when offset is applied.
+  EXPECT_MEDIA_LOG(FrameTimeOutOfRange("After adjusting by timestampOffset",
+                                       "PTS", "video"));
+  EXPECT_FALSE(ProcessFrames("", "3|0"));
+}
+
+TEST_P(FrameProcessorTest,
+       Dts_AfterTimestampOffsetApplied_kNoDecodeTimestamp_Fails) {
+  InSequence s;
+
+  AddTestTracks(HAS_AUDIO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  SetTimestampOffset(kNoTimestamp + Milliseconds(5));
+  EXPECT_MEDIA_LOG(FrameTimeOutOfRange("After adjusting by timestampOffset",
+                                       "DTS", "audio"));
+  EXPECT_FALSE(ProcessFrames("0|-10K", ""));
+}
+
+TEST_P(FrameProcessorTest,
+       Dts_AfterTimestampOffsetApplied_kMaxDecodeTimestamp_Fails) {
+  InSequence s;
+
+  AddTestTracks(HAS_AUDIO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  SetTimestampOffset(kInfiniteDuration - Milliseconds(5));
+  EXPECT_MEDIA_LOG(FrameTimeOutOfRange("After adjusting by timestampOffset",
+                                       "DTS", "audio"));
+  EXPECT_FALSE(ProcessFrames("0|10K", ""));
+}
+
+TEST_P(FrameProcessorTest, FrameEndTimestamp_kInfiniteDuration_Fails) {
+  InSequence s;
+
+  AddTestTracks(HAS_AUDIO);
+  frame_processor_->SetSequenceMode(use_sequence_mode_);
+
+  frame_duration_ = Milliseconds(10);
+  SetTimestampOffset(kInfiniteDuration - Milliseconds(5));
+  EXPECT_MEDIA_LOG(FrameEndTimestampOutOfRange("audio"));
+  EXPECT_FALSE(ProcessFrames("0|0K", ""));
 }
 
 INSTANTIATE_TEST_SUITE_P(SequenceMode, FrameProcessorTest, Values(true));

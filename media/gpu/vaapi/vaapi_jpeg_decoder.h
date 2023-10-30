@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,15 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "media/gpu/vaapi/vaapi_image_decoder.h"
 
 namespace media {
+namespace fuzzing {
+class VaapiJpegDecoderWrapper;
+}  // namespace fuzzing
 
 struct JpegFrameHeader;
+struct JpegParseResult;
 class ScopedVAImage;
 
 // Returns the internal format required for a JPEG image given its parsed
@@ -25,10 +28,15 @@ unsigned int VaSurfaceFormatForJpeg(const JpegFrameHeader& frame_header);
 class VaapiJpegDecoder : public VaapiImageDecoder {
  public:
   VaapiJpegDecoder();
+
+  VaapiJpegDecoder(const VaapiJpegDecoder&) = delete;
+  VaapiJpegDecoder& operator=(const VaapiJpegDecoder&) = delete;
+
   ~VaapiJpegDecoder() override;
 
   // VaapiImageDecoder implementation.
   gpu::ImageDecodeAcceleratorType GetType() const override;
+  SkYUVColorSpace GetYUVColorSpace() const override;
 
   // Get the decoded data from the last Decode() call as a ScopedVAImage. The
   // VAImage's format will be either |preferred_image_fourcc| if the conversion
@@ -39,11 +47,20 @@ class VaapiJpegDecoder : public VaapiImageDecoder {
                                           VaapiImageDecodeStatus* status);
 
  private:
+  friend class fuzzing::VaapiJpegDecoderWrapper;
+
   // VaapiImageDecoder implementation.
   VaapiImageDecodeStatus AllocateVASurfaceAndSubmitVABuffers(
       base::span<const uint8_t> encoded_image) override;
 
-  DISALLOW_COPY_AND_ASSIGN(VaapiJpegDecoder);
+  // AllocateVASurfaceAndSubmitVABuffers() is implemented by calling the
+  // following methods. They are here so that a fuzzer can inject (almost)
+  // arbitrary data into libva by skipping the parsing and image support checks
+  // in AllocateVASurfaceAndSubmitVABuffers().
+  bool MaybeCreateSurface(unsigned int picture_va_rt_format,
+                          const gfx::Size& new_coded_size,
+                          const gfx::Size& new_visible_size);
+  bool SubmitBuffers(const JpegParseResult& parse_result);
 };
 
 }  // namespace media

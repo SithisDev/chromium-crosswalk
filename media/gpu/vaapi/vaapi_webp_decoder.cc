@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,9 +45,11 @@ static bool IsVaapiSupportedWebP(const Vp8FrameHeader& webp_header) {
   }
 
   gfx::Size min_webp_resolution;
-  if (!VaapiWrapper::GetDecodeMinResolution(kWebPVAProfile,
-                                            &min_webp_resolution)) {
-    DLOG(ERROR) << "Could not get the minimum resolution";
+  gfx::Size max_webp_resolution;
+  if (!VaapiWrapper::GetSupportedResolutions(
+          kWebPVAProfile, VaapiWrapper::CodecMode::kDecode, min_webp_resolution,
+          max_webp_resolution)) {
+    DLOG(ERROR) << "Could not get the minimum and maximum resolutions";
     return false;
   }
   if (webp_size.width() < min_webp_resolution.width() ||
@@ -55,13 +57,6 @@ static bool IsVaapiSupportedWebP(const Vp8FrameHeader& webp_header) {
     DLOG(ERROR) << "VAAPI doesn't support size " << webp_size.ToString()
                 << ": under minimum resolution "
                 << min_webp_resolution.ToString();
-    return false;
-  }
-
-  gfx::Size max_webp_resolution;
-  if (!VaapiWrapper::GetDecodeMaxResolution(kWebPVAProfile,
-                                            &max_webp_resolution)) {
-    DLOG(ERROR) << "Could not get the maximum resolution";
     return false;
   }
   if (webp_size.width() > max_webp_resolution.width() ||
@@ -82,6 +77,10 @@ VaapiWebPDecoder::~VaapiWebPDecoder() = default;
 
 gpu::ImageDecodeAcceleratorType VaapiWebPDecoder::GetType() const {
   return gpu::ImageDecodeAcceleratorType::kWebP;
+}
+
+SkYUVColorSpace VaapiWebPDecoder::GetYUVColorSpace() const {
+  return SkYUVColorSpace::kRec601_SkYUVColorSpace;
 }
 
 VaapiImageDecodeStatus VaapiWebPDecoder::AllocateVASurfaceAndSubmitVABuffers(
@@ -106,24 +105,37 @@ VaapiImageDecodeStatus VaapiWebPDecoder::AllocateVASurfaceAndSubmitVABuffers(
   if (!scoped_va_context_and_surface_ ||
       new_visible_size != scoped_va_context_and_surface_->size()) {
     scoped_va_context_and_surface_.reset();
-    scoped_va_context_and_surface_ = ScopedVAContextAndSurface(
-        vaapi_wrapper_
-            ->CreateContextAndScopedVASurface(kWebPVARtFormat, new_visible_size)
-            .release());
-    if (!scoped_va_context_and_surface_) {
+    auto scoped_va_surfaces = vaapi_wrapper_->CreateContextAndScopedVASurfaces(
+        kWebPVARtFormat, new_visible_size,
+        {VaapiWrapper::SurfaceUsageHint::kGeneric}, 1u,
+        /*visible_size=*/absl::nullopt);
+    if (scoped_va_surfaces.empty()) {
       VLOGF(1) << "CreateContextAndScopedVASurface() failed";
       return VaapiImageDecodeStatus::kSurfaceCreationFailed;
     }
+
+    scoped_va_context_and_surface_ =
+        ScopedVAContextAndSurface(scoped_va_surfaces[0].release());
     DCHECK(scoped_va_context_and_surface_->IsValid());
   }
+  DCHECK_NE(scoped_va_context_and_surface_->id(), VA_INVALID_SURFACE);
 
-  if (!FillVP8DataStructures(vaapi_wrapper_,
-                             scoped_va_context_and_surface_->id(),
-                             *parse_result, Vp8ReferenceFrameVector())) {
-    return VaapiImageDecodeStatus::kSubmitVABuffersFailed;
-  }
+  VAIQMatrixBufferVP8 iq_matrix_buf{};
+  VAProbabilityDataBufferVP8 prob_buf{};
+  VAPictureParameterBufferVP8 pic_param{};
+  VASliceParameterBufferVP8 slice_param{};
+  FillVP8DataStructures(*parse_result, Vp8ReferenceFrameVector(),
+                        &iq_matrix_buf, &prob_buf, &pic_param, &slice_param);
 
-  return VaapiImageDecodeStatus::kSuccess;
+  const bool success = vaapi_wrapper_->SubmitBuffers(
+      {{VAIQMatrixBufferType, sizeof(iq_matrix_buf), &iq_matrix_buf},
+       {VAProbabilityBufferType, sizeof(prob_buf), &prob_buf},
+       {VAPictureParameterBufferType, sizeof(pic_param), &pic_param},
+       {VASliceParameterBufferType, sizeof(slice_param), &slice_param},
+       {VASliceDataBufferType, parse_result->frame_size, parse_result->data}});
+
+  return success ? VaapiImageDecodeStatus::kSuccess
+                 : VaapiImageDecodeStatus::kSubmitVABuffersFailed;
 }
 
 }  // namespace media

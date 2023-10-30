@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,8 @@
 #include <stdint.h>
 
 #include <memory>
-#include <string>
 #include <vector>
 
-#include "base/containers/flat_map.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "media/base/android/media_codec_bridge.h"
@@ -35,6 +33,9 @@ using CodecSurfacePair = std::pair<std::unique_ptr<MediaCodecBridge>,
 // soon as we know we no longer need them.
 class MEDIA_GPU_EXPORT CodecOutputBuffer {
  public:
+  CodecOutputBuffer(const CodecOutputBuffer&) = delete;
+  CodecOutputBuffer& operator=(const CodecOutputBuffer&) = delete;
+
   // Releases the buffer without rendering it.
   ~CodecOutputBuffer();
 
@@ -43,6 +44,15 @@ class MEDIA_GPU_EXPORT CodecOutputBuffer {
 
   // The size of the image.
   gfx::Size size() const { return size_; }
+
+  // Sets a callback that will be called when we're released to the surface.
+  // Will not be called if we're dropped.
+  void set_render_cb(base::OnceClosure render_cb) {
+    render_cb_ = std::move(render_cb);
+  }
+
+  // Color space of the image.
+  const gfx::ColorSpace& color_space() const { return color_space_; }
 
   // Note that you can't use the first ctor, since CodecWrapperImpl isn't
   // defined here.  Use the second, and it'll be nullptr.
@@ -58,16 +68,20 @@ class MEDIA_GPU_EXPORT CodecOutputBuffer {
   friend class CodecWrapperImpl;
   CodecOutputBuffer(scoped_refptr<CodecWrapperImpl> codec,
                     int64_t id,
-                    const gfx::Size& size);
+                    const gfx::Size& size,
+                    const gfx::ColorSpace& color_space);
 
   // For testing, since CodecWrapperImpl isn't available.  Uses nullptr.
-  CodecOutputBuffer(int64_t id, const gfx::Size& size);
+  CodecOutputBuffer(int64_t id,
+                    const gfx::Size& size,
+                    const gfx::ColorSpace& color_space);
 
   scoped_refptr<CodecWrapperImpl> codec_;
   int64_t id_;
   bool was_rendered_ = false;
   gfx::Size size_;
-  DISALLOW_COPY_AND_ASSIGN(CodecOutputBuffer);
+  base::OnceClosure render_cb_;
+  gfx::ColorSpace color_space_;
 };
 
 // This wraps a MediaCodecBridge and provides higher level features and tracks
@@ -84,7 +98,7 @@ class MEDIA_GPU_EXPORT CodecWrapper {
   // thread.
   //
   // OutputReleasedCB will be called with a bool indicating if CodecWrapper is
-  // currently draining or in the drained state.
+  // currently draining, is drained, or has run out of output buffers.
   //
   // If not null, then we will only release codec buffers without rendering
   // on |release_task_runner|, posting if needed.  This does not change where
@@ -93,7 +107,12 @@ class MEDIA_GPU_EXPORT CodecWrapper {
   using OutputReleasedCB = base::RepeatingCallback<void(bool)>;
   CodecWrapper(CodecSurfacePair codec_surface_pair,
                OutputReleasedCB output_buffer_release_cb,
-               scoped_refptr<base::SequencedTaskRunner> release_task_runner);
+               scoped_refptr<base::SequencedTaskRunner> release_task_runner,
+               const gfx::Size& initial_expected_size);
+
+  CodecWrapper(const CodecWrapper&) = delete;
+  CodecWrapper& operator=(const CodecWrapper&) = delete;
+
   ~CodecWrapper();
 
   // Takes the backing codec and surface, implicitly discarding all outstanding
@@ -116,9 +135,6 @@ class MEDIA_GPU_EXPORT CodecWrapper {
   // Releases all dequeued output buffers back to the codec without rendering.
   void DiscardOutputBuffers();
 
-  // Whether the codec supports Flush().
-  bool SupportsFlush(DeviceInfo* device_info) const;
-
   // Flushes the codec and discards all output buffers.
   bool Flush();
 
@@ -131,8 +147,7 @@ class MEDIA_GPU_EXPORT CodecWrapper {
 
   // Queues |buffer| if the codec has an available input buffer.
   enum class QueueStatus { kOk, kError, kTryAgainLater, kNoKey };
-  QueueStatus QueueInputBuffer(const DecoderBuffer& buffer,
-                               const EncryptionScheme& encryption_scheme);
+  QueueStatus QueueInputBuffer(const DecoderBuffer& buffer);
 
   // Like MediaCodecBridge::DequeueOutputBuffer() but it outputs a
   // CodecOutputBuffer instead of an index. |*codec_buffer| must be null.
@@ -149,7 +164,6 @@ class MEDIA_GPU_EXPORT CodecWrapper {
 
  private:
   scoped_refptr<CodecWrapperImpl> impl_;
-  DISALLOW_COPY_AND_ASSIGN(CodecWrapper);
 };
 
 }  // namespace media

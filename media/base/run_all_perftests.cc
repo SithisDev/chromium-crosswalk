@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,6 +33,6 @@ int main(int argc, char** argv) {
   // perf measurements with randomness resulting from running
   // in parallel.
   return base::LaunchUnitTestsSerially(
-      argc, argv, base::Bind(&TestSuiteNoAtExit::Run,
-                             base::Unretained(&test_suite)));
+      argc, argv,
+      base::BindOnce(&TestSuiteNoAtExit::Run, base::Unretained(&test_suite)));
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,15 @@
 #include <string.h>
 
 #include <memory>
+#include <type_traits>
 
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
+#include "base/notreached.h"
+#include "base/synchronization/waitable_event.h"
+#include "build/branding_buildflags.h"
 #include "media/audio/audio_device_description.h"
 #include "media/base/audio_timestamp_helper.h"
 
@@ -30,10 +34,12 @@ namespace pulse {
 
 namespace {
 
-#if defined(GOOGLE_CHROME_BUILD)
-static const char kBrowserDisplayName[] = "google-chrome";
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+constexpr char kBrowserDisplayName[] = "google-chrome";
+#define PRODUCT_STRING "Google Chrome"
 #else
-static const char kBrowserDisplayName[] = "chromium-browser";
+constexpr char kBrowserDisplayName[] = "chromium-browser";
+#define PRODUCT_STRING "Chromium"
 #endif
 
 #if defined(DLOPEN_PULSEAUDIO)
@@ -47,7 +53,7 @@ void DestroyMainloop(pa_threaded_mainloop* mainloop) {
 }
 
 void DestroyContext(pa_context* context) {
-  pa_context_set_state_callback(context, NULL, NULL);
+  pa_context_set_state_callback(context, nullptr, nullptr);
   pa_context_disconnect(context);
   pa_context_unref(context);
 }
@@ -87,20 +93,23 @@ pa_channel_position ChromiumToPAChannelPosition(Channels channel) {
 class ScopedPropertyList {
  public:
   ScopedPropertyList() : property_list_(pa_proplist_new()) {}
-  ~ScopedPropertyList() { pa_proplist_free(property_list_); }
 
-  pa_proplist* get() const { return property_list_; }
+  ScopedPropertyList(const ScopedPropertyList&) = delete;
+  ScopedPropertyList& operator=(const ScopedPropertyList&) = delete;
+
+  pa_proplist* get() const { return property_list_.get(); }
 
  private:
-  pa_proplist* property_list_;
-  DISALLOW_COPY_AND_ASSIGN(ScopedPropertyList);
+  using deleter =
+      std::integral_constant<decltype(pa_proplist_free)*, pa_proplist_free>;
+  std::unique_ptr<pa_proplist, deleter> property_list_;
 };
 
 struct InputBusData {
   InputBusData(pa_threaded_mainloop* loop, const std::string& name)
       : loop_(loop), name_(name), bus_() {}
 
-  pa_threaded_mainloop* const loop_;
+  const raw_ptr<pa_threaded_mainloop> loop_;
   const std::string& name_;
   std::string bus_;
 };
@@ -109,7 +118,7 @@ struct OutputBusData {
   OutputBusData(pa_threaded_mainloop* loop, const std::string& bus)
       : loop_(loop), name_(), bus_(bus) {}
 
-  pa_threaded_mainloop* const loop_;
+  const raw_ptr<pa_threaded_mainloop> loop_;
   std::string name_;
   const std::string& bus_;
 };
@@ -127,8 +136,8 @@ void InputBusCallback(pa_context* context,
   }
 
   if (strcmp(info->name, data->name_.c_str()) == 0 &&
-      pa_proplist_contains(info->proplist, PA_PROP_DEVICE_BUS)) {
-    data->bus_ = pa_proplist_gets(info->proplist, PA_PROP_DEVICE_BUS);
+      pa_proplist_contains(info->proplist, PA_PROP_DEVICE_BUS_PATH)) {
+    data->bus_ = pa_proplist_gets(info->proplist, PA_PROP_DEVICE_BUS_PATH);
   }
 }
 
@@ -144,8 +153,8 @@ void OutputBusCallback(pa_context* context,
     return;
   }
 
-  if (pa_proplist_contains(info->proplist, PA_PROP_DEVICE_BUS) &&
-      strcmp(pa_proplist_gets(info->proplist, PA_PROP_DEVICE_BUS),
+  if (pa_proplist_contains(info->proplist, PA_PROP_DEVICE_BUS_PATH) &&
+      strcmp(pa_proplist_gets(info->proplist, PA_PROP_DEVICE_BUS_PATH),
              data->bus_.c_str()) == 0) {
     data->name_ = info->name;
   }
@@ -155,7 +164,7 @@ struct DefaultDevicesData {
   explicit DefaultDevicesData(pa_threaded_mainloop* loop) : loop_(loop) {}
   std::string input_;
   std::string output_;
-  pa_threaded_mainloop* const loop_;
+  const raw_ptr<pa_threaded_mainloop> loop_;
 };
 
 void GetDefaultDeviceIdCallback(pa_context* c,
@@ -169,13 +178,26 @@ void GetDefaultDeviceIdCallback(pa_context* c,
   pa_threaded_mainloop_signal(data->loop_, 0);
 }
 
+struct ContextStartupData {
+  raw_ptr<base::WaitableEvent> context_wait;
+  raw_ptr<pa_threaded_mainloop> pa_mainloop;
+};
+
+void SignalReadyOrErrorStateCallback(pa_context* context, void* context_data) {
+  auto context_state = pa_context_get_state(context);
+  auto* data = static_cast<ContextStartupData*>(context_data);
+  if (!PA_CONTEXT_IS_GOOD(context_state) || context_state == PA_CONTEXT_READY)
+    data->context_wait->Signal();
+  pa_threaded_mainloop_signal(data->pa_mainloop, 0);
+}
+
 }  // namespace
 
 bool InitPulse(pa_threaded_mainloop** mainloop, pa_context** context) {
 #if defined(DLOPEN_PULSEAUDIO)
   StubPathMap paths;
 
-  // Check if the pulse library is avialbale.
+  // Check if the pulse library is available.
   paths[kModulePulse].push_back(kPulseLib);
   if (!InitializeStubs(paths)) {
     VLOG(1) << "Failed on loading the Pulse library and symbols";
@@ -193,19 +215,28 @@ bool InitPulse(pa_threaded_mainloop** mainloop, pa_context** context) {
     return false;
 
   pa_mainloop_api* pa_mainloop_api = pa_threaded_mainloop_get_api(pa_mainloop);
-  pa_context* pa_context = pa_context_new(pa_mainloop_api, "Chrome input");
+  pa_context* pa_context =
+      pa_context_new(pa_mainloop_api, PRODUCT_STRING " input");
   if (!pa_context) {
     pa_threaded_mainloop_free(pa_mainloop);
     return false;
   }
 
-  pa_context_set_state_callback(pa_context, &pulse::ContextStateCallback,
-                                pa_mainloop);
-  if (pa_context_connect(pa_context, NULL, PA_CONTEXT_NOAUTOSPAWN, NULL)) {
+  // We can't rely on pa_threaded_mainloop_wait() for PulseAudio startup since
+  // it can hang indefinitely. Instead we use a WaitableEvent to time out the
+  // startup process if it takes too long.
+  base::WaitableEvent context_wait;
+  ContextStartupData data = {&context_wait, pa_mainloop};
+
+  pa_context_set_state_callback(pa_context, &SignalReadyOrErrorStateCallback,
+                                &data);
+
+  if (pa_context_connect(pa_context, nullptr, PA_CONTEXT_NOAUTOSPAWN,
+                         nullptr)) {
     VLOG(1) << "Failed to connect to the context.  Error: "
             << pa_strerror(pa_context_errno(pa_context));
-    pa_context_set_state_callback(pa_context, NULL, NULL);
-    pa_context_unref(pa_context);
+    DestroyContext(pa_context);
+    data = {nullptr, nullptr};
     pa_threaded_mainloop_free(pa_mainloop);
     return false;
   }
@@ -216,26 +247,46 @@ bool InitPulse(pa_threaded_mainloop** mainloop, pa_context** context) {
 
   // Start the threaded mainloop after everything has been configured.
   if (pa_threaded_mainloop_start(pa_mainloop)) {
+    DestroyContext(pa_context);
     mainloop_lock.reset();
+    data = {nullptr, nullptr};
     DestroyMainloop(pa_mainloop);
     return false;
   }
 
-  // Wait until |pa_context| is ready.  pa_threaded_mainloop_wait() must be
-  // called after pa_context_get_state() in case the context is already ready,
-  // otherwise pa_threaded_mainloop_wait() will hang indefinitely.
-  while (true) {
-    pa_context_state_t context_state = pa_context_get_state(pa_context);
-    if (!PA_CONTEXT_IS_GOOD(context_state)) {
-      DestroyContext(pa_context);
-      mainloop_lock.reset();
-      DestroyMainloop(pa_mainloop);
-      return false;
-    }
-    if (context_state == PA_CONTEXT_READY)
-      break;
-    pa_threaded_mainloop_wait(pa_mainloop);
+  // Don't hold the mainloop lock while waiting for the context to become ready,
+  // or we'll never complete since PulseAudio can't continue working.
+  mainloop_lock.reset();
+
+  // Wait for up to 5 seconds for pa_context to become ready. We'll be signaled
+  // by the SignalReadyOrErrorStateCallback that we setup above.
+  //
+  // We've chosen a timeout value of 5 seconds because this can be executed at
+  // browser startup (other times it's during audio process startup). In the
+  // normal case, this should only take ~50ms, but we've seen some test bots
+  // hang indefinitely when the pulse daemon can't be started.
+  constexpr base::TimeDelta kStartupTimeout = base::Seconds(5);
+  const bool was_signaled = context_wait.TimedWait(kStartupTimeout);
+
+  // Require the mainloop lock before checking the context state.
+  mainloop_lock = std::make_unique<AutoPulseLock>(pa_mainloop);
+
+  auto context_state = pa_context_get_state(pa_context);
+  if (context_state != PA_CONTEXT_READY) {
+    if (!was_signaled)
+      VLOG(1) << "Timed out trying to connect to PulseAudio.";
+    else
+      VLOG(1) << "Failed to connect to PulseAudio: " << context_state;
+    DestroyContext(pa_context);
+    mainloop_lock.reset();
+    data = {nullptr, nullptr};
+    DestroyMainloop(pa_mainloop);
+    return false;
   }
+
+  // Replace our function local state callback with a global appropriate one.
+  pa_context_set_state_callback(pa_context, &pulse::ContextStateCallback,
+                                pa_mainloop);
 
   *mainloop = pa_mainloop;
   *context = pa_context;
@@ -291,17 +342,43 @@ pa_channel_map ChannelLayoutToPAChannelMap(ChannelLayout channel_layout) {
   return channel_map;
 }
 
-void WaitForOperationCompletion(pa_threaded_mainloop* pa_mainloop,
-                                pa_operation* operation) {
+bool WaitForOperationCompletion(pa_threaded_mainloop* mainloop,
+                                pa_operation* operation,
+                                pa_context* optional_context,
+                                pa_stream* optional_stream) {
   if (!operation) {
-    DLOG(WARNING) << "Operation is NULL";
-    return;
+    LOG(ERROR) << "pa_operation is nullptr.";
+    return false;
   }
 
-  while (pa_operation_get_state(operation) == PA_OPERATION_RUNNING)
-    pa_threaded_mainloop_wait(pa_mainloop);
+  while (pa_operation_get_state(operation) == PA_OPERATION_RUNNING) {
+    if (optional_context) {
+      pa_context_state_t context_state = pa_context_get_state(optional_context);
+      if (!PA_CONTEXT_IS_GOOD(context_state)) {
+        LOG(ERROR) << "pa_context went bad while waiting: state="
+                   << context_state << ", error="
+                   << pa_strerror(pa_context_errno(optional_context));
+        pa_operation_cancel(operation);
+        pa_operation_unref(operation);
+        return false;
+      }
+    }
+
+    if (optional_stream) {
+      pa_stream_state_t stream_state = pa_stream_get_state(optional_stream);
+      if (!PA_STREAM_IS_GOOD(stream_state)) {
+        LOG(ERROR) << "pa_stream went bad while waiting: " << stream_state;
+        pa_operation_cancel(operation);
+        pa_operation_unref(operation);
+        return false;
+      }
+    }
+
+    pa_threaded_mainloop_wait(mainloop);
+  }
 
   pa_operation_unref(operation);
+  return true;
 }
 
 base::TimeDelta GetHardwareLatency(pa_stream* stream) {
@@ -314,7 +391,7 @@ base::TimeDelta GetHardwareLatency(pa_stream* stream) {
   if (negative)
     return base::TimeDelta();
 
-  return base::TimeDelta::FromMicroseconds(latency_micros);
+  return base::Microseconds(latency_micros);
 }
 
 // Helper macro for CreateInput/OutputStream() to avoid code spam and
@@ -350,8 +427,8 @@ bool CreateInputStream(pa_threaded_mainloop* mainloop,
   // Get channel mapping and open recording stream.
   pa_channel_map source_channel_map = ChannelLayoutToPAChannelMap(
       params.channel_layout());
-  pa_channel_map* map = (source_channel_map.channels != 0) ?
-      &source_channel_map : NULL;
+  pa_channel_map* map =
+      (source_channel_map.channels != 0) ? &source_channel_map : nullptr;
 
   // Create a new recording stream and
   // tells PulseAudio what the stream icon should be.
@@ -381,9 +458,10 @@ bool CreateInputStream(pa_threaded_mainloop* mainloop,
               PA_STREAM_START_CORKED;
   RETURN_ON_FAILURE(
       pa_stream_connect_record(
-          *stream, device_id == AudioDeviceDescription::kDefaultDeviceId
-                       ? NULL
-                       : device_id.c_str(),
+          *stream,
+          device_id == AudioDeviceDescription::kDefaultDeviceId
+              ? nullptr
+              : device_id.c_str(),
           &buffer_attributes, static_cast<pa_stream_flags_t>(flags)) == 0,
       "pa_stream_connect_record FAILED ");
 
@@ -416,8 +494,8 @@ bool CreateOutputStream(pa_threaded_mainloop** mainloop,
   RETURN_ON_FAILURE(*mainloop, "Failed to create PulseAudio main loop.");
 
   pa_mainloop_api* pa_mainloop_api = pa_threaded_mainloop_get_api(*mainloop);
-  *context = pa_context_new(pa_mainloop_api,
-                            app_name.empty() ? "Chromium" : app_name.c_str());
+  *context = pa_context_new(
+      pa_mainloop_api, app_name.empty() ? PRODUCT_STRING : app_name.c_str());
   RETURN_ON_FAILURE(*context, "Failed to create PulseAudio context.");
 
   // A state callback must be set before calling pa_threaded_mainloop_lock() or
@@ -430,9 +508,9 @@ bool CreateOutputStream(pa_threaded_mainloop** mainloop,
 
   RETURN_ON_FAILURE(pa_threaded_mainloop_start(*mainloop) == 0,
                     "Failed to start PulseAudio main loop.");
-  RETURN_ON_FAILURE(
-      pa_context_connect(*context, NULL, PA_CONTEXT_NOAUTOSPAWN, NULL) == 0,
-      "Failed to connect PulseAudio context.");
+  RETURN_ON_FAILURE(pa_context_connect(*context, nullptr,
+                                       PA_CONTEXT_NOAUTOSPAWN, nullptr) == 0,
+                    "Failed to connect PulseAudio context.");
 
   // Wait until |pa_context_| is ready.  pa_threaded_mainloop_wait() must be
   // called after pa_context_get_state() in case the context is already ready,
@@ -453,12 +531,12 @@ bool CreateOutputStream(pa_threaded_mainloop** mainloop,
   sample_specifications.channels = params.channels();
 
   // Get channel mapping.
-  pa_channel_map* map = NULL;
+  pa_channel_map* map = nullptr;
   pa_channel_map source_channel_map = ChannelLayoutToPAChannelMap(
       params.channel_layout());
   if (source_channel_map.channels != 0) {
     // The source data uses a supported channel map so we will use it rather
-    // than the default channel map (NULL).
+    // than the default channel map (nullptr).
     map = &source_channel_map;
   }
 
@@ -500,15 +578,16 @@ bool CreateOutputStream(pa_threaded_mainloop** mainloop,
   // and error.
   RETURN_ON_FAILURE(
       pa_stream_connect_playback(
-          *stream, device_id == AudioDeviceDescription::kDefaultDeviceId
-                       ? NULL
-                       : device_id.c_str(),
+          *stream,
+          device_id == AudioDeviceDescription::kDefaultDeviceId
+              ? nullptr
+              : device_id.c_str(),
           &pa_buffer_attributes,
           static_cast<pa_stream_flags_t>(
               PA_STREAM_INTERPOLATE_TIMING | PA_STREAM_ADJUST_LATENCY |
               PA_STREAM_AUTO_TIMING_UPDATE | PA_STREAM_NOT_MONOTONIC |
               PA_STREAM_START_CORKED),
-          NULL, NULL) == 0,
+          nullptr, nullptr) == 0,
       "pa_stream_connect_playback FAILED ");
 
   // Wait for the stream to be ready.
@@ -533,7 +612,7 @@ std::string GetBusOfInput(pa_threaded_mainloop* mainloop,
   InputBusData data(mainloop, name);
   pa_operation* operation =
       pa_context_get_source_info_list(context, InputBusCallback, &data);
-  WaitForOperationCompletion(mainloop, operation);
+  WaitForOperationCompletion(mainloop, operation, context);
   return data.bus_;
 }
 
@@ -546,7 +625,7 @@ std::string GetOutputCorrespondingTo(pa_threaded_mainloop* mainloop,
   OutputBusData data(mainloop, bus);
   pa_operation* operation =
       pa_context_get_sink_info_list(context, OutputBusCallback, &data);
-  WaitForOperationCompletion(mainloop, operation);
+  WaitForOperationCompletion(mainloop, operation, context);
   return data.name_;
 }
 
@@ -559,7 +638,7 @@ std::string GetRealDefaultDeviceId(pa_threaded_mainloop* mainloop,
   DefaultDevicesData data(mainloop);
   pa_operation* operation =
       pa_context_get_server_info(context, &GetDefaultDeviceIdCallback, &data);
-  WaitForOperationCompletion(mainloop, operation);
+  WaitForOperationCompletion(mainloop, operation, context);
   return (type == RequestType::INPUT) ? data.input_ : data.output_;
 }
 

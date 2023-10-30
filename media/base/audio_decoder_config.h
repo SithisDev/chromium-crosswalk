@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/time/time.h"
 #include "media/base/audio_codecs.h"
 #include "media/base/channel_layout.h"
@@ -35,7 +34,7 @@ class MEDIA_EXPORT AudioDecoderConfig {
                      ChannelLayout channel_layout,
                      int samples_per_second,
                      const std::vector<uint8_t>& extra_data,
-                     const EncryptionScheme& encryption_scheme);
+                     EncryptionScheme encryption_scheme);
 
   AudioDecoderConfig(const AudioDecoderConfig& other);
 
@@ -47,7 +46,7 @@ class MEDIA_EXPORT AudioDecoderConfig {
                   ChannelLayout channel_layout,
                   int samples_per_second,
                   const std::vector<uint8_t>& extra_data,
-                  const EncryptionScheme& encryption_scheme,
+                  EncryptionScheme encryption_scheme,
                   base::TimeDelta seek_preroll,
                   int codec_delay);
 
@@ -77,27 +76,31 @@ class MEDIA_EXPORT AudioDecoderConfig {
   int codec_delay() const { return codec_delay_; }
 
   // Optional byte data required to initialize audio decoders such as Vorbis
-  // codebooks.
+  // codebooks or AAC AudioSpecificConfig.
   const std::vector<uint8_t>& extra_data() const { return extra_data_; }
 
   // Whether the audio stream is potentially encrypted.
   // Note that in a potentially encrypted audio stream, individual buffers
   // can be encrypted or not encrypted.
-  bool is_encrypted() const { return encryption_scheme_.is_encrypted(); }
+  bool is_encrypted() const {
+    return encryption_scheme_ != EncryptionScheme::kUnencrypted;
+  }
 
   // Encryption scheme used for encrypted buffers.
-  const EncryptionScheme& encryption_scheme() const {
-    return encryption_scheme_;
-  }
+  EncryptionScheme encryption_scheme() const { return encryption_scheme_; }
 
   // Sets the config to be encrypted or not encrypted manually. This can be
   // useful for decryptors that decrypts an encrypted stream to a clear stream.
   void SetIsEncrypted(bool is_encrypted);
 
+  // Optionally set if the AudioCodec has a profile which may preclude certain
+  // decoders from having support.
+  void set_profile(AudioCodecProfile profile) { profile_ = profile; }
+  AudioCodecProfile profile() const { return profile_; }
+
   bool should_discard_decoder_delay() const {
     return should_discard_decoder_delay_;
   }
-
   void disable_discard_decoder_delay() {
     should_discard_decoder_delay_ = false;
   }
@@ -112,34 +115,72 @@ class MEDIA_EXPORT AudioDecoderConfig {
     return target_output_channel_layout_;
   }
 
- private:
-  AudioCodec codec_ = kUnknownAudioCodec;
-  SampleFormat sample_format_ = kUnknownSampleFormat;
-  int bytes_per_channel_ = 0;
-  int samples_per_second_ = 0;
-  int bytes_per_frame_ = 0;
-  std::vector<uint8_t> extra_data_;
-  EncryptionScheme encryption_scheme_;
+  // Optionally set by renderer to signal desired bitstream-passthru format.
+  void set_target_output_sample_format(SampleFormat sample_format) {
+    target_output_sample_format_ = sample_format;
+  }
+  SampleFormat target_output_sample_format() const {
+    return target_output_sample_format_;
+  }
 
-  // Layout and count of the *stream* being decoded.
+  void set_aac_extra_data(std::vector<uint8_t> aac_extra_data) {
+    aac_extra_data_ = std::move(aac_extra_data);
+  }
+  const std::vector<uint8_t>& aac_extra_data() const { return aac_extra_data_; }
+
+ private:
+  // WARNING: When modifying or adding any parameters, update the following:
+  // - AudioDecoderConfig::AsHumanReadableString()
+  // - AudioDecoderConfig::Matches()
+  // - media::mojom::AudioDecoderConfig
+  // - audio_decoder_config_mojom_traits.{h|cc}
+  // - audio_decoder_config_mojom_traits_unittest.cc
+
+  // Mandatory parameters passed in constructor:
+
+  AudioCodec codec_ = AudioCodec::kUnknown;
+  SampleFormat sample_format_ = kUnknownSampleFormat;
   ChannelLayout channel_layout_ = CHANNEL_LAYOUT_UNSUPPORTED;
-  int channels_ = 0;
+  int samples_per_second_ = 0;
+  std::vector<uint8_t> extra_data_;
+  EncryptionScheme encryption_scheme_ = EncryptionScheme::kUnencrypted;
+
+  // The duration of data that the decoder must decode before the decoded data
+  // is valid.
+  base::TimeDelta seek_preroll_;
+
+  // The number of frames the decoder should discard before returning decoded
+  // data. Can include both decoder delay and padding added during encoding.
+  int codec_delay_ = 0;
+
+  // Optional parameters that can be set later:
+
+  AudioCodecProfile profile_ = AudioCodecProfile::kUnknown;
 
   // Layout of the output hardware. Optionally set. See setter comments.
   ChannelLayout target_output_channel_layout_ = CHANNEL_LAYOUT_NONE;
 
-  // |seek_preroll_| is the duration of the data that the decoder must decode
-  // before the decoded data is valid.
-  base::TimeDelta seek_preroll_;
+  // Desired output format of bitstream. Optionally set. See setter comments.
+  SampleFormat target_output_sample_format_ = kUnknownSampleFormat;
 
-  // |codec_delay_| is the number of frames the decoder should discard before
-  // returning decoded data.  This value can include both decoder delay as well
-  // as padding added during encoding.
-  int codec_delay_ = 0;
+  // This is a hack for backward compatibility. For AAC, to preserve existing
+  // behavior, we set `aac_extra_data_` on all platforms but only set
+  // `extra_data` on Android.
+  // TODO(crbug.com/1250841): Remove this after we land a long term fix.
+  std::vector<uint8_t> aac_extra_data_;
 
   // Indicates if a decoder should implicitly discard decoder delay without it
   // being explicitly marked in discard padding.
   bool should_discard_decoder_delay_ = true;
+
+  // Derived values from mandatory and optional parameters above:
+
+  int bytes_per_channel_ = 0;
+  int bytes_per_frame_ = 0;
+
+  // Count of channels. By default derived from `channel_layout_`, but can also
+  // be manually set in `SetChannelsForDiscrete()`;
+  int channels_ = 0;
 
   // Not using DISALLOW_COPY_AND_ASSIGN here intentionally to allow the compiler
   // generated copy constructor and assignment operator. Since the extra data is

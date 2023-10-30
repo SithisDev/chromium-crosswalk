@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,20 +7,20 @@
 
 #include <string>
 
-#include "media/mojo/interfaces/media_types.mojom.h"
+#include "media/mojo/mojom/media_types.mojom.h"
 
 namespace media {
 
 mojom::PredictionFeatures MakeFeatures(VideoCodecProfile profile,
-                                       gfx::Size video_size,
-                                       int frames_per_sec,
-                                       std::string key_system = "",
+                                       const gfx::Size& video_size,
+                                       double frames_per_sec,
+                                       const std::string& key_system = "",
                                        bool use_hw_secure_codecs = false);
 
 mojom::PredictionFeaturesPtr MakeFeaturesPtr(VideoCodecProfile profile,
-                                             gfx::Size video_size,
-                                             int frames_per_sec,
-                                             std::string key_system = "",
+                                             const gfx::Size& video_size,
+                                             double frames_per_sec,
+                                             const std::string& key_system = "",
                                              bool use_hw_secure_codecs = false);
 
 mojom::PredictionTargets MakeTargets(uint32_t frames_decoded,

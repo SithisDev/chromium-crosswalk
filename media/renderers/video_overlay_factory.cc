@@ -1,9 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/renderers/video_overlay_factory.h"
 
+#include "base/logging.h"
 #include "base/time/time.h"
 #include "media/base/video_frame.h"
 #include "ui/gfx/geometry/size.h"

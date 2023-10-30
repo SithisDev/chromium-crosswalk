@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,9 @@
 
 #include <limits.h>
 
-#include "base/logging.h"
+#include <memory>
+
+#include "base/check_op.h"
 #include "media/base/bit_reader.h"
 
 namespace media {
@@ -17,7 +19,7 @@ Vp9RawBitsReader::~Vp9RawBitsReader() = default;
 
 void Vp9RawBitsReader::Initialize(const uint8_t* data, size_t size) {
   DCHECK(data);
-  reader_.reset(new BitReader(data, size));
+  reader_ = std::make_unique<BitReader>(data, size);
   valid_ = true;
 }
 

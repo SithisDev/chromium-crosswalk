@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,9 @@
 
 #include "base/at_exit.h"
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -24,7 +23,7 @@
 #include "media/filters/file_data_source.h"
 #include "media/media_buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "testing/perf/perf_test.h"
+#include "testing/perf/perf_result_reporter.h"
 
 namespace media {
 
@@ -33,6 +32,10 @@ static const int kBenchmarkIterations = 100;
 class DemuxerHostImpl : public media::DemuxerHost {
  public:
   DemuxerHostImpl() = default;
+
+  DemuxerHostImpl(const DemuxerHostImpl&) = delete;
+  DemuxerHostImpl& operator=(const DemuxerHostImpl&) = delete;
+
   ~DemuxerHostImpl() override = default;
 
   // DemuxerHost implementation.
@@ -40,15 +43,12 @@ class DemuxerHostImpl : public media::DemuxerHost {
       const Ranges<base::TimeDelta>& ranges) override {}
   void SetDuration(base::TimeDelta duration) override {}
   void OnDemuxerError(media::PipelineStatus error) override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DemuxerHostImpl);
 };
 
-static void QuitLoopWithStatus(base::Closure quit_cb,
+static void QuitLoopWithStatus(base::OnceClosure quit_cb,
                                media::PipelineStatus status) {
   CHECK_EQ(status, media::PIPELINE_OK);
-  quit_cb.Run();
+  std::move(quit_cb).Run();
 }
 
 static void OnEncryptedMediaInitData(EmeInitDataType init_data_type,
@@ -67,6 +67,10 @@ typedef std::vector<media::DemuxerStream*> Streams;
 class StreamReader {
  public:
   StreamReader(media::Demuxer* demuxer, bool enable_bitstream_converter);
+
+  StreamReader(const StreamReader&) = delete;
+  StreamReader& operator=(const StreamReader&) = delete;
+
   ~StreamReader();
 
   // Performs a single step read.
@@ -81,7 +85,7 @@ class StreamReader {
 
  private:
   void OnReadDone(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-                  const base::Closure& quit_when_idle_closure,
+                  base::OnceClosure quit_when_idle_closure,
                   bool* end_of_stream,
                   base::TimeDelta* timestamp,
                   media::DemuxerStream::Status status,
@@ -92,8 +96,6 @@ class StreamReader {
   std::vector<bool> end_of_stream_;
   std::vector<base::TimeDelta> last_read_timestamp_;
   std::vector<int> counts_;
-
-  DISALLOW_COPY_AND_ASSIGN(StreamReader);
 };
 
 StreamReader::StreamReader(media::Demuxer* demuxer,
@@ -117,10 +119,10 @@ void StreamReader::Read() {
   base::TimeDelta timestamp;
 
   base::RunLoop run_loop;
-  streams_[index]->Read(
-      base::Bind(&StreamReader::OnReadDone, base::Unretained(this),
-                 base::ThreadTaskRunnerHandle::Get(),
-                 run_loop.QuitWhenIdleClosure(), &end_of_stream, &timestamp));
+  streams_[index]->Read(base::BindOnce(
+      &StreamReader::OnReadDone, base::Unretained(this),
+      base::ThreadTaskRunnerHandle::Get(), run_loop.QuitWhenIdleClosure(),
+      &end_of_stream, &timestamp));
   run_loop.Run();
 
   CHECK(end_of_stream || timestamp != media::kNoTimestamp);
@@ -139,7 +141,7 @@ bool StreamReader::IsDone() {
 
 void StreamReader::OnReadDone(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    const base::Closure& quit_when_idle_closure,
+    base::OnceClosure quit_when_idle_closure,
     bool* end_of_stream,
     base::TimeDelta* timestamp,
     media::DemuxerStream::Status status,
@@ -148,7 +150,7 @@ void StreamReader::OnReadDone(
   CHECK(buffer);
   *end_of_stream = buffer->end_of_stream();
   *timestamp = *end_of_stream ? media::kNoTimestamp : buffer->timestamp();
-  task_runner->PostTask(FROM_HERE, quit_when_idle_closure);
+  task_runner->PostTask(FROM_HERE, std::move(quit_when_idle_closure));
 }
 
 int StreamReader::GetNextStreamIndexToRead() {
@@ -176,7 +178,7 @@ static void RunDemuxerBenchmark(const std::string& filename) {
   NullMediaLog media_log_;
   for (int i = 0; i < kBenchmarkIterations; ++i) {
     // Setup.
-    base::test::ScopedTaskEnvironment scoped_task_environment_;
+    base::test::TaskEnvironment task_environment_;
     DemuxerHostImpl demuxer_host;
     FileDataSource data_source;
     ASSERT_TRUE(data_source.Initialize(file_path));
@@ -184,15 +186,15 @@ static void RunDemuxerBenchmark(const std::string& filename) {
     Demuxer::EncryptedMediaInitDataCB encrypted_media_init_data_cb =
         base::BindRepeating(&OnEncryptedMediaInitData);
     Demuxer::MediaTracksUpdatedCB tracks_updated_cb =
-        base::Bind(&OnMediaTracksUpdated);
+        base::BindRepeating(&OnMediaTracksUpdated);
     FFmpegDemuxer demuxer(base::ThreadTaskRunnerHandle::Get(), &data_source,
                           encrypted_media_init_data_cb, tracks_updated_cb,
                           &media_log_, true);
 
     {
       base::RunLoop run_loop;
-      demuxer.Initialize(&demuxer_host, base::Bind(&QuitLoopWithStatus,
-                                                   run_loop.QuitClosure()));
+      demuxer.Initialize(&demuxer_host, base::BindOnce(&QuitLoopWithStatus,
+                                                       run_loop.QuitClosure()));
       run_loop.Run();
     }
 
@@ -207,9 +209,9 @@ static void RunDemuxerBenchmark(const std::string& filename) {
     base::RunLoop().RunUntilIdle();
   }
 
-  perf_test::PrintResult("demuxer_bench", "", filename,
-                         kBenchmarkIterations / total_time.InSecondsF(),
-                         "runs/s", true);
+  perf_test::PerfResultReporter reporter("demuxer_bench", filename);
+  reporter.RegisterImportantMetric("", "runs/s");
+  reporter.AddResult("", kBenchmarkIterations / total_time.InSecondsF());
 }
 
 class DemuxerPerfTest : public testing::TestWithParam<const char*> {};
@@ -228,7 +230,7 @@ static const char* kDemuxerTestFiles[] {
 // For simplicity we only test containers with above 2% daily usage as measured
 // by the Media.DetectedContainer histogram.
 INSTANTIATE_TEST_SUITE_P(
-    /* no prefix */,
+    All,
     DemuxerPerfTest,
     testing::ValuesIn(kDemuxerTestFiles));
 

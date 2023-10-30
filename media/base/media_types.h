@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,8 @@ struct MEDIA_EXPORT AudioType {
   static AudioType FromDecoderConfig(const AudioDecoderConfig& config);
 
   AudioCodec codec;
+  AudioCodecProfile profile;
+  bool spatial_rendering;
 };
 
 struct MEDIA_EXPORT VideoType {
@@ -31,6 +33,7 @@ struct MEDIA_EXPORT VideoType {
   VideoCodecProfile profile;
   int level;
   VideoColorSpace color_space;
+  gfx::HdrMetadataType hdr_metadata_type;
 };
 
 MEDIA_EXPORT bool operator==(const AudioType& x, const AudioType& y);

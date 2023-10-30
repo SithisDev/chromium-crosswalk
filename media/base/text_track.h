@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,10 +25,11 @@ class TextTrack {
                             const std::string& settings) = 0;
 };
 
-using AddTextTrackDoneCB = base::Callback<void(std::unique_ptr<TextTrack>)>;
+using AddTextTrackDoneCB = base::OnceCallback<void(std::unique_ptr<TextTrack>)>;
 
-using AddTextTrackCB = base::Callback<void(const TextTrackConfig& config,
-                                           const AddTextTrackDoneCB& done_cb)>;
+using AddTextTrackCB =
+    base::RepeatingCallback<void(const TextTrackConfig& config,
+                                 AddTextTrackDoneCB done_cb)>;
 
 }  // namespace media
 

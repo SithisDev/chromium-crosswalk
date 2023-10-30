@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "media/base/test_data_util.h"
 #include "media/filters/file_data_source.h"
@@ -41,6 +41,10 @@ void OnFrameExtracted(ExtractVideoFrameResult* result,
 class VideoFrameExtractorTest : public testing::Test {
  public:
   VideoFrameExtractorTest() {}
+
+  VideoFrameExtractorTest(const VideoFrameExtractorTest&) = delete;
+  VideoFrameExtractorTest& operator=(const VideoFrameExtractorTest&) = delete;
+
   ~VideoFrameExtractorTest() override {}
 
  protected:
@@ -65,12 +69,10 @@ class VideoFrameExtractorTest : public testing::Test {
   const base::FilePath& temp_dir() const { return temp_dir_.GetPath(); }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   base::ScopedTempDir temp_dir_;
   std::unique_ptr<FileDataSource> data_source_;
   std::unique_ptr<VideoFrameExtractor> extractor_;
-
-  DISALLOW_COPY_AND_ASSIGN(VideoFrameExtractorTest);
 };
 
 // Verifies the encoded video frame can be extracted correctly.
@@ -78,7 +80,7 @@ TEST_F(VideoFrameExtractorTest, ExtractVideoFrame) {
   auto result = ExtractFrame(GetTestDataFilePath("bear.mp4"));
   EXPECT_TRUE(result.success);
   EXPECT_GT(result.encoded_frame.size(), 0u);
-  EXPECT_EQ(result.decoder_config.codec(), VideoCodec::kCodecH264);
+  EXPECT_EQ(result.decoder_config.codec(), VideoCodec::kH264);
 }
 
 // Verifies graceful failure when trying to extract frame from an invalid video

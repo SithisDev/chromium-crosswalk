@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,9 +28,8 @@ namespace {
 
 bool HasSystemFeatureMidi() {
   // MIDI API was added at Android M.
-  auto sdk_version = base::android::BuildInfo::GetInstance()->sdk_int();
-  if (sdk_version < base::android::SDK_VERSION_MARSHMALLOW)
-    return false;
+  DCHECK_GE(base::android::BuildInfo::GetInstance()->sdk_int(),
+            base::android::SDK_VERSION_MARSHMALLOW);
 
   // Check if the MIDI service actually runs on the system.
   return Java_MidiManagerAndroid_hasSystemFeatureMidi(
@@ -118,7 +117,6 @@ void MidiManagerAndroid::OnReceivedData(MidiInputPortAndroid* port,
 
 void MidiManagerAndroid::OnInitialized(
     JNIEnv* env,
-    const JavaParamRef<jobject>& caller,
     const JavaParamRef<jobjectArray>& devices) {
   for (auto raw_device : devices.ReadElements<jobject>()) {
     AddDevice(std::make_unique<MidiDeviceAndroid>(env, raw_device, this));
@@ -129,9 +127,7 @@ void MidiManagerAndroid::OnInitialized(
                      base::Unretained(this), Result::OK));
 }
 
-void MidiManagerAndroid::OnInitializationFailed(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& caller) {
+void MidiManagerAndroid::OnInitializationFailed(JNIEnv* env) {
   service()->task_service()->PostBoundTask(
       TaskService::kDefaultRunnerId,
       base::BindOnce(&MidiManagerAndroid::CompleteInitialization,
@@ -139,13 +135,11 @@ void MidiManagerAndroid::OnInitializationFailed(
 }
 
 void MidiManagerAndroid::OnAttached(JNIEnv* env,
-                                    const JavaParamRef<jobject>& caller,
                                     const JavaParamRef<jobject>& raw_device) {
   AddDevice(std::make_unique<MidiDeviceAndroid>(env, raw_device, this));
 }
 
 void MidiManagerAndroid::OnDetached(JNIEnv* env,
-                                    const JavaParamRef<jobject>& caller,
                                     const JavaParamRef<jobject>& raw_device) {
   for (auto& device : devices_) {
     if (device->HasRawDevice(env, raw_device)) {

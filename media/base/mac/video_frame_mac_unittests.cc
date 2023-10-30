@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ namespace {
 const int kWidth = 64;
 const int kHeight = 48;
 const int kVisibleRectOffset = 8;
-const base::TimeDelta kTimestamp = base::TimeDelta::FromMicroseconds(1337);
+const base::TimeDelta kTimestamp = base::Microseconds(1337);
 
 struct FormatPair {
   VideoPixelFormat chrome;
@@ -94,9 +94,9 @@ TEST(VideoFrameMac, CheckLifetime) {
 
   int instances_destroyed = 0;
   auto wrapper_frame = VideoFrame::WrapVideoFrame(
-      *frame, frame->format(), frame->visible_rect(), frame->natural_size());
+      frame, frame->format(), frame->visible_rect(), frame->natural_size());
   wrapper_frame->AddDestructionObserver(
-      base::Bind(&Increment, &instances_destroyed));
+      base::BindOnce(&Increment, &instances_destroyed));
   ASSERT_TRUE(wrapper_frame.get());
 
   auto pb = WrapVideoFrameInCVPixelBuffer(*wrapper_frame);

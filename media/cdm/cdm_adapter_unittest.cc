@@ -1,19 +1,20 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/cdm/cdm_adapter.h"
 
 #include <stdint.h>
+
 #include <memory>
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/command_line.h"
-#include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "media/base/cdm_callback_promise.h"
 #include "media/base/cdm_key_information.h"
 #include "media/base/content_decryption_module.h"
@@ -124,10 +125,13 @@ class CdmAdapterTestBase : public testing::Test,
         base::NumberToString(GetCdmInterfaceVersion()));
   }
 
+  CdmAdapterTestBase(const CdmAdapterTestBase&) = delete;
+  CdmAdapterTestBase& operator=(const CdmAdapterTestBase&) = delete;
+
   ~CdmAdapterTestBase() override { CdmModule::ResetInstanceForTesting(); }
 
  protected:
-  virtual std::string GetKeySystemName() = 0;
+  virtual CdmConfig GetCdmConfig() = 0;
   virtual CdmAdapter::CreateCdmFunc GetCreateCdmFunc() = 0;
 
   int GetCdmInterfaceVersion() { return GetParam(); }
@@ -140,27 +144,25 @@ class CdmAdapterTestBase : public testing::Test,
     std::unique_ptr<StrictMock<MockCdmAuxiliaryHelper>> cdm_helper(
         new StrictMock<MockCdmAuxiliaryHelper>(std::move(allocator)));
     cdm_helper_ = cdm_helper.get();
-    CdmAdapter::Create(GetKeySystemName(),
-                       url::Origin::Create(GURL("http://foo.com")), cdm_config,
-                       GetCreateCdmFunc(), std::move(cdm_helper),
-                       base::Bind(&MockCdmClient::OnSessionMessage,
-                                  base::Unretained(&cdm_client_)),
-                       base::Bind(&MockCdmClient::OnSessionClosed,
-                                  base::Unretained(&cdm_client_)),
-                       base::Bind(&MockCdmClient::OnSessionKeysChange,
-                                  base::Unretained(&cdm_client_)),
-                       base::Bind(&MockCdmClient::OnSessionExpirationUpdate,
-                                  base::Unretained(&cdm_client_)),
-                       base::Bind(&CdmAdapterTestBase::OnCdmCreated,
-                                  base::Unretained(this), expected_result));
+    CdmAdapter::Create(
+        cdm_config, GetCreateCdmFunc(), std::move(cdm_helper),
+        base::BindRepeating(&MockCdmClient::OnSessionMessage,
+                            base::Unretained(&cdm_client_)),
+        base::BindRepeating(&MockCdmClient::OnSessionClosed,
+                            base::Unretained(&cdm_client_)),
+        base::BindRepeating(&MockCdmClient::OnSessionKeysChange,
+                            base::Unretained(&cdm_client_)),
+        base::BindRepeating(&MockCdmClient::OnSessionExpirationUpdate,
+                            base::Unretained(&cdm_client_)),
+        base::BindOnce(&CdmAdapterTestBase::OnCdmCreated,
+                       base::Unretained(this), expected_result));
     RunUntilIdle();
     ASSERT_EQ(expected_result == SUCCESS, !!cdm_);
   }
 
   void InitializeAndExpect(ExpectedResult expected_result) {
-    // Default settings of false are sufficient for most tests.
-    CdmConfig cdm_config;
-    InitializeWithCdmConfigAndExpect(cdm_config, expected_result);
+    // Default CdmConfig is sufficient for most tests.
+    InitializeWithCdmConfigAndExpect(GetCdmConfig(), expected_result);
   }
 
   void OnCdmCreated(ExpectedResult expected_result,
@@ -177,18 +179,15 @@ class CdmAdapterTestBase : public testing::Test,
     }
   }
 
-  void RunUntilIdle() { scoped_task_environment_.RunUntilIdle(); }
+  void RunUntilIdle() { task_environment_.RunUntilIdle(); }
 
   StrictMock<MockCdmClient> cdm_client_;
-  StrictMock<MockCdmAuxiliaryHelper>* cdm_helper_ = nullptr;
+  raw_ptr<StrictMock<MockCdmAuxiliaryHelper>> cdm_helper_ = nullptr;
 
   // Keep track of the loaded CDM.
   scoped_refptr<ContentDecryptionModule> cdm_;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CdmAdapterTestBase);
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 class CdmAdapterTestWithClearKeyCdm : public CdmAdapterTestBase {
@@ -210,7 +209,7 @@ class CdmAdapterTestWithClearKeyCdm : public CdmAdapterTestBase {
   }
 
   // CdmAdapterTestBase implementation.
-  std::string GetKeySystemName() override { return helper_.KeySystemName(); }
+  CdmConfig GetCdmConfig() override { return helper_.CdmConfig(); }
   CdmAdapter::CreateCdmFunc GetCreateCdmFunc() override {
     return CdmModule::GetInstance()->GetCreateCdmFunc();
   }
@@ -293,10 +292,10 @@ class CdmAdapterTestWithClearKeyCdm : public CdmAdapterTestBase {
     }
 
     std::unique_ptr<SimpleCdmPromise> promise(new CdmCallbackPromise<>(
-        base::Bind(&CdmAdapterTestWithClearKeyCdm::OnResolve,
-                   base::Unretained(this)),
-        base::Bind(&CdmAdapterTestWithClearKeyCdm::OnReject,
-                   base::Unretained(this))));
+        base::BindOnce(&CdmAdapterTestWithClearKeyCdm::OnResolve,
+                       base::Unretained(this)),
+        base::BindOnce(&CdmAdapterTestWithClearKeyCdm::OnReject,
+                       base::Unretained(this))));
     return promise;
   }
 
@@ -313,10 +312,10 @@ class CdmAdapterTestWithClearKeyCdm : public CdmAdapterTestBase {
 
     std::unique_ptr<NewSessionCdmPromise> promise(
         new CdmCallbackPromise<std::string>(
-            base::Bind(&CdmAdapterTestWithClearKeyCdm::OnResolveWithSession,
-                       base::Unretained(this)),
-            base::Bind(&CdmAdapterTestWithClearKeyCdm::OnReject,
-                       base::Unretained(this))));
+            base::BindOnce(&CdmAdapterTestWithClearKeyCdm::OnResolveWithSession,
+                           base::Unretained(this)),
+            base::BindOnce(&CdmAdapterTestWithClearKeyCdm::OnReject,
+                           base::Unretained(this))));
     return promise;
   }
 
@@ -339,7 +338,9 @@ class CdmAdapterTestWithMockCdm : public CdmAdapterTestBase {
   }
 
   // CdmAdapterTestBase implementation.
-  std::string GetKeySystemName() override { return "x-com.mock"; }
+  CdmConfig GetCdmConfig() override {
+    return {"x-com.mock", false, false, false};
+  }
   CdmAdapter::CreateCdmFunc GetCreateCdmFunc() override {
     return CreateMockLibraryCdm;
   }
@@ -354,8 +355,8 @@ class CdmAdapterTestWithMockCdm : public CdmAdapterTestBase {
     ASSERT_TRUE(cdm_host_proxy_);
   }
 
-  MockLibraryCdm* mock_library_cdm_ = nullptr;
-  CdmHostProxy* cdm_host_proxy_ = nullptr;
+  raw_ptr<MockLibraryCdm> mock_library_cdm_ = nullptr;
+  raw_ptr<CdmHostProxy> cdm_host_proxy_ = nullptr;
 };
 
 // Instantiate test cases
@@ -390,7 +391,7 @@ TEST_P(CdmAdapterTestWithClearKeyCdm, BadLibraryPath) {
 TEST_P(CdmAdapterTestWithClearKeyCdm, CreateWebmSession) {
   InitializeAndExpect(SUCCESS);
 
-  std::vector<uint8_t> key_id(kKeyId, kKeyId + base::size(kKeyId));
+  std::vector<uint8_t> key_id(kKeyId, kKeyId + std::size(kKeyId));
   CreateSessionAndExpect(EmeInitDataType::WEBM, key_id, SUCCESS);
 }
 
@@ -399,7 +400,7 @@ TEST_P(CdmAdapterTestWithClearKeyCdm, CreateKeyIdsSession) {
 
   // Don't include the trailing /0 from the string in the data passed in.
   std::vector<uint8_t> key_id(kKeyIdAsJWK,
-                              kKeyIdAsJWK + base::size(kKeyIdAsJWK) - 1);
+                              kKeyIdAsJWK + std::size(kKeyIdAsJWK) - 1);
   CreateSessionAndExpect(EmeInitDataType::KEYIDS, key_id, SUCCESS);
 }
 
@@ -407,7 +408,7 @@ TEST_P(CdmAdapterTestWithClearKeyCdm, CreateCencSession) {
   InitializeAndExpect(SUCCESS);
 
   std::vector<uint8_t> key_id(kKeyIdAsPssh,
-                              kKeyIdAsPssh + base::size(kKeyIdAsPssh));
+                              kKeyIdAsPssh + std::size(kKeyIdAsPssh));
   CreateSessionAndExpect(EmeInitDataType::CENC, key_id, SUCCESS);
 }
 
@@ -415,7 +416,7 @@ TEST_P(CdmAdapterTestWithClearKeyCdm, CreateSessionWithBadData) {
   InitializeAndExpect(SUCCESS);
 
   // Use |kKeyId| but specify KEYIDS format.
-  std::vector<uint8_t> key_id(kKeyId, kKeyId + base::size(kKeyId));
+  std::vector<uint8_t> key_id(kKeyId, kKeyId + std::size(kKeyId));
   CreateSessionAndExpect(EmeInitDataType::KEYIDS, key_id, FAILURE);
 }
 
@@ -423,14 +424,14 @@ TEST_P(CdmAdapterTestWithClearKeyCdm, LoadSession) {
   InitializeAndExpect(SUCCESS);
 
   // LoadSession() is not supported by AesDecryptor.
-  std::vector<uint8_t> key_id(kKeyId, kKeyId + base::size(kKeyId));
+  std::vector<uint8_t> key_id(kKeyId, kKeyId + std::size(kKeyId));
   CreateSessionAndExpect(EmeInitDataType::KEYIDS, key_id, FAILURE);
 }
 
 TEST_P(CdmAdapterTestWithClearKeyCdm, UpdateSession) {
   InitializeAndExpect(SUCCESS);
 
-  std::vector<uint8_t> key_id(kKeyId, kKeyId + base::size(kKeyId));
+  std::vector<uint8_t> key_id(kKeyId, kKeyId + std::size(kKeyId));
   CreateSessionAndExpect(EmeInitDataType::WEBM, key_id, SUCCESS);
 
   UpdateSessionAndExpect(SessionId(), kKeyAsJWK, SUCCESS, true);
@@ -439,7 +440,7 @@ TEST_P(CdmAdapterTestWithClearKeyCdm, UpdateSession) {
 TEST_P(CdmAdapterTestWithClearKeyCdm, UpdateSessionWithBadData) {
   InitializeAndExpect(SUCCESS);
 
-  std::vector<uint8_t> key_id(kKeyId, kKeyId + base::size(kKeyId));
+  std::vector<uint8_t> key_id(kKeyId, kKeyId + std::size(kKeyId));
   CreateSessionAndExpect(EmeInitDataType::WEBM, key_id, SUCCESS);
 
   UpdateSessionAndExpect(SessionId(), "random data", FAILURE, true);
@@ -449,7 +450,7 @@ TEST_P(CdmAdapterTestWithClearKeyCdm, UpdateSessionWithBadData) {
 
 // ChallengePlatform() will ask the helper to send platform challenge.
 TEST_P(CdmAdapterTestWithMockCdm, ChallengePlatform) {
-  CdmConfig cdm_config;
+  CdmConfig cdm_config = GetCdmConfig();
   cdm_config.allow_distinctive_identifier = true;
   InitializeWithCdmConfig(cdm_config);
 
@@ -467,7 +468,8 @@ TEST_P(CdmAdapterTestWithMockCdm, ChallengePlatform) {
 // false.
 TEST_P(CdmAdapterTestWithMockCdm,
        ChallengePlatform_DistinctiveIdentifierNotAllowed) {
-  CdmConfig cdm_config;
+  CdmConfig cdm_config = GetCdmConfig();
+  cdm_config.allow_distinctive_identifier = false;
   InitializeWithCdmConfig(cdm_config);
 
   EXPECT_CALL(*mock_library_cdm_,
@@ -481,7 +483,7 @@ TEST_P(CdmAdapterTestWithMockCdm,
 
 // CreateFileIO() will ask helper to create FileIO.
 TEST_P(CdmAdapterTestWithMockCdm, CreateFileIO) {
-  CdmConfig cdm_config;
+  CdmConfig cdm_config = GetCdmConfig();
   cdm_config.allow_persistent_state = true;
   InitializeWithCdmConfig(cdm_config);
 
@@ -493,7 +495,7 @@ TEST_P(CdmAdapterTestWithMockCdm, CreateFileIO) {
 
 // CreateFileIO() will always fail if |allow_persistent_state| is false.
 TEST_P(CdmAdapterTestWithMockCdm, CreateFileIO_PersistentStateNotAllowed) {
-  CdmConfig cdm_config;
+  CdmConfig cdm_config = GetCdmConfig();
   InitializeWithCdmConfig(cdm_config);
 
   // When |allow_persistent_state| is false, should return null immediately
@@ -505,7 +507,7 @@ TEST_P(CdmAdapterTestWithMockCdm, CreateFileIO_PersistentStateNotAllowed) {
 
 // RequestStorageId() with version 0 (latest) is supported.
 TEST_P(CdmAdapterTestWithMockCdm, RequestStorageId_Version_0) {
-  CdmConfig cdm_config;
+  CdmConfig cdm_config = GetCdmConfig();
   cdm_config.allow_persistent_state = true;
   InitializeWithCdmConfig(cdm_config);
 
@@ -518,7 +520,7 @@ TEST_P(CdmAdapterTestWithMockCdm, RequestStorageId_Version_0) {
 
 // RequestStorageId() with version 1 is supported.
 TEST_P(CdmAdapterTestWithMockCdm, RequestStorageId_Version_1) {
-  CdmConfig cdm_config;
+  CdmConfig cdm_config = GetCdmConfig();
   cdm_config.allow_persistent_state = true;
   InitializeWithCdmConfig(cdm_config);
 
@@ -531,7 +533,7 @@ TEST_P(CdmAdapterTestWithMockCdm, RequestStorageId_Version_1) {
 
 // RequestStorageId() with version 2 is not supported.
 TEST_P(CdmAdapterTestWithMockCdm, RequestStorageId_Version_2) {
-  CdmConfig cdm_config;
+  CdmConfig cdm_config = GetCdmConfig();
   cdm_config.allow_persistent_state = true;
   InitializeWithCdmConfig(cdm_config);
 
@@ -542,7 +544,7 @@ TEST_P(CdmAdapterTestWithMockCdm, RequestStorageId_Version_2) {
 
 // RequestStorageId() will always fail if |allow_persistent_state| is false.
 TEST_P(CdmAdapterTestWithMockCdm, RequestStorageId_PersistentStateNotAllowed) {
-  CdmConfig cdm_config;
+  CdmConfig cdm_config = GetCdmConfig();
   InitializeWithCdmConfig(cdm_config);
 
   EXPECT_CALL(*mock_library_cdm_, OnStorageId(1, IsNull(), 0));
@@ -551,20 +553,11 @@ TEST_P(CdmAdapterTestWithMockCdm, RequestStorageId_PersistentStateNotAllowed) {
 }
 
 TEST_P(CdmAdapterTestWithMockCdm, GetDecryptor) {
-  CdmConfig cdm_config;
+  CdmConfig cdm_config = GetCdmConfig();
   InitializeWithCdmConfig(cdm_config);
   auto* cdm_context = cdm_->GetCdmContext();
   ASSERT_TRUE(cdm_context);
   EXPECT_TRUE(cdm_context->GetDecryptor());
-}
-
-TEST_P(CdmAdapterTestWithMockCdm, GetDecryptor_UseHwSecureCodecs) {
-  CdmConfig cdm_config;
-  cdm_config.use_hw_secure_codecs = true;
-  InitializeWithCdmConfig(cdm_config);
-  auto* cdm_context = cdm_->GetCdmContext();
-  ASSERT_TRUE(cdm_context);
-  EXPECT_FALSE(cdm_context->GetDecryptor());
 }
 
 }  // namespace media

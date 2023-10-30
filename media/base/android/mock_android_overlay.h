@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,10 @@ class MockAndroidOverlay : public testing::NiceMock<AndroidOverlay>,
                            public DestructionObservable {
  public:
   MockAndroidOverlay();
+
+  MockAndroidOverlay(const MockAndroidOverlay&) = delete;
+  MockAndroidOverlay& operator=(const MockAndroidOverlay&) = delete;
+
   ~MockAndroidOverlay() override;
 
   MOCK_METHOD1(ScheduleLayout, void(const gfx::Rect&));
@@ -33,16 +37,15 @@ class MockAndroidOverlay : public testing::NiceMock<AndroidOverlay>,
   AndroidOverlayConfig* config() const { return config_.get(); }
 
   // Set of callbacks that we provide to control the overlay once you've handed
-  // off ownership of it.  Will return false if the overlay has been destroyed.
-  using ControlCallback = base::RepeatingCallback<void()>;
+  // off ownership of it.
   struct Callbacks {
     Callbacks();
     Callbacks(const Callbacks&);
     ~Callbacks();
 
-    ControlCallback OverlayReady;
-    ControlCallback OverlayFailed;
-    ControlCallback SurfaceDestroyed;
+    base::RepeatingClosure OverlayReady;
+    base::RepeatingClosure OverlayFailed;
+    base::RepeatingClosure SurfaceDestroyed;
     base::RepeatingCallback<void(bool)> PowerEfficientState;
   };
 
@@ -63,9 +66,7 @@ class MockAndroidOverlay : public testing::NiceMock<AndroidOverlay>,
   // Initial configuration, mostly for callbacks.
   std::unique_ptr<AndroidOverlayConfig> config_;
 
-  base::WeakPtrFactory<MockAndroidOverlay> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockAndroidOverlay);
+  base::WeakPtrFactory<MockAndroidOverlay> weak_factory_{this};
 };
 
 }  // namespace media

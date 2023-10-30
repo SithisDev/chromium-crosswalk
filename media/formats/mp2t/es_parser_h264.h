@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,6 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "base/time/time.h"
 #include "media/base/media_export.h"
 #include "media/base/ranges.h"
 #include "media/base/video_decoder_config.h"
@@ -22,7 +20,6 @@
 #include "media/media_buildflags.h"
 
 namespace media {
-class EncryptionScheme;
 class H264Parser;
 struct H264SPS;
 }
@@ -41,16 +38,21 @@ namespace mp2t {
 //
 class MEDIA_EXPORT EsParserH264 : public EsParser {
  public:
-  typedef base::Callback<void(const VideoDecoderConfig&)> NewVideoConfigCB;
+  using NewVideoConfigCB =
+      base::RepeatingCallback<void(const VideoDecoderConfig&)>;
 
-  EsParserH264(const NewVideoConfigCB& new_video_config_cb,
-               const EmitBufferCB& emit_buffer_cb);
+  EsParserH264(NewVideoConfigCB new_video_config_cb,
+               EmitBufferCB emit_buffer_cb);
 #if BUILDFLAG(ENABLE_HLS_SAMPLE_AES)
-  EsParserH264(const NewVideoConfigCB& new_video_config_cb,
-               const EmitBufferCB& emit_buffer_cb,
-               bool use_hls_sample_aes,
+  EsParserH264(NewVideoConfigCB new_video_config_cb,
+               EmitBufferCB emit_buffer_cb,
+               EncryptionScheme init_encryption_scheme,
                const GetDecryptConfigCB& get_decrypt_config_cb);
 #endif
+
+  EsParserH264(const EsParserH264&) = delete;
+  EsParserH264& operator=(const EsParserH264&) = delete;
+
   ~EsParserH264() override;
 
   // EsParser implementation.
@@ -77,8 +79,7 @@ class MEDIA_EXPORT EsParserH264 : public EsParser {
 
   // Update the video decoder config based on an H264 SPS.
   // Return true if successful.
-  bool UpdateVideoDecoderConfig(const H264SPS* sps,
-                                const EncryptionScheme& scheme);
+  bool UpdateVideoDecoderConfig(const H264SPS* sps, EncryptionScheme scheme);
 
   EsAdapterVideo es_adapter_;
 
@@ -89,17 +90,14 @@ class MEDIA_EXPORT EsParserH264 : public EsParser {
   int64_t current_access_unit_pos_;
   int64_t next_access_unit_pos_;
 #if BUILDFLAG(ENABLE_HLS_SAMPLE_AES)
-  bool use_hls_sample_aes_;
+  const EncryptionScheme init_encryption_scheme_;
   // Callback to obtain the current decrypt_config.
-  // Only called if use_hls_sample_aes_ is true.
   GetDecryptConfigCB get_decrypt_config_cb_;
   Ranges<int> protected_blocks_;
 #endif
 
   // Last video decoder config.
   VideoDecoderConfig last_video_decoder_config_;
-
-  DISALLOW_COPY_AND_ASSIGN(EsParserH264);
 };
 
 }  // namespace mp2t

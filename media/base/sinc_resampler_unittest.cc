@@ -1,12 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "base/numerics/math_constants.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
@@ -45,9 +44,9 @@ TEST(SincResamplerTest, ChunkedResample) {
 
   // Choose a high ratio of input to output samples which will result in quick
   // exhaustion of SincResampler's internal buffers.
-  SincResampler resampler(
-      kSampleRateRatio, SincResampler::kDefaultRequestSize,
-      base::Bind(&MockSource::ProvideInput, base::Unretained(&mock_source)));
+  SincResampler resampler(kSampleRateRatio, SincResampler::kDefaultRequestSize,
+                          base::BindRepeating(&MockSource::ProvideInput,
+                                              base::Unretained(&mock_source)));
 
   static const int kChunks = 2;
   int max_chunk_size = resampler.ChunkSize() * kChunks;
@@ -71,9 +70,9 @@ TEST(SincResamplerTest, PrimedResample) {
 
   // Choose a high ratio of input to output samples which will result in quick
   // exhaustion of SincResampler's internal buffers.
-  SincResampler resampler(
-      kSampleRateRatio, SincResampler::kDefaultRequestSize,
-      base::Bind(&MockSource::ProvideInput, base::Unretained(&mock_source)));
+  SincResampler resampler(kSampleRateRatio, SincResampler::kDefaultRequestSize,
+                          base::BindRepeating(&MockSource::ProvideInput,
+                                              base::Unretained(&mock_source)));
 
   // Verify the priming adjusts the chunk size within reasonable limits.
   const int first_chunk_size = resampler.ChunkSize();
@@ -113,9 +112,9 @@ TEST(SincResamplerTest, PrimedResample) {
 // Test flush resets the internal state properly.
 TEST(SincResamplerTest, Flush) {
   MockSource mock_source;
-  SincResampler resampler(
-      kSampleRateRatio, SincResampler::kDefaultRequestSize,
-      base::Bind(&MockSource::ProvideInput, base::Unretained(&mock_source)));
+  SincResampler resampler(kSampleRateRatio, SincResampler::kDefaultRequestSize,
+                          base::BindRepeating(&MockSource::ProvideInput,
+                                              base::Unretained(&mock_source)));
   std::unique_ptr<float[]> resampled_destination(
       new float[resampler.ChunkSize()]);
 
@@ -137,9 +136,9 @@ TEST(SincResamplerTest, Flush) {
 
 TEST(SincResamplerTest, DISABLED_SetRatioBench) {
   MockSource mock_source;
-  SincResampler resampler(
-      kSampleRateRatio, SincResampler::kDefaultRequestSize,
-      base::Bind(&MockSource::ProvideInput, base::Unretained(&mock_source)));
+  SincResampler resampler(kSampleRateRatio, SincResampler::kDefaultRequestSize,
+                          base::BindRepeating(&MockSource::ProvideInput,
+                                              base::Unretained(&mock_source)));
 
   base::TimeTicks start = base::TimeTicks::Now();
   for (int i = 1; i < 10000; ++i)
@@ -148,26 +147,17 @@ TEST(SincResamplerTest, DISABLED_SetRatioBench) {
   printf("SetRatio() took %.2fms.\n", total_time_c_ms);
 }
 
-
-// Define platform independent function name for Convolve* tests.
-#if defined(ARCH_CPU_X86_FAMILY)
-#define CONVOLVE_FUNC Convolve_SSE
-#elif defined(ARCH_CPU_ARM_FAMILY) && defined(USE_NEON)
-#define CONVOLVE_FUNC Convolve_NEON
-#endif
-
 // Ensure various optimized Convolve() methods return the same value.  Only run
 // this test if other optimized methods exist, otherwise the default Convolve()
 // will be tested by the parameterized SincResampler tests below.
-#if defined(CONVOLVE_FUNC)
 static const double kKernelInterpolationFactor = 0.5;
 
 TEST(SincResamplerTest, Convolve) {
   // Initialize a dummy resampler.
   MockSource mock_source;
-  SincResampler resampler(
-      kSampleRateRatio, SincResampler::kDefaultRequestSize,
-      base::Bind(&MockSource::ProvideInput, base::Unretained(&mock_source)));
+  SincResampler resampler(kSampleRateRatio, SincResampler::kDefaultRequestSize,
+                          base::BindRepeating(&MockSource::ProvideInput,
+                                              base::Unretained(&mock_source)));
 
   // The optimized Convolve methods are slightly more precise than Convolve_C(),
   // so comparison must be done using an epsilon.
@@ -178,7 +168,7 @@ TEST(SincResamplerTest, Convolve) {
   double result = resampler.Convolve_C(
       resampler.kernel_storage_.get(), resampler.kernel_storage_.get(),
       resampler.kernel_storage_.get(), kKernelInterpolationFactor);
-  double result2 = resampler.CONVOLVE_FUNC(
+  double result2 = resampler.convolve_proc_(
       resampler.kernel_storage_.get(), resampler.kernel_storage_.get(),
       resampler.kernel_storage_.get(), kKernelInterpolationFactor);
   EXPECT_NEAR(result2, result, kEpsilon);
@@ -187,12 +177,11 @@ TEST(SincResamplerTest, Convolve) {
   result = resampler.Convolve_C(
       resampler.kernel_storage_.get() + 1, resampler.kernel_storage_.get(),
       resampler.kernel_storage_.get(), kKernelInterpolationFactor);
-  result2 = resampler.CONVOLVE_FUNC(
+  result2 = resampler.convolve_proc_(
       resampler.kernel_storage_.get() + 1, resampler.kernel_storage_.get(),
       resampler.kernel_storage_.get(), kKernelInterpolationFactor);
   EXPECT_NEAR(result2, result, kEpsilon);
 }
-#endif
 
 // Fake audio source for testing the resampler.  Generates a sinusoidal linear
 // chirp (http://en.wikipedia.org/wiki/Chirp) which can be tuned to stress the
@@ -210,6 +199,10 @@ class SinusoidalLinearChirpSource {
     double duration = static_cast<double>(total_samples_) / sample_rate_;
     k_ = (max_frequency_ - kMinFrequency) / duration;
   }
+
+  SinusoidalLinearChirpSource(const SinusoidalLinearChirpSource&) = delete;
+  SinusoidalLinearChirpSource& operator=(const SinusoidalLinearChirpSource&) =
+      delete;
 
   virtual ~SinusoidalLinearChirpSource() = default;
 
@@ -235,17 +228,13 @@ class SinusoidalLinearChirpSource {
   }
 
  private:
-  enum {
-    kMinFrequency = 5
-  };
+  static constexpr int kMinFrequency = 5;
 
   double sample_rate_;
   int total_samples_;
   double max_frequency_;
   double k_;
   int current_index_;
-
-  DISALLOW_COPY_AND_ASSIGN(SinusoidalLinearChirpSource);
 };
 
 typedef std::tuple<int, int, double, double> SincResamplerTestData;
@@ -284,8 +273,8 @@ TEST_P(SincResamplerTest, Resample) {
   const double io_ratio = input_rate_ / static_cast<double>(output_rate_);
   SincResampler resampler(
       io_ratio, SincResampler::kDefaultRequestSize,
-      base::Bind(&SinusoidalLinearChirpSource::ProvideInput,
-                 base::Unretained(&resampler_source)));
+      base::BindRepeating(&SinusoidalLinearChirpSource::ProvideInput,
+                          base::Unretained(&resampler_source)));
 
   // Force an update to the sample rate ratio to ensure dyanmic sample rate
   // changes are working correctly.
@@ -407,5 +396,47 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(48000, 192000, kResamplingRMSError, -73.44),
         std::make_tuple(96000, 192000, kResamplingRMSError, -73.52),
         std::make_tuple(192000, 192000, kResamplingRMSError, -73.52)));
+
+// Verify the resampler properly reports the max number of input frames it would
+// request.
+TEST(SincResamplerTest, GetMaxInputFramesRequestedTest) {
+  SincResampler resampler(kSampleRateRatio, SincResampler::kDefaultRequestSize,
+                          SincResampler::ReadCB());
+
+  EXPECT_EQ(SincResampler::kDefaultRequestSize,
+            resampler.GetMaxInputFramesRequested(resampler.ChunkSize()));
+
+  // Request sizes smaller than ChunkSize should still trigger 1 read.
+  EXPECT_EQ(SincResampler::kDefaultRequestSize,
+            resampler.GetMaxInputFramesRequested(resampler.ChunkSize() - 10));
+
+  // Request sizes bigger than ChunkSize can trigger multiple reads.
+  EXPECT_EQ(2 * SincResampler::kDefaultRequestSize,
+            resampler.GetMaxInputFramesRequested(resampler.ChunkSize() + 10));
+
+  // The number of input frames requested should grow proportionally to the
+  // output frames requested.
+  EXPECT_EQ(
+      5 * SincResampler::kDefaultRequestSize,
+      resampler.GetMaxInputFramesRequested(4 * resampler.ChunkSize() + 10));
+
+  const int kCustomRequestSize = SincResampler::kDefaultRequestSize + 128;
+  SincResampler custom_size_resampler(kSampleRateRatio, kCustomRequestSize,
+                                      SincResampler::ReadCB());
+
+  // The input frames requested should be a multiple of the request size.
+  EXPECT_EQ(2 * kCustomRequestSize,
+            custom_size_resampler.GetMaxInputFramesRequested(
+                custom_size_resampler.ChunkSize() + 10));
+
+  // Verify we get results with both downsampling and upsampling ratios.
+  SincResampler inverse_ratio_resampler(1.0 / kSampleRateRatio,
+                                        SincResampler::kDefaultRequestSize,
+                                        SincResampler::ReadCB());
+
+  EXPECT_EQ(2 * SincResampler::kDefaultRequestSize,
+            inverse_ratio_resampler.GetMaxInputFramesRequested(
+                inverse_ratio_resampler.ChunkSize() + 10));
+}
 
 }  // namespace media

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/check.h"
 #include "base/logging.h"
 #include "media/cdm/library_cdm/cdm_host_proxy.h"
 #include "media/cdm/library_cdm/cdm_host_proxy_impl.h"

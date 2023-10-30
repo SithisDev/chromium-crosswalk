@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <memory>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/numerics/math_constants.h"
 #include "build/build_config.h"
 #include "media/base/audio_bus.h"
@@ -307,7 +308,7 @@ int OptimalIndex(const AudioBus* search_block,
                     energy_candidate_blocks.get());
 }
 
-void GetSymmetricHanningWindow(int window_length, float* window) {
+void GetPeriodicHanningWindow(int window_length, float* window) {
   const float scale = 2.0f * base::kPiFloat / window_length;
   for (int n = 0; n < window_length; ++n)
     window[n] = 0.5f * (1.0f - std::cos(n * scale));

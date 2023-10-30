@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,11 +30,11 @@ void AvcStringToAnnexB(const std::string& str,
                        std::vector<uint8_t>* buffer,
                        std::vector<SubsampleEntry>* subsamples);
 
-#if BUILDFLAG(ENABLE_HEVC_DEMUXING)
+#if BUILDFLAG(ENABLE_PLATFORM_HEVC)
 void HevcStringToAnnexB(const std::string& str,
                         std::vector<uint8_t>* buffer,
                         std::vector<SubsampleEntry>* subsamples);
-#endif  // BUILDFLAG(ENABLE_HEVC_DEMUXING)
+#endif  // BUILDFLAG(ENABLE_PLATFORM_HEVC)
 
 // Helper to compare two results of AVC::Analyze().
 bool AnalysesMatch(const BitstreamConverter::AnalysisResult& r1,

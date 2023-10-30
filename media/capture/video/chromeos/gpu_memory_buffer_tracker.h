@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,10 @@ class CAPTURE_EXPORT GpuMemoryBufferTracker final
     : public VideoCaptureBufferTracker {
  public:
   GpuMemoryBufferTracker();
+
+  GpuMemoryBufferTracker(const GpuMemoryBufferTracker&) = delete;
+  GpuMemoryBufferTracker& operator=(const GpuMemoryBufferTracker&) = delete;
+
   ~GpuMemoryBufferTracker() override;
 
   // Implementation of VideoCaptureBufferTracker:
@@ -30,15 +34,13 @@ class CAPTURE_EXPORT GpuMemoryBufferTracker final
                            const mojom::PlaneStridesPtr& strides) override;
   uint32_t GetMemorySizeInBytes() override;
   std::unique_ptr<VideoCaptureBufferHandle> GetMemoryMappedAccess() override;
-  mojo::ScopedSharedBufferHandle GetHandleForTransit(bool read_only) override;
-  base::SharedMemoryHandle GetNonOwnedSharedMemoryHandleForLegacyIPC() override;
+  base::UnsafeSharedMemoryRegion DuplicateAsUnsafeRegion() override;
+  mojo::ScopedSharedBufferHandle DuplicateAsMojoBuffer() override;
   gfx::GpuMemoryBufferHandle GetGpuMemoryBufferHandle() override;
 
  private:
   CameraBufferFactory buffer_factory_;
   std::unique_ptr<gfx::GpuMemoryBuffer> buffer_;
-
-  DISALLOW_COPY_AND_ASSIGN(GpuMemoryBufferTracker);
 };
 
 }  // namespace media

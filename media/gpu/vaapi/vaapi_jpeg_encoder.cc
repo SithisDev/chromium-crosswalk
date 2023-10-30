@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/cxx17_backports.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/stl_util.h"
 #include "media/gpu/macros.h"
 #include "media/gpu/vaapi/vaapi_wrapper.h"
 #include "media/parsers/jpeg_parser.h"
@@ -55,10 +55,10 @@ void FillQMatrix(VAQMatrixBufferJPEG* q_matrix) {
   static_assert(std::extent<decltype(luminance.value)>() ==
                     std::extent<decltype(q_matrix->lum_quantiser_matrix)>(),
                 "Luminance quantization table size mismatch.");
-  static_assert(base::size(kZigZag8x8) == base::size(luminance.value),
+  static_assert(std::size(kZigZag8x8) == std::size(luminance.value),
                 "Luminance quantization table size mismatch.");
   q_matrix->load_lum_quantiser_matrix = 1;
-  for (size_t i = 0; i < base::size(kZigZag8x8); i++) {
+  for (size_t i = 0; i < std::size(kZigZag8x8); i++) {
     q_matrix->lum_quantiser_matrix[i] = luminance.value[kZigZag8x8[i]];
   }
 
@@ -66,23 +66,23 @@ void FillQMatrix(VAQMatrixBufferJPEG* q_matrix) {
   static_assert(std::extent<decltype(chrominance.value)>() ==
                     std::extent<decltype(q_matrix->chroma_quantiser_matrix)>(),
                 "Chrominance quantization table size mismatch.");
-  static_assert(base::size(kZigZag8x8) == base::size(chrominance.value),
+  static_assert(std::size(kZigZag8x8) == std::size(chrominance.value),
                 "Chrominance quantization table size mismatch.");
   q_matrix->load_chroma_quantiser_matrix = 1;
-  for (size_t i = 0; i < base::size(kZigZag8x8); i++) {
+  for (size_t i = 0; i < std::size(kZigZag8x8); i++) {
     q_matrix->chroma_quantiser_matrix[i] = chrominance.value[kZigZag8x8[i]];
   }
 }
 
 void FillHuffmanTableParameters(
     VAHuffmanTableBufferJPEGBaseline* huff_table_param) {
-  static_assert(base::size(kDefaultDcTable) == base::size(kDefaultAcTable),
+  static_assert(std::size(kDefaultDcTable) == std::size(kDefaultAcTable),
                 "DC table and AC table size mismatch.");
-  static_assert(base::size(kDefaultDcTable) ==
+  static_assert(std::size(kDefaultDcTable) ==
                     std::extent<decltype(huff_table_param->huffman_table)>(),
                 "DC table and destination table size mismatch.");
 
-  for (size_t i = 0; i < base::size(kDefaultDcTable); ++i) {
+  for (size_t i = 0; i < std::size(kDefaultDcTable); ++i) {
     const JpegHuffmanTable& dcTable = kDefaultDcTable[i];
     const JpegHuffmanTable& acTable = kDefaultAcTable[i];
     huff_table_param->load_huffman_table[i] = true;
@@ -204,9 +204,17 @@ size_t FillJpegHeader(const gfx::Size& input_size,
 
     const JpegQuantizationTable& quant_table = kDefaultQuantTable[i];
     for (size_t j = 0; j < kDctSize; ++j) {
+      // The iHD media driver shifts the quantization values
+      // by 50 while encoding. We should add 50 here to
+      // ensure the correctness in the packed header that is
+      // directly stuffed into the bitstream as JPEG headers.
+      // GStreamer test cases show a psnr improvement in
+      // Y plane (41.27 to 48.31) with this quirk.
+      const static uint32_t shift =
+          VaapiWrapper::GetImplementationType() == VAImplementation::kIntelIHD ? 50 : 0;
       uint32_t scaled_quant_value =
-          (quant_table.value[kZigZag8x8[j]] * quality_normalized) / 100;
-      scaled_quant_value = std::min(255u, std::max(1u, scaled_quant_value));
+          (quant_table.value[kZigZag8x8[j]] * quality_normalized + shift) / 100;
+      scaled_quant_value = base::clamp(scaled_quant_value, 1u, 255u);
       header[idx++] = static_cast<uint8_t>(scaled_quant_value);
     }
   }
@@ -342,27 +350,15 @@ bool VaapiJpegEncoder::Encode(const gfx::Size& input_size,
   // Set picture parameters.
   VAEncPictureParameterBufferJPEG pic_param;
   FillPictureParameters(input_size, quality, output_buffer_id, &pic_param);
-  if (!vaapi_wrapper_->SubmitBuffer(VAEncPictureParameterBufferType,
-                                    &pic_param)) {
-    return false;
-  }
 
   if (!q_matrix_cached_) {
     q_matrix_cached_.reset(new VAQMatrixBufferJPEG());
     FillQMatrix(q_matrix_cached_.get());
   }
-  if (!vaapi_wrapper_->SubmitBuffer(VAQMatrixBufferType,
-                                    q_matrix_cached_.get())) {
-    return false;
-  }
 
   if (!huff_table_param_cached_) {
     huff_table_param_cached_.reset(new VAHuffmanTableBufferJPEGBaseline());
     FillHuffmanTableParameters(huff_table_param_cached_.get());
-  }
-  if (!vaapi_wrapper_->SubmitBuffer(VAHuffmanTableBufferType,
-                                    huff_table_param_cached_.get())) {
-    return false;
   }
 
   // Set slice parameters.
@@ -370,17 +366,13 @@ bool VaapiJpegEncoder::Encode(const gfx::Size& input_size,
     slice_param_cached_.reset(new VAEncSliceParameterBufferJPEG());
     FillSliceParameters(slice_param_cached_.get());
   }
-  if (!vaapi_wrapper_->SubmitBuffer(VAEncSliceParameterBufferType,
-                                    slice_param_cached_.get())) {
-    return false;
-  }
 
-  std::vector<uint8_t> jpeg_header;
-  size_t jpeg_header_size = exif_buffer_size > 0
-                                ? kJpegDefaultHeaderSize + exif_buffer_size
-                                : kJpegDefaultHeaderSize + kJFIFApp0Size;
-  jpeg_header.resize(jpeg_header_size);
-  size_t length_in_bits =
+  size_t jpeg_header_size =
+      exif_buffer_size > 0
+          ? kJpegDefaultHeaderSize + kJFIFApp1HeaderSize + exif_buffer_size
+          : kJpegDefaultHeaderSize + kJFIFApp0Size;
+  std::vector<uint8_t> jpeg_header(jpeg_header_size);
+  const size_t length_in_bits =
       FillJpegHeader(input_size, exif_buffer, exif_buffer_size, quality,
                      jpeg_header.data(), exif_offset);
 
@@ -389,14 +381,19 @@ bool VaapiJpegEncoder::Encode(const gfx::Size& input_size,
   header_param.type = VAEncPackedHeaderRawData;
   header_param.bit_length = length_in_bits;
   header_param.has_emulation_bytes = 0;
-  if (!vaapi_wrapper_->SubmitBuffer(VAEncPackedHeaderParameterBufferType,
-                                    &header_param)) {
-    return false;
-  }
 
-  if (!vaapi_wrapper_->SubmitBuffer(VAEncPackedHeaderDataBufferType,
-                                    (length_in_bits + 7) / 8,
-                                    jpeg_header.data())) {
+  if (!vaapi_wrapper_->SubmitBuffers(
+          {{VAEncPictureParameterBufferType, sizeof(pic_param), &pic_param},
+           {VAQMatrixBufferType, sizeof(*q_matrix_cached_),
+            q_matrix_cached_.get()},
+           {VAHuffmanTableBufferType, sizeof(*huff_table_param_cached_),
+            huff_table_param_cached_.get()},
+           {VAEncSliceParameterBufferType, sizeof(*slice_param_cached_),
+            slice_param_cached_.get()},
+           {VAEncPackedHeaderParameterBufferType, sizeof(header_param),
+            &header_param},
+           {VAEncPackedHeaderDataBufferType, (length_in_bits + 7) / 8,
+            jpeg_header.data()}})) {
     return false;
   }
 

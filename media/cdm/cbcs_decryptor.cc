@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -126,7 +126,7 @@ scoped_refptr<DecoderBuffer> DecryptCbcsBuffer(
 
   const DecryptConfig* decrypt_config = input.decrypt_config();
   DCHECK(decrypt_config) << "No need to call Decrypt() on unencrypted buffer.";
-  DCHECK_EQ(EncryptionMode::kCbcs, decrypt_config->encryption_mode());
+  DCHECK_EQ(EncryptionScheme::kCbcs, decrypt_config->encryption_scheme());
 
   DCHECK(decrypt_config->HasPattern());
   const EncryptionPattern pattern =

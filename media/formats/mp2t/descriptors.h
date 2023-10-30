@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,7 @@ class Descriptors {
   // |pssh_pid| and |mode| are populated with the contents of the descriptor.
   bool HasCADescriptorCenc(int* ca_pid,
                            int* pssh_pid,
-                           EncryptionMode* mode) const;
+                           EncryptionScheme* scheme) const;
 
   // Indicates whether a Private Data Indicator descriptor is present with a
   // particular |value|.
@@ -68,4 +68,4 @@ class Descriptors {
 }  // namespace mp2t
 }  // namespace media
 
-#endif  // MEDIA_FORMATS_MP2T_DESCRIPTOR_LIST_H_
+#endif  // MEDIA_FORMATS_MP2T_DESCRIPTORS_H_

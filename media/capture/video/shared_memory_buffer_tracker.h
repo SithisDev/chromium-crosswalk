@@ -1,11 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef MEDIA_CAPTURE_VIDEO_SHARED_MEMORY_BUFFER_TRACKER_H_
 #define MEDIA_CAPTURE_VIDEO_SHARED_MEMORY_BUFFER_TRACKER_H_
 
-#include "media/capture/video/shared_memory_handle_provider.h"
 #include "media/capture/video/video_capture_buffer_handle.h"
 #include "media/capture/video/video_capture_buffer_tracker.h"
 
@@ -15,10 +14,23 @@ class Size;
 
 namespace media {
 
-// Tracker specifics for SharedMemory.
+// A tracker backed by unsafe shared memory. An unsafe region is necessary
+// because a buffer may be used multiple times in an output media::VideoFrame to
+// a decoder cross-process where it is written.
 class SharedMemoryBufferTracker final : public VideoCaptureBufferTracker {
  public:
-  SharedMemoryBufferTracker();
+  // If |strict_pixel_format| is false, a tracker of a sufficient size
+  // may be reused for any requested pixel format.
+  // Otherwise, the tracker may be reused only for the same pixel format
+  // as was used for the initialization.
+  // It may be useful if the capturer is using different pixel format for
+  // ShMem and GpuMemory buffers.
+  explicit SharedMemoryBufferTracker(bool strict_pixel_format = false);
+
+  SharedMemoryBufferTracker(const SharedMemoryBufferTracker&) = delete;
+  SharedMemoryBufferTracker& operator=(const SharedMemoryBufferTracker&) =
+      delete;
+
   ~SharedMemoryBufferTracker() override;
 
   // Implementation of VideoCaptureBufferTracker:
@@ -29,18 +41,20 @@ class SharedMemoryBufferTracker final : public VideoCaptureBufferTracker {
                            VideoPixelFormat format,
                            const mojom::PlaneStridesPtr& strides) override;
 
+  base::UnsafeSharedMemoryRegion DuplicateAsUnsafeRegion() override;
+  mojo::ScopedSharedBufferHandle DuplicateAsMojoBuffer() override;
   std::unique_ptr<VideoCaptureBufferHandle> GetMemoryMappedAccess() override;
-  mojo::ScopedSharedBufferHandle GetHandleForTransit(bool read_only) override;
-  base::SharedMemoryHandle GetNonOwnedSharedMemoryHandleForLegacyIPC() override;
-#if defined(OS_CHROMEOS)
   gfx::GpuMemoryBufferHandle GetGpuMemoryBufferHandle() override;
-#endif
   uint32_t GetMemorySizeInBytes() override;
 
  private:
-  SharedMemoryHandleProvider provider_;
-
-  DISALLOW_COPY_AND_ASSIGN(SharedMemoryBufferTracker);
+  base::UnsafeSharedMemoryRegion region_;
+  base::WritableSharedMemoryMapping mapping_;
+  // Pixel format for the underlying buffer.
+  VideoPixelFormat format_;
+  // Is the tracker reusable only for the same pixel format as used for
+  // initialization of the tracker.
+  const bool strict_pixel_format_;
 };
 
 }  // namespace media

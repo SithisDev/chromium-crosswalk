@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,10 @@
 #define MEDIA_BASE_NULL_VIDEO_SINK_H_
 
 #include "base/cancelable_callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/default_tick_clock.h"
 #include "base/time/tick_clock.h"
+#include "base/time/time.h"
 #include "media/base/media_export.h"
 #include "media/base/video_renderer_sink.h"
 
@@ -30,6 +31,10 @@ class MEDIA_EXPORT NullVideoSink : public VideoRendererSink {
                 base::TimeDelta interval,
                 const NewFrameCB& new_frame_cb,
                 const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
+
+  NullVideoSink(const NullVideoSink&) = delete;
+  NullVideoSink& operator=(const NullVideoSink&) = delete;
+
   ~NullVideoSink() override;
 
   // VideoRendererSink implementation.
@@ -43,9 +48,7 @@ class MEDIA_EXPORT NullVideoSink : public VideoRendererSink {
   }
 
   // Sets |stop_cb_|, which will be fired when Stop() is called.
-  void set_stop_cb(const base::Closure& stop_cb) {
-    stop_cb_ = stop_cb;
-  }
+  void set_stop_cb(base::OnceClosure stop_cb) { stop_cb_ = std::move(stop_cb); }
 
   bool is_started() const { return started_; }
 
@@ -65,10 +68,10 @@ class MEDIA_EXPORT NullVideoSink : public VideoRendererSink {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   bool started_;
-  RenderCallback* callback_;
+  raw_ptr<RenderCallback> callback_;
 
   // Manages cancellation of periodic Render() callback task.
-  base::CancelableClosure cancelable_worker_;
+  base::CancelableRepeatingClosure cancelable_worker_;
 
   // Used to determine when a new frame is received.
   scoped_refptr<VideoFrame> last_frame_;
@@ -81,15 +84,13 @@ class MEDIA_EXPORT NullVideoSink : public VideoRendererSink {
   base::TimeTicks last_now_;
 
   // If specified, used instead of a DefaultTickClock.
-  const base::TickClock* tick_clock_;
+  raw_ptr<const base::TickClock> tick_clock_;
 
   // If set, called when Stop() is called.
-  base::Closure stop_cb_;
+  base::OnceClosure stop_cb_;
 
   // Value passed to RenderCallback::Render().
   bool background_render_;
-
-  DISALLOW_COPY_AND_ASSIGN(NullVideoSink);
 };
 
 }  // namespace media

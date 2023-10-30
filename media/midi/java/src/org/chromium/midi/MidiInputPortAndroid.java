@@ -1,17 +1,19 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.midi;
 
-import android.annotation.TargetApi;
 import android.media.midi.MidiDevice;
 import android.media.midi.MidiOutputPort;
 import android.media.midi.MidiReceiver;
 import android.os.Build;
 
+import androidx.annotation.RequiresApi;
+
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 
 import java.io.IOException;
 
@@ -21,7 +23,7 @@ import java.io.IOException;
  * A MidiInputPortAndroid provides data to the associated midi::MidiInputPortAndroid object.
  */
 @JNINamespace("midi")
-@TargetApi(Build.VERSION_CODES.M)
+@RequiresApi(Build.VERSION_CODES.M)
 class MidiInputPortAndroid {
     /**
      * The underlying port.
@@ -73,7 +75,8 @@ class MidiInputPortAndroid {
                     if (mPort == null) {
                         return;
                     }
-                    nativeOnData(mNativeReceiverPointer, bs, offset, count, timestamp);
+                    MidiInputPortAndroidJni.get().onData(
+                            mNativeReceiverPointer, bs, offset, count, timestamp);
                 }
             }
         });
@@ -97,6 +100,9 @@ class MidiInputPortAndroid {
         mPort = null;
     }
 
-    private static native void nativeOnData(
-            long nativeMidiInputPortAndroid, byte[] bs, int offset, int count, long timestamp);
+    @NativeMethods
+    interface Natives {
+        void onData(
+                long nativeMidiInputPortAndroid, byte[] bs, int offset, int count, long timestamp);
+    }
 }

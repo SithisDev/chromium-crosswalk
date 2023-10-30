@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,3 +20,4 @@ addScriptTag('clearkey_player.js');
 addScriptTag('widevine_player.js');
 addScriptTag('unit_test_player.js');
 addScriptTag('eme_app.js');
+addScriptTag('mse_player_utils.js');

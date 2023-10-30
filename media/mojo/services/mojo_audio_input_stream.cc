@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,33 +11,35 @@
 #include "base/callback_helpers.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/sync_socket.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "mojo/public/cpp/system/platform_handle.h"
+#include "third_party/abseil-cpp/absl/utility/utility.h"
 
 namespace media {
 
 MojoAudioInputStream::MojoAudioInputStream(
-    mojom::AudioInputStreamRequest request,
-    mojom::AudioInputStreamClientPtr client,
+    mojo::PendingReceiver<mojom::AudioInputStream> receiver,
+    mojo::PendingRemote<mojom::AudioInputStreamClient> client,
     CreateDelegateCallback create_delegate_callback,
     StreamCreatedCallback stream_created_callback,
     base::OnceClosure deleter_callback)
     : stream_created_callback_(std::move(stream_created_callback)),
       deleter_callback_(std::move(deleter_callback)),
-      binding_(this, std::move(request)),
+      receiver_(this, std::move(receiver)),
       client_(std::move(client)) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(stream_created_callback_);
   DCHECK(deleter_callback_);
-  // |this| owns |binding_|, so unretained is safe.
-  binding_.set_connection_error_handler(
+  // |this| owns |receiver_|, so unretained is safe.
+  receiver_.set_disconnect_handler(
       base::BindOnce(&MojoAudioInputStream::OnError, base::Unretained(this)));
-  client_.set_connection_error_handler(
+  client_.set_disconnect_handler(
       base::BindOnce(&MojoAudioInputStream::OnError, base::Unretained(this)));
   delegate_ = std::move(create_delegate_callback).Run(this);
   if (!delegate_) {
     // Failed to initialize the stream. We cannot call |deleter_callback_| yet,
     // since construction isn't done.
-    binding_.Close();
+    receiver_.reset();
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::BindOnce(&MojoAudioInputStream::OnStreamError,
@@ -85,25 +87,18 @@ void MojoAudioInputStream::OnStreamCreated(
     return;
   }
 
-  mojo::ScopedHandle socket_handle =
-      mojo::WrapPlatformFile(foreign_socket->Release());
-
-  DCHECK(socket_handle.is_valid());
+  DCHECK(foreign_socket->IsValid());
+  mojo::PlatformHandle socket_handle(foreign_socket->Take());
 
   std::move(stream_created_callback_)
-      .Run({base::in_place, std::move(shared_memory_region),
+      .Run({absl::in_place, std::move(shared_memory_region),
             std::move(socket_handle)},
            initially_muted);
 }
 
-void MojoAudioInputStream::OnMuted(int stream_id, bool is_muted) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  client_->OnMutedStateChanged(is_muted);
-}
-
 void MojoAudioInputStream::OnStreamError(int stream_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  client_->OnError();
+  client_->OnError(mojom::InputStreamErrorCode::kUnknown);
   OnError();
 }
 

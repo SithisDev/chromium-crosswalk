@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,6 +68,7 @@ constexpr size_t kJpegDefaultHeaderSize =
     (kNumDcCodeWordsHuffVal * 2) + (kNumAcRunSizeBits * 2) +
     (kNumAcCodeWordsHuffVal * 2);
 constexpr size_t kJFIFApp0Size = 16;
+constexpr size_t kJFIFApp1HeaderSize = 4;
 
 const size_t kJpegMaxHuffmanTableNumBaseline = 2;
 const size_t kJpegMaxComponents = 4;

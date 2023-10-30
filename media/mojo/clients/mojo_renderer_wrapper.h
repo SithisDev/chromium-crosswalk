@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,22 +13,26 @@
 namespace media {
 
 // Simple wrapper around a MojoRenderer.
-// Provides a default behavior for forwarding all media::Renderer calls to a
-// media::Renderer instance in a different process, through |mojo_renderer_|.
+// Provides a default behavior for forwarding all Renderer calls to a
+// Renderer instance in a different process, through |mojo_renderer_|.
 // Used as a base class to reduce boiler plate code for derived types, which can
 // override only the methods they need to specialize.
 class MojoRendererWrapper : public Renderer {
  public:
   explicit MojoRendererWrapper(std::unique_ptr<MojoRenderer> mojo_renderer);
+
+  MojoRendererWrapper(const MojoRendererWrapper&) = delete;
+  MojoRendererWrapper& operator=(const MojoRendererWrapper&) = delete;
+
   ~MojoRendererWrapper() override;
 
   // Renderer implementation.
   void Initialize(MediaResource* media_resource,
-                  media::RendererClient* client,
-                  const PipelineStatusCB& init_cb) override;
-  void SetCdm(CdmContext* cdm_context,
-              const CdmAttachedCB& cdm_attached_cb) override;
-  void Flush(const base::Closure& flush_cb) override;
+                  RendererClient* client,
+                  PipelineStatusCallback init_cb) override;
+  void SetCdm(CdmContext* cdm_context, CdmAttachedCB cdm_attached_cb) override;
+  void SetLatencyHint(absl::optional<base::TimeDelta> latency_hint) override;
+  void Flush(base::OnceClosure flush_cb) override;
   void StartPlayingFrom(base::TimeDelta time) override;
   void SetPlaybackRate(double playback_rate) override;
   void SetVolume(float volume) override;
@@ -36,9 +40,6 @@ class MojoRendererWrapper : public Renderer {
 
  private:
   std::unique_ptr<MojoRenderer> mojo_renderer_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MojoRendererWrapper);
 };
 
 }  // namespace media

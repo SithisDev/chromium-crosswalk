@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,12 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/cancelable_callback.h"
+#include "base/check_op.h"
 #include "base/location.h"
-#include "base/logging.h"
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/thread_annotations.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
@@ -27,6 +26,9 @@ class FakeAudioWorker::Worker
  public:
   Worker(const scoped_refptr<base::SingleThreadTaskRunner>& worker_task_runner,
          const AudioParameters& params);
+
+  Worker(const Worker&) = delete;
+  Worker& operator=(const Worker&) = delete;
 
   bool IsStopped();
   void Start(FakeAudioWorker::Callback worker_cb);
@@ -57,11 +59,9 @@ class FakeAudioWorker::Worker
   int64_t frames_elapsed_;
 
   // Used to cancel any delayed tasks still inside the worker loop's queue.
-  base::CancelableClosure worker_task_cb_;
+  base::CancelableRepeatingClosure worker_task_cb_;
 
   THREAD_CHECKER(thread_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(Worker);
 };
 
 FakeAudioWorker::FakeAudioWorker(
@@ -129,7 +129,7 @@ void FakeAudioWorker::Worker::DoStart() {
   DCHECK(worker_task_runner_->BelongsToCurrentThread());
   first_read_time_ = base::TimeTicks::Now();
   frames_elapsed_ = 0;
-  worker_task_cb_.Reset(base::Bind(&Worker::DoRead, this));
+  worker_task_cb_.Reset(base::BindRepeating(&Worker::DoRead, this));
   worker_task_cb_.callback().Run();
 }
 
@@ -166,9 +166,12 @@ void FakeAudioWorker::Worker::DoRead() {
     base::AutoLock scoped_lock(worker_cb_lock_);
     // Important to sample the clock after waiting to acquire the lock.
     now = base::TimeTicks::Now();
-    if (worker_cb_ && next_read_time > now) {
+
+    // Note: Even if we're late, this callback must be called. In many cases we
+    // are driving an underlying "samples consumed" based clock with these
+    // calls.
+    if (worker_cb_)
       worker_cb_.Run(read_time, now);
-    }
   }
 
   // If we're behind, find the next nearest ontime interval. Note, we could be
@@ -182,8 +185,10 @@ void FakeAudioWorker::Worker::DoRead() {
                                             frames_elapsed_, sample_rate_);
   }
 
-  worker_task_runner_->PostDelayedTask(FROM_HERE, worker_task_cb_.callback(),
-                                       next_read_time - now);
+  worker_task_runner_->PostDelayedTaskAt(base::subtle::PostDelayedTaskPassKey(),
+                                         FROM_HERE, worker_task_cb_.callback(),
+                                         next_read_time,
+                                         base::subtle::DelayPolicy::kPrecise);
 }
 
 }  // namespace media

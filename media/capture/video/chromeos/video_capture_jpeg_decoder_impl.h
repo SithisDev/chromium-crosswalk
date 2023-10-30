@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "components/chromeos_camera/mojo_mjpeg_decode_accelerator.h"
@@ -26,7 +26,7 @@ namespace media {
 
 // Implementation of media::VideoCaptureJpegDecoder that delegates to a
 // chromeos_camera::mojom::MjpegDecodeAccelerator. When a frame is received in
-// DecodeCapturedData(), it is copied to |in_shared_memory| for IPC transport
+// DecodeCapturedData(), it is copied to |in_shared_region_| for IPC transport
 // to |decoder_|. When the decoder is finished with the frame, |decode_done_cb_|
 // is invoked. Until |decode_done_cb_| is invoked, subsequent calls to
 // DecodeCapturedData() are ignored.
@@ -42,6 +42,11 @@ class CAPTURE_EXPORT VideoCaptureJpegDecoderImpl
       scoped_refptr<base::SequencedTaskRunner> decoder_task_runner,
       DecodeDoneCB decode_done_cb,
       base::RepeatingCallback<void(const std::string&)> send_log_message_cb);
+
+  VideoCaptureJpegDecoderImpl(const VideoCaptureJpegDecoderImpl&) = delete;
+  VideoCaptureJpegDecoderImpl& operator=(const VideoCaptureJpegDecoderImpl&) =
+      delete;
+
   ~VideoCaptureJpegDecoderImpl() override;
 
   // Implementation of VideoCaptureJpegDecoder:
@@ -78,7 +83,7 @@ class CAPTURE_EXPORT VideoCaptureJpegDecoderImpl
   scoped_refptr<base::SequencedTaskRunner> decoder_task_runner_;
 
   // The underlying JPEG decode accelerator.
-  std::unique_ptr<chromeos_camera::MjpegDecodeAccelerator> decoder_;
+  std::unique_ptr<chromeos_camera::MojoMjpegDecodeAccelerator> decoder_;
 
   // The callback to run when decode succeeds.
   const DecodeDoneCB decode_done_cb_;
@@ -86,29 +91,25 @@ class CAPTURE_EXPORT VideoCaptureJpegDecoderImpl
   const base::RepeatingCallback<void(const std::string&)> send_log_message_cb_;
   bool has_received_decoded_frame_;
 
-  // Guards |decode_done_closure_| and |decoder_status_|.
-  mutable base::Lock lock_;
-
   // The closure of |decode_done_cb_| with bound parameters.
-  base::OnceClosure decode_done_closure_;
+  mutable base::Lock lock_;
+  STATUS decoder_status_ GUARDED_BY(lock_);
+  base::OnceClosure decode_done_closure_ GUARDED_BY(lock_);
 
   // Next id for input BitstreamBuffer.
-  int32_t next_bitstream_buffer_id_;
+  int32_t next_task_id_;
 
   // The id for current input BitstreamBuffer being decoded.
-  int32_t in_buffer_id_;
+  int32_t task_id_;
 
   // Shared memory to store JPEG stream buffer. The input BitstreamBuffer is
   // backed by this.
-  std::unique_ptr<base::SharedMemory> in_shared_memory_;
-
-  STATUS decoder_status_;
+  base::UnsafeSharedMemoryRegion in_shared_region_;
+  base::WritableSharedMemoryMapping in_shared_mapping_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  base::WeakPtrFactory<VideoCaptureJpegDecoderImpl> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(VideoCaptureJpegDecoderImpl);
+  base::WeakPtrFactory<VideoCaptureJpegDecoderImpl> weak_ptr_factory_{this};
 };
 
 }  // namespace media

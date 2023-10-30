@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <set>
 
 #include "base/android/jni_android.h"
-#include "base/macros.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "media/audio/audio_manager_base.h"
@@ -22,6 +21,10 @@ class MEDIA_EXPORT AudioManagerAndroid : public AudioManagerBase {
  public:
   AudioManagerAndroid(std::unique_ptr<AudioThread> audio_thread,
                       AudioLogFactory* audio_log_factory);
+
+  AudioManagerAndroid(const AudioManagerAndroid&) = delete;
+  AudioManagerAndroid& operator=(const AudioManagerAndroid&) = delete;
+
   ~AudioManagerAndroid() override;
 
   void InitializeIfNeeded();
@@ -81,6 +84,17 @@ class MEDIA_EXPORT AudioManagerAndroid : public AudioManagerBase {
   void SetOutputVolumeOverride(double volume);
   bool HasOutputVolumeOverride(double* out_volume) const;
 
+  // Get the latency introduced by the hardware.  It relies on
+  // AudioManager.getOutputLatency, which is both (a) hidden and (b) not
+  // guaranteed to be meaningful.  Do not use this, except in the context of
+  // b/80326798 to adjust (hackily) for hardware latency that OpenSLES isn't
+  // otherwise accounting for.
+  base::TimeDelta GetOutputLatency();
+
+  bool IsUsingAAudioForTesting() { return UseAAudio(); }
+
+  static int GetSinkAudioEncodingFormats();
+
  protected:
   void ShutdownOnAudioThread() override;
   AudioParameters GetPreferredOutputStreamParameters(
@@ -96,9 +110,17 @@ class MEDIA_EXPORT AudioManagerAndroid : public AudioManagerBase {
   bool IsAudioLowLatencySupported();
   int GetAudioLowLatencyOutputFrameSize();
   int GetOptimalOutputFrameSize(int sample_rate, int channels);
+  AudioParameters GetAudioFormatsSupportedBySinkDevice(
+      const std::string& output_device_id,
+      const ChannelLayoutConfig& channel_layout_config,
+      int sample_rate,
+      int buffer_size);
 
   void DoSetMuteOnAudioThread(bool muted);
   void DoSetVolumeOnAudioThread(double volume);
+
+  // Returns whether or not we can and should use AAudio.
+  bool UseAAudio();
 
   // Java AudioManager instance.
   base::android::ScopedJavaGlobalRef<jobject> j_audio_manager_;
@@ -110,11 +132,11 @@ class MEDIA_EXPORT AudioManagerAndroid : public AudioManagerBase {
   // input stream is destroyed. Also affects the stream type of output streams.
   bool communication_mode_is_on_;
 
+  absl::optional<bool> is_aaudio_available_;
+
   // If set, overrides volume level on output streams
   bool output_volume_override_set_;
   double output_volume_override_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioManagerAndroid);
 };
 
 }  // namespace media

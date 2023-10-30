@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "base/supports_user_data.h"
 #include "media/learning/common/labelled_example.h"
 #include "media/learning/common/learning_task.h"
 
@@ -19,17 +19,19 @@ namespace learning {
 class LearningTaskController;
 
 // Interface to provide a Learner given the task name.
-class COMPONENT_EXPORT(LEARNING_COMMON) LearningSession {
+class COMPONENT_EXPORT(LEARNING_COMMON) LearningSession
+    : public base::SupportsUserData::Data {
  public:
   LearningSession();
-  virtual ~LearningSession();
+
+  LearningSession(const LearningSession&) = delete;
+  LearningSession& operator=(const LearningSession&) = delete;
+
+  ~LearningSession() override;
 
   // Return a LearningTaskController for the given task.
   virtual std::unique_ptr<LearningTaskController> GetController(
       const std::string& task_name) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(LearningSession);
 };
 
 }  // namespace learning

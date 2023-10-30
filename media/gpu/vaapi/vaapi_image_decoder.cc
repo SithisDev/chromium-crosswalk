@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,9 +27,10 @@ VaapiImageDecoder::VaapiImageDecoder(VAProfile va_profile)
 
 VaapiImageDecoder::~VaapiImageDecoder() = default;
 
-bool VaapiImageDecoder::Initialize(const base::RepeatingClosure& error_uma_cb) {
+bool VaapiImageDecoder::Initialize(const ReportErrorToUMACB& error_uma_cb) {
   vaapi_wrapper_ =
-      VaapiWrapper::Create(VaapiWrapper::kDecode, va_profile_, error_uma_cb);
+      VaapiWrapper::Create(VaapiWrapper::kDecode, va_profile_,
+                           EncryptionScheme::kUnencrypted, error_uma_cb);
   return !!vaapi_wrapper_;
 }
 
@@ -73,13 +74,11 @@ VaapiImageDecoder::GetSupportedProfile() const {
   DCHECK_NE(gpu::ImageDecodeAcceleratorType::kUnknown, profile.image_type);
 
   // Note that since |vaapi_wrapper_| was created successfully, we expect the
-  // following calls to be successful. Hence the DCHECKs.
-  const bool got_min_resolution = VaapiWrapper::GetDecodeMinResolution(
-      va_profile_, &profile.min_encoded_dimensions);
-  DCHECK(got_min_resolution);
-  const bool got_max_resolution = VaapiWrapper::GetDecodeMaxResolution(
-      va_profile_, &profile.max_encoded_dimensions);
-  DCHECK(got_max_resolution);
+  // following call to be successful. Hence the DCHECK.
+  const bool got_supported_resolutions = VaapiWrapper::GetSupportedResolutions(
+      va_profile_, VaapiWrapper::CodecMode::kDecode,
+      profile.min_encoded_dimensions, profile.max_encoded_dimensions);
+  DCHECK(got_supported_resolutions);
 
   // TODO(andrescj): Ideally, we would advertise support for all the formats
   // supported by the driver. However, for now, we will only support exposing
@@ -89,7 +88,7 @@ VaapiImageDecoder::GetSupportedProfile() const {
   return profile;
 }
 
-scoped_refptr<gfx::NativePixmapDmaBuf>
+std::unique_ptr<NativePixmapAndSizeInfo>
 VaapiImageDecoder::ExportAsNativePixmapDmaBuf(VaapiImageDecodeStatus* status) {
   DCHECK(status);
 
@@ -108,24 +107,18 @@ VaapiImageDecoder::ExportAsNativePixmapDmaBuf(VaapiImageDecodeStatus* status) {
   }
   DCHECK(temp_scoped_va_surface->IsValid());
 
-  scoped_refptr<gfx::NativePixmapDmaBuf> pixmap =
+  std::unique_ptr<NativePixmapAndSizeInfo> exported_pixmap =
       vaapi_wrapper_->ExportVASurfaceAsNativePixmapDmaBuf(
-          temp_scoped_va_surface->id());
-  if (!pixmap) {
+          *temp_scoped_va_surface);
+  if (!exported_pixmap) {
     *status = VaapiImageDecodeStatus::kCannotExportSurface;
     return nullptr;
   }
 
-  // In Intel's iHD driver the size requested for the surface may be different
-  // than the buffer size of the NativePixmap because of additional alignment.
-  // See https://git.io/fj6nA.
-  DCHECK_LE(temp_scoped_va_surface->size().width(),
-            pixmap->GetBufferSize().width());
-  DCHECK_LE(temp_scoped_va_surface->size().height(),
-            pixmap->GetBufferSize().height());
-
+  DCHECK_EQ(temp_scoped_va_surface->size(),
+            exported_pixmap->pixmap->GetBufferSize());
   *status = VaapiImageDecodeStatus::kSuccess;
-  return pixmap;
+  return exported_pixmap;
 }
 
 }  // namespace media

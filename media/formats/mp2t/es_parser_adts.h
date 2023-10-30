@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,11 @@
 
 #include <stdint.h>
 
-#include <list>
 #include <memory>
 #include <utility>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "base/time/time.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/decrypt_config.h"
 #include "media/base/media_export.h"
@@ -31,18 +28,22 @@ namespace mp2t {
 
 class MEDIA_EXPORT EsParserAdts : public EsParser {
  public:
-  typedef base::Callback<void(const AudioDecoderConfig&)> NewAudioConfigCB;
+  using NewAudioConfigCB =
+      base::RepeatingCallback<void(const AudioDecoderConfig&)>;
 
-  EsParserAdts(const NewAudioConfigCB& new_audio_config_cb,
-               const EmitBufferCB& emit_buffer_cb,
+  EsParserAdts(NewAudioConfigCB new_audio_config_cb,
+               EmitBufferCB emit_buffer_cb,
                bool sbr_in_mimetype);
 #if BUILDFLAG(ENABLE_HLS_SAMPLE_AES)
-  EsParserAdts(const NewAudioConfigCB& new_audio_config_cb,
-               const EmitBufferCB& emit_buffer_cb,
-               const GetDecryptConfigCB& get_decrypt_config_cb,
-               bool use_hls_sample_aes,
+  EsParserAdts(NewAudioConfigCB new_audio_config_cb,
+               EmitBufferCB emit_buffer_cb,
+               GetDecryptConfigCB get_decrypt_config_cb,
+               EncryptionScheme init_encryption_scheme,
                bool sbr_in_mimetype);
 #endif
+
+  EsParserAdts(const EsParserAdts&) = delete;
+  EsParserAdts& operator=(const EsParserAdts&) = delete;
 
   ~EsParserAdts() override;
 
@@ -82,9 +83,9 @@ class MEDIA_EXPORT EsParserAdts : public EsParser {
   NewAudioConfigCB new_audio_config_cb_;
   EmitBufferCB emit_buffer_cb_;
 #if BUILDFLAG(ENABLE_HLS_SAMPLE_AES)
-  // - to obtain the current decrypt_config. Only called if use_hls_sample_aes_.
+  // - to obtain the current decrypt_config.
   GetDecryptConfigCB get_decrypt_config_cb_;
-  bool use_hls_sample_aes_;
+  const EncryptionScheme init_encryption_scheme_;
 #endif
 
   // True when AAC SBR extension is signalled in the mimetype
@@ -98,8 +99,6 @@ class MEDIA_EXPORT EsParserAdts : public EsParser {
   AudioDecoderConfig last_audio_decoder_config_;
 
   ADTSStreamParser adts_parser_;
-
-  DISALLOW_COPY_AND_ASSIGN(EsParserAdts);
 };
 
 }  // namespace mp2t

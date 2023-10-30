@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,16 +48,11 @@ class MidiManagerAndroid final : public MidiManager,
 
   // Called from the Java world.
   void OnInitialized(JNIEnv* env,
-                     const base::android::JavaParamRef<jobject>& caller,
                      const base::android::JavaParamRef<jobjectArray>& devices);
-  void OnInitializationFailed(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& caller);
+  void OnInitializationFailed(JNIEnv* env);
   void OnAttached(JNIEnv* env,
-                  const base::android::JavaParamRef<jobject>& caller,
                   const base::android::JavaParamRef<jobject>& device);
   void OnDetached(JNIEnv* env,
-                  const base::android::JavaParamRef<jobject>& caller,
                   const base::android::JavaParamRef<jobject>& device);
 
  private:

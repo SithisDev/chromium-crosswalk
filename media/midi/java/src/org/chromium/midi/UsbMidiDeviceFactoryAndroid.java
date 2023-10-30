@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,8 +16,10 @@ import android.hardware.usb.UsbManager;
 import android.os.Parcelable;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.IntentUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -31,6 +33,10 @@ import java.util.Set;
  */
 @JNINamespace("midi")
 class UsbMidiDeviceFactoryAndroid {
+    // Used to verify Pre-T that the broadcast sender was Chrome. This extra can be removed when the
+    // min supported version is Android T.
+    private static final String EXTRA_RECEIVER_TOKEN = "receiver_token";
+
     /**
      * The UsbManager of this system.
      */
@@ -82,7 +88,11 @@ class UsbMidiDeviceFactoryAndroid {
                     onUsbDeviceDetached((UsbDevice) extra);
                 }
                 if (ACTION_USB_PERMISSION.equals(intent.getAction())) {
-                    onUsbDevicePermissionRequestDone(context, intent);
+                    if (intent.hasExtra(EXTRA_RECEIVER_TOKEN)
+                            && intent.getIntExtra(EXTRA_RECEIVER_TOKEN, 0)
+                                    == mReceiver.hashCode()) {
+                        onUsbDevicePermissionRequestDone(context, intent);
+                    }
                 }
             }
         };
@@ -90,7 +100,8 @@ class UsbMidiDeviceFactoryAndroid {
         filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
         filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
         filter.addAction(ACTION_USB_PERMISSION);
-        ContextUtils.getApplicationContext().registerReceiver(mReceiver, filter);
+        ContextUtils.registerNonExportedBroadcastReceiver(
+                ContextUtils.getApplicationContext(), mReceiver, filter);
         mRequestedDevices = new HashSet<UsbDevice>();
     }
 
@@ -107,8 +118,8 @@ class UsbMidiDeviceFactoryAndroid {
      * Enumerates USB-MIDI devices.
      * If there are devices having USB-MIDI interfaces, this function requests permission for
      * accessing the device to the user.
-     * When the permission request is accepted or rejected,  nativeOnUsbMidiDeviceRequestDone
-     * will be called.
+     * When the permission request is accepted or rejected,
+     * UsbMidiDeviceFactoryAndroidJni.get().onUsbMidiDeviceRequestDone will be called.
      *
      * If there are no USB-MIDI interfaces, this function returns false.
      * @return true if some permission requests are in progress.
@@ -146,10 +157,12 @@ class UsbMidiDeviceFactoryAndroid {
             UsbInterface iface = device.getInterface(i);
             if (iface.getInterfaceClass() == UsbConstants.USB_CLASS_AUDIO
                     && iface.getInterfaceSubclass() == UsbMidiDeviceAndroid.MIDI_SUBCLASS) {
+                Intent intent = new Intent(ACTION_USB_PERMISSION);
+                intent.putExtra(EXTRA_RECEIVER_TOKEN, mReceiver.hashCode());
                 // There is at least one interface supporting MIDI.
                 mUsbManager.requestPermission(device,
-                        PendingIntent.getBroadcast(ContextUtils.getApplicationContext(), 0,
-                                new Intent(ACTION_USB_PERMISSION), 0));
+                        PendingIntent.getBroadcast(ContextUtils.getApplicationContext(), 0, intent,
+                                IntentUtils.getPendingIntentMutabilityFlag(true)));
                 mRequestedDevices.add(device);
                 break;
             }
@@ -184,7 +197,7 @@ class UsbMidiDeviceFactoryAndroid {
                     return;
                 }
                 if (mNativePointer != 0) {
-                    nativeOnUsbMidiDeviceDetached(mNativePointer, i);
+                    UsbMidiDeviceFactoryAndroidJni.get().onUsbMidiDeviceDetached(mNativePointer, i);
                 }
                 return;
             }
@@ -236,10 +249,12 @@ class UsbMidiDeviceFactoryAndroid {
         }
 
         if (mIsEnumeratingDevices) {
-            nativeOnUsbMidiDeviceRequestDone(mNativePointer, mDevices.toArray());
+            UsbMidiDeviceFactoryAndroidJni.get().onUsbMidiDeviceRequestDone(
+                    mNativePointer, mDevices.toArray());
             mIsEnumeratingDevices = false;
         } else if (midiDevice != null) {
-            nativeOnUsbMidiDeviceAttached(mNativePointer, midiDevice);
+            UsbMidiDeviceFactoryAndroidJni.get().onUsbMidiDeviceAttached(
+                    mNativePointer, midiDevice);
         }
     }
 
@@ -252,10 +267,10 @@ class UsbMidiDeviceFactoryAndroid {
         ContextUtils.getApplicationContext().unregisterReceiver(mReceiver);
     }
 
-    private static native void nativeOnUsbMidiDeviceRequestDone(
-            long nativeUsbMidiDeviceFactoryAndroid, Object[] devices);
-    private static native void nativeOnUsbMidiDeviceAttached(
-            long nativeUsbMidiDeviceFactoryAndroid, Object device);
-    private static native void nativeOnUsbMidiDeviceDetached(
-            long nativeUsbMidiDeviceFactoryAndroid, int index);
+    @NativeMethods
+    interface Natives {
+        void onUsbMidiDeviceRequestDone(long nativeUsbMidiDeviceFactoryAndroid, Object[] devices);
+        void onUsbMidiDeviceAttached(long nativeUsbMidiDeviceFactoryAndroid, Object device);
+        void onUsbMidiDeviceDetached(long nativeUsbMidiDeviceFactoryAndroid, int index);
+    }
 }

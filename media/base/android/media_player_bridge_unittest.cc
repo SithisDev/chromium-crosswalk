@@ -1,11 +1,12 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/base/android/media_player_bridge.h"
+
 #include "base/bind.h"
-#include "base/macros.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "net/cookies/site_for_cookies.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -31,7 +32,17 @@ class MockMediaPlayerBridgeClient : public MediaPlayerBridge::Client {
 class MediaPlayerBridgeTest : public testing::Test {
  public:
   MediaPlayerBridgeTest()
-      : bridge_(GURL(), GURL(), "", false, &client_, false) {}
+      : bridge_(GURL(),
+                net::SiteForCookies(),
+                url::Origin(),
+                "",
+                false,
+                &client_,
+                false,
+                false) {}
+
+  MediaPlayerBridgeTest(const MediaPlayerBridgeTest&) = delete;
+  MediaPlayerBridgeTest& operator=(const MediaPlayerBridgeTest&) = delete;
 
  protected:
   void SimulateDurationChange(base::TimeDelta duration) {
@@ -46,15 +57,13 @@ class MediaPlayerBridgeTest : public testing::Test {
 
   void SimulatePlaybackCompleted() { bridge_.OnPlaybackComplete(); }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   StrictMock<MockMediaPlayerBridgeClient> client_;
   MediaPlayerBridge bridge_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaPlayerBridgeTest);
 };
 
 TEST_F(MediaPlayerBridgeTest, Client_OnMediaMetadataChanged) {
-  const base::TimeDelta kDuration = base::TimeDelta::FromSeconds(20);
+  const base::TimeDelta kDuration = base::Seconds(20);
 
   EXPECT_CALL(client_, OnMediaDurationChanged(kDuration));
 

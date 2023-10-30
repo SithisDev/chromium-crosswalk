@@ -1,13 +1,20 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/capture/video/chromeos/video_capture_jpeg_decoder_impl.h"
 
+#include <utility>
+
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/trace_event/typed_macros.h"
 #include "components/chromeos_camera/mojo_mjpeg_decode_accelerator.h"
 #include "media/base/media_switches.h"
+#include "media/capture/video/chromeos/camera_trace_utils.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "third_party/perfetto/include/perfetto/tracing/track.h"
 
 namespace media {
 
@@ -21,17 +28,16 @@ VideoCaptureJpegDecoderImpl::VideoCaptureJpegDecoderImpl(
       decode_done_cb_(std::move(decode_done_cb)),
       send_log_message_cb_(std::move(send_log_message_cb)),
       has_received_decoded_frame_(false),
-      next_bitstream_buffer_id_(0),
-      in_buffer_id_(
-          chromeos_camera::MjpegDecodeAccelerator::kInvalidBitstreamBufferId),
       decoder_status_(INIT_PENDING),
-      weak_ptr_factory_(this) {}
+      next_task_id_(0),
+      task_id_(chromeos_camera::MjpegDecodeAccelerator::kInvalidTaskId) {}
 
 VideoCaptureJpegDecoderImpl::~VideoCaptureJpegDecoderImpl() {
   DCHECK(decoder_task_runner_->RunsTasksInCurrentSequence());
 }
 
 void VideoCaptureJpegDecoderImpl::Initialize() {
+  base::AutoLock lock(lock_);
   if (!IsVideoCaptureAcceleratedJpegDecodingEnabled()) {
     decoder_status_ = FAILED;
     RecordInitDecodeUMA_Locked();
@@ -58,9 +64,10 @@ void VideoCaptureJpegDecoderImpl::DecodeCapturedData(
     media::VideoCaptureDevice::Client::Buffer out_buffer) {
   DCHECK(decoder_);
 
-  TRACE_EVENT_ASYNC_BEGIN0("jpeg", "VideoCaptureJpegDecoderImpl decoding",
-                           next_bitstream_buffer_id_);
-  TRACE_EVENT0("jpeg", "VideoCaptureJpegDecoderImpl::DecodeCapturedData");
+  TRACE_EVENT_BEGIN(
+      "jpeg", "VideoCaptureJpegDecoderImpl decoding",
+      GetTraceTrack(CameraTraceEvent::kJpegDecoding, next_task_id_));
+  TRACE_EVENT("jpeg", "VideoCaptureJpegDecoderImpl::DecodeCapturedData");
 
   // TODO(kcwu): enqueue decode requests in case decoding is not fast enough
   // (say, if decoding time is longer than 16ms for 60fps 4k image)
@@ -73,60 +80,49 @@ void VideoCaptureJpegDecoderImpl::DecodeCapturedData(
   }
 
   // Enlarge input buffer if necessary.
-  if (!in_shared_memory_.get() ||
-      in_buffer_size > in_shared_memory_->mapped_size()) {
+  if (!in_shared_region_.IsValid() || !in_shared_mapping_.IsValid() ||
+      in_buffer_size > in_shared_mapping_.size()) {
     // Reserve 2x space to avoid frequent reallocations for initial frames.
     const size_t reserved_size = 2 * in_buffer_size;
-    in_shared_memory_.reset(new base::SharedMemory);
-    if (!in_shared_memory_->CreateAndMapAnonymous(reserved_size)) {
+    in_shared_region_ = base::UnsafeSharedMemoryRegion::Create(reserved_size);
+    if (!in_shared_region_.IsValid()) {
       base::AutoLock lock(lock_);
       decoder_status_ = FAILED;
-      LOG(WARNING) << "CreateAndMapAnonymous failed, size=" << reserved_size;
+      LOG(WARNING) << "UnsafeSharedMemoryRegion::Create failed, size="
+                   << reserved_size;
+      return;
+    }
+    in_shared_mapping_ = in_shared_region_.Map();
+    if (!in_shared_mapping_.IsValid()) {
+      base::AutoLock lock(lock_);
+      decoder_status_ = FAILED;
+      LOG(WARNING) << "UnsafeSharedMemoryRegion::Map failed, size="
+                   << reserved_size;
       return;
     }
   }
-  memcpy(in_shared_memory_->memory(), data, in_buffer_size);
+  memcpy(in_shared_mapping_.memory(), data, in_buffer_size);
 
-  // No need to lock for |in_buffer_id_| since IsDecoding_Locked() is false.
-  in_buffer_id_ = next_bitstream_buffer_id_;
-  media::BitstreamBuffer in_buffer(in_buffer_id_, in_shared_memory_->handle(),
-                                   false /* read_only */, in_buffer_size);
+  // No need to lock for |task_id_| since IsDecoding_Locked() is false.
+  task_id_ = next_task_id_;
+  media::BitstreamBuffer in_buffer(task_id_, in_shared_region_.Duplicate(),
+                                   in_buffer_size);
   // Mask against 30 bits, to avoid (undefined) wraparound on signed integer.
-  next_bitstream_buffer_id_ = (next_bitstream_buffer_id_ + 1) & 0x3FFFFFFF;
+  next_task_id_ = (next_task_id_ + 1) & 0x3FFFFFFF;
 
-  // The API of |decoder_| requires us to wrap the |out_buffer| in a VideoFrame.
   const gfx::Size dimensions = frame_format.frame_size;
-  std::unique_ptr<media::VideoCaptureBufferHandle> out_buffer_access =
-      out_buffer.handle_provider->GetHandleForInProcessAccess();
-  base::SharedMemoryHandle out_handle =
-      out_buffer.handle_provider->GetNonOwnedSharedMemoryHandleForLegacyIPC();
-  scoped_refptr<media::VideoFrame> out_frame =
-      media::VideoFrame::WrapExternalSharedMemory(
-          media::PIXEL_FORMAT_I420,          // format
-          dimensions,                        // coded_size
-          gfx::Rect(dimensions),             // visible_rect
-          dimensions,                        // natural_size
-          out_buffer_access->data(),         // data
-          out_buffer_access->mapped_size(),  // data_size
-          out_handle,                        // handle
-          0,                                 // shared_memory_offset
-          timestamp);                        // timestamp
-  if (!out_frame) {
+  if (!VideoFrame::IsValidConfig(PIXEL_FORMAT_I420,
+                                 VideoFrame::STORAGE_UNOWNED_MEMORY, dimensions,
+                                 gfx::Rect(dimensions), dimensions)) {
     base::AutoLock lock(lock_);
     decoder_status_ = FAILED;
-    LOG(ERROR) << "DecodeCapturedData: WrapExternalSharedMemory failed";
+    LOG(ERROR) << "DecodeCapturedData: VideoFrame::IsValidConfig() failed";
     return;
   }
-  // Hold onto the buffer access handle for the lifetime of the VideoFrame, to
-  // ensure the data pointers remain valid.
-  out_frame->AddDestructionObserver(base::BindOnce(
-      [](std::unique_ptr<media::VideoCaptureBufferHandle> handle) {},
-      std::move(out_buffer_access)));
-  out_frame->metadata()->SetDouble(media::VideoFrameMetadata::FRAME_RATE,
-                                   frame_format.frame_rate);
 
-  out_frame->metadata()->SetTimeTicks(media::VideoFrameMetadata::REFERENCE_TIME,
-                                      reference_time);
+  base::UnsafeSharedMemoryRegion out_region =
+      out_buffer.handle_provider->DuplicateAsUnsafeRegion();
+  DCHECK(out_region.IsValid());
 
   media::mojom::VideoFrameInfoPtr out_frame_info =
       media::mojom::VideoFrameInfo::New();
@@ -134,29 +130,39 @@ void VideoCaptureJpegDecoderImpl::DecodeCapturedData(
   out_frame_info->pixel_format = media::PIXEL_FORMAT_I420;
   out_frame_info->coded_size = dimensions;
   out_frame_info->visible_rect = gfx::Rect(dimensions);
-  out_frame_info->metadata = out_frame->metadata()->GetInternalValues().Clone();
-  out_frame_info->color_space = out_frame->ColorSpace();
+  out_frame_info->metadata = VideoFrameMetadata();
+  out_frame_info->metadata.frame_rate = frame_format.frame_rate;
+  out_frame_info->metadata.reference_time = reference_time;
+  out_frame_info->color_space = gfx::ColorSpace();
 
   {
     base::AutoLock lock(lock_);
     decode_done_closure_ = base::BindOnce(
-        decode_done_cb_, out_buffer.id, out_buffer.frame_feedback_id,
-        base::Passed(&out_buffer.access_permission),
-        base::Passed(&out_frame_info));
+        decode_done_cb_,
+        ReadyFrameInBuffer(out_buffer.id, out_buffer.frame_feedback_id,
+                           std::move(out_buffer.access_permission),
+                           std::move(out_frame_info)),
+        std::vector<ReadyFrameInBuffer>());
   }
 
   // base::Unretained is safe because |decoder_| is deleted on
   // |decoder_task_runner_|.
   decoder_task_runner_->PostTask(
       FROM_HERE,
-      base::BindOnce(&chromeos_camera::MjpegDecodeAccelerator::Decode,
-                     base::Unretained(decoder_.get()), std::move(in_buffer),
-                     std::move(out_frame)));
+      base::BindOnce(
+          [](chromeos_camera::MojoMjpegDecodeAccelerator* decoder,
+             BitstreamBuffer in_buffer, VideoPixelFormat format,
+             gfx::Size coded_size, base::UnsafeSharedMemoryRegion out_region) {
+            decoder->Decode(std::move(in_buffer), format, coded_size,
+                            std::move(out_region));
+          },
+          base::Unretained(decoder_.get()), std::move(in_buffer),
+          media::PIXEL_FORMAT_I420, dimensions, std::move(out_region)));
 }
 
-void VideoCaptureJpegDecoderImpl::VideoFrameReady(int32_t bitstream_buffer_id) {
+void VideoCaptureJpegDecoderImpl::VideoFrameReady(int32_t task_id) {
   DCHECK(decoder_task_runner_->RunsTasksInCurrentSequence());
-  TRACE_EVENT0("jpeg", "VideoCaptureJpegDecoderImpl::VideoFrameReady");
+  TRACE_EVENT("jpeg", "VideoCaptureJpegDecoderImpl::VideoFrameReady");
   if (!has_received_decoded_frame_) {
     send_log_message_cb_.Run("Received decoded frame from Gpu Jpeg decoder");
     has_received_decoded_frame_ = true;
@@ -168,26 +174,23 @@ void VideoCaptureJpegDecoderImpl::VideoFrameReady(int32_t bitstream_buffer_id) {
     return;
   }
 
-  if (bitstream_buffer_id != in_buffer_id_) {
-    LOG(ERROR) << "Unexpected bitstream_buffer_id " << bitstream_buffer_id
-               << ", expected " << in_buffer_id_;
+  if (task_id != task_id_) {
+    LOG(ERROR) << "Unexpected task_id " << task_id << ", expected " << task_id_;
     return;
   }
-  in_buffer_id_ =
-      chromeos_camera::MjpegDecodeAccelerator::kInvalidBitstreamBufferId;
+  task_id_ = chromeos_camera::MjpegDecodeAccelerator::kInvalidTaskId;
 
   std::move(decode_done_closure_).Run();
 
-  TRACE_EVENT_ASYNC_END0("jpeg", "VideoCaptureJpegDecoderImpl decoding",
-                         bitstream_buffer_id);
+  TRACE_EVENT_END("jpeg",
+                  GetTraceTrack(CameraTraceEvent::kJpegDecoding, task_id));
 }
 
 void VideoCaptureJpegDecoderImpl::NotifyError(
-    int32_t bitstream_buffer_id,
+    int32_t task_id,
     chromeos_camera::MjpegDecodeAccelerator::Error error) {
   DCHECK(decoder_task_runner_->RunsTasksInCurrentSequence());
-  LOG(ERROR) << "Decode error, bitstream_buffer_id=" << bitstream_buffer_id
-             << ", error=" << error;
+  LOG(ERROR) << "Decode error, task_id=" << task_id << ", error=" << error;
   send_log_message_cb_.Run("Gpu Jpeg decoder failed");
   base::AutoLock lock(lock_);
   decode_done_closure_.Reset();
@@ -195,24 +198,24 @@ void VideoCaptureJpegDecoderImpl::NotifyError(
 }
 
 void VideoCaptureJpegDecoderImpl::FinishInitialization() {
-  TRACE_EVENT0("gpu", "VideoCaptureJpegDecoderImpl::FinishInitialization");
+  TRACE_EVENT("gpu", "VideoCaptureJpegDecoderImpl::FinishInitialization");
   DCHECK(decoder_task_runner_->RunsTasksInCurrentSequence());
 
-  chromeos_camera::mojom::MjpegDecodeAcceleratorPtr remote_decoder;
-  jpeg_decoder_factory_.Run(mojo::MakeRequest(&remote_decoder));
+  mojo::PendingRemote<chromeos_camera::mojom::MjpegDecodeAccelerator>
+      remote_decoder;
+  jpeg_decoder_factory_.Run(remote_decoder.InitWithNewPipeAndPassReceiver());
 
   base::AutoLock lock(lock_);
   decoder_ = std::make_unique<chromeos_camera::MojoMjpegDecodeAccelerator>(
-      decoder_task_runner_, remote_decoder.PassInterface());
+      decoder_task_runner_, std::move(remote_decoder));
 
   decoder_->InitializeAsync(
-      this,
-      base::BindRepeating(&VideoCaptureJpegDecoderImpl::OnInitializationDone,
-                          weak_ptr_factory_.GetWeakPtr()));
+      this, base::BindOnce(&VideoCaptureJpegDecoderImpl::OnInitializationDone,
+                           weak_ptr_factory_.GetWeakPtr()));
 }
 
 void VideoCaptureJpegDecoderImpl::OnInitializationDone(bool success) {
-  TRACE_EVENT0("gpu", "VideoCaptureJpegDecoderImpl::OnInitializationDone");
+  TRACE_EVENT("gpu", "VideoCaptureJpegDecoderImpl::OnInitializationDone");
   DCHECK(decoder_task_runner_->RunsTasksInCurrentSequence());
 
   base::AutoLock lock(lock_);
@@ -231,15 +234,9 @@ bool VideoCaptureJpegDecoderImpl::IsDecoding_Locked() const {
 }
 
 void VideoCaptureJpegDecoderImpl::RecordInitDecodeUMA_Locked() {
+  lock_.AssertAcquired();
   UMA_HISTOGRAM_BOOLEAN("Media.VideoCaptureGpuJpegDecoder.InitDecodeSuccess",
                         decoder_status_ == INIT_PASSED);
-}
-
-void VideoCaptureJpegDecoderImpl::DestroyDecoderOnIOThread(
-    base::WaitableEvent* event) {
-  DCHECK(decoder_task_runner_->RunsTasksInCurrentSequence());
-  decoder_.reset();
-  event->Signal();
 }
 
 }  // namespace media

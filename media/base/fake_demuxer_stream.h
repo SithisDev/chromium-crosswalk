@@ -1,12 +1,12 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef MEDIA_BASE_FAKE_DEMUXER_STREAM_H_
 #define MEDIA_BASE_FAKE_DEMUXER_STREAM_H_
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/time/time.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/demuxer_stream.h"
 #include "media/base/media_resource.h"
@@ -26,11 +26,27 @@ class FakeDemuxerStream : public DemuxerStream {
   FakeDemuxerStream(int num_configs,
                     int num_buffers_in_one_config,
                     bool is_encrypted);
+  // Constructs an object that outputs |num_configs| different configs in
+  // sequence with |num_frames_in_one_config| buffers for each config. The
+  // output buffers are encrypted if |is_encrypted| is true.
+  // The starting config |coded_size| is specified by the
+  // |start_coded_size| parameter, and each config change increases/decreases it
+  // by the |coded_size_delta| parameter.
+  // The returned config always has equal |coded_size| and |visible_rect|
+  // properties.
+  FakeDemuxerStream(int num_configs,
+                    int num_buffers_in_one_config,
+                    bool is_encrypted,
+                    gfx::Size start_coded_size,
+                    gfx::Vector2dF coded_size_delta);
+
+  FakeDemuxerStream(const FakeDemuxerStream&) = delete;
+  FakeDemuxerStream& operator=(const FakeDemuxerStream&) = delete;
+
   ~FakeDemuxerStream() override;
 
   // DemuxerStream implementation.
-  void Read(const ReadCB& read_cb) override;
-  bool IsReadPending() const override;
+  void Read(ReadCB read_cb) override;
   AudioDecoderConfig audio_decoder_config() override;
   VideoDecoderConfig video_decoder_config() override;
   Type type() const override;
@@ -82,6 +98,8 @@ class FakeDemuxerStream : public DemuxerStream {
   const int num_buffers_in_one_config_;
   const bool config_changes_;
   const bool is_encrypted_;
+  const gfx::Size start_coded_size_;
+  const gfx::Vector2dF coded_size_delta_;
 
   int num_configs_left_;
 
@@ -93,7 +111,7 @@ class FakeDemuxerStream : public DemuxerStream {
   base::TimeDelta current_timestamp_;
   base::TimeDelta duration_;
 
-  gfx::Size next_coded_size_;
+  gfx::Size next_size_;
   VideoDecoderConfig video_decoder_config_;
 
   ReadCB read_cb_;
@@ -102,8 +120,6 @@ class FakeDemuxerStream : public DemuxerStream {
   // Zero-based number indicating which read operation should be held. -1 means
   // no read shall be held.
   int read_to_hold_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeDemuxerStream);
 };
 
 class FakeMediaResource : public MediaResource {
@@ -112,6 +128,10 @@ class FakeMediaResource : public MediaResource {
   FakeMediaResource(int num_video_configs,
                     int num_video_buffers_in_one_config,
                     bool is_video_encrypted);
+
+  FakeMediaResource(const FakeMediaResource&) = delete;
+  FakeMediaResource& operator=(const FakeMediaResource&) = delete;
+
   ~FakeMediaResource() override;
 
   // MediaResource implementation.
@@ -119,8 +139,6 @@ class FakeMediaResource : public MediaResource {
 
  private:
   FakeDemuxerStream fake_video_stream_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeMediaResource);
 };
 
 }  // namespace media

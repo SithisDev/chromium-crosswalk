@@ -1,11 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/formats/mp2t/es_parser_test_base.h"
 
+#include "base/check_op.h"
 #include "base/files/memory_mapped_file.h"
-#include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "media/base/stream_parser_buffer.h"
@@ -92,7 +92,7 @@ bool EsParserTestBase::ProcessPesPackets(
     size_t cur_pes_size = pes_packets[k].size;
 
     base::TimeDelta pts = kNoTimestamp;
-    DecodeTimestamp dts = kNoDecodeTimestamp();
+    DecodeTimestamp dts = kNoDecodeTimestamp;
     if (pes_packets[k].pts >= base::TimeDelta() || force_timing)
       pts = pes_packets[k].pts;
 

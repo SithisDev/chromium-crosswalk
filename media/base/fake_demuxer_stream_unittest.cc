@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,8 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/demuxer_stream.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -30,6 +29,10 @@ class FakeDemuxerStreamTest : public testing::Test {
       : status_(DemuxerStream::kAborted),
         read_pending_(false),
         num_buffers_received_(0) {}
+
+  FakeDemuxerStreamTest(const FakeDemuxerStreamTest&) = delete;
+  FakeDemuxerStreamTest& operator=(const FakeDemuxerStreamTest&) = delete;
+
   ~FakeDemuxerStreamTest() override = default;
 
   void BufferReady(DemuxerStream::Status status,
@@ -45,15 +48,16 @@ class FakeDemuxerStreamTest : public testing::Test {
   enum ReadResult { OK, ABORTED, CONFIG_CHANGED, READ_ERROR, EOS, PENDING };
 
   void EnterNormalReadState() {
-    stream_.reset(
-        new FakeDemuxerStream(kNumConfigs, kNumBuffersInOneConfig, false));
+    stream_ = std::make_unique<FakeDemuxerStream>(
+        kNumConfigs, kNumBuffersInOneConfig, false);
     for (int i = 0; i < kNumBuffersToReadFirst; ++i)
       ReadAndExpect(OK);
     DCHECK_EQ(kNumBuffersToReadFirst, num_buffers_received_);
   }
 
   void EnterBeforeEOSState() {
-    stream_.reset(new FakeDemuxerStream(1, kNumBuffersInOneConfig, false));
+    stream_ =
+        std::make_unique<FakeDemuxerStream>(1, kNumBuffersInOneConfig, false);
     for (int i = 0; i < kNumBuffersInOneConfig; ++i)
       ReadAndExpect(OK);
     DCHECK_EQ(kNumBuffersInOneConfig, num_buffers_received_);
@@ -103,17 +107,17 @@ class FakeDemuxerStreamTest : public testing::Test {
   void ReadAndExpect(ReadResult result) {
     EXPECT_FALSE(read_pending_);
     read_pending_ = true;
-    stream_->Read(base::Bind(&FakeDemuxerStreamTest::BufferReady,
-                             base::Unretained(this)));
+    stream_->Read(base::BindOnce(&FakeDemuxerStreamTest::BufferReady,
+                                 base::Unretained(this)));
     base::RunLoop().RunUntilIdle();
     ExpectReadResult(result);
   }
 
   void ReadUntilPending() {
-    while (1) {
+    while (true) {
       read_pending_ = true;
-      stream_->Read(base::Bind(&FakeDemuxerStreamTest::BufferReady,
-                               base::Unretained(this)));
+      stream_->Read(base::BindOnce(&FakeDemuxerStreamTest::BufferReady,
+                                   base::Unretained(this)));
       base::RunLoop().RunUntilIdle();
       if (read_pending_)
         break;
@@ -170,8 +174,8 @@ class FakeDemuxerStreamTest : public testing::Test {
   void TestRead(int num_configs,
                 int num_buffers_in_one_config,
                 bool is_encrypted) {
-    stream_.reset(new FakeDemuxerStream(
-        num_configs, num_buffers_in_one_config, is_encrypted));
+    stream_ = std::make_unique<FakeDemuxerStream>(
+        num_configs, num_buffers_in_one_config, is_encrypted);
 
     const VideoDecoderConfig& config = stream_->video_decoder_config();
     EXPECT_TRUE(config.IsValidConfig());
@@ -180,16 +184,13 @@ class FakeDemuxerStreamTest : public testing::Test {
     ReadAllBuffers(num_configs, num_buffers_in_one_config);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<FakeDemuxerStream> stream_;
 
   DemuxerStream::Status status_;
   scoped_refptr<DecoderBuffer> buffer_;
   bool read_pending_;
   int num_buffers_received_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FakeDemuxerStreamTest);
 };
 
 TEST_F(FakeDemuxerStreamTest, Read_OneConfig) {
@@ -296,8 +297,8 @@ TEST_F(FakeDemuxerStreamTest, Error_BeforeEOS) {
 }
 
 TEST_F(FakeDemuxerStreamTest, NoConfigChanges) {
-  stream_.reset(
-      new FakeDemuxerStream(1, kNumBuffersInOneConfig, false));
+  stream_ =
+      std::make_unique<FakeDemuxerStream>(1, kNumBuffersInOneConfig, false);
   EXPECT_FALSE(stream_->SupportsConfigChanges());
   for (int i = 0; i < kNumBuffersInOneConfig; ++i)
     ReadAndExpect(OK);
@@ -323,6 +324,38 @@ TEST_F(FakeDemuxerStreamTest, SeekToStart_AfterEOS) {
   stream_->SeekToStart();
   num_buffers_received_ = 0;
   ReadAllBuffers(3, 5);
+}
+
+TEST_F(FakeDemuxerStreamTest, DemuxerStream_GetTypeName) {
+  EXPECT_TRUE(DemuxerStream::GetTypeName(DemuxerStream::Type::AUDIO) ==
+              std::string("audio"));
+  EXPECT_TRUE(DemuxerStream::GetTypeName(DemuxerStream::Type::VIDEO) ==
+              std::string("video"));
+  EXPECT_TRUE(DemuxerStream::GetTypeName(DemuxerStream::Type::TEXT) ==
+              std::string("text"));
+  EXPECT_TRUE(DemuxerStream::GetTypeName(DemuxerStream::Type::UNKNOWN) ==
+              std::string("unknown"));
+}
+
+TEST_F(FakeDemuxerStreamTest, DemuxerStream_GetStatusName) {
+  EXPECT_TRUE(DemuxerStream::GetStatusName(DemuxerStream::Status::kOk) ==
+              std::string("okay"));
+  EXPECT_TRUE(DemuxerStream::GetStatusName(DemuxerStream::Status::kAborted) ==
+              std::string("aborted"));
+  EXPECT_TRUE(
+      DemuxerStream::GetStatusName(DemuxerStream::Status::kConfigChanged) ==
+      std::string("config_changed"));
+  EXPECT_TRUE(DemuxerStream::GetStatusName(DemuxerStream::Status::kError) ==
+              std::string("error"));
+}
+
+TEST_F(FakeDemuxerStreamTest, DemuxerStream_GetLivenessName) {
+  EXPECT_TRUE(GetStreamLivenessName(StreamLiveness::kUnknown) ==
+              std::string("unknown"));
+  EXPECT_TRUE(GetStreamLivenessName(StreamLiveness::kRecorded) ==
+              std::string("recorded"));
+  EXPECT_TRUE(GetStreamLivenessName(StreamLiveness::kLive) ==
+              std::string("live"));
 }
 
 }  // namespace media

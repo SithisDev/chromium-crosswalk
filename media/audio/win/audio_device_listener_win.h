@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "media/base/media_export.h"
@@ -32,42 +32,46 @@ namespace media {
 class MEDIA_EXPORT AudioDeviceListenerWin : public IMMNotificationClient {
  public:
   // The listener callback will be called from a system level multimedia thread,
-  // thus the callee must be thread safe.  |listener| is a permanent callback
+  // thus the callee must be thread safe.  |listener_cb| is a permanent callback
   // and must outlive AudioDeviceListenerWin.
-  explicit AudioDeviceListenerWin(const base::Closure& listener_cb);
+  explicit AudioDeviceListenerWin(base::RepeatingClosure listener_cb);
+
+  AudioDeviceListenerWin(const AudioDeviceListenerWin&) = delete;
+  AudioDeviceListenerWin& operator=(const AudioDeviceListenerWin&) = delete;
+
   virtual ~AudioDeviceListenerWin();
 
  private:
   friend class AudioDeviceListenerWinTest;
 
   // Minimum allowed time between device change notifications.
-  static const int kDeviceChangeLimitMs = 250;
+  static constexpr base::TimeDelta kDeviceChangeLimit = base::Milliseconds(250);
 
   // IMMNotificationClient implementation.
-  STDMETHOD_(ULONG, AddRef)() override;
-  STDMETHOD_(ULONG, Release)() override;
-  STDMETHOD(QueryInterface)(REFIID iid, void** object) override;
-  STDMETHOD(OnPropertyValueChanged)(LPCWSTR device_id,
-                                    const PROPERTYKEY key) override;
-  STDMETHOD(OnDeviceAdded)(LPCWSTR device_id) override;
-  STDMETHOD(OnDeviceRemoved)(LPCWSTR device_id) override;
-  STDMETHOD(OnDeviceStateChanged)(LPCWSTR device_id, DWORD new_state) override;
-  STDMETHOD(OnDefaultDeviceChanged)(EDataFlow flow,
-                                    ERole role,
-                                    LPCWSTR new_default_device_id) override;
+  IFACEMETHODIMP_(ULONG) AddRef() override;
+  IFACEMETHODIMP_(ULONG) Release() override;
+  IFACEMETHODIMP QueryInterface(REFIID iid, void** object) override;
+  IFACEMETHODIMP OnPropertyValueChanged(LPCWSTR device_id,
+                                        const PROPERTYKEY key) override;
+  IFACEMETHODIMP OnDeviceAdded(LPCWSTR device_id) override;
+  IFACEMETHODIMP OnDeviceRemoved(LPCWSTR device_id) override;
+  IFACEMETHODIMP OnDeviceStateChanged(LPCWSTR device_id,
+                                      DWORD new_state) override;
+  IFACEMETHODIMP OnDefaultDeviceChanged(EDataFlow flow,
+                                        ERole role,
+                                        LPCWSTR new_default_device_id) override;
 
-  base::Closure listener_cb_;
+  const base::RepeatingClosure listener_cb_;
   Microsoft::WRL::ComPtr<IMMDeviceEnumerator> device_enumerator_;
 
   // Used to rate limit device change events.
   base::TimeTicks last_device_change_time_;
+  std::string last_device_id_;
 
   // AudioDeviceListenerWin must be constructed and destructed on one thread.
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
-  const base::TickClock* tick_clock_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioDeviceListenerWin);
+  raw_ptr<const base::TickClock> tick_clock_;
 };
 
 }  // namespace media

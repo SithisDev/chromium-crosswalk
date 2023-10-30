@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,7 @@ struct BufferSubmitter<ID3D11VideoContext1> {
     constexpr UINT max_buffers = 4;
     DCHECK_LE(num_buffers, max_buffers);
     D3D11_VIDEO_DECODER_BUFFER_DESC1 buffers[max_buffers] = {};
+    memset(buffers, 0, sizeof(D3D11_VIDEO_DECODER_BUFFER_DESC1) * max_buffers);
     for (size_t i = 0; i < num_buffers; i++) {
       buffers[i].BufferType = src[i].BufferType;
       buffers[i].DataOffset = src[i].DataOffset;
@@ -49,6 +50,7 @@ struct BufferSubmitter<ID3D11VideoContext> {
     constexpr UINT max_buffers = 4;
     DCHECK_LE(num_buffers, max_buffers);
     D3D11_VIDEO_DECODER_BUFFER_DESC buffers[max_buffers] = {};
+    memset(buffers, 0, sizeof(D3D11_VIDEO_DECODER_BUFFER_DESC) * max_buffers);
     for (size_t i = 0; i < num_buffers; i++) {
       buffers[i].BufferType = src[i].BufferType;
       buffers[i].DataOffset = src[i].DataOffset;
@@ -114,14 +116,14 @@ std::unique_ptr<VideoContextWrapper> VideoContextWrapper::CreateWrapper(
     HRESULT* status) {
   if (supported_d3d11_version == D3D_FEATURE_LEVEL_11_0) {
     ComD3D11VideoContext video_context;
-    *status = device_context.CopyTo(video_context.ReleaseAndGetAddressOf());
+    *status = device_context.As(&video_context);
     return std::make_unique<VideoContextWrapperImpl<ID3D11VideoContext>>(
         video_context);
   }
 
   if (supported_d3d11_version == D3D_FEATURE_LEVEL_11_1) {
     ComD3D11VideoContext1 video_context;
-    *status = device_context.CopyTo(video_context.ReleaseAndGetAddressOf());
+    *status = device_context.As(&video_context);
     return std::make_unique<VideoContextWrapperImpl<ID3D11VideoContext1>>(
         video_context);
   }

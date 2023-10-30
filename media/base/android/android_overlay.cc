@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 namespace media {
 
-AndroidOverlay::AndroidOverlay() : weak_factory_(this) {}
+AndroidOverlay::AndroidOverlay() {}
 AndroidOverlay::~AndroidOverlay() {
   // Don't permit any other callbacks once we start sending deletion cbs.
   weak_factory_.InvalidateWeakPtrs();

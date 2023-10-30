@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,10 +81,9 @@ class MEDIA_EXPORT AudioShifter {
   // calculate playout_time would be now + audio pipeline delay.
   void Pull(AudioBus* output, base::TimeTicks playout_time);
 
-private:
-  void Zero(AudioBus* output);
-  void ResamplerCallback(int frame_delay, AudioBus* destination);
+  int frames_pushed_for_testing() { return frames_pushed_for_testing_; }
 
+ private:
   struct AudioQueueEntry {
     AudioQueueEntry(base::TimeTicks target_playout_time,
                     std::unique_ptr<AudioBus> audio);
@@ -94,11 +93,16 @@ private:
     std::unique_ptr<AudioBus> audio;
   };
 
+  void Zero(AudioBus* output);
+  void ResamplerCallback(int frame_delay, AudioBus* destination);
+
   // Set from constructor.
   const base::TimeDelta max_buffer_size_;
   const base::TimeDelta clock_accuracy_;
   const base::TimeDelta adjustment_time_;
-  const int rate_;
+  // Kept as a double to make it easier to preserve precision in frame count ->
+  // total time conversions .
+  const double rate_;
   const int channels_;
 
   // The clock smoothers are used to smooth out timestamps
@@ -110,7 +114,7 @@ private:
   bool running_;
 
   // Number of frames already consumed from |queue_|.
-  size_t position_;
+  size_t position_ = 0;
 
   // Queue of data provided to us.
   base::circular_deque<AudioQueueEntry> queue_;
@@ -119,7 +123,7 @@ private:
   base::TimeTicks previous_playout_time_;
 
   // Number of frames requested in last Pull call.
-  size_t previous_requested_samples_;
+  int previous_requested_samples_ = 0;
 
   // Timestamp at the end of last audio bus
   // consumed by resampler.
@@ -133,7 +137,9 @@ private:
   MultiChannelResampler resampler_;
 
   // Current resampler ratio.
-  double current_ratio_;
+  double current_ratio_ = 1.0;
+
+  int frames_pushed_for_testing_ = 0;
 };
 
 }  // namespace media

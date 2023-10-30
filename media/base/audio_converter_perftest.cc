@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "media/base/audio_converter.h"
 #include "media/base/fake_audio_render_callback.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "testing/perf/perf_test.h"
+#include "testing/perf/perf_result_reporter.h"
 
 namespace media {
 
@@ -46,17 +46,19 @@ void RunConvertBenchmark(const AudioParameters& in_params,
   }
   double runs_per_second = kBenchmarkIterations /
                            (base::TimeTicks::Now() - start).InSecondsF();
-  perf_test::PrintResult(
-      "audio_converter", "", trace_name, runs_per_second, "runs/s", true);
+  perf_test::PerfResultReporter reporter("audio_converter", trace_name);
+  reporter.RegisterImportantMetric("", "runs/s");
+  reporter.AddResult("", runs_per_second);
 }
 
 TEST(AudioConverterPerfTest, ConvertBenchmark) {
   // Create input and output parameters to convert between the two most common
   // sets of parameters (as indicated via UMA data).
   AudioParameters input_params(AudioParameters::AUDIO_PCM_LINEAR,
-                               CHANNEL_LAYOUT_MONO, 48000, 2048);
+                               media::ChannelLayoutConfig::Mono(), 48000, 2048);
   AudioParameters output_params(AudioParameters::AUDIO_PCM_LINEAR,
-                                CHANNEL_LAYOUT_STEREO, 44100, 440);
+                                media::ChannelLayoutConfig::Stereo(), 44100,
+                                440);
 
   RunConvertBenchmark(input_params, output_params, false, "convert");
 }
@@ -65,11 +67,11 @@ TEST(AudioConverterPerfTest, ConvertBenchmarkFIFO) {
   // Create input and output parameters to convert between common buffer sizes
   // without any resampling for the FIFO vs no FIFO benchmarks.
   AudioParameters input_params(AudioParameters::AUDIO_PCM_LINEAR,
-                               CHANNEL_LAYOUT_STEREO,
-                               44100,
+                               media::ChannelLayoutConfig::Stereo(), 44100,
                                2048);
   AudioParameters output_params(AudioParameters::AUDIO_PCM_LINEAR,
-                                CHANNEL_LAYOUT_STEREO, 44100, 440);
+                                media::ChannelLayoutConfig::Stereo(), 44100,
+                                440);
 
   RunConvertBenchmark(input_params, output_params, true, "convert_fifo_only");
   RunConvertBenchmark(input_params, output_params, false,

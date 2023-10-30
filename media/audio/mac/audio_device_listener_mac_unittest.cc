@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,10 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "media/base/bind_to_current_loop.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,17 +24,21 @@ class AudioDeviceListenerMacTest : public testing::Test {
   AudioDeviceListenerMacTest() {
     // It's important to create the device listener from the message loop in
     // order to ensure we don't end up with unbalanced TaskObserver calls.
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE,
         base::BindOnce(&AudioDeviceListenerMacTest::CreateDeviceListener,
                        base::Unretained(this)));
     base::RunLoop().RunUntilIdle();
   }
 
-  virtual ~AudioDeviceListenerMacTest() {
+  AudioDeviceListenerMacTest(const AudioDeviceListenerMacTest&) = delete;
+  AudioDeviceListenerMacTest& operator=(const AudioDeviceListenerMacTest&) =
+      delete;
+
+  ~AudioDeviceListenerMacTest() override {
     // It's important to destroy the device listener from the message loop in
     // order to ensure we don't end up with unbalanced TaskObserver calls.
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE,
         base::BindOnce(&AudioDeviceListenerMacTest::DestroyDeviceListener,
                        base::Unretained(this)));
@@ -45,11 +48,11 @@ class AudioDeviceListenerMacTest : public testing::Test {
   void CreateDeviceListener() {
     // Force a post task using BindToCurrentLoop() to ensure device listener
     // internals are working correctly.
-    device_listener_.reset(new AudioDeviceListenerMac(
+    device_listener_ = std::make_unique<AudioDeviceListenerMac>(
         BindToCurrentLoop(
-            base::Bind(&AudioDeviceListenerMacTest::OnDeviceChange,
-                       base::Unretained(this))),
-        true /* monitor_default_input */, true /* monitor_addition_removal */));
+            base::BindRepeating(&AudioDeviceListenerMacTest::OnDeviceChange,
+                                base::Unretained(this))),
+        true /* monitor_default_input */, true /* monitor_addition_removal */);
   }
 
   void DestroyDeviceListener() { device_listener_.reset(); }
@@ -98,10 +101,8 @@ class AudioDeviceListenerMacTest : public testing::Test {
   MOCK_METHOD0(OnDeviceChange, void());
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<AudioDeviceListenerMac> device_listener_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioDeviceListenerMacTest);
 };
 
 // Simulate a device change event and ensure we get the right callback.

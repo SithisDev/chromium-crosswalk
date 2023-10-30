@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/trace_event/trace_event.h"
 #include "media/capture/mojom/image_capture_types.h"
 #include "media/capture/video/android/capture_jni_headers/VideoCapture_jni.h"
 #include "media/capture/video/android/photo_capabilities.h"
@@ -103,8 +104,7 @@ PhotoCapabilities::AndroidFillLightMode ToAndroidFillLightMode(
 VideoCaptureDeviceAndroid::VideoCaptureDeviceAndroid(
     const VideoCaptureDeviceDescriptor& device_descriptor)
     : main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      device_descriptor_(device_descriptor),
-      weak_ptr_factory_(this) {}
+      device_descriptor_(device_descriptor) {}
 
 VideoCaptureDeviceAndroid::~VideoCaptureDeviceAndroid() {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
@@ -162,7 +162,7 @@ void VideoCaptureDeviceAndroid::AllocateAndStart(
   CHECK(!(capture_format_.frame_size.height() % 2));
 
   if (capture_format_.frame_rate > 0) {
-    frame_interval_ = base::TimeDelta::FromMicroseconds(
+    frame_interval_ = base::Microseconds(
         (base::Time::kMicrosecondsPerSecond + capture_format_.frame_rate - 1) /
         capture_format_.frame_rate);
   }
@@ -226,8 +226,8 @@ void VideoCaptureDeviceAndroid::TakePhoto(TakePhotoCallback callback) {
                            "wait for first frame",
                            TRACE_EVENT_SCOPE_PROCESS);
       photo_requests_queue_.push_back(
-          base::Bind(&VideoCaptureDeviceAndroid::DoTakePhoto,
-                     weak_ptr_factory_.GetWeakPtr(), base::Passed(&callback)));
+          base::BindOnce(&VideoCaptureDeviceAndroid::DoTakePhoto,
+                         weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
       return;
     }
   }
@@ -242,8 +242,8 @@ void VideoCaptureDeviceAndroid::GetPhotoState(GetPhotoStateCallback callback) {
       return;
     if (!got_first_frame_) {  // We have to wait until we get the first frame.
       photo_requests_queue_.push_back(
-          base::Bind(&VideoCaptureDeviceAndroid::DoGetPhotoState,
-                     weak_ptr_factory_.GetWeakPtr(), base::Passed(&callback)));
+          base::BindOnce(&VideoCaptureDeviceAndroid::DoGetPhotoState,
+                         weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
       return;
     }
   }
@@ -260,9 +260,9 @@ void VideoCaptureDeviceAndroid::SetPhotoOptions(
       return;
     if (!got_first_frame_) {  // We have to wait until we get the first frame.
       photo_requests_queue_.push_back(
-          base::Bind(&VideoCaptureDeviceAndroid::DoSetPhotoOptions,
-                     weak_ptr_factory_.GetWeakPtr(), base::Passed(&settings),
-                     base::Passed(&callback)));
+          base::BindOnce(&VideoCaptureDeviceAndroid::DoSetPhotoOptions,
+                         weak_ptr_factory_.GetWeakPtr(), std::move(settings),
+                         std::move(callback)));
       return;
     }
   }
@@ -326,8 +326,7 @@ void VideoCaptureDeviceAndroid::OnI420FrameAvailable(JNIEnv* env,
     return;
   const int64_t absolute_micro =
       timestamp / base::Time::kNanosecondsPerMicrosecond;
-  const base::TimeDelta capture_time =
-      base::TimeDelta::FromMicroseconds(absolute_micro);
+  const base::TimeDelta capture_time = base::Microseconds(absolute_micro);
 
   const base::TimeTicks current_time = base::TimeTicks::Now();
   ProcessFirstFrameAvailable(current_time);
@@ -351,7 +350,7 @@ void VideoCaptureDeviceAndroid::OnI420FrameAvailable(JNIEnv* env,
   const int y_plane_length = width * height;
   const int uv_plane_length = y_plane_length / 4;
   const int buffer_length = y_plane_length + uv_plane_length * 2;
-  std::unique_ptr<uint8_t[]> buffer(new uint8_t[buffer_length]);
+  auto buffer = std::make_unique<uint8_t[]>(buffer_length);
 
   libyuv::Android420ToI420(y_src, y_stride, u_src, uv_row_stride, v_src,
                            uv_row_stride, uv_pixel_stride, buffer.get(), width,
@@ -603,8 +602,8 @@ void VideoCaptureDeviceAndroid::ProcessFirstFrameAvailable(
 
   // Set aside one frame allowance for fluctuation.
   expected_next_frame_time_ = current_time - frame_interval_;
-  for (const auto& request : photo_requests_queue_)
-    main_task_runner_->PostTask(FROM_HERE, request);
+  for (auto& request : photo_requests_queue_)
+    main_task_runner_->PostTask(FROM_HERE, std::move(request));
   photo_requests_queue_.clear();
 }
 
@@ -678,8 +677,7 @@ void VideoCaptureDeviceAndroid::DoTakePhoto(TakePhotoCallback callback) {
   JNIEnv* env = AttachCurrentThread();
 
   // Make copy on the heap so we can pass the pointer through JNI.
-  std::unique_ptr<TakePhotoCallback> heap_callback(
-      new TakePhotoCallback(std::move(callback)));
+  auto heap_callback = std::make_unique<TakePhotoCallback>(std::move(callback));
   const intptr_t callback_id = reinterpret_cast<intptr_t>(heap_callback.get());
   {
     base::AutoLock lock(photo_callbacks_lock_);
@@ -701,8 +699,8 @@ void VideoCaptureDeviceAndroid::DoGetPhotoState(
   JNIEnv* env = AttachCurrentThread();
 
   // Make copy on the heap so we can pass the pointer through JNI.
-  std::unique_ptr<GetPhotoStateCallback> heap_callback(
-      new GetPhotoStateCallback(std::move(callback)));
+  auto heap_callback =
+      std::make_unique<GetPhotoStateCallback>(std::move(callback));
   const intptr_t callback_id = reinterpret_cast<intptr_t>(heap_callback.get());
   {
     base::AutoLock lock(photo_callbacks_lock_);

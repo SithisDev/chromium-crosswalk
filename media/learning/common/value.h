@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,6 +36,7 @@ class COMPONENT_EXPORT(LEARNING_COMMON) Value {
 
   explicit Value(const char* x);
   explicit Value(const std::string& x);
+  explicit Value(bool x);
 
   Value(const Value& other);
   Value(Value&&) noexcept;
@@ -47,6 +48,7 @@ class COMPONENT_EXPORT(LEARNING_COMMON) Value {
   bool operator!=(const Value& rhs) const;
   bool operator<(const Value& rhs) const;
   bool operator>(const Value& rhs) const;
+  bool operator>=(const Value& rhs) const;
 
   double value() const { return value_; }
 

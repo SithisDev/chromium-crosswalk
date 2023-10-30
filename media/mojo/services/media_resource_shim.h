@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,10 @@
 #include <stddef.h>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "media/base/media_resource.h"
 #include "media/mojo/services/mojo_demuxer_stream_adapter.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 
 namespace media {
 
@@ -21,8 +21,13 @@ class MediaResourceShim : public MediaResource {
   // Constructs the shim; at least a single audio or video stream must be
   // provided.  |demuxer_ready_cb| will be called once the streams have been
   // initialized.  Calling any method before then is an error.
-  MediaResourceShim(std::vector<mojom::DemuxerStreamPtrInfo> streams,
-                    const base::Closure& demuxer_ready_cb);
+  MediaResourceShim(
+      std::vector<mojo::PendingRemote<mojom::DemuxerStream>> streams,
+      base::OnceClosure demuxer_ready_cb);
+
+  MediaResourceShim(const MediaResourceShim&) = delete;
+  MediaResourceShim& operator=(const MediaResourceShim&) = delete;
+
   ~MediaResourceShim() override;
 
   // MediaResource interface.
@@ -36,7 +41,7 @@ class MediaResourceShim : public MediaResource {
 
   // Stored copy the ready callback provided during construction; cleared once
   // all streams are ready.
-  base::Closure demuxer_ready_cb_;
+  base::OnceClosure demuxer_ready_cb_;
 
   // Container for demuxer stream adapters which interface with the mojo level
   // demuxer streams.  |streams_ready_| tracks how many streams are ready and is
@@ -46,8 +51,6 @@ class MediaResourceShim : public MediaResource {
 
   // WeakPtrFactorys must always be the last member variable.
   base::WeakPtrFactory<MediaResourceShim> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MediaResourceShim);
 };
 
 }  // namespace media

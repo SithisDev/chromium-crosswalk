@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,7 +90,8 @@ void RenderLineOfText(const std::string& line, int top, VideoFrame* frame) {
   const int stride = frame->stride(kPlane);
   uint8_t* p_ul =
       // Start at the first pixel in the first row...
-      frame->visible_data(kPlane) + (stride * top)
+      frame->GetWritableVisibleData(kPlane) +
+      (stride * top)
       // ...now move to the right edge of the visible part of the frame...
       + frame->visible_rect().width()
       // ...now move left to where line[0] would be rendered...
@@ -180,7 +181,7 @@ void RenderLineOfText(const std::string& line, int top, VideoFrame* frame) {
       case '+':
         DivergePixels(gfx::Rect(1, 1, 1, 1), p_ul, stride);
         DivergePixels(gfx::Rect(1, 3, 1, 1), p_ul, stride);
-        FALLTHROUGH;
+        [[fallthrough]];
       case '-':
         DivergePixels(gfx::Rect(0, 2, 3, 1), p_ul, stride);
         break;
@@ -221,7 +222,7 @@ scoped_refptr<VideoFrame> MaybeRenderPerformanceMetricsOverlay(
     int target_bitrate,
     int frames_ago,
     double encoder_utilization,
-    double lossy_utilization,
+    double lossiness,
     scoped_refptr<VideoFrame> source) {
   if (!VLOG_IS_ON(1))
     return source;
@@ -258,44 +259,41 @@ scoped_refptr<VideoFrame> MaybeRenderPerformanceMetricsOverlay(
         plane, source->format(), source->visible_rect().width());
     const uint8_t* src = source->visible_data(plane);
     const int src_stride = source->stride(plane);
-    uint8_t* dst = frame->visible_data(plane);
+    uint8_t* dst = frame->GetWritableVisibleData(plane);
     const int dst_stride = frame->stride(plane);
     for (size_t row = 0; row < row_count;
          ++row, src += src_stride, dst += dst_stride) {
       memcpy(dst, src, bytes_per_row);
     }
   }
-  frame->metadata()->MergeMetadataFrom(source->metadata());
+  frame->metadata().MergeMetadataFrom(source->metadata());
   // Important: After all consumers are done with the frame, copy-back the
   // changed/new metadata to the source frame, as it contains feedback signals
   // that need to propagate back up the video stack. The destruction callback
   // for the |frame| holds a ref-counted reference to the source frame to ensure
   // the source frame has the right metadata before its destruction observers
   // are invoked.
-  frame->AddDestructionObserver(base::Bind(
-      [](const VideoFrameMetadata* sent_frame_metadata,
+  frame->AddDestructionObserver(base::BindOnce(
+      [](const VideoFrameMetadata& sent_frame_metadata,
          scoped_refptr<VideoFrame> source_frame) {
-        source_frame->metadata()->Clear();
-        source_frame->metadata()->MergeMetadataFrom(sent_frame_metadata);
+        source_frame->set_metadata(sent_frame_metadata);
       },
       frame->metadata(), std::move(source)));
 
   // Line 3: Frame duration, resolution, and timestamp.
   int frame_duration_ms = 0;
   int frame_duration_ms_frac = 0;
-  base::TimeDelta frame_duration;
-  if (frame->metadata()->GetTimeDelta(VideoFrameMetadata::FRAME_DURATION,
-                                      &frame_duration)) {
+  if (frame->metadata().frame_duration.has_value()) {
     const int decimilliseconds = base::saturated_cast<int>(
-        frame_duration.InMicroseconds() / 100.0 + 0.5);
+        frame->metadata().frame_duration->InMicroseconds() / 100.0 + 0.5);
     frame_duration_ms = decimilliseconds / 10;
     frame_duration_ms_frac = decimilliseconds % 10;
   }
   base::TimeDelta rem = frame->timestamp();
   const int minutes = rem.InMinutes();
-  rem -= base::TimeDelta::FromMinutes(minutes);
+  rem -= base::Minutes(minutes);
   const int seconds = static_cast<int>(rem.InSeconds());
-  rem -= base::TimeDelta::FromSeconds(seconds);
+  rem -= base::Seconds(seconds);
   const int hundredth_seconds = static_cast<int>(rem.InMilliseconds() / 10);
   RenderLineOfText(
       base::StringPrintf("%d.%01d %dx%d %d:%02d.%02d", frame_duration_ms,
@@ -312,13 +310,13 @@ scoped_refptr<VideoFrame> MaybeRenderPerformanceMetricsOverlay(
   // Line 2: Capture duration, target playout delay, low-latency mode, and
   // target bitrate.
   int capture_duration_ms = 0;
-  base::TimeTicks capture_begin_time, capture_end_time;
-  if (frame->metadata()->GetTimeTicks(VideoFrameMetadata::CAPTURE_BEGIN_TIME,
-                                      &capture_begin_time) &&
-      frame->metadata()->GetTimeTicks(VideoFrameMetadata::CAPTURE_END_TIME,
-                                      &capture_end_time)) {
-    capture_duration_ms = base::saturated_cast<int>(
-        (capture_end_time - capture_begin_time).InMillisecondsF() + 0.5);
+  if (frame->metadata().capture_begin_time &&
+      frame->metadata().capture_end_time) {
+    capture_duration_ms =
+        base::saturated_cast<int>((*frame->metadata().capture_end_time -
+                                   *frame->metadata().capture_begin_time)
+                                      .InMillisecondsF() +
+                                  0.5);
   }
   const int target_playout_delay_ms =
       static_cast<int>(target_playout_delay.InMillisecondsF() + 0.5);
@@ -337,8 +335,7 @@ scoped_refptr<VideoFrame> MaybeRenderPerformanceMetricsOverlay(
   // Line 1: Recent utilization metrics.
   const int encoder_pct =
       base::saturated_cast<int>(encoder_utilization * 100.0 + 0.5);
-  const int lossy_pct =
-      base::saturated_cast<int>(lossy_utilization * 100.0 + 0.5);
+  const int lossy_pct = base::saturated_cast<int>(lossiness * 100.0 + 0.5);
   RenderLineOfText(base::StringPrintf("%d %3.1d%% %3.1d%%", frames_ago,
                                       encoder_pct, lossy_pct),
                    top, frame.get());

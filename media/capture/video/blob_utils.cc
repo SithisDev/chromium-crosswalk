@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,9 +98,7 @@ mojom::BlobPtr RotateAndBlobify(const uint8_t* buffer,
   }
 
   uint32_t src_format;
-  if (pixel_format == VideoPixelFormat::PIXEL_FORMAT_UYVY)
-    src_format = libyuv::FOURCC_UYVY;
-  else if (pixel_format == VideoPixelFormat::PIXEL_FORMAT_YUY2)
+  if (pixel_format == VideoPixelFormat::PIXEL_FORMAT_YUY2)
     src_format = libyuv::FOURCC_YUY2;
   else if (pixel_format == VideoPixelFormat::PIXEL_FORMAT_I420)
     src_format = libyuv::FOURCC_I420;
@@ -111,8 +109,8 @@ mojom::BlobPtr RotateAndBlobify(const uint8_t* buffer,
 
   const gfx::Size frame_size = capture_format.frame_size;
   // PNGCodec does not support YUV formats, convert to a temporary ARGB buffer.
-  std::unique_ptr<uint8_t[]> tmp_argb(
-      new uint8_t[VideoFrame::AllocationSize(PIXEL_FORMAT_ARGB, frame_size)]);
+  auto tmp_argb = std::make_unique<uint8_t[]>(
+      VideoFrame::AllocationSize(PIXEL_FORMAT_ARGB, frame_size));
   if (ConvertToARGB(buffer, bytesused, tmp_argb.get(), frame_size.width() * 4,
                     0 /* crop_x_pos */, 0 /* crop_y_pos */, frame_size.width(),
                     frame_size.height(), frame_size.width(),
@@ -123,8 +121,11 @@ mojom::BlobPtr RotateAndBlobify(const uint8_t* buffer,
 
   mojom::BlobPtr blob = mojom::Blob::New();
   const gfx::PNGCodec::ColorFormat codec_color_format =
-      (kN32_SkColorType == kRGBA_8888_SkColorType) ? gfx::PNGCodec::FORMAT_RGBA
-                                                   : gfx::PNGCodec::FORMAT_BGRA;
+#if SK_PMCOLOR_BYTE_ORDER(R, G, B, A)
+      gfx::PNGCodec::FORMAT_RGBA;
+#else
+      gfx::PNGCodec::FORMAT_BGRA;
+#endif
   const bool result = gfx::PNGCodec::Encode(
       tmp_argb.get(), codec_color_format, frame_size, frame_size.width() * 4,
       true /* discard_transparency */, std::vector<gfx::PNGCodec::Comment>(),

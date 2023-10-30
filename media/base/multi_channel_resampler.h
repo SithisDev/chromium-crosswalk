@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "media/base/sinc_resampler.h"
 
 namespace media {
@@ -25,7 +24,8 @@ class MEDIA_EXPORT MultiChannelResampler {
   // to be completely filled with data upon return; zero padded if not enough
   // frames are available to satisfy the request.  |frame_delay| is the number
   // of output frames already processed and can be used to estimate delay.
-  typedef base::Callback<void(int frame_delay, AudioBus* audio_bus)> ReadCB;
+  typedef base::RepeatingCallback<void(int frame_delay, AudioBus* audio_bus)>
+      ReadCB;
 
   // Constructs a MultiChannelResampler with the specified |read_cb|, which is
   // used to acquire audio data for resampling.  |io_sample_rate_ratio| is the
@@ -34,7 +34,11 @@ class MEDIA_EXPORT MultiChannelResampler {
   MultiChannelResampler(int channels,
                         double io_sample_rate_ratio,
                         size_t request_frames,
-                        const ReadCB& read_cb);
+                        const ReadCB read_cb);
+
+  MultiChannelResampler(const MultiChannelResampler&) = delete;
+  MultiChannelResampler& operator=(const MultiChannelResampler&) = delete;
+
   virtual ~MultiChannelResampler();
 
   // Resamples |frames| of data from |read_cb_| into AudioBus.
@@ -52,6 +56,9 @@ class MEDIA_EXPORT MultiChannelResampler {
   // The maximum size in frames that guarantees Resample() will only make a
   // single call to |read_cb_| for more data.
   int ChunkSize() const;
+
+  // See SincResampler::GetMaxInputFramesRequested().
+  int GetMaxInputFramesRequested(int output_frames_requested) const;
 
   // See SincResampler::BufferedFrames.
   double BufferedFrames() const;
@@ -80,8 +87,6 @@ class MEDIA_EXPORT MultiChannelResampler {
   // The number of output frames that have successfully been processed during
   // the current Resample() call.
   int output_frames_ready_;
-
-  DISALLOW_COPY_AND_ASSIGN(MultiChannelResampler);
 };
 
 }  // namespace media

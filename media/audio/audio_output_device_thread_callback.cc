@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,61 +6,31 @@
 
 #include <utility>
 
-#include "base/metrics/histogram_macros.h"
+#include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/trace_event/trace_event.h"
 
 namespace media {
 
-AudioOutputDeviceThreadCallback::Metrics::Metrics()
-    : first_play_start_time_(base::nullopt) {}
-
-AudioOutputDeviceThreadCallback::Metrics::~Metrics() = default;
-
-void AudioOutputDeviceThreadCallback::Metrics::OnCreated() {
-  start_time_ = base::TimeTicks::Now();
-}
-
-void AudioOutputDeviceThreadCallback::Metrics::OnProcess() {
-  if (first_play_start_time_) {
-    UMA_HISTOGRAM_TIMES("Media.Audio.Render.OutputDeviceStartTime",
-                        base::TimeTicks::Now() - *first_play_start_time_);
-  }
-}
-
-void AudioOutputDeviceThreadCallback::Metrics::OnInitializePlayStartTime() {
-  if (!first_play_start_time_.has_value())
-    first_play_start_time_ = base::TimeTicks::Now();
-}
-
-void AudioOutputDeviceThreadCallback::Metrics::OnDestroyed() {
-  DCHECK(!start_time_.is_null());
-  UMA_HISTOGRAM_LONG_TIMES("Media.Audio.Render.OutputStreamDuration",
-                           base::TimeTicks::Now() - start_time_);
-}
-
 AudioOutputDeviceThreadCallback::AudioOutputDeviceThreadCallback(
     const media::AudioParameters& audio_parameters,
     base::UnsafeSharedMemoryRegion shared_memory_region,
-    media::AudioRendererSink::RenderCallback* render_callback,
-    std::unique_ptr<Metrics> metrics)
+    media::AudioRendererSink::RenderCallback* render_callback)
     : media::AudioDeviceThread::Callback(
           audio_parameters,
           ComputeAudioOutputBufferSize(audio_parameters),
           /*segment count*/ 1),
       shared_memory_region_(std::move(shared_memory_region)),
       render_callback_(render_callback),
-      callback_num_(0),
-      metrics_(std::move(metrics)) {
+      create_time_(base::TimeTicks::Now()) {
   // CHECK that the shared memory is large enough. The memory allocated must be
   // at least as large as expected.
   CHECK(memory_length_ <= shared_memory_region_.GetSize());
-  if (metrics_)
-    metrics_->OnCreated();
 }
 
 AudioOutputDeviceThreadCallback::~AudioOutputDeviceThreadCallback() {
-  if (metrics_)
-    metrics_->OnDestroyed();
+  UmaHistogramLongTimes("Media.Audio.Render.OutputStreamDuration2",
+                        base::TimeTicks::Now() - create_time_);
 }
 
 void AudioOutputDeviceThreadCallback::MapSharedMemory() {
@@ -90,12 +60,10 @@ void AudioOutputDeviceThreadCallback::Process(uint32_t control_signal) {
                      "callback_num", callback_num_, "frames skipped",
                      frames_skipped);
 
-  base::TimeDelta delay =
-      base::TimeDelta::FromMicroseconds(buffer->params.delay_us);
+  base::TimeDelta delay = base::Microseconds(buffer->params.delay_us);
 
   base::TimeTicks delay_timestamp =
-      base::TimeTicks() +
-      base::TimeDelta::FromMicroseconds(buffer->params.delay_timestamp_us);
+      base::TimeTicks() + base::Microseconds(buffer->params.delay_timestamp_us);
 
   DVLOG(4) << __func__ << " delay:" << delay << " delay_timestamp:" << delay
            << " frames_skipped:" << frames_skipped;
@@ -104,9 +72,12 @@ void AudioOutputDeviceThreadCallback::Process(uint32_t control_signal) {
   // that we have some data, we'll get another one after the device is awake and
   // ingesting data, which is what we want to track with this trace.
   if (callback_num_ == 2) {
-    if (metrics_)
-      metrics_->OnProcess();
-    TRACE_EVENT_ASYNC_END0("audio", "StartingPlayback", this);
+    TRACE_EVENT_NESTABLE_ASYNC_END0("audio", "StartingPlayback",
+                                    TRACE_ID_LOCAL(this));
+    if (first_play_start_time_) {
+      UmaHistogramTimes("Media.Audio.Render.OutputDeviceStartTime2",
+                        base::TimeTicks::Now() - *first_play_start_time_);
+    }
   }
 
   // Update the audio-delay measurement, inform about the number of skipped
@@ -132,8 +103,13 @@ bool AudioOutputDeviceThreadCallback::CurrentThreadIsAudioDeviceThread() {
 }
 
 void AudioOutputDeviceThreadCallback::InitializePlayStartTime() {
-  if (metrics_)
-    metrics_->OnInitializePlayStartTime();
+  if (first_play_start_time_)
+    return;
+
+  DCHECK(!callback_num_);
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("audio", "StartingPlayback",
+                                    TRACE_ID_LOCAL(this));
+  first_play_start_time_ = base::TimeTicks::Now();
 }
 
 }  // namespace media

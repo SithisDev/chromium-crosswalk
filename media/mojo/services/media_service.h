@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,46 +7,39 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "build/build_config.h"
-#include "media/mojo/interfaces/interface_factory.mojom.h"
-#include "media/mojo/interfaces/media_service.mojom.h"
-#include "media/mojo/services/deferred_destroy_strong_binding_set.h"
+#include "media/mojo/mojom/frame_interface_factory.mojom.h"
+#include "media/mojo/mojom/interface_factory.mojom.h"
+#include "media/mojo/mojom/media_service.mojom.h"
+#include "media/mojo/services/deferred_destroy_unique_receiver_set.h"
 #include "media/mojo/services/media_mojo_export.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
-#include "services/service_manager/public/cpp/service.h"
-#include "services/service_manager/public/cpp/service_binding.h"
-#include "services/service_manager/public/cpp/service_keepalive.h"
-#include "services/service_manager/public/mojom/service.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 
 namespace media {
 
 class MojoMediaClient;
 
-class MEDIA_MOJO_EXPORT MediaService : public service_manager::Service,
-                                       public mojom::MediaService {
+class MEDIA_MOJO_EXPORT MediaService final : public mojom::MediaService {
  public:
   MediaService(std::unique_ptr<MojoMediaClient> mojo_media_client,
-               service_manager::mojom::ServiceRequest request);
+               mojo::PendingReceiver<mojom::MediaService> receiver);
+
+  MediaService(const MediaService&) = delete;
+  MediaService& operator=(const MediaService&) = delete;
+
   ~MediaService() final;
 
  private:
-  // service_manager::Service implementation.
-  void OnStart() final;
-  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
-                       const std::string& interface_name,
-                       mojo::ScopedMessagePipeHandle interface_pipe) override;
-  void OnDisconnected() final;
+  void Create(mojo::PendingReceiver<mojom::MediaService> receiver);
 
-  void Create(mojom::MediaServiceRequest request);
-
+  // mojom::MediaService implementation:
   void CreateInterfaceFactory(
-      mojom::InterfaceFactoryRequest request,
-      service_manager::mojom::InterfaceProviderPtr host_interfaces) final;
+      mojo::PendingReceiver<mojom::InterfaceFactory> receiver,
+      mojo::PendingRemote<mojom::FrameInterfaceFactory> frame_interfaces) final;
 
-  service_manager::ServiceBinding service_binding_;
-  service_manager::ServiceKeepalive keepalive_;
+  mojo::Receiver<mojom::MediaService> receiver_;
 
   // Note: Since each instance runs on a different thread, do not share a common
   // MojoMediaClient with other instances to avoid threading issues. Hence using
@@ -56,13 +49,8 @@ class MEDIA_MOJO_EXPORT MediaService : public service_manager::Service,
   // |mojo_media_client_| must be destructed before |ref_factory_|.
   std::unique_ptr<MojoMediaClient> mojo_media_client_;
 
-  DeferredDestroyStrongBindingSet<mojom::InterfaceFactory>
-      interface_factory_bindings_;
-
-  service_manager::BinderRegistry registry_;
-  mojo::BindingSet<mojom::MediaService> bindings_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaService);
+  DeferredDestroyUniqueReceiverSet<mojom::InterfaceFactory>
+      interface_factory_receivers_;
 };
 
 }  // namespace media

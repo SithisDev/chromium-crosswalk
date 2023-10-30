@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 
 #include <limits>
 
+#include "base/containers/adapters.h"
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/optional.h"
 #include "media/base/decrypt_config.h"
 #include "media/base/encryption_pattern.h"
 #include "media/base/media_util.h"
@@ -18,6 +18,7 @@
 #include "media/formats/common/offset_byte_queue.h"
 #include "media/formats/mp2t/mp2t_common.h"
 #include "media/video/h264_parser.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -113,8 +114,8 @@ std::unique_ptr<uint8_t[]> AdjustAUForSampleAES(
     result.reset(new uint8_t[au_end_pos]);
     uint8_t* temp = result.get();
     memcpy(temp, au, au_end_pos);
-    for (auto epb_pos = epbs.rbegin(); epb_pos != epbs.rend(); ++epb_pos) {
-      RemoveByte(temp, *epb_pos, au_end_pos);
+    for (const auto& epb : base::Reversed(epbs)) {
+      RemoveByte(temp, epb, au_end_pos);
       au_end_pos--;
     }
     au = temp;
@@ -177,33 +178,31 @@ std::unique_ptr<uint8_t[]> AdjustAUForSampleAES(
 // 3 bytes for the start code + 1 byte for the NALU type.
 const int kMinAUDSize = 4;
 
-EsParserH264::EsParserH264(const NewVideoConfigCB& new_video_config_cb,
-                           const EmitBufferCB& emit_buffer_cb)
-    : es_adapter_(new_video_config_cb, emit_buffer_cb),
+EsParserH264::EsParserH264(NewVideoConfigCB new_video_config_cb,
+                           EmitBufferCB emit_buffer_cb)
+    : es_adapter_(std::move(new_video_config_cb), std::move(emit_buffer_cb)),
       h264_parser_(new H264Parser()),
       current_access_unit_pos_(0),
       next_access_unit_pos_(0)
 #if BUILDFLAG(ENABLE_HLS_SAMPLE_AES)
       ,
-      use_hls_sample_aes_(false),
+      init_encryption_scheme_(EncryptionScheme::kUnencrypted),
       get_decrypt_config_cb_()
 #endif
 {
 }
 
 #if BUILDFLAG(ENABLE_HLS_SAMPLE_AES)
-EsParserH264::EsParserH264(const NewVideoConfigCB& new_video_config_cb,
-                           const EmitBufferCB& emit_buffer_cb,
-                           bool use_hls_sample_aes,
+EsParserH264::EsParserH264(NewVideoConfigCB new_video_config_cb,
+                           EmitBufferCB emit_buffer_cb,
+                           EncryptionScheme init_encryption_scheme,
                            const GetDecryptConfigCB& get_decrypt_config_cb)
-    : es_adapter_(new_video_config_cb, emit_buffer_cb),
+    : es_adapter_(std::move(new_video_config_cb), std::move(emit_buffer_cb)),
       h264_parser_(new H264Parser()),
       current_access_unit_pos_(0),
       next_access_unit_pos_(0),
-      use_hls_sample_aes_(use_hls_sample_aes),
-      get_decrypt_config_cb_(get_decrypt_config_cb) {
-  DCHECK_EQ(!!get_decrypt_config_cb_, use_hls_sample_aes_);
-}
+      init_encryption_scheme_(init_encryption_scheme),
+      get_decrypt_config_cb_(get_decrypt_config_cb) {}
 #endif
 
 EsParserH264::~EsParserH264() {
@@ -360,7 +359,7 @@ bool EsParserH264::ParseFromEsQueue() {
 #if BUILDFLAG(ENABLE_HLS_SAMPLE_AES)
         // With HLS SampleAES, protected blocks in H.264 consist of IDR and non-
         // IDR slices that are more than 48 bytes in length.
-        if (use_hls_sample_aes_ &&
+        if (get_decrypt_config_cb_ && get_decrypt_config_cb_.Run() &&
             nalu.size > kSampleAESMaxUnprotectedNALULength) {
           int64_t nal_begin = nalu.data - es;
           protected_blocks_.Add(nal_begin, nal_begin + nalu.size);
@@ -399,7 +398,7 @@ bool EsParserH264::EmitFrame(int64_t access_unit_pos,
   DVLOG_IF(1, current_timing_desc.pts == kNoTimestamp) << "Missing timestamp";
 
   // If only the PTS is provided, copy the PTS into the DTS.
-  if (current_timing_desc.dts == kNoDecodeTimestamp()) {
+  if (current_timing_desc.dts == kNoDecodeTimestamp) {
     current_timing_desc.dts =
         DecodeTimestamp::FromPresentationTime(current_timing_desc.pts);
   }
@@ -418,14 +417,9 @@ bool EsParserH264::EmitFrame(int64_t access_unit_pos,
     const H264SPS* sps = h264_parser_->GetSPS(pps->seq_parameter_set_id);
     if (!sps)
       return false;
-    EncryptionScheme scheme = Unencrypted();
+    EncryptionScheme scheme = EncryptionScheme::kUnencrypted;
 #if BUILDFLAG(ENABLE_HLS_SAMPLE_AES)
-    if (use_hls_sample_aes_) {
-      // Note that for SampleAES the (encrypt,skip) pattern is constant.
-      scheme = EncryptionScheme(
-          EncryptionScheme::CIPHER_MODE_AES_CBC,
-          EncryptionPattern(kSampleAESEncryptBlocks, kSampleAESSkipBlocks));
-    }
+    scheme = init_encryption_scheme_;
 #endif
     RCHECK(UpdateVideoDecoderConfig(sps, scheme));
   }
@@ -440,14 +434,12 @@ bool EsParserH264::EmitFrame(int64_t access_unit_pos,
 
 #if BUILDFLAG(ENABLE_HLS_SAMPLE_AES)
   const DecryptConfig* base_decrypt_config = nullptr;
-  if (use_hls_sample_aes_) {
-    DCHECK(get_decrypt_config_cb_);
+  if (get_decrypt_config_cb_)
     base_decrypt_config = get_decrypt_config_cb_.Run();
-  }
 
   std::unique_ptr<uint8_t[]> adjusted_au;
   std::vector<SubsampleEntry> subsamples;
-  if (use_hls_sample_aes_ && base_decrypt_config) {
+  if (base_decrypt_config) {
     adjusted_au = AdjustAUForSampleAES(es, &access_unit_size, protected_blocks_,
                                        &subsamples);
     protected_blocks_.clear();
@@ -464,20 +456,20 @@ bool EsParserH264::EmitFrame(int64_t access_unit_pos,
   stream_parser_buffer->SetDecodeTimestamp(current_timing_desc.dts);
   stream_parser_buffer->set_timestamp(current_timing_desc.pts);
 #if BUILDFLAG(ENABLE_HLS_SAMPLE_AES)
-  if (use_hls_sample_aes_ && base_decrypt_config) {
-    switch (base_decrypt_config->encryption_mode()) {
-      case EncryptionMode::kUnencrypted:
+  if (base_decrypt_config) {
+    switch (base_decrypt_config->encryption_scheme()) {
+      case EncryptionScheme::kUnencrypted:
         // As |base_decrypt_config| is specified, the stream is encrypted,
         // so this shouldn't happen.
         NOTREACHED();
         break;
-      case EncryptionMode::kCenc:
+      case EncryptionScheme::kCenc:
         stream_parser_buffer->set_decrypt_config(
             DecryptConfig::CreateCencConfig(base_decrypt_config->key_id(),
                                             base_decrypt_config->iv(),
                                             subsamples));
         break;
-      case EncryptionMode::kCbcs:
+      case EncryptionScheme::kCbcs:
         // Note that for SampleAES the (encrypt,skip) pattern is constant.
         // If not specified in |base_decrypt_config|, use default values.
         stream_parser_buffer->set_decrypt_config(
@@ -494,16 +486,16 @@ bool EsParserH264::EmitFrame(int64_t access_unit_pos,
 }
 
 bool EsParserH264::UpdateVideoDecoderConfig(const H264SPS* sps,
-                                            const EncryptionScheme& scheme) {
+                                            EncryptionScheme scheme) {
   // Set the SAR to 1 when not specified in the H264 stream.
   int sar_width = (sps->sar_width == 0) ? 1 : sps->sar_width;
   int sar_height = (sps->sar_height == 0) ? 1 : sps->sar_height;
 
-  base::Optional<gfx::Size> coded_size = sps->GetCodedSize();
+  absl::optional<gfx::Size> coded_size = sps->GetCodedSize();
   if (!coded_size)
     return false;
 
-  base::Optional<gfx::Rect> visible_rect = sps->GetVisibleRect();
+  absl::optional<gfx::Rect> visible_rect = sps->GetVisibleRect();
   if (!visible_rect)
     return false;
 
@@ -526,7 +518,7 @@ bool EsParserH264::UpdateVideoDecoderConfig(const H264SPS* sps,
   }
 
   VideoDecoderConfig video_decoder_config(
-      kCodecH264, profile, VideoDecoderConfig::AlphaMode::kIsOpaque,
+      VideoCodec::kH264, profile, VideoDecoderConfig::AlphaMode::kIsOpaque,
       VideoColorSpace::REC709(), kNoTransformation, coded_size.value(),
       visible_rect.value(), natural_size, EmptyExtraData(), scheme);
 

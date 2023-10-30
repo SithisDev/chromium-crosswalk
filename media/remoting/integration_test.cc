@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,46 +12,27 @@
 namespace media {
 namespace remoting {
 
-namespace {
-
 constexpr int kAppendTimeSec = 1;
-
-class TestRendererFactory final : public PipelineTestRendererFactory {
- public:
-  explicit TestRendererFactory(
-      std::unique_ptr<PipelineTestRendererFactory> renderer_factory)
-      : default_renderer_factory_(std::move(renderer_factory)) {}
-  ~TestRendererFactory() override = default;
-
-  // PipelineTestRendererFactory implementation.
-  std::unique_ptr<Renderer> CreateRenderer(
-      CreateVideoDecodersCB prepend_video_decoders_cb,
-      CreateAudioDecodersCB prepend_audio_decoders_cb) override {
-    std::unique_ptr<Renderer> renderer_impl =
-        default_renderer_factory_->CreateRenderer(prepend_video_decoders_cb,
-                                                  prepend_audio_decoders_cb);
-    return std::make_unique<End2EndTestRenderer>(std::move(renderer_impl));
-  }
-
- private:
-  std::unique_ptr<PipelineTestRendererFactory> default_renderer_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestRendererFactory);
-};
-
-}  // namespace
 
 class MediaRemotingIntegrationTest : public testing::Test,
                                      public PipelineIntegrationTestBase {
  public:
   MediaRemotingIntegrationTest() {
-    std::unique_ptr<PipelineTestRendererFactory> factory =
-        std::move(renderer_factory_);
-    renderer_factory_.reset(new TestRendererFactory(std::move(factory)));
+    SetCreateRendererCB(base::BindRepeating(
+        &MediaRemotingIntegrationTest::CreateEnd2EndTestRenderer,
+        base::Unretained(this)));
   }
 
+  MediaRemotingIntegrationTest(const MediaRemotingIntegrationTest&) = delete;
+  MediaRemotingIntegrationTest& operator=(const MediaRemotingIntegrationTest&) =
+      delete;
+
  private:
-  DISALLOW_COPY_AND_ASSIGN(MediaRemotingIntegrationTest);
+  std::unique_ptr<Renderer> CreateEnd2EndTestRenderer(
+      absl::optional<RendererType> renderer_type) {
+    return std::make_unique<End2EndTestRenderer>(
+        this->CreateDefaultRenderer(renderer_type));
+  }
 };
 
 TEST_F(MediaRemotingIntegrationTest, BasicPlayback) {
@@ -81,7 +62,7 @@ TEST_F(MediaRemotingIntegrationTest, MediaSource_ConfigChange_WebM) {
   EXPECT_CALL(*this, OnVideoNaturalSizeChange(gfx::Size(640, 360))).Times(1);
   scoped_refptr<DecoderBuffer> second_file =
       ReadTestDataFile("bear-640x360.webm");
-  ASSERT_TRUE(source.AppendAtTime(base::TimeDelta::FromSeconds(kAppendTimeSec),
+  ASSERT_TRUE(source.AppendAtTime(base::Seconds(kAppendTimeSec),
                                   second_file->data(),
                                   second_file->data_size()));
   source.EndOfStream();

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/sync_socket.h"
+#include "media/base/audio_capturer_source.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/media_export.h"
 
@@ -22,15 +23,15 @@ class AudioProcessorControls;
 class MEDIA_EXPORT AudioInputIPCDelegate {
  public:
   // Called when an AudioInputController has been created.
-  // See media/mojo/interfaces/audio_data_pipe.mojom for documentation of
+  // See media/mojo/mojom/audio_data_pipe.mojom for documentation of
   // |handle| and |socket_handle|.
   virtual void OnStreamCreated(
       base::ReadOnlySharedMemoryRegion shared_memory_region,
-      base::SyncSocket::Handle socket_handle,
+      base::SyncSocket::ScopedHandle socket_handle,
       bool initially_muted) = 0;
 
   // Called when state of an audio stream has changed.
-  virtual void OnError() = 0;
+  virtual void OnError(AudioCapturerSource::ErrorCode code) = 0;
 
   // Called when an audio stream is muted or unmuted.
   virtual void OnMuted(bool is_muted) = 0;

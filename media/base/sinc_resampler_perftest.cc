@@ -1,15 +1,16 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/cpu.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "media/base/sinc_resampler.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "testing/perf/perf_test.h"
+#include "testing/perf/perf_result_reporter.h"
 
 namespace media {
 
@@ -17,13 +18,6 @@ static const int kBenchmarkIterations = 50000000;
 
 static const double kSampleRateRatio = 192000.0 / 44100.0;
 static const double kKernelInterpolationFactor = 0.5;
-
-// Define platform independent function name for Convolve* tests.
-#if defined(ARCH_CPU_X86_FAMILY)
-#define CONVOLVE_FUNC Convolve_SSE
-#elif defined(ARCH_CPU_ARM_FAMILY) && defined(USE_NEON)
-#define CONVOLVE_FUNC Convolve_NEON
-#endif
 
 static void RunConvolveBenchmark(
     float (*convolve_fn)(const float*, const float*, const float*, double),
@@ -38,14 +32,11 @@ static void RunConvolveBenchmark(
                 resampler.get_kernel_for_testing(),
                 resampler.get_kernel_for_testing(), kKernelInterpolationFactor);
   }
-  double total_time_milliseconds =
-      (base::TimeTicks::Now() - start).InMillisecondsF();
-  perf_test::PrintResult("sinc_resampler_convolve",
-                         "",
-                         trace_name,
-                         kBenchmarkIterations / total_time_milliseconds,
-                         "runs/ms",
-                         true);
+  double total_time_seconds = (base::TimeTicks::Now() - start).InSecondsF();
+
+  perf_test::PerfResultReporter reporter("sinc_resampler", trace_name);
+  reporter.RegisterImportantMetric("_convolve", "runs/s");
+  reporter.AddResult("_convolve", kBenchmarkIterations / total_time_seconds);
 }
 
 // Benchmark for the various Convolve() methods.  Make sure to build with
@@ -54,17 +45,35 @@ TEST(SincResamplerPerfTest, Convolve_unoptimized_aligned) {
   RunConvolveBenchmark(SincResampler::Convolve_C, true, "unoptimized_aligned");
 }
 
-#if defined(CONVOLVE_FUNC)
 TEST(SincResamplerPerfTest, Convolve_optimized_aligned) {
-  RunConvolveBenchmark(SincResampler::CONVOLVE_FUNC, true, "optimized_aligned");
+#if defined(ARCH_CPU_X86_FAMILY)
+  base::CPU cpu;
+  if (cpu.has_avx2()) {
+    RunConvolveBenchmark(SincResampler::Convolve_AVX2, true,
+                         "optimized_aligned");
+  } else if (cpu.has_sse2()) {
+    RunConvolveBenchmark(SincResampler::Convolve_SSE, true,
+                         "optimized_aligned");
+  }
+#elif defined(ARCH_CPU_ARM_FAMILY) && defined(USE_NEON)
+  RunConvolveBenchmark(SincResampler::Convolve_NEON, true, "optimized_aligned");
+#endif
 }
 
 TEST(SincResamplerPerfTest, Convolve_optimized_unaligned) {
-  RunConvolveBenchmark(SincResampler::CONVOLVE_FUNC, false,
+#if defined(ARCH_CPU_X86_FAMILY)
+  base::CPU cpu;
+  if (cpu.has_avx2()) {
+    RunConvolveBenchmark(SincResampler::Convolve_AVX2, false,
+                         "optimized_unaligned");
+  } else if (cpu.has_sse2()) {
+    RunConvolveBenchmark(SincResampler::Convolve_SSE, false,
+                         "optimized_unaligned");
+  }
+#elif defined(ARCH_CPU_ARM_FAMILY) && defined(USE_NEON)
+  RunConvolveBenchmark(SincResampler::Convolve_NEON, false,
                        "optimized_unaligned");
-}
 #endif
-
-#undef CONVOLVE_FUNC
+}
 
 } // namespace media

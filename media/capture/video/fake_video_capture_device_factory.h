@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,10 @@
 
 #include "media/capture/video/fake_video_capture_device.h"
 #include "media/capture/video/video_capture_device_factory.h"
+
+namespace gpu {
+class GpuMemoryBufferSupport;
+}  // namespace gpu
 
 namespace media {
 
@@ -49,12 +53,14 @@ class CAPTURE_EXPORT FakeVideoCaptureDeviceFactory
   ~FakeVideoCaptureDeviceFactory() override;
 
   static std::unique_ptr<VideoCaptureDevice> CreateDeviceWithSettings(
-      const FakeVideoCaptureDeviceSettings& settings);
+      const FakeVideoCaptureDeviceSettings& settings,
+      std::unique_ptr<gpu::GpuMemoryBufferSupport> gmb_support = nullptr);
 
   static std::unique_ptr<VideoCaptureDevice> CreateDeviceWithDefaultResolutions(
       VideoPixelFormat pixel_format,
       FakeVideoCaptureDevice::DeliveryMode delivery_mode,
-      float frame_rate);
+      float frame_rate,
+      std::unique_ptr<gpu::GpuMemoryBufferSupport> gmb_support = nullptr);
 
   // Creates a device that reports OnError() when AllocateAndStart() is called.
   static std::unique_ptr<VideoCaptureDevice> CreateErrorDevice();
@@ -74,16 +80,9 @@ class CAPTURE_EXPORT FakeVideoCaptureDeviceFactory
       const std::vector<FakeVideoCaptureDeviceSettings>& config);
 
   // VideoCaptureDeviceFactory implementation:
-  std::unique_ptr<VideoCaptureDevice> CreateDevice(
+  VideoCaptureErrorOrDevice CreateDevice(
       const VideoCaptureDeviceDescriptor& device_descriptor) override;
-  void GetDeviceDescriptors(
-      VideoCaptureDeviceDescriptors* device_descriptors) override;
-  void GetSupportedFormats(
-      const VideoCaptureDeviceDescriptor& device_descriptor,
-      VideoCaptureFormats* supported_formats) override;
-  void GetCameraLocationsAsync(
-      std::unique_ptr<VideoCaptureDeviceDescriptors> device_descriptors,
-      DeviceDescriptorsCallback result_callback) override;
+  void GetDevicesInfo(GetDevicesInfoCallback callback) override;
 
   int number_of_devices() {
     DCHECK(thread_checker_.CalledOnValidThread());
@@ -91,6 +90,9 @@ class CAPTURE_EXPORT FakeVideoCaptureDeviceFactory
   }
 
  private:
+  // Helper used in GetDevicesInfo().
+  VideoCaptureFormats GetSupportedFormats(const std::string& device_id);
+
   std::vector<FakeVideoCaptureDeviceSettings> devices_config_;
 };
 

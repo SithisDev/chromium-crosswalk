@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,20 @@
 
 namespace media {
 
-size_t GetDemuxerStreamAudioMemoryLimit() {
+size_t GetDemuxerStreamAudioMemoryLimit(
+    const AudioDecoderConfig* /*audio_config*/) {
   return internal::kDemuxerStreamAudioMemoryLimitLow;
 }
 
-size_t GetDemuxerStreamVideoMemoryLimit() {
+size_t GetDemuxerStreamVideoMemoryLimit(
+    Demuxer::DemuxerTypes /*demuxer_type*/,
+    const VideoDecoderConfig* /*video_config*/) {
   return internal::kDemuxerStreamVideoMemoryLimitLow;
 }
 
-size_t GetDemuxerMemoryLimit() {
-  return GetDemuxerStreamAudioMemoryLimit() +
-         GetDemuxerStreamVideoMemoryLimit();
+size_t GetDemuxerMemoryLimit(Demuxer::DemuxerTypes demuxer_type) {
+  return GetDemuxerStreamAudioMemoryLimit(nullptr) +
+         GetDemuxerStreamVideoMemoryLimit(demuxer_type, nullptr);
 }
 
 }  // namespace media

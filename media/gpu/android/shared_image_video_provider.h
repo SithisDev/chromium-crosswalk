@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,16 +30,31 @@ class MEDIA_GPU_EXPORT SharedImageVideoProvider {
 
   // Description of the underlying properties of the shared image.
   struct ImageSpec {
-    ImageSpec(const gfx::Size& size);
+    ImageSpec();
+    ImageSpec(const gfx::Size& coded_size, uint64_t generation_id);
     ImageSpec(const ImageSpec&);
     ~ImageSpec();
 
     // Size of the underlying texture.
-    gfx::Size size;
+    gfx::Size coded_size;
+
+    // Color space used for the SharedImage.
+    gfx::ColorSpace color_space;
+
+    // This is a hack to allow us to discard pooled images if the TextureOwner
+    // changes.  We don't want to keep a ref to the TextureOwner here, so we
+    // just use a generation counter.  Note that this is temporary anyway; we
+    // only need it for legacy mailbox support to construct a per-video-frame
+    // texture with the TextureOwner's service id (unowned texture hack).  Once
+    // legacy mailboxes aren't needed, SharedImageVideo::BeginAccess can just
+    // ask the CodecImage for whatever TextureOwner it is using currently, which
+    // is set by the client via CodecImage::Initialize.
+    uint64_t generation_id = 0;
 
     // TODO: Include other properties, if they matter, like texture format.
 
-    bool operator==(const ImageSpec&);
+    bool operator==(const ImageSpec&) const;
+    bool operator!=(const ImageSpec&) const;
   };
 
   using ReleaseCB = base::OnceCallback<void(const gpu::SyncToken&)>;
@@ -48,26 +63,33 @@ class MEDIA_GPU_EXPORT SharedImageVideoProvider {
   struct ImageRecord {
     ImageRecord();
     ImageRecord(ImageRecord&&);
+
+    ImageRecord(const ImageRecord&) = delete;
+    ImageRecord& operator=(const ImageRecord&) = delete;
+
     ~ImageRecord();
 
     // Mailbox to which this shared image is bound.
     gpu::Mailbox mailbox;
 
-    // Sampler conversion information which is used in vulkan context.
-    base::Optional<gpu::VulkanYCbCrInfo> ycbcr_info;
-
     // Release callback.  When this is called (or dropped), the image will be
     // considered to be unused.
     ReleaseCB release_cb;
 
-    // CodecImage that one can use for MaybeRenderEarly.
+    // CodecImage that one can use for MaybeRenderEarly, and to attach a codec
+    // output buffer.
     scoped_refptr<CodecImageHolder> codec_image_holder;
 
-   private:
-    DISALLOW_COPY_AND_ASSIGN(ImageRecord);
+    // Is the underlying context Vulkan?  If so, then one must provide YCbCrInfo
+    // with the VideoFrame.
+    bool is_vulkan = false;
   };
 
   SharedImageVideoProvider() = default;
+
+  SharedImageVideoProvider(const SharedImageVideoProvider&) = delete;
+  SharedImageVideoProvider& operator=(const SharedImageVideoProvider&) = delete;
+
   virtual ~SharedImageVideoProvider() = default;
 
   using ImageReadyCB = base::OnceCallback<void(ImageRecord)>;
@@ -80,12 +102,7 @@ class MEDIA_GPU_EXPORT SharedImageVideoProvider {
 
   // Call |cb| when we have a shared image that matches |spec|.  We may call
   // |cb| back before returning, or we might post it for later.
-  virtual void RequestImage(ImageReadyCB cb,
-                            const ImageSpec& spec,
-                            scoped_refptr<TextureOwner> texture_owner) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SharedImageVideoProvider);
+  virtual void RequestImage(ImageReadyCB cb, const ImageSpec& spec) = 0;
 };
 
 }  // namespace media

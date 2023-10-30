@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -99,6 +99,7 @@ enum ChannelLayout {
   // Channels are not explicitly mapped to speakers.
   CHANNEL_LAYOUT_DISCRETE = 29,
 
+  // Deprecated, but keeping the enum value for UMA consistency.
   // Front L, Front R, Front C. Front C contains the keyboard mic audio. This
   // layout is only intended for input for WebRTC. The Front C channel
   // is stripped away in the WebRTC audio input pipeline and never seen outside
@@ -113,8 +114,14 @@ enum ChannelLayout {
   // pass-through mode).
   CHANNEL_LAYOUT_BITSTREAM = 32,
 
+  // Front L, Front R, Front C, LFE, Side L, Side R,
+  // Front Height L, Front Height R, Rear Height L, Rear Height R
+  // Will be represented as six channels (5.1) due to eight channel limit
+  // kMaxConcurrentChannels
+  CHANNEL_LAYOUT_5_1_4_DOWNMIX = 33,
+
   // Max value, must always equal the largest entry ever logged.
-  CHANNEL_LAYOUT_MAX = CHANNEL_LAYOUT_BITSTREAM
+  CHANNEL_LAYOUT_MAX = CHANNEL_LAYOUT_5_1_4_DOWNMIX
 };
 
 // Note: Do not reorder or reassign these values; other code depends on their
@@ -143,7 +150,12 @@ constexpr int kMaxConcurrentChannels = 8;
 // from 0 to ChannelLayoutToChannelCount(layout) - 1.
 MEDIA_SHMEM_EXPORT int ChannelOrder(ChannelLayout layout, Channels channel);
 
-// Returns the number of channels in a given ChannelLayout.
+// Returns the number of channels in a given ChannelLayout or 0 if the
+// channel layout can't be mapped to a valid value. Currently, 0
+// is returned for CHANNEL_LAYOUT_NONE, CHANNEL_LAYOUT_UNSUPPORTED,
+// CHANNEL_LAYOUT_DISCRETE, and CHANNEL_LAYOUT_BITSTREAM. For these cases,
+// additional steps must be taken to manually figure out the corresponding
+// number of channels.
 MEDIA_SHMEM_EXPORT int ChannelLayoutToChannelCount(ChannelLayout layout);
 
 // Given the number of channels, return the best layout,

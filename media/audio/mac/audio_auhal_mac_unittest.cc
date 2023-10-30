@@ -1,10 +1,9 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_message_loop.h"
@@ -39,7 +38,7 @@ ACTION_P3(MaybeSignalEvent, counter, signal_at_count, event) {
 class AUHALStreamTest : public testing::Test {
  public:
   AUHALStreamTest()
-      : message_loop_(base::MessageLoop::TYPE_UI),
+      : message_loop_(base::MessagePumpType::UI),
         manager_(AudioManager::CreateForTesting(
             std::make_unique<TestAudioThread>())),
         manager_device_info_(manager_.get()) {
@@ -47,12 +46,16 @@ class AUHALStreamTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
   }
 
+  AUHALStreamTest(const AUHALStreamTest&) = delete;
+  AUHALStreamTest& operator=(const AUHALStreamTest&) = delete;
+
   ~AUHALStreamTest() override { manager_->Shutdown(); }
 
   AudioOutputStream* Create() {
     return manager_->MakeAudioOutputStream(
         manager_device_info_.GetDefaultOutputStreamParameters(), "",
-        base::Bind(&AUHALStreamTest::OnLogMessage, base::Unretained(this)));
+        base::BindRepeating(&AUHALStreamTest::OnLogMessage,
+                            base::Unretained(this)));
   }
 
   bool OutputDevicesAvailable() {
@@ -67,9 +70,6 @@ class AUHALStreamTest : public testing::Test {
   AudioDeviceInfoAccessorForTests manager_device_info_;
   MockAudioSourceCallback source_;
   std::string log_message_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AUHALStreamTest);
 };
 
 TEST_F(AUHALStreamTest, HardwareSampleRate) {
@@ -109,7 +109,7 @@ TEST_F(AUHALStreamTest, CreateOpenStartStopClose) {
           ZeroBuffer(),
           MaybeSignalEvent(&callback_counter, number_of_callbacks, &event),
           Return(0)));
-  EXPECT_CALL(source_, OnError()).Times(0);
+  EXPECT_CALL(source_, OnError(_)).Times(0);
   stream->Start(&source_);
   event.Wait();
 

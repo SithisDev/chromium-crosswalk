@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,11 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/optional.h"
+#include "base/callback_helpers.h"
 #include "base/unguessable_token.h"
+#include "media/mojo/mojom/media_drm_storage.mojom.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -19,9 +20,8 @@ namespace media {
 // never run. Handle connection error to make sure callbacks will always run.
 
 MojoMediaDrmStorage::MojoMediaDrmStorage(
-    mojom::MediaDrmStoragePtr media_drm_storage_ptr)
-    : media_drm_storage_ptr_(std::move(media_drm_storage_ptr)),
-      weak_factory_(this) {
+    mojo::PendingRemote<mojom::MediaDrmStorage> media_drm_storage)
+    : media_drm_storage_(std::move(media_drm_storage)) {
   DVLOG(1) << __func__;
 }
 
@@ -29,14 +29,13 @@ MojoMediaDrmStorage::~MojoMediaDrmStorage() {}
 
 void MojoMediaDrmStorage::Initialize(InitCB init_cb) {
   DVLOG(1) << __func__;
-  media_drm_storage_ptr_->Initialize(
-      mojo::WrapCallbackWithDefaultInvokeIfNotRun(std::move(init_cb), false,
-                                                  base::nullopt));
+  media_drm_storage_->Initialize(mojo::WrapCallbackWithDefaultInvokeIfNotRun(
+      std::move(init_cb), false, absl::nullopt));
 }
 
 void MojoMediaDrmStorage::OnProvisioned(ResultCB result_cb) {
   DVLOG(1) << __func__;
-  media_drm_storage_ptr_->OnProvisioned(
+  media_drm_storage_->OnProvisioned(
       mojo::WrapCallbackWithDefaultInvokeIfNotRun(std::move(result_cb), false));
 }
 
@@ -44,7 +43,7 @@ void MojoMediaDrmStorage::SavePersistentSession(const std::string& session_id,
                                                 const SessionData& session_data,
                                                 ResultCB result_cb) {
   DVLOG(1) << __func__;
-  media_drm_storage_ptr_->SavePersistentSession(
+  media_drm_storage_->SavePersistentSession(
       session_id,
       mojom::SessionData::New(session_data.key_set_id, session_data.mime_type,
                               session_data.key_type),
@@ -55,19 +54,19 @@ void MojoMediaDrmStorage::LoadPersistentSession(
     const std::string& session_id,
     LoadPersistentSessionCB load_persistent_session_cb) {
   DVLOG(1) << __func__;
-  media_drm_storage_ptr_->LoadPersistentSession(
+  media_drm_storage_->LoadPersistentSession(
       session_id,
       mojo::WrapCallbackWithDefaultInvokeIfNotRun(
           base::BindOnce(&MojoMediaDrmStorage::OnPersistentSessionLoaded,
                          weak_factory_.GetWeakPtr(),
-                         base::Passed(&load_persistent_session_cb)),
+                         std::move(load_persistent_session_cb)),
           nullptr));
 }
 
 void MojoMediaDrmStorage::RemovePersistentSession(const std::string& session_id,
                                                   ResultCB result_cb) {
   DVLOG(1) << __func__;
-  media_drm_storage_ptr_->RemovePersistentSession(
+  media_drm_storage_->RemovePersistentSession(
       session_id,
       mojo::WrapCallbackWithDefaultInvokeIfNotRun(std::move(result_cb), false));
 }

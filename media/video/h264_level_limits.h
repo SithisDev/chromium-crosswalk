@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "media/base/media_export.h"
 #include "media/base/video_codecs.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -37,6 +38,14 @@ bool MEDIA_EXPORT CheckH264LevelLimits(VideoCodecProfile profile,
                                        uint32_t framerate,
                                        uint32_t framesize_in_mbs);
 
+// Return a minimum level that comforts Table A-1 in spec with |profile|,
+// |bitrate|, |framerate| and |framesize_in_mbs|. If there is no proper level,
+// returns absl::nullopt.
+absl::optional<uint8_t> MEDIA_EXPORT
+FindValidH264Level(VideoCodecProfile profile,
+                   uint32_t bitrate,
+                   uint32_t framerate,
+                   uint32_t framesize_in_mbs);
 }  // namespace media
 
 #endif  // MEDIA_VIDEO_H264_LEVEL_LIMITS_H_

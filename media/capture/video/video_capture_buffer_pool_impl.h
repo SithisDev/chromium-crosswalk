@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,7 @@
 #include <map>
 
 #include "base/files/file.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/shared_memory.h"
 #include "base/process/process.h"
 #include "base/synchronization/lock.h"
 #include "build/build_config.h"
@@ -25,28 +23,36 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 
+#if BUILDFLAG(IS_WIN)
+#include "media/base/win/dxgi_device_manager.h"
+#endif
+
 namespace media {
 
 class CAPTURE_EXPORT VideoCaptureBufferPoolImpl
     : public VideoCaptureBufferPool {
  public:
-  explicit VideoCaptureBufferPoolImpl(
-      std::unique_ptr<VideoCaptureBufferTrackerFactory> buffer_tracker_factory,
-      int count);
+  VideoCaptureBufferPoolImpl() = delete;
+  explicit VideoCaptureBufferPoolImpl(VideoCaptureBufferType buffer_type);
+  VideoCaptureBufferPoolImpl(VideoCaptureBufferType buffer_type, int count);
+  VideoCaptureBufferPoolImpl(
+      VideoCaptureBufferType buffer_type,
+      int count,
+      std::unique_ptr<VideoCaptureBufferTrackerFactory> buffer_tracker_factory);
+
+  VideoCaptureBufferPoolImpl(const VideoCaptureBufferPoolImpl&) = delete;
+  VideoCaptureBufferPoolImpl& operator=(const VideoCaptureBufferPoolImpl&) =
+      delete;
 
   // VideoCaptureBufferPool implementation.
-  mojo::ScopedSharedBufferHandle GetHandleForInterProcessTransit(
-      int buffer_id,
-      bool read_only) override;
-  base::SharedMemoryHandle GetNonOwnedSharedMemoryHandleForLegacyIPC(
+  base::UnsafeSharedMemoryRegion DuplicateAsUnsafeRegion(
       int buffer_id) override;
+  mojo::ScopedSharedBufferHandle DuplicateAsMojoBuffer(int buffer_id) override;
   mojom::SharedMemoryViaRawFileDescriptorPtr
   CreateSharedMemoryViaRawFileDescriptorStruct(int buffer_id) override;
   std::unique_ptr<VideoCaptureBufferHandle> GetHandleForInProcessAccess(
       int buffer_id) override;
-#if defined(OS_CHROMEOS)
   gfx::GpuMemoryBufferHandle GetGpuMemoryBufferHandle(int buffer_id) override;
-#endif
   VideoCaptureDevice::Client::ReserveResult ReserveForProducer(
       const gfx::Size& dimensions,
       VideoPixelFormat format,
@@ -55,6 +61,8 @@ class CAPTURE_EXPORT VideoCaptureBufferPoolImpl
       int* buffer_id,
       int* buffer_id_to_drop) override;
   void RelinquishProducerReservation(int buffer_id) override;
+  int ReserveIdForExternalBuffer(const gfx::GpuMemoryBufferHandle& handle,
+                                 int* buffer_id_to_drop) override;
   double GetBufferPoolUtilization() const override;
   void HoldForConsumers(int buffer_id, int num_clients) override;
   void RelinquishConsumerHold(int buffer_id, int num_clients) override;
@@ -71,7 +79,11 @@ class CAPTURE_EXPORT VideoCaptureBufferPoolImpl
       int* buffer_id,
       int* tracker_id_to_drop);
 
-  VideoCaptureBufferTracker* GetTracker(int buffer_id);
+  VideoCaptureBufferTracker* GetTracker(int buffer_id)
+      EXCLUSIVE_LOCKS_REQUIRED(lock_);
+
+  // The type of the buffer the pool serves.
+  VideoCaptureBufferType buffer_type_;
 
   // The max number of buffers that the pool is allowed to have at any moment.
   const int count_;
@@ -80,15 +92,14 @@ class CAPTURE_EXPORT VideoCaptureBufferPoolImpl
   mutable base::Lock lock_;
 
   // The ID of the next buffer.
-  int next_buffer_id_;
+  int next_buffer_id_ GUARDED_BY(lock_) = 0;
 
   // The buffers, indexed by the first parameter, a buffer id.
-  std::map<int, std::unique_ptr<VideoCaptureBufferTracker>> trackers_;
+  std::map<int, std::unique_ptr<VideoCaptureBufferTracker>> trackers_
+      GUARDED_BY(lock_);
 
   const std::unique_ptr<VideoCaptureBufferTrackerFactory>
-      buffer_tracker_factory_;
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(VideoCaptureBufferPoolImpl);
+      buffer_tracker_factory_ GUARDED_BY(lock_);
 };
 
 }  // namespace media

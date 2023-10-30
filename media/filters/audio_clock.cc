@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,8 @@
 #include <algorithm>
 #include <cmath>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/numerics/safe_conversions.h"
 
 namespace media {
 
@@ -20,8 +21,8 @@ AudioClock::AudioClock(base::TimeDelta start_timestamp, int sample_rate)
           static_cast<double>(base::Time::kMicrosecondsPerSecond) /
           sample_rate),
       total_buffered_frames_(0),
-      front_timestamp_micros_(start_timestamp.InMicroseconds()),
-      back_timestamp_micros_(start_timestamp.InMicroseconds()) {}
+      front_timestamp_micros_(start_timestamp.InMicrosecondsF()),
+      back_timestamp_micros_(start_timestamp.InMicrosecondsF()) {}
 
 AudioClock::~AudioClock() = default;
 
@@ -35,7 +36,7 @@ void AudioClock::WroteAudio(int frames_written,
   DCHECK_GE(playback_rate, 0);
 
   // First write: initialize buffer with silence.
-  if (start_timestamp_.InMicroseconds() == front_timestamp_micros_ &&
+  if (start_timestamp_.InMicrosecondsF() == front_timestamp_micros_ &&
       buffered_.empty()) {
     PushBufferedAudioData(delay_frames, 0.0);
   }
@@ -51,13 +52,6 @@ void AudioClock::WroteAudio(int frames_written,
   PushBufferedAudioData(frames_requested - frames_written, 0.0);
   PopBufferedAudioData(frames_played);
 
-  // Trying to track down AudioClock crash, http://crbug.com/674856.
-  // It may be that we crash due to running out of memory. |buffered_| should
-  // never come close to 1000 elements in size. In most cases it should have
-  // just one entry, though additional entries are added when playback rate
-  // changes.
-  CHECK_LT(buffered_.size(), 1000U);
-
   // Update our front and back timestamps.  The back timestamp is considered the
   // authoritative source of truth, so base the front timestamp on range of data
   // buffered.  Doing so avoids accumulation errors on the front timestamp.
@@ -69,14 +63,14 @@ void AudioClock::WroteAudio(int frames_written,
   front_timestamp_micros_ =
       std::max(front_timestamp_micros_,
                back_timestamp_micros_ - ComputeBufferedMediaDurationMicros());
-  DCHECK_GE(front_timestamp_micros_, start_timestamp_.InMicroseconds());
+  DCHECK_GE(front_timestamp_micros_, start_timestamp_.InMicrosecondsF());
   DCHECK_LE(front_timestamp_micros_, back_timestamp_micros_);
 }
 
 void AudioClock::CompensateForSuspendedWrites(base::TimeDelta elapsed,
                                               int delay_frames) {
-  const int64_t frames_elapsed =
-      elapsed.InMicroseconds() / microseconds_per_frame_ + 0.5;
+  const int64_t frames_elapsed = base::ClampRound<int64_t>(
+      elapsed.InMicrosecondsF() / microseconds_per_frame_);
 
   // No need to do anything if we're within the limits of our played out audio
   // or there are no delay frames, the next WroteAudio() call will expire
@@ -98,8 +92,8 @@ base::TimeDelta AudioClock::TimeUntilPlayback(base::TimeDelta timestamp) const {
   DCHECK_LE(timestamp, back_timestamp());
 
   int64_t frames_until_timestamp = 0;
-  double timestamp_us = timestamp.InMicroseconds();
-  double media_time_us = front_timestamp().InMicroseconds();
+  double timestamp_us = timestamp.InMicrosecondsF();
+  double media_time_us = front_timestamp().InMicrosecondsF();
 
   for (size_t i = 0; i < buffered_.size(); ++i) {
     // Leading silence is always accounted prior to anything else.
@@ -126,7 +120,7 @@ base::TimeDelta AudioClock::TimeUntilPlayback(base::TimeDelta timestamp) const {
     frames_until_timestamp += buffered_[i].frames;
   }
 
-  return base::TimeDelta::FromMicroseconds(
+  return base::Microseconds(
       std::round(frames_until_timestamp * microseconds_per_frame_));
 }
 
@@ -152,10 +146,9 @@ void AudioClock::ContiguousAudioDataBufferedForTesting(
       scaled_frames_at_same_rate = scaled_frames;
   }
 
-  *total = base::TimeDelta::FromMicroseconds(scaled_frames *
-                                             microseconds_per_frame_);
-  *same_rate_total = base::TimeDelta::FromMicroseconds(
-      scaled_frames_at_same_rate * microseconds_per_frame_);
+  *total = base::Microseconds(scaled_frames * microseconds_per_frame_);
+  *same_rate_total =
+      base::Microseconds(scaled_frames_at_same_rate * microseconds_per_frame_);
 }
 
 AudioClock::AudioData::AudioData(int64_t frames, double playback_rate)

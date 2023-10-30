@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,22 +49,21 @@ void AudioDiscardHelper::Reset(size_t initial_discard) {
   delayed_discard_padding_ = DecoderBuffer::DiscardPadding();
 }
 
-bool AudioDiscardHelper::ProcessBuffers(const DecoderBuffer& encoded_buffer,
-                                        AudioBuffer* decoded_buffer) {
-  DCHECK(!encoded_buffer.end_of_stream());
-  DCHECK(encoded_buffer.timestamp() != kNoTimestamp);
+bool AudioDiscardHelper::ProcessBuffers(
+    const DecoderBuffer::TimeInfo& time_info,
+    AudioBuffer* decoded_buffer) {
+  DCHECK(time_info.timestamp != kNoTimestamp);
 
   // Issue a debug warning when we see non-monotonic timestamps.  Only a warning
   // to allow chained OGG playback.
-  WarnOnNonMonotonicTimestamps(last_input_timestamp_,
-                               encoded_buffer.timestamp());
-  last_input_timestamp_ = encoded_buffer.timestamp();
+  WarnOnNonMonotonicTimestamps(last_input_timestamp_, time_info.timestamp);
+  last_input_timestamp_ = time_info.timestamp;
 
   // If this is the first buffer seen, setup the timestamp helper.
   if (!initialized()) {
     // Clamp the base timestamp to zero.
     timestamp_helper_.SetBaseTimestamp(
-        std::max(base::TimeDelta(), encoded_buffer.timestamp()));
+        std::max(base::TimeDelta(), time_info.timestamp));
   }
   DCHECK(initialized());
 
@@ -72,7 +71,7 @@ bool AudioDiscardHelper::ProcessBuffers(const DecoderBuffer& encoded_buffer,
     // If there's a one buffer delay for decoding, we need to save it so it can
     // be processed with the next decoder buffer.
     if (delayed_discard_)
-      delayed_discard_padding_ = encoded_buffer.discard_padding();
+      delayed_discard_padding_ = time_info.discard_padding;
     return false;
   }
 
@@ -81,7 +80,7 @@ bool AudioDiscardHelper::ProcessBuffers(const DecoderBuffer& encoded_buffer,
   // If there's a one buffer delay for decoding, pick up the last encoded
   // buffer's discard padding for processing with the current decoded buffer.
   DecoderBuffer::DiscardPadding current_discard_padding =
-      encoded_buffer.discard_padding();
+      time_info.discard_padding;
   if (delayed_discard_) {
     // For simplicity disallow cases where decoder delay is present with delayed
     // discard (no codecs at present).  Doing so allows us to avoid complexity
@@ -127,7 +126,7 @@ bool AudioDiscardHelper::ProcessBuffers(const DecoderBuffer& encoded_buffer,
   }
 
   // Handle front discard padding.
-  if (current_discard_padding.first > base::TimeDelta()) {
+  if (current_discard_padding.first.is_positive()) {
     const size_t decoded_frames = decoded_buffer->frame_count();
 
     // If a complete buffer discard is requested and there's no decoder delay,
@@ -136,7 +135,7 @@ bool AudioDiscardHelper::ProcessBuffers(const DecoderBuffer& encoded_buffer,
     // duration of the encoded buffer.
     const size_t start_frames_to_discard =
         current_discard_padding.first == kInfiniteDuration
-            ? (decoder_delay_ > 0 ? TimeDeltaToFrames(encoded_buffer.duration())
+            ? (decoder_delay_ > 0 ? TimeDeltaToFrames(time_info.duration)
                                   : decoded_frames)
             : TimeDeltaToFrames(current_discard_padding.first);
 
@@ -156,7 +155,13 @@ bool AudioDiscardHelper::ProcessBuffers(const DecoderBuffer& encoded_buffer,
     // For simplicity require the start of the discard to be within the current
     // buffer.  Doing so allows us avoid complexity around tracking discards
     // across buffers.
-    CHECK_LT(discard_start, decoded_frames);
+    if (discard_start >= decoded_frames) {
+      DLOG(ERROR)
+          << "Unsupported discard padding and decoder delay mix. Due to "
+             "decoder delay, discard padding indicates data beyond the current "
+             "buffer should be discarded. This is not supported.";
+      return false;
+    }
 
     const size_t frames_to_discard =
         std::min(start_frames_to_discard, decoded_frames - discard_start);
@@ -172,8 +177,10 @@ bool AudioDiscardHelper::ProcessBuffers(const DecoderBuffer& encoded_buffer,
     // If everything would be discarded, indicate a new buffer is required.
     if (frames_to_discard == decoded_frames) {
       // The buffer should not have been marked with end discard if the front
-      // discard removes everything.
-      DCHECK(current_discard_padding.second.is_zero());
+      // discard removes everything, though incorrect or imprecise duration
+      // metadata, combined with various trimming operations, might still have
+      // end discard marked here. For simplicity, we do not carry over any such
+      // end discard for handling later.
       return false;
     }
 
@@ -183,7 +190,7 @@ bool AudioDiscardHelper::ProcessBuffers(const DecoderBuffer& encoded_buffer,
   }
 
   // Handle end discard padding.
-  if (current_discard_padding.second > base::TimeDelta()) {
+  if (current_discard_padding.second.is_positive()) {
     const size_t decoded_frames = decoded_buffer->frame_count();
     size_t end_frames_to_discard =
         TimeDeltaToFrames(current_discard_padding.second);

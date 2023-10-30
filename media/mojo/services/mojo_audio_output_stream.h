@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,13 @@
 #define MEDIA_MOJO_SERVICES_MOJO_AUDIO_OUTPUT_STREAM_H_
 
 #include <memory>
-#include <string>
 
 #include "base/sequence_checker.h"
 #include "media/audio/audio_output_delegate.h"
-#include "media/mojo/interfaces/audio_output_stream.mojom.h"
+#include "media/mojo/mojom/audio_output_stream.mojom.h"
 #include "media/mojo/services/media_mojo_export.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 
 namespace media {
 
@@ -23,7 +23,7 @@ class MEDIA_MOJO_EXPORT MojoAudioOutputStream
       public AudioOutputDelegate::EventHandler {
  public:
   using StreamCreatedCallback =
-      base::OnceCallback<void(mojom::AudioOutputStreamPtr,
+      base::OnceCallback<void(mojo::PendingRemote<mojom::AudioOutputStream>,
                               media::mojom::ReadWriteAudioDataPipePtr)>;
   using CreateDelegateCallback =
       base::OnceCallback<std::unique_ptr<AudioOutputDelegate>(
@@ -39,6 +39,9 @@ class MEDIA_MOJO_EXPORT MojoAudioOutputStream
   MojoAudioOutputStream(CreateDelegateCallback create_delegate_callback,
                         StreamCreatedCallback stream_created_callback,
                         DeleterCallback deleter_callback);
+
+  MojoAudioOutputStream(const MojoAudioOutputStream&) = delete;
+  MojoAudioOutputStream& operator=(const MojoAudioOutputStream&) = delete;
 
   ~MojoAudioOutputStream() override;
 
@@ -62,11 +65,9 @@ class MEDIA_MOJO_EXPORT MojoAudioOutputStream
 
   StreamCreatedCallback stream_created_callback_;
   DeleterCallback deleter_callback_;
-  mojo::Binding<AudioOutputStream> binding_;
+  mojo::Receiver<AudioOutputStream> receiver_{this};
   std::unique_ptr<AudioOutputDelegate> delegate_;
   base::WeakPtrFactory<MojoAudioOutputStream> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MojoAudioOutputStream);
 };
 
 }  // namespace media

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,7 @@ import org.chromium.base.Log;
 import org.chromium.base.StreamUtil;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.task.AsyncTask;
 
 import java.io.ByteArrayInputStream;
@@ -37,8 +38,7 @@ import java.util.HashMap;
 */
 @JNINamespace("media")
 public class MediaPlayerBridge {
-
-    private static final String TAG = "cr.media";
+    private static final String TAG = "media";
 
     // Local player to forward this to. We don't initialize it here since the subclass might not
     // want it.
@@ -74,6 +74,21 @@ public class MediaPlayerBridge {
     @CalledByNative
     protected void setSurface(Surface surface) {
         getLocalPlayer().setSurface(surface);
+    }
+
+    @SuppressLint("NewApi")
+    @CalledByNative
+    protected void setPlaybackRate(double speed) {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.LOLLIPOP_MR1) return;
+
+        try {
+            MediaPlayer player = getLocalPlayer();
+            player.setPlaybackParams(player.getPlaybackParams().setSpeed((float) speed));
+        } catch (IllegalStateException ise) {
+            Log.e(TAG, "Unable to set playback rate", ise);
+        } catch (IllegalArgumentException iae) {
+            Log.e(TAG, "Unable to set playback rate", iae);
+        }
     }
 
     @CalledByNative
@@ -140,12 +155,9 @@ public class MediaPlayerBridge {
         if (hideUrlLog) headersMap.put("x-hide-urls-from-log", "true");
         if (!TextUtils.isEmpty(cookies)) headersMap.put("Cookie", cookies);
         if (!TextUtils.isEmpty(userAgent)) headersMap.put("User-Agent", userAgent);
-        // The security origin check is enforced for devices above K. For devices below K,
-        // only anonymous media HTTP request (no cookies) may be considered same-origin.
-        // Note that if the server rejects the request we must not consider it same-origin.
-        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.KITKAT) {
-            headersMap.put("allow-cross-domain-redirect", "false");
-        }
+
+        headersMap.put("android-allow-cross-domain-redirect", "0");
+
         try {
             getLocalPlayer().setDataSource(ContextUtils.getApplicationContext(), uri, headersMap);
             return true;
@@ -236,7 +248,8 @@ public class MediaPlayerBridge {
 
             deleteFile();
             assert (mNativeMediaPlayerBridge != 0);
-            nativeOnDidSetDataUriDataSource(mNativeMediaPlayerBridge, result);
+            MediaPlayerBridgeJni.get().onDidSetDataUriDataSource(
+                    mNativeMediaPlayerBridge, MediaPlayerBridge.this, result);
         }
 
         private void deleteFile() {
@@ -295,7 +308,7 @@ public class MediaPlayerBridge {
         boolean canSeekForward = true;
         boolean canSeekBackward = true;
         try {
-            @SuppressLint("PrivateApi")
+            @SuppressLint({"DiscouragedPrivateApi", "PrivateApi"})
             Method getMetadata = player.getClass().getDeclaredMethod(
                     "getMetadata", boolean.class, boolean.class);
             getMetadata.setAccessible(true);
@@ -328,13 +341,16 @@ public class MediaPlayerBridge {
         return new AllowedOperations(canSeekForward, canSeekBackward);
     }
 
-    private native void nativeOnDidSetDataUriDataSource(long nativeMediaPlayerBridge,
-                                                        boolean success);
-
     private void cancelLoadDataUriTask() {
         if (mLoadDataUriTask != null) {
             mLoadDataUriTask.cancel(true);
             mLoadDataUriTask = null;
         }
+    }
+
+    @NativeMethods
+    interface Natives {
+        void onDidSetDataUriDataSource(
+                long nativeMediaPlayerBridge, MediaPlayerBridge caller, boolean success);
     }
 }

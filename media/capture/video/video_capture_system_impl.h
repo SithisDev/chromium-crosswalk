@@ -1,15 +1,18 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef MEDIA_CAPTURE_VIDEO_VIDEO_CAPTURE_SYSTEM_IMPL_H_
 #define MEDIA_CAPTURE_VIDEO_VIDEO_CAPTURE_SYSTEM_IMPL_H_
 
-#include "media/capture/video/video_capture_system.h"
+#include <list>
+#include <memory>
+#include <string>
+#include <vector>
 
-#if defined(OS_CHROMEOS)
-#include "media/capture/video/chromeos/mojo/cros_image_capture.mojom.h"
-#endif  // defined(OS_CHROMEOS)
+#include "base/memory/weak_ptr.h"
+#include "base/threading/thread_checker.h"
+#include "media/capture/video/video_capture_system.h"
 
 namespace media {
 
@@ -23,13 +26,9 @@ class CAPTURE_EXPORT VideoCaptureSystemImpl : public VideoCaptureSystem {
   ~VideoCaptureSystemImpl() override;
 
   void GetDeviceInfosAsync(DeviceInfoCallback result_callback) override;
-  std::unique_ptr<VideoCaptureDevice> CreateDevice(
-      const std::string& device_id) override;
+  VideoCaptureErrorOrDevice CreateDevice(const std::string& device_id) override;
 
-#if defined(OS_CHROMEOS)
-  void BindCrosImageCaptureRequest(
-      cros::mojom::CrosImageCaptureRequest request) override;
-#endif  // defined(OS_CHROMEOS)
+  VideoCaptureDeviceFactory* GetFactory() override;
 
  private:
   using DeviceEnumQueue = std::list<DeviceInfoCallback>;
@@ -38,15 +37,15 @@ class CAPTURE_EXPORT VideoCaptureSystemImpl : public VideoCaptureSystem {
   const VideoCaptureDeviceInfo* LookupDeviceInfoFromId(
       const std::string& device_id);
 
-  void ProcessDeviceInfoRequest();
-  void DeviceInfosReady(
-      std::unique_ptr<VideoCaptureDeviceDescriptors> descriptors);
+  void DevicesInfoReady(std::vector<VideoCaptureDeviceInfo> devices_info);
 
   const std::unique_ptr<VideoCaptureDeviceFactory> factory_;
-  std::vector<VideoCaptureDeviceInfo> devices_info_cache_;
   DeviceEnumQueue device_enum_request_queue_;
+  std::vector<VideoCaptureDeviceInfo> devices_info_cache_;
 
   base::ThreadChecker thread_checker_;
+
+  base::WeakPtrFactory<VideoCaptureSystemImpl> weak_factory_{this};
 };
 
 }  // namespace media

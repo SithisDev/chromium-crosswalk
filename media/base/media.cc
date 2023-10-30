@@ -1,13 +1,16 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/base/media.h"
 
+#include <stdint.h>
+#include <limits>
+
 #include "base/allocator/buildflags.h"
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/metrics/field_trial.h"
+#include "base/no_destructor.h"
 #include "base/trace_event/trace_event.h"
 #include "media/base/media_switches.h"
 #include "media/media_buildflags.h"
@@ -41,35 +44,22 @@ class MediaInitializer {
 
 #if BUILDFLAG(USE_ALLOCATOR_SHIM)
     // Remove allocation limit from ffmpeg, so calls go down to shim layer.
-    av_max_alloc(0);
+    av_max_alloc(std::numeric_limits<size_t>::max());
 #endif  // BUILDFLAG(USE_ALLOCATOR_SHIM)
 
 #endif  // BUILDFLAG(ENABLE_FFMPEG)
   }
 
-#if defined(OS_ANDROID)
-  void enable_platform_decoder_support() {
-    has_platform_decoder_support_ = true;
-  }
-
-  bool has_platform_decoder_support() const {
-    return has_platform_decoder_support_;
-  }
-#endif  // defined(OS_ANDROID)
+  MediaInitializer(const MediaInitializer&) = delete;
+  MediaInitializer& operator=(const MediaInitializer&) = delete;
 
  private:
   ~MediaInitializer() = delete;
-
-#if defined(OS_ANDROID)
-  bool has_platform_decoder_support_ = false;
-#endif  // defined(OS_ANDROID)
-
-  DISALLOW_COPY_AND_ASSIGN(MediaInitializer);
 };
 
-static MediaInitializer* GetMediaInstance() {
-  static MediaInitializer* instance = new MediaInitializer();
-  return instance;
+static const MediaInitializer& GetMediaInstance() {
+  static const base::NoDestructor<MediaInitializer> instance;
+  return *instance;
 }
 
 void InitializeMediaLibrary() {
@@ -86,15 +76,5 @@ void InitializeMediaLibraryInSandbox(int64_t libyuv_cpu_flags,
 #endif
   GetMediaInstance();
 }
-
-#if defined(OS_ANDROID)
-void EnablePlatformDecoderSupport() {
-  GetMediaInstance()->enable_platform_decoder_support();
-}
-
-bool HasPlatformDecoderSupport() {
-  return GetMediaInstance()->has_platform_decoder_support();
-}
-#endif  // defined(OS_ANDROID)
 
 }  // namespace media

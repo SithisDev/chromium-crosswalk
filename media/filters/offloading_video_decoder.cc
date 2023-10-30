@@ -1,14 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/filters/offloading_video_decoder.h"
 
+#include <memory>
+
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/sequenced_task_runner.h"
+#include "base/callback_helpers.h"
 #include "base/synchronization/atomic_flag.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/video_frame.h"
@@ -23,13 +25,16 @@ class CancellationHelper {
       : cancellation_flag_(std::make_unique<base::AtomicFlag>()),
         decoder_(std::move(decoder)) {}
 
+  CancellationHelper(const CancellationHelper&) = delete;
+  CancellationHelper& operator=(const CancellationHelper&) = delete;
+
   // Safe to call from any thread.
   void Cancel() { cancellation_flag_->Set(); }
 
   void Decode(scoped_refptr<DecoderBuffer> buffer,
               VideoDecoder::DecodeCB decode_cb) {
     if (cancellation_flag_->IsSet()) {
-      std::move(decode_cb).Run(DecodeStatus::ABORTED);
+      std::move(decode_cb).Run(DecoderStatus::Codes::kAborted);
       return;
     }
 
@@ -42,7 +47,7 @@ class CancellationHelper {
     // want to run |reset_cb| before we've reset the cancellation flag or the
     // client may end up issuing another Reset() before this code runs.
     decoder_->Reset(base::DoNothing());
-    cancellation_flag_.reset(new base::AtomicFlag());
+    cancellation_flag_ = std::make_unique<base::AtomicFlag>();
     std::move(reset_cb).Run();
   }
 
@@ -51,8 +56,6 @@ class CancellationHelper {
  private:
   std::unique_ptr<base::AtomicFlag> cancellation_flag_;
   std::unique_ptr<OffloadableVideoDecoder> decoder_;
-
-  DISALLOW_COPY_AND_ASSIGN(CancellationHelper);
 };
 
 OffloadingVideoDecoder::OffloadingVideoDecoder(
@@ -62,11 +65,11 @@ OffloadingVideoDecoder::OffloadingVideoDecoder(
     : min_offloading_width_(min_offloading_width),
       supported_codecs_(std::move(supported_codecs)),
       helper_(std::make_unique<CancellationHelper>(std::move(decoder))) {
-  DETACH_FROM_THREAD(thread_checker_);
+  DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
 OffloadingVideoDecoder::~OffloadingVideoDecoder() {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // The |helper_| must always be destroyed on the |offload_task_runner_| since
   // we may still have tasks posted to it.
@@ -74,9 +77,9 @@ OffloadingVideoDecoder::~OffloadingVideoDecoder() {
     offload_task_runner_->DeleteSoon(FROM_HERE, std::move(helper_));
 }
 
-std::string OffloadingVideoDecoder::GetDisplayName() const {
+VideoDecoderType OffloadingVideoDecoder::GetDecoderType() const {
   // This call is expected to be static and safe to call from any thread.
-  return helper_->decoder()->GetDisplayName();
+  return helper_->decoder()->GetDecoderType();
 }
 
 void OffloadingVideoDecoder::Initialize(const VideoDecoderConfig& config,
@@ -85,7 +88,7 @@ void OffloadingVideoDecoder::Initialize(const VideoDecoderConfig& config,
                                         InitCB init_cb,
                                         const OutputCB& output_cb,
                                         const WaitingCB& waiting_cb) {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(config.IsValidConfig());
 
   const bool disable_offloading =
@@ -137,7 +140,7 @@ void OffloadingVideoDecoder::Initialize(const VideoDecoderConfig& config,
   }
 
   if (!offload_task_runner_) {
-    offload_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+    offload_task_runner_ = base::ThreadPool::CreateSequencedTaskRunner(
         {base::TaskPriority::USER_BLOCKING});
   }
 
@@ -151,7 +154,7 @@ void OffloadingVideoDecoder::Initialize(const VideoDecoderConfig& config,
 
 void OffloadingVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
                                     DecodeCB decode_cb) {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(buffer);
   DCHECK(decode_cb);
 
@@ -168,7 +171,7 @@ void OffloadingVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
 }
 
 void OffloadingVideoDecoder::Reset(base::OnceClosure reset_cb) {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   base::OnceClosure bound_reset_cb = BindToCurrentLoop(std::move(reset_cb));
   if (!offload_task_runner_) {

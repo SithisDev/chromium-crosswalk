@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 
 #include <memory>
 
-#include "base/test/scoped_task_environment.h"
+#include "base/memory/raw_ptr.h"
+#include "base/test/task_environment.h"
 #include "media/base/media_export.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,6 +22,10 @@ class MockAudioManager;
 class AudioDebugRecordingTest : public testing::Test {
  public:
   AudioDebugRecordingTest();
+
+  AudioDebugRecordingTest(const AudioDebugRecordingTest&) = delete;
+  AudioDebugRecordingTest& operator=(const AudioDebugRecordingTest&) = delete;
+
   ~AudioDebugRecordingTest() override;
 
  protected:
@@ -28,12 +33,9 @@ class AudioDebugRecordingTest : public testing::Test {
   void ShutdownAudioManager();
   void InitializeAudioDebugRecordingManager();
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<MockAudioManager> mock_audio_manager_;
-  MockAudioDebugRecordingManager* mock_debug_recording_manager_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AudioDebugRecordingTest);
+  raw_ptr<MockAudioDebugRecordingManager> mock_debug_recording_manager_;
 };
 
 }  // namespace media

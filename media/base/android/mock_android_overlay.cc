@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@ MockAndroidOverlay::Callbacks::Callbacks() = default;
 MockAndroidOverlay::Callbacks::Callbacks(const Callbacks&) = default;
 MockAndroidOverlay::Callbacks::~Callbacks() = default;
 
-MockAndroidOverlay::MockAndroidOverlay() : weak_factory_(this) {}
+MockAndroidOverlay::MockAndroidOverlay() {}
 
 MockAndroidOverlay::~MockAndroidOverlay() {}
 
@@ -25,14 +25,14 @@ void MockAndroidOverlay::SetConfig(AndroidOverlayConfig config) {
 
 MockAndroidOverlay::Callbacks MockAndroidOverlay::GetCallbacks() {
   Callbacks c;
-  c.OverlayReady = base::Bind(&MockAndroidOverlay::OnOverlayReady,
-                              weak_factory_.GetWeakPtr());
-  c.OverlayFailed = base::Bind(&MockAndroidOverlay::OnOverlayFailed,
-                               weak_factory_.GetWeakPtr());
-  c.SurfaceDestroyed = base::Bind(&MockAndroidOverlay::OnSurfaceDestroyed,
-                                  weak_factory_.GetWeakPtr());
-  c.PowerEfficientState = base::Bind(&MockAndroidOverlay::OnPowerEfficientState,
-                                     weak_factory_.GetWeakPtr());
+  c.OverlayReady = base::BindRepeating(&MockAndroidOverlay::OnOverlayReady,
+                                       weak_factory_.GetWeakPtr());
+  c.OverlayFailed = base::BindRepeating(&MockAndroidOverlay::OnOverlayFailed,
+                                        weak_factory_.GetWeakPtr());
+  c.SurfaceDestroyed = base::BindRepeating(
+      &MockAndroidOverlay::OnSurfaceDestroyed, weak_factory_.GetWeakPtr());
+  c.PowerEfficientState = base::BindRepeating(
+      &MockAndroidOverlay::OnPowerEfficientState, weak_factory_.GetWeakPtr());
 
   return c;
 }

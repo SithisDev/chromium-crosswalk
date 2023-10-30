@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,8 @@ function TestConfig() {
   this.playTwice = false;
   this.configChangeType = CONFIG_CHANGE_TYPE.CLEAR_TO_CLEAR;
   this.policyCheck = false;
+  this.MSESegmentDurationMS = 0;
+  this.MSESegmentFetchDelayBeforeEndMS = 0;
 }
 
 TestConfig.prototype.loadQueryParams = function() {
@@ -30,6 +32,9 @@ TestConfig.prototype.loadQueryParams = function() {
   this.useMSE = this.useMSE == '1' || this.useMSE == 'true';
   this.playTwice = this.playTwice == '1' || this.playTwice == 'true';
   this.policyCheck = this.policyCheck == '1' || this.policyCheck == 'true';
+  this.MSESegmentDurationMS = parseInt(this.MSESegmentDurationMS) || 0;
+  this.MSESegmentFetchDelayBeforeEndMS =
+    parseInt(this.MSESegmentFetchDelayBeforeEndMS) || 0;
 };
 
 TestConfig.updateDocument = function() {

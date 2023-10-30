@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,13 +16,13 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/containers/stack.h"
-#include "base/macros.h"
 #include "media/cdm/api/content_decryption_module.h"
 
 namespace media {
 
-typedef base::Callback<void(bool success)> CompletionCB;
-typedef base::Callback<cdm::FileIO*(cdm::FileIOClient* client)> CreateFileIOCB;
+using CompletionCB = base::OnceCallback<void(bool success)>;
+using CreateFileIOCB =
+    base::RepeatingCallback<cdm::FileIO*(cdm::FileIOClient* client)>;
 
 // A customizable test class that tests cdm::FileIO implementation.
 // - To create a test, call AddTestStep() to add a test step. A test step can be
@@ -67,6 +67,10 @@ class FileIOTest : public cdm::FileIOClient {
 
   FileIOTest(const CreateFileIOCB& create_file_io_cb,
              const std::string& test_name);
+
+  FileIOTest(const FileIOTest&) = delete;
+  FileIOTest& operator=(const FileIOTest&) = delete;
+
   ~FileIOTest() override;
 
   // Adds a test step in this test. |this| object doesn't take the ownership of
@@ -75,19 +79,34 @@ class FileIOTest : public cdm::FileIOClient {
                    Status status,
                    const uint8_t* data,
                    uint32_t data_size);
+  // Adds a test step in this test that expects a successful read of either
+  // |data| or |data2|. |this| object doesn't take the ownership of |data| or
+  // |data2|, which should be valid throughout the lifetime of |this| object.
+  void AddResultReadEither(Status status,
+                           const uint8_t* data,
+                           uint32_t data_size,
+                           const uint8_t* data2,
+                           uint32_t data2_size);
 
   // Runs this test case and returns the test result through |completion_cb|.
-  void Run(const CompletionCB& completion_cb);
+  void Run(CompletionCB completion_cb);
 
  private:
   struct TestStep {
-    // |this| object doesn't take the ownership of |data|, which should be valid
-    // throughout the lifetime of |this| object.
+    // |this| object doesn't take the ownership of |data| or |data2|, which
+    // should be valid throughout the lifetime of |this| object.
     TestStep(StepType type,
              Status status,
-             const uint8_t* data,
-             uint32_t data_size)
-        : type(type), status(status), data(data), data_size(data_size) {}
+             const uint8_t* data = nullptr,
+             uint32_t data_size = 0,
+             const uint8_t* data2 = nullptr,
+             uint32_t data2_size = 0)
+        : type(type),
+          status(status),
+          data(data),
+          data_size(data_size),
+          data2(data2),
+          data2_size(data2_size) {}
 
     StepType type;
 
@@ -97,6 +116,10 @@ class FileIOTest : public cdm::FileIOClient {
     // Data to write in ACTION_WRITE, or read data in RESULT_READ.
     const uint8_t* data;
     uint32_t data_size;
+
+    // Alternate read data in RESULT_READ, if |data2| != nullptr.
+    const uint8_t* data2;
+    uint32_t data2_size;
   };
 
   // Returns whether |test_step| is a RESULT_* step.
@@ -134,21 +157,23 @@ class FileIOTest : public cdm::FileIOClient {
   // In the current implementation, all ACTION_* are performed on the latest
   // opened cdm::FileIO object, hence the stack.
   base::stack<cdm::FileIO*> file_io_stack_;
-
-  DISALLOW_COPY_AND_ASSIGN(FileIOTest);
 };
 
 // Tests cdm::FileIO implementation.
 class FileIOTestRunner {
  public:
   explicit FileIOTestRunner(const CreateFileIOCB& create_file_io_cb);
+
+  FileIOTestRunner(const FileIOTestRunner&) = delete;
+  FileIOTestRunner& operator=(const FileIOTestRunner&) = delete;
+
   ~FileIOTestRunner();
 
   void AddTests();
 
   // Run all tests. When tests are completed, the result will be reported in the
   // |completion_cb|.
-  void RunAllTests(const CompletionCB& completion_cb);
+  void RunAllTests(CompletionCB completion_cb);
 
  private:
   void OnTestComplete(bool success);
@@ -160,8 +185,6 @@ class FileIOTestRunner {
   std::vector<uint8_t> large_data_;
   size_t total_num_tests_ = 0;   // Total number of tests.
   size_t num_passed_tests_ = 0;  // Number of passed tests.
-
-  DISALLOW_COPY_AND_ASSIGN(FileIOTestRunner);
 };
 
 }  // namespace media

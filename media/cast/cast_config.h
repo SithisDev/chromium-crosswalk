@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,8 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/shared_memory.h"
-#include "base/single_thread_task_runner.h"
+#include "base/memory/unsafe_shared_memory_region.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 
 namespace media {
@@ -21,17 +21,22 @@ class VideoEncodeAccelerator;
 
 namespace cast {
 
+// TODO(https://crbug.com/1363514): should be removed in favor of
+// media::VideoCodec, media::AudioCodec.
 enum Codec {
   CODEC_UNKNOWN,
   CODEC_AUDIO_OPUS,
   CODEC_AUDIO_PCM16,
   CODEC_AUDIO_AAC,
   CODEC_AUDIO_REMOTE,
+  // For tests only.  Must set enable_fake_codec_for_tests to true.
   CODEC_VIDEO_FAKE,
   CODEC_VIDEO_VP8,
   CODEC_VIDEO_H264,
   CODEC_VIDEO_REMOTE,
-  CODEC_LAST = CODEC_VIDEO_REMOTE
+  CODEC_VIDEO_VP9,
+  CODEC_VIDEO_AV1,
+  CODEC_LAST = CODEC_VIDEO_AV1
 };
 
 // Describes the content being transported over RTP streams.
@@ -60,11 +65,16 @@ enum class RtpPayloadType {
   // in-sequence. No assumptions about the data can be made.
   REMOTE_VIDEO = 102,
 
-  LAST = REMOTE_VIDEO
+  VIDEO_VP9 = 103,
+
+  VIDEO_AV1 = 104,
+
+  LAST = VIDEO_AV1
 };
 
-// TODO(miu): Eliminate these after moving "default config" into the top-level
-// media/cast directory.  http://crbug.com/530839
+// Desired end-to-end latency.
+constexpr base::TimeDelta kDefaultTargetPlayoutDelay = base::Milliseconds(400);
+
 enum SuggestedDefaults {
   // Audio encoder bitrate.  Zero means "auto," which asks the encoder to select
   // a bitrate that dynamically adjusts to the content.  Otherwise, a constant
@@ -79,14 +89,6 @@ enum SuggestedDefaults {
 
   // Suggested default maximum video frame rate.
   kDefaultMaxFrameRate = 30,
-
-  // End-to-end latency in milliseconds.
-  //
-  // DO NOT USE THIS (400 ms is proven as ideal for general-purpose use).
-  //
-  // TODO(miu): Change to 400, and confirm nothing has broken in later change.
-  // http://crbug.com/530839
-  kDefaultRtpMaxDelayMs = 100,
 
   // Suggested minimum and maximum video bitrates for general-purpose use (up to
   // 1080p, 30 FPS).
@@ -158,6 +160,7 @@ struct FrameSenderConfig {
   base::TimeDelta max_playout_delay;
 
   // Starting playout delay when streaming animated content.
+  // TODO(https://crbug.com/1363694): animated playout delay should be removed.
   base::TimeDelta animated_playout_delay;
 
   // RTP payload type enum: Specifies the type/encoding of frame data.
@@ -193,11 +196,14 @@ struct FrameSenderConfig {
   std::string aes_key;
   std::string aes_iv_mask;
 
+  // When true, allows use of CODEC_VIDEO_FAKE.  When false, CODEC_VIDEO_FAKE is
+  // not supported.
+  bool enable_fake_codec_for_tests{false};
+
   // These are codec specific parameters for video streams only.
   VideoCodecParams video_codec_params;
 };
 
-// TODO(miu): Naming and minor type changes are badly needed in a later CL.
 struct FrameReceiverConfig {
   FrameReceiverConfig();
   FrameReceiverConfig(const FrameReceiverConfig& other);
@@ -215,7 +221,7 @@ struct FrameReceiverConfig {
   // transmit/retransmit, receive, decode, and render; given its run-time
   // environment (sender/receiver hardware performance, network conditions,
   // etc.).
-  int rtp_max_delay_ms;  // TODO(miu): Change to TimeDelta target_playout_delay.
+  int rtp_max_delay_ms;
 
   // RTP payload type enum: Specifies the type/encoding of frame data.
   RtpPayloadType rtp_payload_type;
@@ -234,8 +240,6 @@ struct FrameReceiverConfig {
   double target_frame_rate;
 
   // Codec used for the compression of signal data.
-  // TODO(miu): Merge the AudioCodec and VideoCodec enums into one so this union
-  // is not necessary.
   Codec codec;
 
   // The AES crypto key and initialization vector.  Each of these strings
@@ -245,18 +249,13 @@ struct FrameReceiverConfig {
   std::string aes_iv_mask;
 };
 
-// TODO(miu): Remove the CreateVEA callbacks.  http://crbug.com/454029
-typedef base::Callback<void(scoped_refptr<base::SingleThreadTaskRunner>,
-                            std::unique_ptr<media::VideoEncodeAccelerator>)>
+typedef base::OnceCallback<void(scoped_refptr<base::SingleThreadTaskRunner>,
+                                std::unique_ptr<media::VideoEncodeAccelerator>)>
     ReceiveVideoEncodeAcceleratorCallback;
-typedef base::Callback<void(const ReceiveVideoEncodeAcceleratorCallback&)>
+typedef base::RepeatingCallback<void(ReceiveVideoEncodeAcceleratorCallback)>
     CreateVideoEncodeAcceleratorCallback;
-typedef base::Callback<void(std::unique_ptr<base::SharedMemory>)>
+typedef base::OnceCallback<void(base::UnsafeSharedMemoryRegion)>
     ReceiveVideoEncodeMemoryCallback;
-typedef base::Callback<void(size_t size,
-                            const ReceiveVideoEncodeMemoryCallback&)>
-    CreateVideoEncodeMemoryCallback;
-
 }  // namespace cast
 }  // namespace media
 

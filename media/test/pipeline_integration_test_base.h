@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,9 @@
 #include "base/callback_forward.h"
 #include "base/hash/md5.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/scoped_run_loop_timeout.h"
+#include "base/test/task_environment.h"
+#include "base/time/time.h"
 #include "media/audio/clockless_audio_sink.h"
 #include "media/audio/null_audio_sink.h"
 #include "media/base/demuxer.h"
@@ -43,15 +45,6 @@ extern const char kNullVideoHash[];
 // Empty hash string.  Used to verify empty audio tracks.
 extern const char kNullAudioHash[];
 
-class PipelineTestRendererFactory {
- public:
-  virtual ~PipelineTestRendererFactory() {}
-  // Creates and returns a Renderer.
-  virtual std::unique_ptr<Renderer> CreateRenderer(
-      CreateVideoDecodersCB prepend_video_decoders_cb,
-      CreateAudioDecodersCB prepend_audio_decoders_cb) = 0;
-};
-
 // Integration tests for Pipeline. Real demuxers, real decoders, and
 // base renderer implementations are used to verify pipeline functionality. The
 // renderers used in these tests rely heavily on the AudioRendererBase &
@@ -64,6 +57,11 @@ class PipelineTestRendererFactory {
 class PipelineIntegrationTestBase : public Pipeline::Client {
  public:
   PipelineIntegrationTestBase();
+
+  PipelineIntegrationTestBase(const PipelineIntegrationTestBase&) = delete;
+  PipelineIntegrationTestBase& operator=(const PipelineIntegrationTestBase&) =
+      delete;
+
   virtual ~PipelineIntegrationTestBase();
 
   // Test types for advanced testing and benchmarking (e.g., underflow is
@@ -140,18 +138,17 @@ class PipelineIntegrationTestBase : public Pipeline::Client {
   }
 
   // Saves a test callback, ownership of which will be transferred to the next
-  // AudioRendererImpl created by CreateRenderer().
+  // AudioRendererImpl created by CreateDefaultRenderer().
   void set_audio_play_delay_cb(AudioRendererImpl::PlayDelayCBForTesting cb) {
     audio_play_delay_cb_ = std::move(cb);
   }
 
   std::unique_ptr<Renderer> CreateRenderer(
-      CreateVideoDecodersCB prepend_video_decoders_cb,
-      CreateAudioDecodersCB prepend_audio_decoders_cb);
+      absl::optional<RendererType> renderer_type);
 
  protected:
   NiceMock<MockMediaLog> media_log_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   base::MD5Context md5_context_;
   bool hashing_enabled_;
   bool clockless_playback_;
@@ -160,7 +157,7 @@ class PipelineIntegrationTestBase : public Pipeline::Client {
   bool fuzzing_;
 #if defined(ADDRESS_SANITIZER) || defined(UNDEFINED_SANITIZER)
   // TODO(https://crbug.com/924030): ASAN causes Run() timeouts to be reached.
-  const base::RunLoop::ScopedDisableRunTimeoutForTest disable_run_timeout_;
+  const base::test::ScopedDisableRunLoopTimeout disable_run_timeout_;
 #endif
   std::unique_ptr<Demuxer> demuxer_;
   std::unique_ptr<DataSource> data_source_;
@@ -177,7 +174,20 @@ class PipelineIntegrationTestBase : public Pipeline::Client {
   scoped_refptr<VideoFrame> last_frame_;
   base::TimeDelta current_duration_;
   AudioRendererImpl::PlayDelayCBForTesting audio_play_delay_cb_;
-  std::unique_ptr<PipelineTestRendererFactory> renderer_factory_;
+
+  // By default RendererImpl will be created using CreateDefaultRenderer(). But
+  // if |create_renderer_cb_| is set, it'll be used to create the Renderer
+  // instead.
+  using CreateRendererCB = base::RepeatingCallback<std::unique_ptr<Renderer>(
+      absl::optional<RendererType> renderer_type)>;
+  CreateRendererCB create_renderer_cb_;
+
+  std::unique_ptr<Renderer> CreateDefaultRenderer(
+      absl::optional<RendererType> renderer_type);
+
+  // Sets |create_renderer_cb_| which will be used to wrap the Renderer created
+  // by CreateDefaultRenderer().
+  void SetCreateRendererCB(CreateRendererCB create_renderer_cb);
 
   PipelineStatus StartInternal(
       std::unique_ptr<DataSource> data_source,
@@ -203,9 +213,13 @@ class PipelineIntegrationTestBase : public Pipeline::Client {
       TestMediaSource* source,
       uint8_t test_type,
       FakeEncryptedMedia* encrypted_media);
+  PipelineStatus StartPipelineWithMediaSource(
+      TestMediaSource* source,
+      uint8_t test_type,
+      CreateAudioDecodersCB prepend_audio_decoders_cb);
 
   void OnSeeked(base::TimeDelta seek_time, PipelineStatus status);
-  void OnStatusCallback(const base::Closure& quit_run_loop_closure,
+  void OnStatusCallback(const base::RepeatingClosure& quit_run_loop_closure,
                         PipelineStatus status);
   void DemuxerEncryptedMediaInitDataCB(EmeInitDataType type,
                                        const std::vector<uint8_t>& init_data);
@@ -226,30 +240,32 @@ class PipelineIntegrationTestBase : public Pipeline::Client {
   base::TimeDelta GetStartTime();
 
   MOCK_METHOD1(DecryptorAttached, void(bool));
+
   // Pipeline::Client overrides.
   void OnError(PipelineStatus status) override;
+  void OnFallback(PipelineStatus status) override;
   void OnEnded() override;
   MOCK_METHOD1(OnMetadata, void(const PipelineMetadata&));
   MOCK_METHOD2(OnBufferingStateChange,
                void(BufferingState, BufferingStateChangeReason));
   MOCK_METHOD0(OnDurationChange, void());
   MOCK_METHOD2(OnAddTextTrack,
-               void(const TextTrackConfig& config,
-                    const AddTextTrackDoneCB& done_cb));
+               void(const TextTrackConfig& config, AddTextTrackDoneCB done_cb));
   MOCK_METHOD1(OnWaiting, void(WaitingReason));
   MOCK_METHOD1(OnVideoNaturalSizeChange, void(const gfx::Size&));
   MOCK_METHOD1(OnVideoConfigChange, void(const VideoDecoderConfig&));
   MOCK_METHOD1(OnAudioConfigChange, void(const AudioDecoderConfig&));
   MOCK_METHOD1(OnVideoOpacityChange, void(bool));
+  MOCK_METHOD1(OnVideoFrameRateChange, void(absl::optional<int>));
   MOCK_METHOD0(OnVideoAverageKeyframeDistanceUpdate, void());
-  MOCK_METHOD1(OnAudioDecoderChange, void(const PipelineDecoderInfo&));
-  MOCK_METHOD1(OnVideoDecoderChange, void(const PipelineDecoderInfo&));
+  MOCK_METHOD1(OnAudioPipelineInfoChange, void(const AudioPipelineInfo&));
+  MOCK_METHOD1(OnVideoPipelineInfoChange, void(const VideoPipelineInfo&));
   MOCK_METHOD1(OnRemotePlayStateChange, void(MediaStatus::State state));
 
  private:
   // Runs |run_loop| until it is explicitly Quit() by some part of the calling
   // test fixture or when an error occurs (by setting |on_error_closure_|). The
-  // |scoped_task_environment_| is RunUntilIdle() after the RunLoop finishes
+  // |task_environment_| is RunUntilIdle() after the RunLoop finishes
   // running, before returning to the caller.
   void RunUntilQuitOrError(base::RunLoop* run_loop);
 
@@ -257,10 +273,11 @@ class PipelineIntegrationTestBase : public Pipeline::Client {
   // RunUntilQuitOrError() on it.
   void RunUntilQuitOrEndedOrError(base::RunLoop* run_loop);
 
+  CreateVideoDecodersCB prepend_video_decoders_cb_;
+  CreateAudioDecodersCB prepend_audio_decoders_cb_;
+
   base::OnceClosure on_ended_closure_;
   base::OnceClosure on_error_closure_;
-
-  DISALLOW_COPY_AND_ASSIGN(PipelineIntegrationTestBase);
 };
 
 }  // namespace media

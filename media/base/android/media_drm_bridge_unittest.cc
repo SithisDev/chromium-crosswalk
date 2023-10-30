@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,12 @@
 
 #include "base/android/build_info.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "media/base/android/media_drm_bridge.h"
 #include "media/base/provision_fetcher.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -66,14 +67,15 @@ class ProvisionFetcherWrapper : public ProvisionFetcher {
       : provision_fetcher_(provision_fetcher) {}
 
   // ProvisionFetcher implementation.
-  void Retrieve(const std::string& default_url,
+  void Retrieve(const GURL& default_url,
                 const std::string& request_data,
-                const ResponseCB& response_cb) override {
-    provision_fetcher_->Retrieve(default_url, request_data, response_cb);
+                ResponseCB response_cb) override {
+    provision_fetcher_->Retrieve(default_url, request_data,
+                                 std::move(response_cb));
   }
 
  private:
-  ProvisionFetcher* provision_fetcher_;
+  raw_ptr<ProvisionFetcher> provision_fetcher_;
 };
 
 }  // namespace
@@ -95,9 +97,9 @@ class MediaDrmBridgeTest : public ProvisionFetcher, public testing::Test {
   // ProvisionFetcher implementation. Done as a mock method so we can properly
   // check if |media_drm_bridge_| invokes it or not.
   MOCK_METHOD3(Retrieve,
-               void(const std::string& default_url,
+               void(const GURL& default_url,
                     const std::string& request_data,
-                    const ResponseCB& response_cb));
+                    ResponseCB response_cb));
 
   void Provision() {
     media_drm_bridge_->Provision(base::BindOnce(
@@ -116,7 +118,7 @@ class MediaDrmBridgeTest : public ProvisionFetcher, public testing::Test {
     return std::make_unique<ProvisionFetcherWrapper>(this);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 };
 
 TEST_F(MediaDrmBridgeTest, IsKeySystemSupported_Widevine) {
@@ -126,16 +128,11 @@ TEST_F(MediaDrmBridgeTest, IsKeySystemSupported_Widevine) {
   EXPECT_TRUE_IF_WIDEVINE_AVAILABLE(
       IsKeySystemSupportedWithType(kWidevineKeySystem, kVideoMp4));
 
-  if (base::android::BuildInfo::GetInstance()->sdk_int() <=
-      base::android::SDK_VERSION_KITKAT) {
-    EXPECT_FALSE(IsKeySystemSupportedWithType(kWidevineKeySystem, kAudioWebM));
-    EXPECT_FALSE(IsKeySystemSupportedWithType(kWidevineKeySystem, kVideoWebM));
-  } else {
-    EXPECT_TRUE_IF_WIDEVINE_AVAILABLE(
+
+  EXPECT_TRUE_IF_WIDEVINE_AVAILABLE(
         IsKeySystemSupportedWithType(kWidevineKeySystem, kAudioWebM));
-    EXPECT_TRUE_IF_WIDEVINE_AVAILABLE(
+  EXPECT_TRUE_IF_WIDEVINE_AVAILABLE(
         IsKeySystemSupportedWithType(kWidevineKeySystem, kVideoWebM));
-  }
 
   EXPECT_FALSE(IsKeySystemSupportedWithType(kWidevineKeySystem, "unknown"));
   EXPECT_FALSE(IsKeySystemSupportedWithType(kWidevineKeySystem, "video/avi"));

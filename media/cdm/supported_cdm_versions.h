@@ -1,9 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef MEDIA_CDM_SUPPORTED_CDM_VERSIONS_H_
 #define MEDIA_CDM_SUPPORTED_CDM_VERSIONS_H_
+
+#include <stddef.h>
 
 #include <array>
 
@@ -32,7 +34,7 @@ struct SupportedVersion {
   bool enabled;
 };
 
-constexpr std::array<SupportedVersion, 3> kSupportedCdmInterfaceVersions = {{
+constexpr std::array<SupportedVersion, 2> kSupportedCdmInterfaceVersions = {{
     {10, true},
     {11, false},
 }};

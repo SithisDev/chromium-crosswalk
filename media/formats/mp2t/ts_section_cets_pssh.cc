@@ -1,19 +1,18 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/formats/mp2t/ts_section_cets_pssh.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "media/base/bit_reader.h"
 #include "media/formats/mp2t/mp2t_common.h"
 
 namespace media {
 namespace mp2t {
 
-TsSectionCetsPssh::TsSectionCetsPssh(
-    const RegisterPsshBoxesCb& register_pssh_boxes_cb)
-    : register_pssh_boxes_cb_(register_pssh_boxes_cb) {}
+TsSectionCetsPssh::TsSectionCetsPssh(RegisterPsshBoxesCB register_pssh_boxes_cb)
+    : register_pssh_boxes_cb_(std::move(register_pssh_boxes_cb)) {}
 
 TsSectionCetsPssh::~TsSectionCetsPssh() {}
 

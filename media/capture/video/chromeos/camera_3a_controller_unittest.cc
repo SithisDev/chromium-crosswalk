@@ -1,14 +1,16 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/capture/video/chromeos/camera_3a_controller.h"
 
 #include <functional>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
+#include "base/time/time.h"
 #include "media/capture/video/chromeos/camera_metadata_utils.h"
 #include "media/capture/video/chromeos/request_builder.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -70,10 +72,9 @@ class Camera3AControllerTest : public ::testing::Test {
     base::WaitableEvent done(base::WaitableEvent::ResetPolicy::MANUAL,
                              base::WaitableEvent::InitialState::NOT_SIGNALED);
     thread_.task_runner()->PostTask(
-        location,
-        base::BindOnce(&Camera3AControllerTest::RunOnThread,
-                       base::Unretained(this), std::cref(location),
-                       base::Passed(&closure), base::Unretained(&done)));
+        location, base::BindOnce(&Camera3AControllerTest::RunOnThread,
+                                 base::Unretained(this), std::cref(location),
+                                 std::move(closure), base::Unretained(&done)));
     done.Wait();
   }
 
@@ -207,17 +208,17 @@ class Camera3AControllerTest : public ::testing::Test {
                 AddResultMetadataObserver(_))
         .Times(1);
     EXPECT_CALL(*mock_capture_metadata_dispatcher_,
-                SetCaptureMetadata(
+                SetRepeatingCaptureMetadata(
                     cros::mojom::CameraMetadataTag::ANDROID_CONTROL_AF_MODE,
                     cros::mojom::EntryType::TYPE_BYTE, 1, _))
         .Times(1);
     EXPECT_CALL(*mock_capture_metadata_dispatcher_,
-                SetCaptureMetadata(
+                SetRepeatingCaptureMetadata(
                     cros::mojom::CameraMetadataTag::ANDROID_CONTROL_AE_MODE,
                     cros::mojom::EntryType::TYPE_BYTE, 1, _))
         .Times(1);
     EXPECT_CALL(*mock_capture_metadata_dispatcher_,
-                SetCaptureMetadata(
+                SetRepeatingCaptureMetadata(
                     cros::mojom::CameraMetadataTag::ANDROID_CONTROL_AWB_MODE,
                     cros::mojom::EntryType::TYPE_BYTE, 1, _))
         .Times(1);
@@ -249,7 +250,7 @@ TEST_F(Camera3AControllerTest, Stabilize3AForStillCaptureTest) {
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_trigger_cancel))
       .Times(1);
   EXPECT_CALL(*mock_capture_metadata_dispatcher_,
-              SetCaptureMetadata(
+              SetRepeatingCaptureMetadata(
                   cros::mojom::CameraMetadataTag::ANDROID_CONTROL_AF_MODE,
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_mode))
       .Times(1);
@@ -321,7 +322,7 @@ TEST_F(Camera3AControllerTest, Stabilize3AForStillCaptureTest) {
   RunOnThreadSync(FROM_HERE,
                   base::BindOnce(&Camera3AController::OnResultMetadataAvailable,
                                  base::Unretained(camera_3a_controller_.get()),
-                                 std::cref(result_metadata)));
+                                 0, std::cref(result_metadata)));
 
   // |camera_3a_controller_| should call the registered callback once 3A are
   // stabilized.
@@ -340,7 +341,7 @@ TEST_F(Camera3AControllerTest, Stabilize3AForStillCaptureTest) {
   RunOnThreadSync(FROM_HERE,
                   base::BindOnce(&Camera3AController::OnResultMetadataAvailable,
                                  base::Unretained(camera_3a_controller_.get()),
-                                 std::cref(result_metadata)));
+                                 0, std::cref(result_metadata)));
   done.Wait();
 }
 
@@ -363,7 +364,7 @@ TEST_F(Camera3AControllerTest, SetAutoFocusModeForStillCaptureTest) {
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_trigger))
       .Times(1);
   EXPECT_CALL(*mock_capture_metadata_dispatcher_,
-              SetCaptureMetadata(
+              SetRepeatingCaptureMetadata(
                   cros::mojom::CameraMetadataTag::ANDROID_CONTROL_AF_MODE,
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_mode))
       .Times(1);
@@ -391,7 +392,7 @@ TEST_F(Camera3AControllerTest, SetAutoFocusModeForStillCaptureTest) {
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_trigger))
       .Times(1);
   EXPECT_CALL(*mock_capture_metadata_dispatcher_,
-              SetCaptureMetadata(
+              SetRepeatingCaptureMetadata(
                   cros::mojom::CameraMetadataTag::ANDROID_CONTROL_AF_MODE,
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_mode))
       .Times(1);
@@ -415,7 +416,7 @@ TEST_F(Camera3AControllerTest, SetAutoFocusModeForStillCaptureTest) {
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_trigger))
       .Times(1);
   EXPECT_CALL(*mock_capture_metadata_dispatcher_,
-              SetCaptureMetadata(
+              SetRepeatingCaptureMetadata(
                   cros::mojom::CameraMetadataTag::ANDROID_CONTROL_AF_MODE,
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_mode))
       .Times(1);
@@ -445,7 +446,7 @@ TEST_F(Camera3AControllerTest, SetAutoFocusModeForVideoRecordingTest) {
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_trigger))
       .Times(1);
   EXPECT_CALL(*mock_capture_metadata_dispatcher_,
-              SetCaptureMetadata(
+              SetRepeatingCaptureMetadata(
                   cros::mojom::CameraMetadataTag::ANDROID_CONTROL_AF_MODE,
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_mode))
       .Times(1);
@@ -473,7 +474,7 @@ TEST_F(Camera3AControllerTest, SetAutoFocusModeForVideoRecordingTest) {
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_trigger))
       .Times(1);
   EXPECT_CALL(*mock_capture_metadata_dispatcher_,
-              SetCaptureMetadata(
+              SetRepeatingCaptureMetadata(
                   cros::mojom::CameraMetadataTag::ANDROID_CONTROL_AF_MODE,
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_mode))
       .Times(1);
@@ -497,7 +498,7 @@ TEST_F(Camera3AControllerTest, SetAutoFocusModeForVideoRecordingTest) {
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_trigger))
       .Times(1);
   EXPECT_CALL(*mock_capture_metadata_dispatcher_,
-              SetCaptureMetadata(
+              SetRepeatingCaptureMetadata(
                   cros::mojom::CameraMetadataTag::ANDROID_CONTROL_AF_MODE,
                   cros::mojom::EntryType::TYPE_BYTE, 1, af_mode))
       .Times(1);

@@ -1,19 +1,22 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/gpu/android/codec_image_group.h"
 
 #include "base/bind.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "media/gpu/android/codec_surface_bundle.h"
 
 namespace media {
 
 CodecImageGroup::CodecImageGroup(
     scoped_refptr<base::SequencedTaskRunner> task_runner,
-    scoped_refptr<CodecSurfaceBundle> surface_bundle)
-    : surface_bundle_(std::move(surface_bundle)), weak_this_factory_(this) {
+    scoped_refptr<CodecSurfaceBundle> surface_bundle,
+    scoped_refptr<gpu::RefCountedLock> drdc_lock)
+    : gpu::RefCountedLockHelperDrDc(std::move(drdc_lock)),
+      surface_bundle_(std::move(surface_bundle)),
+      task_runner_(std::move(task_runner)) {
   // If the surface bundle has an overlay, then register for destruction
   // callbacks.  We thread-hop to the right thread, which means that we might
   // find out about destruction asynchronously.  Remember that the wp will be
@@ -26,7 +29,7 @@ CodecImageGroup::CodecImageGroup(
           task_runner->PostTask(FROM_HERE,
                                 base::BindOnce(std::move(cb), overlay));
         },
-        std::move(task_runner),
+        task_runner_,
         base::BindOnce(&CodecImageGroup::OnSurfaceDestroyed,
                        weak_this_factory_.GetWeakPtr())));
   }
@@ -36,12 +39,20 @@ CodecImageGroup::CodecImageGroup(
   // adding a new image.
 }
 
-CodecImageGroup::~CodecImageGroup() {}
+CodecImageGroup::~CodecImageGroup() {
+  // Since every CodecImage should hold a strong ref to us until it becomes
+  // unused, we shouldn't be destroyed with any outstanding images.
+  DCHECK(images_.empty());
+  CHECK(task_runner_->RunsTasksInCurrentSequence());
+}
 
 void CodecImageGroup::AddCodecImage(CodecImage* image) {
+  // Temporary: crbug.com/986783 .
+  CHECK(task_runner_->RunsTasksInCurrentSequence());
   // If somebody adds an image after the surface has been destroyed, fail the
   // image immediately.  This can happen due to thread hopping.
   if (!surface_bundle_) {
+    base::AutoLockMaybe auto_lock(GetDrDcLockPtr());
     image->ReleaseCodecBuffer();
     return;
   }
@@ -49,27 +60,28 @@ void CodecImageGroup::AddCodecImage(CodecImage* image) {
   images_.insert(image);
 
   // Bind a strong ref to |this| so that the callback will prevent us from being
-  // destroyed until the CodecImage is destroyed.
-  image->SetDestructionCB(
-      base::BindRepeating(&CodecImageGroup::OnCodecImageDestroyed,
-                          scoped_refptr<CodecImageGroup>(this)));
+  // destroyed until the CodecImage is no longer in use for drawing.  In that
+  // case, it doesn't need |surface_bundle_|, nor does it need to be notified
+  // if the overlay is destroyed.
+  image->AddUnusedCB(
+      base::BindOnce(&CodecImageGroup::OnCodecImageUnused, this));
 }
 
-void CodecImageGroup::RemoveCodecImage(CodecImage* image) {
-  images_.erase(image);
-  // Clear the destruction CB, since it has a strong ref to us.
-  image->SetDestructionCB(CodecImage::DestructionCB());
-}
-
-void CodecImageGroup::OnCodecImageDestroyed(CodecImage* image) {
+void CodecImageGroup::OnCodecImageUnused(CodecImage* image) {
+  // Temporary: crbug.com/986783 .
+  CHECK(task_runner_->RunsTasksInCurrentSequence());
   images_.erase(image);
 }
 
 void CodecImageGroup::OnSurfaceDestroyed(AndroidOverlay* overlay) {
+  // Temporary: crbug.com/986783 .
+  CHECK(task_runner_->RunsTasksInCurrentSequence());
   // Release any codec buffer, so that the image doesn't try to render to the
   // overlay.  If it already did, that's fine.
-  for (CodecImage* image : images_)
+  for (CodecImage* image : images_) {
+    base::AutoLockMaybe auto_lock(GetDrDcLockPtr());
     image->ReleaseCodecBuffer();
+  }
 
   // While this might cause |surface_bundle_| to be deleted, it's okay because
   // it's a RefCountedDeleteOnSequence.

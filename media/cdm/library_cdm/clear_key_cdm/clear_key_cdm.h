@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "media/base/cdm_key_information.h"
@@ -23,7 +22,6 @@
 namespace media {
 
 class CdmHostProxy;
-class CdmProxyHandler;
 class CdmVideoDecoder;
 class DecoderBuffer;
 class FFmpegCdmAudioDecoder;
@@ -37,6 +35,10 @@ class ClearKeyCdm : public cdm::ContentDecryptionModule_10,
  public:
   template <typename HostInterface>
   ClearKeyCdm(HostInterface* host, const std::string& key_system);
+
+  ClearKeyCdm(const ClearKeyCdm&) = delete;
+  ClearKeyCdm& operator=(const ClearKeyCdm&) = delete;
+
   ~ClearKeyCdm() override;
 
   // cdm::ContentDecryptionModule_10 implementation.
@@ -103,17 +105,6 @@ class ClearKeyCdm : public cdm::ContentDecryptionModule_10,
                    uint32_t storage_id_size) override;
 
  private:
-  struct UpdateParams {
-    UpdateParams(uint32_t promise_id,
-                 std::string session_id,
-                 std::vector<uint8_t> response);
-    ~UpdateParams();
-
-    const uint32_t promise_id;
-    const std::string session_id;
-    const std::vector<uint8_t> response;
-  };
-
   // ContentDecryptionModule callbacks.
   void OnSessionMessage(const std::string& session_id,
                         CdmMessageType message_type,
@@ -121,7 +112,8 @@ class ClearKeyCdm : public cdm::ContentDecryptionModule_10,
   void OnSessionKeysChange(const std::string& session_id,
                            bool has_additional_usable_key,
                            CdmKeysInfo keys_info);
-  void OnSessionClosed(const std::string& session_id);
+  void OnSessionClosed(const std::string& session_id,
+                       CdmSessionClosedReason reason);
   void OnSessionExpirationUpdate(const std::string& session_id,
                                  base::Time new_expiry_time);
 
@@ -138,7 +130,7 @@ class ClearKeyCdm : public cdm::ContentDecryptionModule_10,
   void OnUpdateSuccess(uint32_t promise_id, const std::string& session_id);
 
   // Prepares next renewal message and sets a timer for it.
-  void ScheduleNextRenewal();
+  void ScheduleNextTimer();
 
   // Decrypts the |encrypted_buffer| and puts the result in |decrypted_buffer|.
   // Returns cdm::kSuccess if decryption succeeded. The decrypted result is
@@ -158,15 +150,10 @@ class ClearKeyCdm : public cdm::ContentDecryptionModule_10,
   void OnFileIOTestComplete(bool success);
 
   void StartOutputProtectionTest();
+
   void StartPlatformVerificationTest();
   void ReportVerifyCdmHostTestResult();
   void StartStorageIdTest();
-
-  void InitializeCdmProxyHandler();
-  void OnCdmProxyHandlerInitialized(bool success);
-  void OnCdmProxyKeySet(bool success);
-
-  void UpdateSessionInternal(std::unique_ptr<UpdateParams> params);
 
   int host_interface_version_ = 0;
 
@@ -182,9 +169,9 @@ class ClearKeyCdm : public cdm::ContentDecryptionModule_10,
   // Timer delay in milliseconds for the next cdm_host_proxy_->SetTimer() call.
   int64_t timer_delay_ms_ = kInitialTimerDelayMs;
 
-  // Indicates whether a renewal timer has been set to prevent multiple timers
-  // from running.
-  bool has_set_renewal_timer_ = false;
+  // Indicates whether a timer has been set to prevent multiple timers from
+  // running.
+  bool has_set_timer_ = false;
 
   bool has_sent_individualization_request_ = false;
 
@@ -192,18 +179,13 @@ class ClearKeyCdm : public cdm::ContentDecryptionModule_10,
   std::unique_ptr<FFmpegCdmAudioDecoder> audio_decoder_;
 #endif  // CLEAR_KEY_CDM_USE_FFMPEG_DECODER
 
-  std::unique_ptr<UpdateParams> pending_update_params_;
-
   std::unique_ptr<CdmVideoDecoder> video_decoder_;
 
   std::unique_ptr<FileIOTestRunner> file_io_test_runner_;
-  std::unique_ptr<CdmProxyHandler> cdm_proxy_handler_;
 
   bool is_running_output_protection_test_ = false;
   bool is_running_platform_verification_test_ = false;
   bool is_running_storage_id_test_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(ClearKeyCdm);
 };
 
 }  // namespace media

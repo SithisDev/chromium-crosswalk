@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,18 +22,23 @@ namespace media {
 
 namespace {
 
-std::vector<VideoFrameLayout::Plane> CreatePlanes(
-    const std::vector<int32_t>& strides,
-    const std::vector<size_t>& offsets,
-    const std::vector<size_t>& sizes) {
+std::vector<ColorPlaneLayout> CreatePlanes(const std::vector<int32_t>& strides,
+                                           const std::vector<size_t>& offsets,
+                                           const std::vector<size_t>& sizes) {
   LOG_ASSERT(strides.size() == offsets.size());
-  std::vector<VideoFrameLayout::Plane> planes(strides.size());
+  std::vector<ColorPlaneLayout> planes(strides.size());
   for (size_t i = 0; i < strides.size(); i++) {
     planes[i].stride = strides[i];
     planes[i].offset = offsets[i];
     planes[i].size = sizes[i];
   }
   return planes;
+}
+
+static std::string ModifierToHexString(uint64_t modifier) {
+  std::stringstream stream;
+  stream << "0x" << std::hex << modifier;
+  return stream.str();
 }
 
 }  // namespace
@@ -209,7 +214,7 @@ TEST(VideoFrameLayout, ToStringWithPlanes) {
   std::ostringstream ostream;
   ostream << *layout;
   const std::string kNoModifier =
-      std::to_string(gfx::NativePixmapHandle::kNoModifier);
+      ModifierToHexString(gfx::NativePixmapHandle::kNoModifier);
   EXPECT_EQ(ostream.str(),
             "VideoFrameLayout(format: PIXEL_FORMAT_I420, coded_size: 320x180, "
             "planes (stride, offset, size): [(384, 0, 0), (192, 0, 0), "
@@ -230,7 +235,7 @@ TEST(VideoFrameLayout, ToStringMultiPlanar) {
   std::ostringstream ostream;
   ostream << *layout;
   const std::string kNoModifier =
-      std::to_string(gfx::NativePixmapHandle::kNoModifier);
+      ModifierToHexString(gfx::NativePixmapHandle::kNoModifier);
   EXPECT_EQ(ostream.str(),
             "VideoFrameLayout(format: PIXEL_FORMAT_NV12, coded_size: 320x180, "
             "planes (stride, offset, size): [(384, 0, 100), (192, 100, 100)], "
@@ -247,7 +252,7 @@ TEST(VideoFrameLayout, ToString) {
   std::ostringstream ostream;
   ostream << *layout;
   const std::string kNoModifier =
-      std::to_string(gfx::NativePixmapHandle::kNoModifier);
+      ModifierToHexString(gfx::NativePixmapHandle::kNoModifier);
   EXPECT_EQ(ostream.str(),
             "VideoFrameLayout(format: PIXEL_FORMAT_NV12, coded_size: 320x180, "
             "planes (stride, offset, size): [(0, 0, 0), (0, 0, 0)], "

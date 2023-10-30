@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -36,8 +36,10 @@ target(link_target_type, "service") {
     "//ipc",
     "//media",
     "//media/gpu",
+    "//media/mojo/mojom",
   ]
   deps = [
+    "//build:chromeos_buildflags",
     "//gpu/command_buffer/service:gles2",
     "//gpu/ipc/service",
     "//media:media_buildflags",
@@ -48,12 +50,8 @@ target(link_target_type, "service") {
     "//ui/gfx/ipc/color",
   ]
 
-  if (is_win) {
-    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
-  }
-
   if (is_mac) {
-    deps += [ "//third_party/webrtc/common_video:common_video" ]
+    deps += [ "//third_party/webrtc_overrides:webrtc_component" ]
   }
 }
 
@@ -68,6 +66,7 @@ source_set("unit_tests") {
     "//base",
     "//base/test:test_support",
     "//media:test_support",
+    "//media/gpu:test_support",
     "//testing/gmock",
     "//testing/gtest",
   ]

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,6 +60,11 @@ class MEDIA_EXPORT AudioDebugRecordingHelper : public AudioDebugRecorder {
       const AudioParameters& params,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       base::OnceClosure on_destruction_closure);
+
+  AudioDebugRecordingHelper(const AudioDebugRecordingHelper&) = delete;
+  AudioDebugRecordingHelper& operator=(const AudioDebugRecordingHelper&) =
+      delete;
+
   ~AudioDebugRecordingHelper() override;
 
   // Enable debug recording. Creates |debug_writer_| and runs
@@ -103,7 +108,6 @@ class MEDIA_EXPORT AudioDebugRecordingHelper : public AudioDebugRecorder {
   base::OnceClosure on_destruction_closure_;
 
   base::WeakPtrFactory<AudioDebugRecordingHelper> weak_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(AudioDebugRecordingHelper);
 };
 
 }  // namespace media

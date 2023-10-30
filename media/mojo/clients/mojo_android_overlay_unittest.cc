@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,16 @@
 
 #include "base/android/jni_android.h"
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "gpu/ipc/common/gpu_surface_tracker.h"
 #include "media/base/mock_filters.h"
 #include "media/mojo/clients/mojo_android_overlay.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/service_manager/public/mojom/interface_provider.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/android/scoped_java_surface.h"
@@ -52,37 +53,39 @@ class MojoAndroidOverlayTest : public ::testing::Test {
       : public StrictMock<mojom::AndroidOverlayProvider> {
    public:
     // These argument types lack default constructors, so gmock can't mock them.
-    void CreateOverlay(mojom::AndroidOverlayRequest overlay_request,
-                       mojom::AndroidOverlayClientPtr client,
-                       mojom::AndroidOverlayConfigPtr config) override {
-      overlay_request_ = std::move(overlay_request);
-      client_ = std::move(client);
+    void CreateOverlay(
+        mojo::PendingReceiver<mojom::AndroidOverlay> overlay_receiver,
+        mojo::PendingRemote<mojom::AndroidOverlayClient> client,
+        mojom::AndroidOverlayConfigPtr config) override {
+      overlay_receiver_ = std::move(overlay_receiver);
+      client_.Bind(std::move(client));
       config_ = std::move(config);
       OverlayCreated();
     }
 
     MOCK_METHOD0(OverlayCreated, void(void));
 
-    mojom::AndroidOverlayRequest overlay_request_;
-    mojom::AndroidOverlayClientPtr client_;
+    mojo::PendingReceiver<mojom::AndroidOverlay> overlay_receiver_;
+    mojo::Remote<mojom::AndroidOverlayClient> client_;
     mojom::AndroidOverlayConfigPtr config_;
   };
 
  public:
   MojoAndroidOverlayTest()
-      : provider_binding_(&mock_provider_), overlay_binding_(&mock_overlay_) {}
+      : provider_receiver_(&mock_provider_),
+        overlay_receiver_(&mock_overlay_) {}
 
   ~MojoAndroidOverlayTest() override {}
 
   void SetUp() override {
     // Set up default config.
     config_.rect = gfx::Rect(100, 200, 300, 400);
-    config_.ready_cb = base::Bind(&MockClientCallbacks::OnReady,
-                                  base::Unretained(&callbacks_));
-    config_.failed_cb = base::Bind(&MockClientCallbacks::OnFailed,
-                                   base::Unretained(&callbacks_));
-    config_.power_cb = base::Bind(&MockClientCallbacks::OnPowerEfficient,
-                                  base::Unretained(&callbacks_));
+    config_.ready_cb = base::BindOnce(&MockClientCallbacks::OnReady,
+                                      base::Unretained(&callbacks_));
+    config_.failed_cb = base::BindOnce(&MockClientCallbacks::OnFailed,
+                                       base::Unretained(&callbacks_));
+    config_.power_cb = base::BindRepeating(
+        &MockClientCallbacks::OnPowerEfficient, base::Unretained(&callbacks_));
 
     // Make sure that we have an implementation of GpuSurfaceLookup.
     gpu::GpuSurfaceTracker::Get();
@@ -102,17 +105,16 @@ class MojoAndroidOverlayTest : public ::testing::Test {
   }
 
   // Create an overlay in |overlay_client_| using the current config, but do
-  // not bind anything to |overlay_request_| yet.
+  // not bind anything to |overlay_receiver_| yet.
   void CreateOverlay() {
     EXPECT_CALL(mock_provider_, OverlayCreated());
 
     base::UnguessableToken routing_token = base::UnguessableToken::Create();
-    mojom::AndroidOverlayProviderPtr provider_ptr;
-    provider_binding_.Bind(mojo::MakeRequest(&provider_ptr));
 
-    overlay_client_.reset(new MojoAndroidOverlay(
-        std::move(provider_ptr), std::move(config_), routing_token));
-    overlay_client_->AddSurfaceDestroyedCallback(base::Bind(
+    overlay_client_ = std::make_unique<MojoAndroidOverlay>(
+        provider_receiver_.BindNewPipeAndPassRemote(), std::move(config_),
+        routing_token);
+    overlay_client_->AddSurfaceDestroyedCallback(base::BindOnce(
         &MockClientCallbacks::OnDestroyed, base::Unretained(&callbacks_)));
     base::RunLoop().RunUntilIdle();
   }
@@ -122,7 +124,7 @@ class MojoAndroidOverlayTest : public ::testing::Test {
     CreateOverlay();
 
     // Bind an overlay to the request.
-    overlay_binding_.Bind(std::move(mock_provider_.overlay_request_));
+    overlay_receiver_.Bind(std::move(mock_provider_.overlay_receiver_));
     base::RunLoop().RunUntilIdle();
   }
 
@@ -136,7 +138,7 @@ class MojoAndroidOverlayTest : public ::testing::Test {
     surface_ = gl::ScopedJavaSurface(surface_texture_.get());
     surface_key_ = gpu::GpuSurfaceTracker::Get()->AddSurfaceForNativeWidget(
         gpu::GpuSurfaceTracker::SurfaceRecord(
-            gfx::kNullAcceleratedWidget, surface_.j_surface().obj(),
+            gfx::kNullAcceleratedWidget, surface_.j_surface(),
             false /* can_be_used_with_surface_control */));
 
     mock_provider_.client_->OnSurfaceReady(surface_key_);
@@ -155,18 +157,18 @@ class MojoAndroidOverlayTest : public ::testing::Test {
   }
 
   // Mojo stuff.
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
 
   // The mock provider that |overlay_client_| will talk to.
   // |interface_provider_| will bind it.
   MockAndroidOverlayProvider mock_provider_;
 
-  // Binding for |mock_provider_|.
-  mojo::Binding<mojom::AndroidOverlayProvider> provider_binding_;
+  // Receiver for |mock_provider_|.
+  mojo::Receiver<mojom::AndroidOverlayProvider> provider_receiver_;
 
   // The mock overlay impl that |mock_provider_| will provide.
   MockAndroidOverlay mock_overlay_;
-  mojo::Binding<mojom::AndroidOverlay> overlay_binding_;
+  mojo::Receiver<mojom::AndroidOverlay> overlay_receiver_;
 
   // The client under test.
   std::unique_ptr<AndroidOverlay> overlay_client_;

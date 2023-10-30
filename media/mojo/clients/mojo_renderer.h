@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,15 +10,17 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
-#include "base/optional.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/default_tick_clock.h"
 #include "base/unguessable_token.h"
 #include "media/base/demuxer_stream.h"
 #include "media/base/renderer.h"
 #include "media/base/time_delta_interpolator.h"
-#include "media/mojo/interfaces/renderer.mojom.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "media/mojo/mojom/renderer.mojom.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -46,31 +48,34 @@ class MojoRenderer : public Renderer, public mojom::RendererClient {
   MojoRenderer(const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
                std::unique_ptr<VideoOverlayFactory> video_overlay_factory,
                VideoRendererSink* video_renderer_sink,
-               mojom::RendererPtr remote_renderer);
+               mojo::PendingRemote<mojom::Renderer> remote_renderer);
+
+  MojoRenderer(const MojoRenderer&) = delete;
+  MojoRenderer& operator=(const MojoRenderer&) = delete;
+
   ~MojoRenderer() override;
 
   // Renderer implementation.
   void Initialize(MediaResource* media_resource,
                   media::RendererClient* client,
-                  const PipelineStatusCB& init_cb) override;
-  void SetCdm(CdmContext* cdm_context,
-              const CdmAttachedCB& cdm_attached_cb) override;
-  void Flush(const base::Closure& flush_cb) override;
+                  PipelineStatusCallback init_cb) override;
+  void SetCdm(CdmContext* cdm_context, CdmAttachedCB cdm_attached_cb) override;
+  void SetLatencyHint(absl::optional<base::TimeDelta> latency_hint) override;
+  void Flush(base::OnceClosure flush_cb) override;
   void StartPlayingFrom(base::TimeDelta time) override;
   void SetPlaybackRate(double playback_rate) override;
   void SetVolume(float volume) override;
   base::TimeDelta GetMediaTime() override;
 
  private:
-  // mojom::RendererClient implementation, dispatched on the
-  // |task_runner_|.
+  // mojom::RendererClient implementation, dispatched on the |task_runner_|.
   void OnTimeUpdate(base::TimeDelta time,
                     base::TimeDelta max_time,
                     base::TimeTicks capture_time) override;
   void OnBufferingStateChange(BufferingState state,
                               BufferingStateChangeReason reason) override;
   void OnEnded() override;
-  void OnError() override;
+  void OnError(const PipelineStatus& status) override;
   void OnAudioConfigChange(const AudioDecoderConfig& config) override;
   void OnVideoConfigChange(const VideoDecoderConfig& config) override;
   void OnVideoNaturalSizeChange(const gfx::Size& size) override;
@@ -115,47 +120,48 @@ class MojoRenderer : public Renderer, public mojom::RendererClient {
 
   // Video frame overlays are rendered onto this sink.
   // Rendering of a new overlay is only needed when video natural size changes.
-  VideoRendererSink* video_renderer_sink_ = nullptr;
+  raw_ptr<VideoRendererSink> video_renderer_sink_ = nullptr;
 
   // Provider of audio/video DemuxerStreams. Must be valid throughout the
   // lifetime of |this|.
-  MediaResource* media_resource_ = nullptr;
+  raw_ptr<MediaResource> media_resource_ = nullptr;
 
   // Client of |this| renderer passed in Initialize.
-  media::RendererClient* client_ = nullptr;
+  raw_ptr<media::RendererClient> client_ = nullptr;
 
   // Mojo demuxer streams.
   // Owned by MojoRenderer instead of remote mojom::Renderer
-  // becuase these demuxer streams need to be destroyed as soon as |this| is
+  // because these demuxer streams need to be destroyed as soon as |this| is
   // destroyed. The local demuxer streams returned by MediaResource cannot be
   // used after |this| is destroyed.
   // TODO(alokp): Add tests for MojoDemuxerStreamImpl.
   std::vector<std::unique_ptr<MojoDemuxerStreamImpl>> streams_;
 
   // This class is constructed on one thread and used exclusively on another
-  // thread. This member is used to safely pass the RendererPtr from one thread
-  // to another. It is set in the constructor and is consumed in Initialize().
-  mojom::RendererPtrInfo remote_renderer_info_;
+  // thread. This member is used to safely pass the PendingRemote from one
+  // thread to another. It is set in the constructor and is consumed in
+  // Initialize().
+  mojo::PendingRemote<mojom::Renderer> remote_renderer_pending_remote_;
 
   // Remote Renderer, bound to |task_runner_| during Initialize().
-  mojom::RendererPtr remote_renderer_;
+  mojo::Remote<mojom::Renderer> remote_renderer_;
 
-  // Binding for RendererClient, bound to the |task_runner_|.
-  mojo::AssociatedBinding<RendererClient> client_binding_;
+  // Receiver for RendererClient, bound to the |task_runner_|.
+  mojo::AssociatedReceiver<RendererClient> client_receiver_{this};
 
   bool encountered_error_ = false;
 
-  PipelineStatusCB init_cb_;
-  base::Closure flush_cb_;
+  PipelineStatusCallback init_cb_;
+  base::OnceClosure flush_cb_;
   CdmAttachedCB cdm_attached_cb_;
+
+  float volume_ = 1.0f;
 
   // Lock used to serialize access for |time_interpolator_|.
   mutable base::Lock lock_;
   media::TimeDeltaInterpolator media_time_interpolator_;
 
-  base::Optional<PipelineStatistics> pending_stats_;
-
-  DISALLOW_COPY_AND_ASSIGN(MojoRenderer);
+  absl::optional<PipelineStatistics> pending_stats_;
 };
 
 }  // namespace media

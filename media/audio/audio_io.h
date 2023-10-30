@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,6 @@
 // Specifically for this case we avoid supporting complex formats such as MP3
 // or WMA. Complex format decoding should be done by the renderers.
 
-
 // Models an audio stream that gets rendered to the audio hardware output.
 // Because we support more audio streams than physically available channels
 // a given AudioOutputStream might or might not talk directly to hardware.
@@ -75,11 +74,23 @@ class MEDIA_EXPORT AudioOutputStream {
                            int prior_frames_skipped,
                            AudioBus* dest) = 0;
 
+    virtual int OnMoreData(base::TimeDelta delay,
+                           base::TimeTicks delay_timestamp,
+                           int prior_frames_skipped,
+                           AudioBus* dest,
+                           bool is_mixing);
+
     // There was an error while playing a buffer. Audio source cannot be
     // destroyed yet. No direct action needed by the AudioStream, but it is
     // a good place to stop accumulating sound data since is is likely that
     // playback will not continue.
-    virtual void OnError() = 0;
+    //
+    // An ErrorType may be provided with more information on what went wrong. An
+    // unhandled kDeviceChange type error is likely to result in further errors;
+    // so it's recommended that sources close their existing output stream and
+    // request a new one when this error is sent.
+    enum class ErrorType { kUnknown, kDeviceChange };
+    virtual void OnError(ErrorType type) = 0;
   };
 
   virtual ~AudioOutputStream() {}
@@ -110,6 +121,9 @@ class MEDIA_EXPORT AudioOutputStream {
 
   // Close the stream.
   // After calling this method, the object should not be used anymore.
+  // After calling this method, no further AudioSourceCallback methods
+  // should be called on the callback object that was supplied to Start()
+  // by the AudioOutputStream implementation.
   virtual void Close() = 0;
 
   // Flushes the stream. This should only be called if the stream is not
@@ -146,9 +160,20 @@ class MEDIA_EXPORT AudioInputStream {
 
   virtual ~AudioInputStream() {}
 
+  enum class OpenOutcome {
+    kSuccess,
+    kAlreadyOpen,
+    // Failed due to an unknown or unspecified reason.
+    kFailed,
+    // Failed to open due to OS-level System permissions.
+    kFailedSystemPermissions,
+    // Failed to open as the device is exclusively opened by another app.
+    kFailedInUse,
+  };
+
   // Open the stream and prepares it for recording. Call Start() to actually
   // begin recording.
-  virtual bool Open() = 0;
+  virtual OpenOutcome Open() = 0;
 
   // Starts recording audio and generating AudioInputCallback::OnData().
   // The input stream does not take ownership of this callback.

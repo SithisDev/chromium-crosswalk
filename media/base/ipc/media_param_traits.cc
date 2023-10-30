@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include "media/base/limits.h"
 #include "ui/gfx/ipc/geometry/gfx_param_traits.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
-#include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
 
 using media::AudioParameters;
 using media::AudioLatency;
@@ -42,7 +41,7 @@ bool ParamTraits<AudioParameters>::Read(const base::Pickle* m,
   int sample_rate, frames_per_buffer, channels, effects;
   std::vector<media::Point> mic_positions;
   AudioLatency::LatencyType latency_tag;
-  base::Optional<media::AudioParameters::HardwareCapabilities>
+  absl::optional<media::AudioParameters::HardwareCapabilities>
       hardware_capabilities;
 
   if (!ReadParam(m, iter, &format) || !ReadParam(m, iter, &channel_layout) ||
@@ -56,14 +55,13 @@ bool ParamTraits<AudioParameters>::Read(const base::Pickle* m,
   }
 
   if (hardware_capabilities) {
-    *r = AudioParameters(format, channel_layout, sample_rate, frames_per_buffer,
-                         *hardware_capabilities);
+    *r = AudioParameters(format, {channel_layout, channels}, sample_rate,
+                         frames_per_buffer, *hardware_capabilities);
   } else {
-    *r =
-        AudioParameters(format, channel_layout, sample_rate, frames_per_buffer);
+    *r = AudioParameters(format, {channel_layout, channels}, sample_rate,
+                         frames_per_buffer);
   }
 
-  r->set_channels_for_discrete(channels);
   r->set_effects(effects);
   r->set_mic_positions(mic_positions);
   r->set_latency_tag(latency_tag);
@@ -81,19 +79,24 @@ void ParamTraits<AudioParameters::HardwareCapabilities>::Write(
     const param_type& p) {
   WriteParam(m, p.min_frames_per_buffer);
   WriteParam(m, p.max_frames_per_buffer);
+  WriteParam(m, p.bitstream_formats);
 }
 
 bool ParamTraits<AudioParameters::HardwareCapabilities>::Read(
     const base::Pickle* m,
     base::PickleIterator* iter,
     param_type* r) {
-  int max_frames_per_buffer, min_frames_per_buffer;
+  int bitstream_formats;
+  int max_frames_per_buffer;
+  int min_frames_per_buffer;
   if (!ReadParam(m, iter, &min_frames_per_buffer) ||
-      !ReadParam(m, iter, &max_frames_per_buffer)) {
+      !ReadParam(m, iter, &max_frames_per_buffer) ||
+      !ReadParam(m, iter, &bitstream_formats)) {
     return false;
   }
   r->min_frames_per_buffer = min_frames_per_buffer;
   r->max_frames_per_buffer = max_frames_per_buffer;
+  r->bitstream_formats = bitstream_formats;
   return true;
 }
 
@@ -112,28 +115,6 @@ struct ParamTraits<media::EncryptionPattern> {
                    param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
-
-void ParamTraits<media::EncryptionScheme>::Write(base::Pickle* m,
-                                                 const param_type& p) {
-  WriteParam(m, p.mode());
-  WriteParam(m, p.pattern());
-}
-
-bool ParamTraits<media::EncryptionScheme>::Read(const base::Pickle* m,
-                                                base::PickleIterator* iter,
-                                                param_type* r) {
-  media::EncryptionScheme::CipherMode mode;
-  media::EncryptionPattern pattern;
-  if (!ReadParam(m, iter, &mode) || !ReadParam(m, iter, &pattern))
-    return false;
-  *r = media::EncryptionScheme(mode, pattern);
-  return true;
-}
-
-void ParamTraits<media::EncryptionScheme>::Log(const param_type& p,
-                                               std::string* l) {
-  l->append(base::StringPrintf("<EncryptionScheme>"));
-}
 
 void ParamTraits<media::EncryptionPattern>::Write(base::Pickle* m,
                                                   const param_type& p) {

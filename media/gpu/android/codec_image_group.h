@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,27 +36,27 @@ class CodecSurfaceBundle;
 // bundle (and overlay) may be accessed.  All other methods will run on the
 // provided task runner.
 class MEDIA_GPU_EXPORT CodecImageGroup
-    : public base::RefCountedThreadSafe<CodecImageGroup> {
+    : public base::RefCountedThreadSafe<CodecImageGroup>,
+      public gpu::RefCountedLockHelperDrDc {
  public:
   // NOTE: Construction happens on the correct thread to access |bundle| and
   // any overlay it contains.  All other access to this class will happen on
   // |task_runner|, including destruction.
   CodecImageGroup(scoped_refptr<base::SequencedTaskRunner> task_runner,
-                  scoped_refptr<CodecSurfaceBundle> bundle);
+                  scoped_refptr<CodecSurfaceBundle> bundle,
+                  scoped_refptr<gpu::RefCountedLock> drdc_lock);
 
-  // Notify us that |image| uses |surface_bundle_|.
+  // Notify us that |image| uses |surface_bundle_|.  We will remove |image| from
+  // the group automatically when it's no longer using |surface_bundle_|.
   void AddCodecImage(CodecImage* image);
-
-  // Notify us that |image| no longer depends on |surface_bundle_|.
-  void RemoveCodecImage(CodecImage* image);
 
  protected:
   virtual ~CodecImageGroup();
   friend class base::RefCountedThreadSafe<CodecImageGroup>;
   friend class base::DeleteHelper<CodecImageGroup>;
 
-  // Notify us that |image| has been destroyed.
-  void OnCodecImageDestroyed(CodecImage* image);
+  // Notify us that |image| is no longer in use.
+  void OnCodecImageUnused(CodecImage* image);
 
   // Notify us that our overlay surface has been destroyed.
   void OnSurfaceDestroyed(AndroidOverlay*);
@@ -68,9 +68,12 @@ class MEDIA_GPU_EXPORT CodecImageGroup
   // All the images that use |surface_bundle_|.
   std::unordered_set<CodecImage*> images_;
 
-  base::WeakPtrFactory<CodecImageGroup> weak_this_factory_;
+  // Task runner for everything.
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
+
+  base::WeakPtrFactory<CodecImageGroup> weak_this_factory_{this};
 };
 
 }  // namespace media
 
-#endif  // MEDIA_GPU_ANDROID_CODEC_IMAGE_H_
+#endif  // MEDIA_GPU_ANDROID_CODEC_IMAGE_GROUP_H_

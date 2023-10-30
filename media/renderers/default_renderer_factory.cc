@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "build/build_config.h"
+#include "media/base/audio_buffer.h"
 #include "media/base/decoder_factory.h"
 #include "media/renderers/audio_renderer_impl.h"
 #include "media/renderers/renderer_impl.h"
@@ -17,15 +19,33 @@
 
 namespace media {
 
+#if BUILDFLAG(IS_ANDROID)
 DefaultRendererFactory::DefaultRendererFactory(
     MediaLog* media_log,
     DecoderFactory* decoder_factory,
-    const GetGpuFactoriesCB& get_gpu_factories_cb)
+    const GetGpuFactoriesCB& get_gpu_factories_cb,
+    MediaPlayerLoggingID media_player_id)
     : media_log_(media_log),
       decoder_factory_(decoder_factory),
-      get_gpu_factories_cb_(get_gpu_factories_cb) {
+      get_gpu_factories_cb_(get_gpu_factories_cb),
+      media_player_id_(media_player_id) {
   DCHECK(decoder_factory_);
 }
+#else
+DefaultRendererFactory::DefaultRendererFactory(
+    MediaLog* media_log,
+    DecoderFactory* decoder_factory,
+    const GetGpuFactoriesCB& get_gpu_factories_cb,
+    MediaPlayerLoggingID media_player_id,
+    std::unique_ptr<SpeechRecognitionClient> speech_recognition_client)
+    : media_log_(media_log),
+      decoder_factory_(decoder_factory),
+      get_gpu_factories_cb_(get_gpu_factories_cb),
+      media_player_id_(media_player_id),
+      speech_recognition_client_(std::move(speech_recognition_client)) {
+  DCHECK(decoder_factory_);
+}
+#endif
 
 DefaultRendererFactory::~DefaultRendererFactory() = default;
 
@@ -43,15 +63,15 @@ DefaultRendererFactory::CreateAudioDecoders(
 std::vector<std::unique_ptr<VideoDecoder>>
 DefaultRendererFactory::CreateVideoDecoders(
     const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
-    const RequestOverlayInfoCB& request_overlay_info_cb,
+    RequestOverlayInfoCB request_overlay_info_cb,
     const gfx::ColorSpace& target_color_space,
     GpuVideoAcceleratorFactories* gpu_factories) {
   // Create our video decoders and renderer.
   std::vector<std::unique_ptr<VideoDecoder>> video_decoders;
 
-  decoder_factory_->CreateVideoDecoders(media_task_runner, gpu_factories,
-                                        media_log_, request_overlay_info_cb,
-                                        target_color_space, &video_decoders);
+  decoder_factory_->CreateVideoDecoders(
+      media_task_runner, gpu_factories, media_log_,
+      std::move(request_overlay_info_cb), target_color_space, &video_decoders);
 
   return video_decoders;
 }
@@ -61,7 +81,7 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
     const scoped_refptr<base::TaskRunner>& worker_task_runner,
     AudioRendererSink* audio_renderer_sink,
     VideoRendererSink* video_renderer_sink,
-    const RequestOverlayInfoCB& request_overlay_info_cb,
+    RequestOverlayInfoCB request_overlay_info_cb,
     const gfx::ColorSpace& target_color_space) {
   DCHECK(audio_renderer_sink);
 
@@ -73,9 +93,15 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
       // RendererWrapper::Stop -> RendererWrapper::DestroyRenderer(). And the
       // RendererFactory is owned by WMPI and gets called after WMPI destructor
       // finishes.
-      base::Bind(&DefaultRendererFactory::CreateAudioDecoders,
-                 base::Unretained(this), media_task_runner),
-      media_log_));
+      base::BindRepeating(&DefaultRendererFactory::CreateAudioDecoders,
+                          base::Unretained(this), media_task_runner),
+      media_log_, media_player_id_
+#if BUILDFLAG(IS_ANDROID)
+      ));
+#else
+      ,
+      speech_recognition_client_.get()));
+#endif
 
   GpuVideoAcceleratorFactories* gpu_factories = nullptr;
   if (get_gpu_factories_cb_)
@@ -85,8 +111,7 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
   if (gpu_factories && gpu_factories->ShouldUseGpuMemoryBuffersForVideoFrames(
                            false /* for_media_stream */)) {
     gmb_pool = std::make_unique<GpuMemoryBufferVideoFramePool>(
-        std::move(media_task_runner), std::move(worker_task_runner),
-        gpu_factories);
+        media_task_runner, std::move(worker_task_runner), gpu_factories);
   }
 
   std::unique_ptr<VideoRenderer> video_renderer(new VideoRendererImpl(
@@ -97,10 +122,11 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
       // RendererWrapper::Stop -> RendererWrapper::DestroyRenderer(). And the
       // RendererFactory is owned by WMPI and gets called after WMPI destructor
       // finishes.
-      base::Bind(&DefaultRendererFactory::CreateVideoDecoders,
-                 base::Unretained(this), media_task_runner,
-                 request_overlay_info_cb, target_color_space, gpu_factories),
-      true, media_log_, std::move(gmb_pool)));
+      base::BindRepeating(&DefaultRendererFactory::CreateVideoDecoders,
+                          base::Unretained(this), media_task_runner,
+                          std::move(request_overlay_info_cb),
+                          target_color_space, gpu_factories),
+      true, media_log_, std::move(gmb_pool), media_player_id_));
 
   return std::make_unique<RendererImpl>(
       media_task_runner, std::move(audio_renderer), std::move(video_renderer));

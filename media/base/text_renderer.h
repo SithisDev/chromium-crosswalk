@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include <set>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "media/base/demuxer_stream.h"
 #include "media/base/media_export.h"
@@ -32,6 +31,8 @@ class TextTrackConfig;
 // demuxer text stream.
 class MEDIA_EXPORT TextRenderer {
  public:
+  TextRenderer() = delete;
+
   // |task_runner| is the thread on which TextRenderer will execute.
   //
   // |add_text_track_cb] is called when the demuxer requests (via its host)
@@ -40,22 +41,25 @@ class MEDIA_EXPORT TextRenderer {
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
       const AddTextTrackCB& add_text_track_cb);
 
+  TextRenderer(const TextRenderer&) = delete;
+  TextRenderer& operator=(const TextRenderer&) = delete;
+
   // Stops all operations and fires all pending callbacks.
   ~TextRenderer();
 
   // |ended_cb| is executed when all of the text tracks have reached
   // end of stream, following a play request.
-  void Initialize(const base::Closure& ended_cb);
+  void Initialize(const base::RepeatingClosure& ended_cb);
 
   // Starts text track cue decoding and rendering.
   void StartPlaying();
 
   // Temporarily suspends decoding and rendering, executing |callback| when
   // playback has been suspended.
-  void Pause(const base::Closure& callback);
+  void Pause(base::OnceClosure callback);
 
   // Discards any text data, executing |callback| when completed.
-  void Flush(const base::Closure& callback);
+  void Flush(base::OnceClosure callback);
 
   // Adds new |text_stream|, having the indicated |config|, to the text stream
   // collection managed by this text renderer.
@@ -106,10 +110,10 @@ class MEDIA_EXPORT TextRenderer {
   const AddTextTrackCB add_text_track_cb_;
 
   // Callbacks provided during Initialize().
-  base::Closure ended_cb_;
+  base::RepeatingClosure ended_cb_;
 
   // Callback provided to Pause().
-  base::Closure pause_cb_;
+  base::OnceClosure pause_cb_;
 
   // Simple state tracking variable.
   enum State {
@@ -133,8 +137,6 @@ class MEDIA_EXPORT TextRenderer {
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<TextRenderer> weak_factory_{this};
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(TextRenderer);
 };
 
 }  // namespace media

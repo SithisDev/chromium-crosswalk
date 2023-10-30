@@ -1,14 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stdint.h>
 
+#include <memory>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/environment.h"
-#include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/memory/raw_ptr.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/test/test_message_loop.h"
 #include "base/threading/platform_thread.h"
@@ -19,9 +23,42 @@
 #include "media/audio/audio_manager.h"
 #include "media/audio/audio_unittest_util.h"
 #include "media/audio/test_audio_thread.h"
+#include "media/base/media_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if BUILDFLAG(IS_FUCHSIA)
+#include <fuchsia/media/cpp/fidl_test_base.h>
+
+#include "base/fuchsia/scoped_service_binding.h"
+#include "base/fuchsia/test_component_context_for_process.h"
+#include "media/fuchsia/audio/fake_audio_capturer.h"
+#endif  // BUILDFLAG(IS_FUCHSIA)
+
 namespace media {
+
+#if BUILDFLAG(IS_FUCHSIA)
+class FakeAudio : public fuchsia::media::testing::Audio_TestBase {
+ public:
+  FakeAudio()
+      : audio_binding_(test_component_context_.additional_services(), this) {}
+
+  // fuchsia::media::testing::Audio_TestBase
+  void CreateAudioCapturer(
+      fidl::InterfaceRequest<fuchsia::media::AudioCapturer> request,
+      bool is_loopback) override {
+    capturer_.push_back(
+        std::make_unique<FakeAudioCapturer>(std::move(request)));
+  }
+  void NotImplemented_(const std::string& name) override {
+    FAIL() << "Unexpected call to: " << name;
+  }
+
+ private:
+  base::TestComponentContextForProcess test_component_context_;
+  base::ScopedServiceBinding<fuchsia::media::Audio> audio_binding_;
+  std::vector<std::unique_ptr<FakeAudioCapturer>> capturer_;
+};
+#endif  // BUILDFLAG(IS_FUCHSIA)
 
 // This class allows to find out if the callbacks are occurring as
 // expected and if any error has been reported.
@@ -69,58 +106,70 @@ class TestInputCallback : public AudioInputStream::AudioInputCallback {
 class AudioInputTest : public testing::Test {
  public:
   AudioInputTest()
-      : message_loop_(base::MessageLoop::TYPE_UI),
+      : message_loop_(base::MessagePumpType::UI),
         audio_manager_(AudioManager::CreateForTesting(
             std::make_unique<TestAudioThread>())),
-        audio_input_stream_(NULL) {
+        audio_input_stream_(nullptr) {
     base::RunLoop().RunUntilIdle();
   }
+
+  AudioInputTest(const AudioInputTest&) = delete;
+  AudioInputTest& operator=(const AudioInputTest&) = delete;
 
   ~AudioInputTest() override { audio_manager_->Shutdown(); }
 
  protected:
   bool InputDevicesAvailable() {
+#if BUILDFLAG(IS_FUCHSIA)
+    if (AudioDeviceInfoAccessorForTests(audio_manager_.get())
+            .HasAudioInputDevices()) {
+      return true;
+    }
+    // If the device has no audio input device, fake it.
+    if (!fake_audio_) {
+      fake_audio_ = std::make_unique<FakeAudio>();
+    }
+    return true;
+#elif BUILDFLAG(IS_MAC) && defined(ARCH_CPU_ARM64)
+    // TODO(crbug.com/1128458): macOS on ARM64 says it has devices, but won't
+    // let any of them be opened or listed.
+    return false;
+#else
     return AudioDeviceInfoAccessorForTests(audio_manager_.get())
         .HasAudioInputDevices();
+#endif
   }
 
   void MakeAudioInputStreamOnAudioThread() {
-    RunOnAudioThread(
-        base::Bind(&AudioInputTest::MakeAudioInputStream,
-                   base::Unretained(this)));
+    RunOnAudioThread(base::BindOnce(&AudioInputTest::MakeAudioInputStream,
+                                    base::Unretained(this)));
   }
 
   void CloseAudioInputStreamOnAudioThread() {
-    RunOnAudioThread(
-        base::Bind(&AudioInputStream::Close,
-                   base::Unretained(audio_input_stream_)));
-    audio_input_stream_ = NULL;
+    RunOnAudioThread(base::BindOnce(&AudioInputStream::Close,
+                                    base::Unretained(audio_input_stream_)));
+    audio_input_stream_ = nullptr;
   }
 
   void OpenAndCloseAudioInputStreamOnAudioThread() {
     RunOnAudioThread(
-        base::Bind(&AudioInputTest::OpenAndClose,
-                   base::Unretained(this)));
+        base::BindOnce(&AudioInputTest::OpenAndClose, base::Unretained(this)));
   }
 
   void OpenStopAndCloseAudioInputStreamOnAudioThread() {
-    RunOnAudioThread(
-        base::Bind(&AudioInputTest::OpenStopAndClose,
-                   base::Unretained(this)));
+    RunOnAudioThread(base::BindOnce(&AudioInputTest::OpenStopAndClose,
+                                    base::Unretained(this)));
   }
 
   void OpenAndStartAudioInputStreamOnAudioThread(
       AudioInputStream::AudioInputCallback* sink) {
-    RunOnAudioThread(
-        base::Bind(&AudioInputTest::OpenAndStart,
-                   base::Unretained(this),
-                   sink));
+    RunOnAudioThread(base::BindOnce(&AudioInputTest::OpenAndStart,
+                                    base::Unretained(this), sink));
   }
 
   void StopAndCloseAudioInputStreamOnAudioThread() {
     RunOnAudioThread(
-        base::Bind(&AudioInputTest::StopAndClose,
-                   base::Unretained(this)));
+        base::BindOnce(&AudioInputTest::StopAndClose, base::Unretained(this)));
   }
 
   void MakeAudioInputStream() {
@@ -130,52 +179,60 @@ class AudioInputTest : public testing::Test {
             .GetInputStreamParameters(AudioDeviceDescription::kDefaultDeviceId);
     audio_input_stream_ = audio_manager_->MakeAudioInputStream(
         params, AudioDeviceDescription::kDefaultDeviceId,
-        base::Bind(&AudioInputTest::OnLogMessage, base::Unretained(this)));
-    EXPECT_TRUE(audio_input_stream_);
+        base::BindRepeating(&AudioInputTest::OnLogMessage,
+                            base::Unretained(this)));
+    ASSERT_TRUE(audio_input_stream_);
   }
 
   void OpenAndClose() {
     DCHECK(audio_manager_->GetTaskRunner()->BelongsToCurrentThread());
-    EXPECT_TRUE(audio_input_stream_->Open());
+    ASSERT_TRUE(audio_input_stream_);
+    EXPECT_EQ(audio_input_stream_->Open(),
+              AudioInputStream::OpenOutcome::kSuccess);
     audio_input_stream_->Close();
-    audio_input_stream_ = NULL;
+    audio_input_stream_ = nullptr;
   }
 
   void OpenAndStart(AudioInputStream::AudioInputCallback* sink) {
     DCHECK(audio_manager_->GetTaskRunner()->BelongsToCurrentThread());
-    EXPECT_TRUE(audio_input_stream_->Open());
+    ASSERT_TRUE(audio_input_stream_);
+    EXPECT_EQ(audio_input_stream_->Open(),
+              AudioInputStream::OpenOutcome::kSuccess);
     audio_input_stream_->Start(sink);
   }
 
   void OpenStopAndClose() {
     DCHECK(audio_manager_->GetTaskRunner()->BelongsToCurrentThread());
-    EXPECT_TRUE(audio_input_stream_->Open());
+    ASSERT_TRUE(audio_input_stream_);
+    EXPECT_EQ(audio_input_stream_->Open(),
+              AudioInputStream::OpenOutcome::kSuccess);
     audio_input_stream_->Stop();
     audio_input_stream_->Close();
-    audio_input_stream_ = NULL;
+    audio_input_stream_ = nullptr;
   }
 
   void StopAndClose() {
     DCHECK(audio_manager_->GetTaskRunner()->BelongsToCurrentThread());
+    ASSERT_TRUE(audio_input_stream_);
     audio_input_stream_->Stop();
     audio_input_stream_->Close();
-    audio_input_stream_ = NULL;
+    audio_input_stream_ = nullptr;
   }
 
   // Synchronously runs the provided callback/closure on the audio thread.
-  void RunOnAudioThread(const base::Closure& closure) {
+  void RunOnAudioThread(base::OnceClosure closure) {
     DCHECK(audio_manager_->GetTaskRunner()->BelongsToCurrentThread());
-    closure.Run();
+    std::move(closure).Run();
   }
 
   void OnLogMessage(const std::string& message) {}
 
   base::TestMessageLoop message_loop_;
+#if BUILDFLAG(IS_FUCHSIA)
+  std::unique_ptr<FakeAudio> fake_audio_;
+#endif  // BUILDFLAG(IS_FUCHSIA)
   std::unique_ptr<AudioManager> audio_manager_;
-  AudioInputStream* audio_input_stream_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AudioInputTest);
+  raw_ptr<AudioInputStream> audio_input_stream_;
 };
 
 // Test create and close of an AudioInputStream without recording audio.
@@ -185,41 +242,23 @@ TEST_F(AudioInputTest, CreateAndClose) {
   CloseAudioInputStreamOnAudioThread();
 }
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
-// This test is failing on ARM linux: http://crbug.com/238490
-#define MAYBE_OpenAndClose DISABLED_OpenAndClose
-#else
-#define MAYBE_OpenAndClose OpenAndClose
-#endif
 // Test create, open and close of an AudioInputStream without recording audio.
-TEST_F(AudioInputTest, MAYBE_OpenAndClose) {
+TEST_F(AudioInputTest, OpenAndClose) {
   ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable());
   MakeAudioInputStreamOnAudioThread();
   OpenAndCloseAudioInputStreamOnAudioThread();
 }
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
-// This test is failing on ARM linux: http://crbug.com/238490
-#define MAYBE_OpenStopAndClose DISABLED_OpenStopAndClose
-#else
-#define MAYBE_OpenStopAndClose OpenStopAndClose
-#endif
 // Test create, open, stop and close of an AudioInputStream without recording.
-TEST_F(AudioInputTest, MAYBE_OpenStopAndClose) {
+TEST_F(AudioInputTest, OpenStopAndClose) {
   ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable());
   MakeAudioInputStreamOnAudioThread();
   OpenStopAndCloseAudioInputStreamOnAudioThread();
 }
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
-// This test is failing on ARM linux: http://crbug.com/238490
-#define MAYBE_Record DISABLED_Record
-#else
-#define MAYBE_Record Record
-#endif
 // Test a normal recording sequence using an AudioInputStream.
 // Very simple test which starts capturing and verifies that recording starts.
-TEST_F(AudioInputTest, MAYBE_Record) {
+TEST_F(AudioInputTest, Record) {
   ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable());
   MakeAudioInputStreamOnAudioThread();
 

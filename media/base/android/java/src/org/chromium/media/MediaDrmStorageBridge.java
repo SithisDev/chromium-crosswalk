@@ -1,16 +1,18 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.media;
 
-import android.annotation.TargetApi;
 import android.os.Build;
+
+import androidx.annotation.RequiresApi;
 
 import org.chromium.base.Callback;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.MainDex;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.build.annotations.MainDex;
 
 /**
  * Origin isolated media drm scope id storage. Isolated origin is guranteed by native
@@ -18,7 +20,7 @@ import org.chromium.base.annotations.MainDex;
  */
 @JNINamespace("media")
 @MainDex
-@TargetApi(Build.VERSION_CODES.M)
+@RequiresApi(Build.VERSION_CODES.M)
 class MediaDrmStorageBridge {
     private static final long INVALID_NATIVE_MEDIA_DRM_STORAGE_BRIDGE = -1;
 
@@ -27,7 +29,6 @@ class MediaDrmStorageBridge {
     /**
      * Information that need to be persistent on the device. Exposed to JNI.
      */
-    @MainDex
     static class PersistentInfo {
         // EME session ID, which is generated randomly.
         private final byte[] mEmeId;
@@ -85,7 +86,8 @@ class MediaDrmStorageBridge {
      */
     void onProvisioned(Callback<Boolean> cb) {
         if (isNativeMediaDrmStorageValid()) {
-            nativeOnProvisioned(mNativeMediaDrmStorageBridge, cb);
+            MediaDrmStorageBridgeJni.get().onProvisioned(
+                    mNativeMediaDrmStorageBridge, MediaDrmStorageBridge.this, cb);
         } else {
             cb.onResult(true);
         }
@@ -96,7 +98,8 @@ class MediaDrmStorageBridge {
      */
     void loadInfo(byte[] emeId, Callback<PersistentInfo> cb) {
         if (isNativeMediaDrmStorageValid()) {
-            nativeOnLoadInfo(mNativeMediaDrmStorageBridge, emeId, cb);
+            MediaDrmStorageBridgeJni.get().onLoadInfo(
+                    mNativeMediaDrmStorageBridge, MediaDrmStorageBridge.this, emeId, cb);
         } else {
             cb.onResult(null);
         }
@@ -107,7 +110,8 @@ class MediaDrmStorageBridge {
      */
     void saveInfo(PersistentInfo info, Callback<Boolean> cb) {
         if (isNativeMediaDrmStorageValid()) {
-            nativeOnSaveInfo(mNativeMediaDrmStorageBridge, info, cb);
+            MediaDrmStorageBridgeJni.get().onSaveInfo(
+                    mNativeMediaDrmStorageBridge, MediaDrmStorageBridge.this, info, cb);
         } else {
             cb.onResult(false);
         }
@@ -118,7 +122,8 @@ class MediaDrmStorageBridge {
      */
     void clearInfo(byte[] emeId, Callback<Boolean> cb) {
         if (isNativeMediaDrmStorageValid()) {
-            nativeOnClearInfo(mNativeMediaDrmStorageBridge, emeId, cb);
+            MediaDrmStorageBridgeJni.get().onClearInfo(
+                    mNativeMediaDrmStorageBridge, MediaDrmStorageBridge.this, emeId, cb);
         } else {
             cb.onResult(true);
         }
@@ -128,11 +133,15 @@ class MediaDrmStorageBridge {
         return mNativeMediaDrmStorageBridge != INVALID_NATIVE_MEDIA_DRM_STORAGE_BRIDGE;
     }
 
-    private native void nativeOnProvisioned(long nativeMediaDrmStorageBridge, Callback<Boolean> cb);
-    private native void nativeOnLoadInfo(
-            long nativeMediaDrmStorageBridge, byte[] sessionId, Callback<PersistentInfo> cb);
-    private native void nativeOnSaveInfo(
-            long nativeMediaDrmStorageBridge, PersistentInfo info, Callback<Boolean> cb);
-    private native void nativeOnClearInfo(
-            long nativeMediaDrmStorageBridge, byte[] sessionId, Callback<Boolean> cb);
+    @NativeMethods
+    interface Natives {
+        void onProvisioned(long nativeMediaDrmStorageBridge, MediaDrmStorageBridge caller,
+                Callback<Boolean> cb);
+        void onLoadInfo(long nativeMediaDrmStorageBridge, MediaDrmStorageBridge caller,
+                byte[] sessionId, Callback<PersistentInfo> cb);
+        void onSaveInfo(long nativeMediaDrmStorageBridge, MediaDrmStorageBridge caller,
+                PersistentInfo info, Callback<Boolean> cb);
+        void onClearInfo(long nativeMediaDrmStorageBridge, MediaDrmStorageBridge caller,
+                byte[] sessionId, Callback<Boolean> cb);
+    }
 }

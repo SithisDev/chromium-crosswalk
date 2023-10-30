@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@ void ScopedTaskRunnerObserver::ObserveLoopDestruction(
     base::WaitableEvent* done) {
   // Note: |done| may be NULL.
   if (task_runner_->BelongsToCurrentThread()) {
-    base::MessageLoopCurrent loop = base::MessageLoopCurrent::Get();
+    base::CurrentThread loop = base::CurrentThread::Get();
     if (enable) {
       loop->AddDestructionObserver(this);
     } else {

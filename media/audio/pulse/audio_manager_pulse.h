@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "media/audio/audio_manager_base.h"
 
@@ -23,6 +23,10 @@ class MEDIA_EXPORT AudioManagerPulse : public AudioManagerBase {
                     AudioLogFactory* audio_log_factory,
                     pa_threaded_mainloop* pa_mainloop,
                     pa_context* pa_context);
+
+  AudioManagerPulse(const AudioManagerPulse&) = delete;
+  AudioManagerPulse& operator=(const AudioManagerPulse&) = delete;
+
   ~AudioManagerPulse() override;
 
   // Implementation of AudioManager.
@@ -69,10 +73,12 @@ class MEDIA_EXPORT AudioManagerPulse : public AudioManagerBase {
   // Callback to get the devices' info like names, used by GetInputDevices().
   static void InputDevicesInfoCallback(pa_context* context,
                                        const pa_source_info* info,
-                                       int error, void* user_data);
+                                       int eol,
+                                       void* user_data);
   static void OutputDevicesInfoCallback(pa_context* context,
                                         const pa_sink_info* info,
-                                        int error, void* user_data);
+                                        int eol,
+                                        void* user_data);
 
   // Callback to get the native sample rate of PulseAudio, used by
   // UpdateNativeAudioHardwareInfo().
@@ -87,24 +93,24 @@ class MEDIA_EXPORT AudioManagerPulse : public AudioManagerBase {
 
   // Called by MakeLinearOutputStream and MakeLowLatencyOutputStream.
   AudioOutputStream* MakeOutputStream(const AudioParameters& params,
-                                      const std::string& device_id);
+                                      const std::string& device_id,
+                                      LogCallback log_callback);
 
   // Called by MakeLinearInputStream and MakeLowLatencyInputStream.
   AudioInputStream* MakeInputStream(const AudioParameters& params,
-                                    const std::string& device_id);
+                                    const std::string& device_id,
+                                    LogCallback log_callback);
 
   // Updates |native_input_sample_rate_| and |native_channel_count_|.
   void UpdateNativeAudioHardwareInfo();
 
-  pa_threaded_mainloop* input_mainloop_;
-  pa_context* input_context_;
-  AudioDeviceNames* devices_;
+  raw_ptr<pa_threaded_mainloop> input_mainloop_;
+  raw_ptr<pa_context> input_context_;
+  raw_ptr<AudioDeviceNames> devices_;
   int native_input_sample_rate_;
   int native_channel_count_;
   std::string default_source_name_;
   bool default_source_is_monitor_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioManagerPulse);
 };
 
 }  // namespace media

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,15 @@
 #include <memory>
 #include <utility>
 
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
 #include "media/capture/video/chromeos/mock_camera_module.h"
 #include "media/capture/video/chromeos/mock_vendor_tag_ops.h"
 #include "media/capture/video/chromeos/video_capture_device_factory_chromeos.h"
 #include "media/capture/video/mock_gpu_memory_buffer_manager.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -36,39 +38,40 @@ namespace media {
 
 class CameraHalDelegateTest : public ::testing::Test {
  public:
-  CameraHalDelegateTest() : hal_delegate_thread_("HalDelegateThread") {}
+  CameraHalDelegateTest() {}
+
+  CameraHalDelegateTest(const CameraHalDelegateTest&) = delete;
+  CameraHalDelegateTest& operator=(const CameraHalDelegateTest&) = delete;
 
   void SetUp() override {
     VideoCaptureDeviceFactoryChromeOS::SetGpuBufferManager(
         &mock_gpu_memory_buffer_manager_);
-    hal_delegate_thread_.Start();
-    camera_hal_delegate_ =
-        new CameraHalDelegate(hal_delegate_thread_.task_runner());
+    camera_hal_delegate_ = std::make_unique<CameraHalDelegate>();
+    if (!camera_hal_delegate_->Init()) {
+      LOG(ERROR) << "Failed to initialize CameraHalDelegate";
+      camera_hal_delegate_.reset();
+      return;
+    }
     camera_hal_delegate_->SetCameraModule(
-        mock_camera_module_.GetInterfacePtrInfo());
+        mock_camera_module_.GetPendingRemote());
   }
 
-  void TearDown() override {
-    camera_hal_delegate_->Reset();
-    hal_delegate_thread_.Stop();
-  }
+  void TearDown() override { camera_hal_delegate_->Reset(); }
 
   void Wait() {
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
   }
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-  scoped_refptr<CameraHalDelegate> camera_hal_delegate_;
+  base::test::TaskEnvironment task_environment_;
+  std::unique_ptr<CameraHalDelegate> camera_hal_delegate_;
   testing::StrictMock<unittest_internal::MockCameraModule> mock_camera_module_;
   testing::StrictMock<unittest_internal::MockVendorTagOps> mock_vendor_tag_ops_;
   unittest_internal::MockGpuMemoryBufferManager mock_gpu_memory_buffer_manager_;
 
  private:
-  base::Thread hal_delegate_thread_;
   std::unique_ptr<base::RunLoop> run_loop_;
-  DISALLOW_COPY_AND_ASSIGN(CameraHalDelegateTest);
 };
 
 TEST_F(CameraHalDelegateTest, GetBuiltinCameraInfo) {
@@ -83,8 +86,8 @@ TEST_F(CameraHalDelegateTest, GetBuiltinCameraInfo) {
     cros::mojom::CameraInfoPtr camera_info = cros::mojom::CameraInfo::New();
     cros::mojom::CameraMetadataPtr static_metadata =
         cros::mojom::CameraMetadata::New();
-    static_metadata->entry_count = 1;
-    static_metadata->entry_capacity = 1;
+    static_metadata->entry_count = 2;
+    static_metadata->entry_capacity = 2;
     static_metadata->entries =
         std::vector<cros::mojom::CameraMetadataEntryPtr>();
 
@@ -108,6 +111,17 @@ TEST_F(CameraHalDelegateTest, GetBuiltinCameraInfo) {
     min_frame_durations[7] = 16666666;
     uint8_t* as_int8 = reinterpret_cast<uint8_t*>(min_frame_durations.data());
     entry->data.assign(as_int8, as_int8 + entry->count * sizeof(int64_t));
+    static_metadata->entries->push_back(std::move(entry));
+
+    entry = cros::mojom::CameraMetadataEntry::New();
+    entry->index = 1;
+    entry->tag = cros::mojom::CameraMetadataTag::
+        ANDROID_CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES;
+    entry->type = cros::mojom::EntryType::TYPE_INT32;
+    entry->count = 4;
+    std::vector<int32_t> default_fps_range{30, 30, 60, 60};
+    as_int8 = reinterpret_cast<uint8_t*>(default_fps_range.data());
+    entry->data.assign(as_int8, as_int8 + entry->count * sizeof(int32_t));
     static_metadata->entries->push_back(std::move(entry));
 
     switch (camera_id) {
@@ -142,18 +156,21 @@ TEST_F(CameraHalDelegateTest, GetBuiltinCameraInfo) {
       default:
         FAIL() << "Invalid camera id";
     }
+
     std::move(cb).Run(0, std::move(camera_info));
   };
 
   auto get_vendor_tag_ops_cb =
-      [&](cros::mojom::VendorTagOpsRequest& vendor_tag_ops_request,
+      [&](mojo::PendingReceiver<cros::mojom::VendorTagOps>
+              vendor_tag_ops_receiver,
           cros::mojom::CameraModule::GetVendorTagOpsCallback&) {
-        mock_vendor_tag_ops_.Bind(std::move(vendor_tag_ops_request));
+        mock_vendor_tag_ops_.Bind(std::move(vendor_tag_ops_receiver));
       };
 
   auto set_callbacks_cb =
-      [&](cros::mojom::CameraModuleCallbacksPtr& callbacks,
-          cros::mojom::CameraModule::SetCallbacksCallback&) {
+      [&](mojo::PendingAssociatedRemote<cros::mojom::CameraModuleCallbacks>&
+              callbacks,
+          cros::mojom::CameraModule::SetCallbacksAssociatedCallback&) {
         mock_camera_module_.NotifyCameraDeviceChange(
             2, cros::mojom::CameraDeviceStatus::CAMERA_DEVICE_STATUS_PRESENT);
       };
@@ -163,13 +180,15 @@ TEST_F(CameraHalDelegateTest, GetBuiltinCameraInfo) {
       .WillOnce(Invoke(get_number_of_cameras_cb));
   EXPECT_CALL(
       mock_camera_module_,
-      DoSetCallbacks(A<cros::mojom::CameraModuleCallbacksPtr&>(),
-                     A<cros::mojom::CameraModule::SetCallbacksCallback&>()))
+      DoSetCallbacksAssociated(
+          A<mojo::PendingAssociatedRemote<
+              cros::mojom::CameraModuleCallbacks>&>(),
+          A<cros::mojom::CameraModule::SetCallbacksAssociatedCallback&>()))
       .Times(1)
       .WillOnce(Invoke(set_callbacks_cb));
   EXPECT_CALL(mock_camera_module_,
               DoGetVendorTagOps(
-                  A<cros::mojom::VendorTagOpsRequest&>(),
+                  A<mojo::PendingReceiver<cros::mojom::VendorTagOps>>(),
                   A<cros::mojom::CameraModule::GetVendorTagOpsCallback&>()))
       .Times(1)
       .WillOnce(Invoke(get_vendor_tag_ops_cb));
@@ -210,39 +229,50 @@ TEST_F(CameraHalDelegateTest, GetBuiltinCameraInfo) {
       .WillOnce(
           Return(static_cast<int32_t>(cros::mojom::EntryType::TYPE_BYTE)));
 
-  VideoCaptureDeviceDescriptors descriptors;
-  camera_hal_delegate_->GetDeviceDescriptors(&descriptors);
-
-  ASSERT_EQ(3u, descriptors.size());
-  // We have workaround to always put front camera at first.
-  ASSERT_EQ("1", descriptors[0].device_id);
-  ASSERT_EQ(VideoFacingMode::MEDIA_VIDEO_FACING_USER, descriptors[0].facing);
-  ASSERT_EQ("0", descriptors[1].device_id);
-  ASSERT_EQ(VideoFacingMode::MEDIA_VIDEO_FACING_ENVIRONMENT,
-            descriptors[1].facing);
-  ASSERT_EQ(kFakeDevicePath, descriptors[2].device_id);
-  ASSERT_EQ(VideoFacingMode::MEDIA_VIDEO_FACING_NONE, descriptors[2].facing);
-
-  // TODO(shik): Test external camera. Check the fields |display_name| and
-  // |model_id| are set properly according to the vendor tags.
-
   EXPECT_CALL(mock_gpu_memory_buffer_manager_,
-              CreateGpuMemoryBuffer(_, gfx::BufferFormat::YUV_420_BIPLANAR,
-                                    gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE,
-                                    gpu::kNullSurfaceHandle))
+              CreateGpuMemoryBuffer(
+                  _, gfx::BufferFormat::YUV_420_BIPLANAR,
+                  gfx::BufferUsage::VEA_READ_CAMERA_AND_CPU_READ_WRITE,
+                  gpu::kNullSurfaceHandle, nullptr))
       .Times(1)
       .WillOnce(Invoke(&unittest_internal::MockGpuMemoryBufferManager::
                            CreateFakeGpuMemoryBuffer));
 
-  VideoCaptureFormats supported_formats;
-  camera_hal_delegate_->GetSupportedFormats(descriptors[0], &supported_formats);
+  std::vector<VideoCaptureDeviceInfo> devices_info;
+  base::RunLoop run_loop;
+  camera_hal_delegate_->GetDevicesInfo(base::BindLambdaForTesting(
+      [&devices_info, &run_loop](std::vector<VideoCaptureDeviceInfo> result) {
+        devices_info = std::move(result);
+        run_loop.Quit();
+      }));
+  run_loop.Run();
+
+  ASSERT_EQ(3u, devices_info.size());
+  // We have workaround to always put front camera at first.
+  ASSERT_EQ("1", devices_info[0].descriptor.device_id);
+  ASSERT_EQ(VideoFacingMode::MEDIA_VIDEO_FACING_USER,
+            devices_info[0].descriptor.facing);
+  ASSERT_EQ("0", devices_info[1].descriptor.device_id);
+  ASSERT_EQ(VideoFacingMode::MEDIA_VIDEO_FACING_ENVIRONMENT,
+            devices_info[1].descriptor.facing);
+  ASSERT_EQ(kFakeDevicePath, devices_info[2].descriptor.device_id);
+  ASSERT_EQ(VideoFacingMode::MEDIA_VIDEO_FACING_NONE,
+            devices_info[2].descriptor.facing);
+
+  // TODO(shik): Test external camera. Check the fields |display_name| and
+  // |model_id| are set properly according to the vendor tags.
+
+  const VideoCaptureFormats& supported_formats =
+      devices_info[0].supported_formats;
 
   // IMPLEMENTATION_DEFINED format should be filtered; currently YCbCr_420_888
   // format corresponds to NV12 in Chrome.
-  ASSERT_EQ(1U, supported_formats.size());
-  ASSERT_EQ(gfx::Size(1280, 720), supported_formats[0].frame_size);
-  ASSERT_FLOAT_EQ(60.0, supported_formats[0].frame_rate);
-  ASSERT_EQ(PIXEL_FORMAT_NV12, supported_formats[0].pixel_format);
+  ASSERT_GE(supported_formats.size(), 1U);
+  for (auto& format : supported_formats) {
+    ASSERT_EQ(gfx::Size(1280, 720), format.frame_size);
+    ASSERT_TRUE(format.frame_rate == 60.0 || format.frame_rate == 30.0);
+    ASSERT_EQ(PIXEL_FORMAT_NV12, format.pixel_format);
+  }
 }
 
 }  // namespace media

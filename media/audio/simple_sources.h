@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,7 +49,7 @@ class MEDIA_EXPORT SineWaveAudioSource
                  base::TimeTicks timestamp,
                  int prior_frames_skipped,
                  AudioBus* dest) override;
-  void OnError() override;
+  void OnError(ErrorType type) override;
 
   // The number of OnMoreData() and OnError() calls respectively.
   int callbacks() {
@@ -88,7 +88,7 @@ class MEDIA_EXPORT FileSource : public AudioOutputStream::AudioSourceCallback,
                  base::TimeTicks delay_timestamp,
                  int prior_frames_skipped,
                  AudioBus* dest) override;
-  void OnError() override;
+  void OnError(ErrorType type) override;
 
  private:
   AudioParameters params_;
@@ -125,7 +125,7 @@ class BeepingSource : public AudioOutputStream::AudioSourceCallback {
                  base::TimeTicks delay_timestamp,
                  int prior_frames_skipped,
                  AudioBus* dest) override;
-  void OnError() override;
+  void OnError(ErrorType type) override;
 
   static void BeepOnce();
  private:

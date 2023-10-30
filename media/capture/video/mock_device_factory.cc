@@ -1,10 +1,12 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/capture/video/mock_device_factory.h"
 
 #include <utility>
+
+#include "base/memory/raw_ptr.h"
 
 namespace {
 
@@ -37,12 +39,12 @@ class RawPointerVideoCaptureDevice : public media::VideoCaptureDevice {
   void TakePhoto(TakePhotoCallback callback) override {
     device_->TakePhoto(std::move(callback));
   }
-  void OnUtilizationReport(int frame_feedback_id, double utilization) override {
-    device_->OnUtilizationReport(frame_feedback_id, utilization);
+  void OnUtilizationReport(media::VideoCaptureFeedback feedback) override {
+    device_->OnUtilizationReport(feedback);
   }
 
  private:
-  media::VideoCaptureDevice* device_;
+  raw_ptr<media::VideoCaptureDevice> device_;
 };
 
 }  // anonymous namespace
@@ -63,30 +65,25 @@ void MockDeviceFactory::RemoveAllDevices() {
   devices_.clear();
 }
 
-std::unique_ptr<media::VideoCaptureDevice> MockDeviceFactory::CreateDevice(
+VideoCaptureErrorOrDevice MockDeviceFactory::CreateDevice(
     const media::VideoCaptureDeviceDescriptor& device_descriptor) {
   if (devices_.find(device_descriptor) == devices_.end())
-    return nullptr;
-  return std::make_unique<RawPointerVideoCaptureDevice>(
-      devices_[device_descriptor]);
+    return VideoCaptureErrorOrDevice(
+        VideoCaptureError::
+            kVideoCaptureControllerInvalidOrUnsupportedVideoCaptureParametersRequested);
+  return VideoCaptureErrorOrDevice(
+      std::make_unique<RawPointerVideoCaptureDevice>(
+          devices_[device_descriptor]));
 }
 
-void MockDeviceFactory::GetDeviceDescriptors(
-    media::VideoCaptureDeviceDescriptors* device_descriptors) {
-  for (const auto& entry : devices_)
-    device_descriptors->push_back(entry.first);
-}
+void MockDeviceFactory::GetDevicesInfo(GetDevicesInfoCallback callback) {
+  std::vector<media::VideoCaptureDeviceInfo> result;
+  for (const auto& entry : devices_) {
+    result.emplace_back(entry.first);
+    result.back().supported_formats.push_back(kSupportedFormat);
+  }
 
-void MockDeviceFactory::GetSupportedFormats(
-    const media::VideoCaptureDeviceDescriptor& device_descriptor,
-    media::VideoCaptureFormats* supported_formats) {
-  supported_formats->push_back(kSupportedFormat);
-}
-
-void MockDeviceFactory::GetCameraLocationsAsync(
-    std::unique_ptr<media::VideoCaptureDeviceDescriptors> device_descriptors,
-    DeviceDescriptorsCallback result_callback) {
-  std::move(result_callback).Run(std::move(device_descriptors));
+  std::move(callback).Run(std::move(result));
 }
 
 }  // namespace media

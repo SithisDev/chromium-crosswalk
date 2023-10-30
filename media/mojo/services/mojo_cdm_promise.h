@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,7 @@
 #include <stdint.h>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "media/base/cdm_promise.h"
-#include "media/mojo/interfaces/content_decryption_module.mojom.h"
 
 namespace media {
 
@@ -19,7 +17,7 @@ namespace media {
 // callback can be passed in by value or as const-refs. Find a better solution
 // to handle this.
 template <typename F, typename... T>
-class MojoCdmPromise : public CdmPromiseTemplate<T...> {
+class MojoCdmPromise final : public CdmPromiseTemplate<T...> {
  public:
   using CallbackType = base::OnceCallback<F>;
 
