@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,38 +8,41 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
-FakeOAuth2AccessTokenManager::PendingRequest::PendingRequest() {}
+using TokenResponseBuilder = OAuth2AccessTokenConsumer::TokenResponse::Builder;
+
+FakeOAuth2AccessTokenManager::PendingRequest::PendingRequest() = default;
 
 FakeOAuth2AccessTokenManager::PendingRequest::PendingRequest(
     const PendingRequest& other) = default;
 
-FakeOAuth2AccessTokenManager::PendingRequest::~PendingRequest() {}
+FakeOAuth2AccessTokenManager::PendingRequest::~PendingRequest() = default;
 
 FakeOAuth2AccessTokenManager::FakeOAuth2AccessTokenManager(
     OAuth2AccessTokenManager::Delegate* delegate)
     : OAuth2AccessTokenManager(delegate),
-      auto_post_fetch_response_on_message_loop_(false),
-      weak_ptr_factory_(this) {}
+      auto_post_fetch_response_on_message_loop_(false) {}
 
-FakeOAuth2AccessTokenManager::~FakeOAuth2AccessTokenManager() {}
+FakeOAuth2AccessTokenManager::~FakeOAuth2AccessTokenManager() = default;
 
 void FakeOAuth2AccessTokenManager::IssueAllTokensForAccount(
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     const std::string& access_token,
     const base::Time& expiration) {
   DCHECK(!auto_post_fetch_response_on_message_loop_);
   CompleteRequests(account_id, true, FakeOAuth2AccessTokenManager::ScopeSet(),
                    GoogleServiceAuthError::AuthErrorNone(),
-                   OAuth2AccessTokenConsumer::TokenResponse(
-                       access_token, expiration, std::string() /* id_token */));
+                   TokenResponseBuilder()
+                       .WithAccessToken(access_token)
+                       .WithExpirationTime(expiration)
+                       .build());
 }
 
 void FakeOAuth2AccessTokenManager::IssueAllTokensForAccount(
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     const OAuth2AccessTokenConsumer::TokenResponse& token_response) {
   DCHECK(!auto_post_fetch_response_on_message_loop_);
   CompleteRequests(account_id, true, FakeOAuth2AccessTokenManager::ScopeSet(),
@@ -47,7 +50,7 @@ void FakeOAuth2AccessTokenManager::IssueAllTokensForAccount(
 }
 
 void FakeOAuth2AccessTokenManager::IssueErrorForAllPendingRequestsForAccount(
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     const GoogleServiceAuthError& error) {
   DCHECK(!auto_post_fetch_response_on_message_loop_);
   CompleteRequests(account_id, true, FakeOAuth2AccessTokenManager::ScopeSet(),
@@ -59,31 +62,35 @@ void FakeOAuth2AccessTokenManager::IssueTokenForScope(
     const std::string& access_token,
     const base::Time& expiration) {
   DCHECK(!auto_post_fetch_response_on_message_loop_);
-  CompleteRequests("", false, scope, GoogleServiceAuthError::AuthErrorNone(),
-                   OAuth2AccessTokenConsumer::TokenResponse(
-                       access_token, expiration, std::string() /* id_token */));
+  CompleteRequests(CoreAccountId(), false, scope,
+                   GoogleServiceAuthError::AuthErrorNone(),
+                   TokenResponseBuilder()
+                       .WithAccessToken(access_token)
+                       .WithExpirationTime(expiration)
+                       .build());
 }
 
 void FakeOAuth2AccessTokenManager::IssueTokenForScope(
     const FakeOAuth2AccessTokenManager::ScopeSet& scope,
     const OAuth2AccessTokenConsumer::TokenResponse& token_response) {
   DCHECK(!auto_post_fetch_response_on_message_loop_);
-  CompleteRequests("", false, scope, GoogleServiceAuthError::AuthErrorNone(),
-                   token_response);
+  CompleteRequests(CoreAccountId(), false, scope,
+                   GoogleServiceAuthError::AuthErrorNone(), token_response);
 }
 
 void FakeOAuth2AccessTokenManager::IssueErrorForScope(
     const FakeOAuth2AccessTokenManager::ScopeSet& scope,
     const GoogleServiceAuthError& error) {
   DCHECK(!auto_post_fetch_response_on_message_loop_);
-  CompleteRequests("", false, scope, error,
+  CompleteRequests(CoreAccountId(), false, scope, error,
                    OAuth2AccessTokenConsumer::TokenResponse());
 }
 
 void FakeOAuth2AccessTokenManager::IssueErrorForAllPendingRequests(
     const GoogleServiceAuthError& error) {
   DCHECK(!auto_post_fetch_response_on_message_loop_);
-  CompleteRequests("", true, FakeOAuth2AccessTokenManager::ScopeSet(), error,
+  CompleteRequests(CoreAccountId(), true,
+                   FakeOAuth2AccessTokenManager::ScopeSet(), error,
                    OAuth2AccessTokenConsumer::TokenResponse());
 }
 
@@ -91,21 +98,25 @@ void FakeOAuth2AccessTokenManager::IssueTokenForAllPendingRequests(
     const std::string& access_token,
     const base::Time& expiration) {
   DCHECK(!auto_post_fetch_response_on_message_loop_);
-  CompleteRequests("", true, FakeOAuth2AccessTokenManager::ScopeSet(),
+  CompleteRequests(CoreAccountId(), true,
+                   FakeOAuth2AccessTokenManager::ScopeSet(),
                    GoogleServiceAuthError::AuthErrorNone(),
-                   OAuth2AccessTokenConsumer::TokenResponse(
-                       access_token, expiration, std::string() /* id_token */));
+                   TokenResponseBuilder()
+                       .WithAccessToken(access_token)
+                       .WithExpirationTime(expiration)
+                       .build());
 }
 
 void FakeOAuth2AccessTokenManager::IssueTokenForAllPendingRequests(
     const OAuth2AccessTokenConsumer::TokenResponse& token_response) {
   DCHECK(!auto_post_fetch_response_on_message_loop_);
-  CompleteRequests("", true, FakeOAuth2AccessTokenManager::ScopeSet(),
+  CompleteRequests(CoreAccountId(), true,
+                   FakeOAuth2AccessTokenManager::ScopeSet(),
                    GoogleServiceAuthError::AuthErrorNone(), token_response);
 }
 
 void FakeOAuth2AccessTokenManager::CompleteRequests(
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     bool all_scopes,
     const FakeOAuth2AccessTokenManager::ScopeSet& scope,
     const GoogleServiceAuthError& error,
@@ -130,10 +141,7 @@ void FakeOAuth2AccessTokenManager::CompleteRequests(
             base::Time());
       }
 
-      it->request->InformConsumer(
-          error, OAuth2AccessTokenConsumer::TokenResponse(
-                     token_response.access_token,
-                     token_response.expiration_time, token_response.id_token));
+      it->request->InformConsumer(error, token_response);
     }
   }
 }
@@ -151,7 +159,7 @@ FakeOAuth2AccessTokenManager::GetPendingRequests() {
 
 void FakeOAuth2AccessTokenManager::CancelAllRequests() {
   CompleteRequests(
-      "", true, FakeOAuth2AccessTokenManager::ScopeSet(),
+      CoreAccountId(), true, FakeOAuth2AccessTokenManager::ScopeSet(),
       GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED),
       OAuth2AccessTokenConsumer::TokenResponse());
 }
@@ -170,6 +178,7 @@ void FakeOAuth2AccessTokenManager::FetchOAuth2Token(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     const std::string& client_id,
     const std::string& client_secret,
+    const std::string& consumer_name,
     const FakeOAuth2AccessTokenManager::ScopeSet& scopes) {
   PendingRequest pending_request;
   pending_request.account_id = account_id;
@@ -187,8 +196,10 @@ void FakeOAuth2AccessTokenManager::FetchOAuth2Token(
                        weak_ptr_factory_.GetWeakPtr(), account_id,
                        /*all_scoped=*/true, scopes,
                        GoogleServiceAuthError::AuthErrorNone(),
-                       OAuth2AccessTokenConsumer::TokenResponse(
-                           "access_token", base::Time::Max(), std::string())));
+                       TokenResponseBuilder()
+                           .WithAccessToken("access_token")
+                           .WithExpirationTime(base::Time::Max())
+                           .build()));
   }
 }
 
@@ -197,5 +208,7 @@ void FakeOAuth2AccessTokenManager::InvalidateAccessTokenImpl(
     const std::string& client_id,
     const FakeOAuth2AccessTokenManager::ScopeSet& scopes,
     const std::string& access_token) {
-  // Do nothing, as we don't have a cache from which to remove the token.
+  for (auto& observer : GetDiagnosticsObserversForTesting())
+    observer.OnAccessTokenRemoved(account_id, scopes);
+  // Do nothing else, as we don't have a cache from which to remove the token.
 }

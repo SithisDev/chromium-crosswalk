@@ -1,21 +1,22 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef GOOGLE_APIS_GCM_ENGINE_CONNECTION_FACTORY_IMPL_H_
 #define GOOGLE_APIS_GCM_ENGINE_CONNECTION_FACTORY_IMPL_H_
 
+#include "base/memory/raw_ptr.h"
 #include "google_apis/gcm/engine/connection_factory.h"
 
 #include <stddef.h>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "google_apis/gcm/engine/connection_event_tracker.h"
 #include "google_apis/gcm/engine/connection_handler.h"
 #include "google_apis/gcm/protocol/mcs.pb.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "net/base/backoff_entry.h"
 #include "net/log/net_log_with_source.h"
@@ -38,6 +39,10 @@ class GCM_EXPORT ConnectionFactoryImpl
       scoped_refptr<base::SequencedTaskRunner> io_task_runner,
       GCMStatsRecorder* recorder,
       network::NetworkConnectionTracker* network_connection_tracker);
+
+  ConnectionFactoryImpl(const ConnectionFactoryImpl&) = delete;
+  ConnectionFactoryImpl& operator=(const ConnectionFactoryImpl&) = delete;
+
   ~ConnectionFactoryImpl() override;
 
   // ConnectionFactory implementation.
@@ -90,8 +95,8 @@ class GCM_EXPORT ConnectionFactoryImpl
 
   // Callback for Socket connection completion. This is public for testing.
   void OnConnectDone(int result,
-                     const base::Optional<net::IPEndPoint>& local_addr,
-                     const base::Optional<net::IPEndPoint>& peer_addr,
+                     const absl::optional<net::IPEndPoint>& local_addr,
+                     const absl::optional<net::IPEndPoint>& peer_addr,
                      mojo::ScopedDataPipeConsumerHandle receive_stream,
                      mojo::ScopedDataPipeProducerHandle send_stream);
 
@@ -136,9 +141,9 @@ class GCM_EXPORT ConnectionFactoryImpl
   // ---- network:: components for establishing connections. ----
   // Socket factory for creating new GCM connections.
   GetProxyResolvingFactoryCallback get_socket_factory_callback_;
-  network::mojom::ProxyResolvingSocketFactoryPtr socket_factory_;
+  mojo::Remote<network::mojom::ProxyResolvingSocketFactory> socket_factory_;
   // The handle to the socket for the current connection, if one exists.
-  network::mojom::ProxyResolvingSocketPtr socket_;
+  mojo::Remote<network::mojom::ProxyResolvingSocket> socket_;
   // Peer address of |socket_|.
   net::IPEndPoint peer_addr_;
 
@@ -185,18 +190,16 @@ class GCM_EXPORT ConnectionFactoryImpl
   const scoped_refptr<base::SequencedTaskRunner> io_task_runner_;
 
   // Recorder that records GCM activities for debugging purpose. Not owned.
-  GCMStatsRecorder* recorder_;
+  raw_ptr<GCMStatsRecorder> recorder_;
 
   // Notifies this class of network connection changes.
   // Must outlive the ConnectionFactoryImpl.
-  network::NetworkConnectionTracker* network_connection_tracker_;
+  raw_ptr<network::NetworkConnectionTracker> network_connection_tracker_;
 
   // The currently registered listener to notify of connection changes.
-  ConnectionListener* listener_;
+  raw_ptr<ConnectionListener> listener_;
 
-  base::WeakPtrFactory<ConnectionFactoryImpl> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConnectionFactoryImpl);
+  base::WeakPtrFactory<ConnectionFactoryImpl> weak_ptr_factory_{this};
 };
 
 }  // namespace gcm

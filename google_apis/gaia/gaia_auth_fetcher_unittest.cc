@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 // A complete set of unit tests for GaiaAuthFetcher.
 // Originally ported from GoogleAuthenticator tests.
+#include "google_apis/gaia/gaia_auth_fetcher.h"
 
 #include <string>
 #include <vector>
@@ -11,26 +12,23 @@
 #include "base/bind.h"
 #include "base/json/json_reader.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
-#include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
-#include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth_multilogin_result.h"
 #include "google_apis/google_api_keys.h"
-#include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/fetch_api.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -56,7 +54,10 @@ std::string GetRequestBodyAsString(const network::ResourceRequest* request) {
     return "";
   }
   const network::DataElement& elem = request->request_body->elements()->at(0);
-  return std::string(elem.bytes(), elem.length());
+  if (elem.type() != network::DataElement::Tag::kBytes) {
+    return "";
+  }
+  return std::string(elem.As<network::DataElementBytes>().AsStringPiece());
 }
 
 }  // namespace
@@ -71,8 +72,7 @@ class GaiaAuthFetcherTest : public testing::Test {
             GaiaUrls::GetInstance()->oauth1_login_url().Resolve(
                 "?source=&issueuberauth=1")),
         oauth_login_gurl_(GaiaUrls::GetInstance()->oauth1_login_url()),
-        scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI),
+        task_environment_(base::test::TaskEnvironment::MainThreadType::UI),
         test_shared_loader_factory_(
             base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
                 &test_url_loader_factory_)) {
@@ -123,7 +123,7 @@ class GaiaAuthFetcherTest : public testing::Test {
     return test_shared_loader_factory_;
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
   std::vector<network::ResourceRequest> received_requests_;
@@ -156,9 +156,12 @@ class MockGaiaConsumer : public GaiaAuthConsumer {
   MOCK_METHOD0(OnLogOutSuccess, void());
   MOCK_METHOD1(OnLogOutFailure, void(const GoogleServiceAuthError& error));
   MOCK_METHOD1(OnGetCheckConnectionInfoSuccess, void(const std::string& data));
+  MOCK_METHOD1(OnReAuthProofTokenSuccess, void(const std::string& rapt_token));
+  MOCK_METHOD1(OnReAuthProofTokenFailure,
+               void(GaiaAuthConsumer::ReAuthProofTokenStatus status));
 };
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define MAYBE_ErrorComparator DISABLED_ErrorComparator
 #else
 #define MAYBE_ErrorComparator ErrorComparator
@@ -200,10 +203,10 @@ class TestGaiaAuthFetcher : public GaiaAuthFetcher {
       const std::string& body,
       const std::string& headers,
       const GURL& gaia_gurl,
-      int load_flags,
+      network::mojom::CredentialsMode credentials_mode,
       const net::NetworkTrafficAnnotationTag& traffic_annotation) {
-    CreateAndStartGaiaFetcher(body, headers, gaia_gurl, load_flags,
-                              traffic_annotation);
+    CreateAndStartGaiaFetcher(body, /*content_type=*/"", headers, gaia_gurl,
+                              credentials_mode, traffic_annotation);
   }
 
   void TestOnURLLoadCompleteInternal(
@@ -286,8 +289,8 @@ TEST_F(GaiaAuthFetcherTest, StartAuthCodeForOAuth2TokenExchange_Success) {
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
   auth.StartAuthCodeForOAuth2TokenExchange("auth_code");
   ASSERT_EQ(received_requests_.size(), 1U);
-  EXPECT_EQ(net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES,
-            received_requests_.at(0).load_flags);
+  EXPECT_EQ(network::mojom::CredentialsMode::kOmit,
+            received_requests_.at(0).credentials_mode);
   std::string body = GetRequestBodyAsString(&received_requests_.at(0));
   EXPECT_EQ(std::string::npos, body.find("device_type=chrome"));
   EXPECT_TRUE(auth.HasPendingFetch());
@@ -305,8 +308,8 @@ TEST_F(GaiaAuthFetcherTest, StartAuthCodeForOAuth2TokenExchange_DeviceId) {
                                                        "device_ABCDE_1");
 
   ASSERT_EQ(1U, received_requests_.size());
-  EXPECT_EQ(net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES,
-            received_requests_.at(0).load_flags);
+  EXPECT_EQ(network::mojom::CredentialsMode::kOmit,
+            received_requests_.at(0).credentials_mode);
   std::string body = GetRequestBodyAsString(&received_requests_.at(0));
   EXPECT_NE(std::string::npos, body.find("device_type=chrome"));
   EXPECT_NE(std::string::npos, body.find("device_id=device_ABCDE_1"));
@@ -338,6 +341,38 @@ TEST_F(GaiaAuthFetcherTest, MergeSessionSuccess) {
   EXPECT_FALSE(auth.HasPendingFetch());
 }
 
+TEST_F(GaiaAuthFetcherTest, MultiloginRequestFormat) {
+  MockGaiaConsumer consumer;
+  TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
+  std::vector<GaiaAuthFetcher::MultiloginTokenIDPair> accounts;
+  accounts.push_back({"token1", "id1"});
+  accounts.push_back({"token2", "id2"});
+  auth.StartOAuthMultilogin(
+      gaia::MultiloginMode::MULTILOGIN_UPDATE_COOKIE_ACCOUNTS_ORDER, accounts,
+      "cc_result");
+  ASSERT_TRUE(auth.HasPendingFetch());
+
+  const network::ResourceRequest& request0 = received_requests_.at(0);
+  EXPECT_EQ("POST", request0.method);
+  std::string header;
+  request0.headers.GetHeader("Authorization", &header);
+  EXPECT_EQ("MultiBearer id1:token1,id2:token2", header);
+  EXPECT_EQ("source=ChromiumBrowser&reuseCookies=0&externalCcResult=cc_result",
+            request0.url.query());
+
+  auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_OK, std::string());
+  EXPECT_FALSE(auth.HasPendingFetch());
+
+  auth.StartOAuthMultilogin(
+      gaia::MultiloginMode::MULTILOGIN_PRESERVE_COOKIE_ACCOUNTS_ORDER, accounts,
+      "cc_result");
+  ASSERT_TRUE(auth.HasPendingFetch());
+
+  const network::ResourceRequest& request1 = received_requests_.at(1);
+  EXPECT_EQ("source=ChromiumBrowser&reuseCookies=1&externalCcResult=cc_result",
+            request1.url.query());
+}
+
 TEST_F(GaiaAuthFetcherTest, MultiloginSuccess) {
   MockGaiaConsumer consumer;
   EXPECT_CALL(consumer, OnOAuthMultiloginFinished(::testing::Property(
@@ -347,6 +382,7 @@ TEST_F(GaiaAuthFetcherTest, MultiloginSuccess) {
 
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
   auth.StartOAuthMultilogin(
+      gaia::MultiloginMode::MULTILOGIN_UPDATE_COOKIE_ACCOUNTS_ORDER,
       std::vector<GaiaAuthFetcher::MultiloginTokenIDPair>(), std::string());
 
   EXPECT_TRUE(auth.HasPendingFetch());
@@ -382,6 +418,7 @@ TEST_F(GaiaAuthFetcherTest, MultiloginFailureNetError) {
 
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
   auth.StartOAuthMultilogin(
+      gaia::MultiloginMode::MULTILOGIN_UPDATE_COOKIE_ACCOUNTS_ORDER,
       std::vector<GaiaAuthFetcher::MultiloginTokenIDPair>(), std::string());
 
   EXPECT_TRUE(auth.HasPendingFetch());
@@ -417,6 +454,7 @@ TEST_F(GaiaAuthFetcherTest, MultiloginFailureServerError) {
 
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
   auth.StartOAuthMultilogin(
+      gaia::MultiloginMode::MULTILOGIN_UPDATE_COOKIE_ACCOUNTS_ORDER,
       std::vector<GaiaAuthFetcher::MultiloginTokenIDPair>(), std::string());
 
   EXPECT_TRUE(auth.HasPendingFetch());
@@ -431,8 +469,7 @@ TEST_F(GaiaAuthFetcherTest, UberAuthTokenSuccess) {
   EXPECT_CALL(consumer, OnUberAuthTokenSuccess("uberToken")).Times(1);
 
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
-  auth.StartTokenFetchForUberAuthExchange("myAccessToken",
-                                          true /* is_bound_to_channel_id */);
+  auth.StartTokenFetchForUberAuthExchange("myAccessToken");
 
   EXPECT_TRUE(auth.HasPendingFetch());
   auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_OK, "uberToken");
@@ -454,9 +491,9 @@ TEST_F(GaiaAuthFetcherTest, StartOAuthLogin) {
   EXPECT_CALL(consumer, OnClientLoginSuccess(result)).Times(1);
 
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
-  auth.CreateAndStartGaiaFetcherForTesting(/*body=*/"", /*headers=*/"",
-                                           oauth_login_gurl_, /*load_flags=*/0,
-                                           TRAFFIC_ANNOTATION_FOR_TESTS);
+  auth.CreateAndStartGaiaFetcherForTesting(
+      /*body=*/"", /*headers=*/"", oauth_login_gurl_,
+      network::mojom::CredentialsMode::kInclude, TRAFFIC_ANNOTATION_FOR_TESTS);
   auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_OK, data);
 }
 
@@ -477,11 +514,12 @@ TEST_F(GaiaAuthFetcherTest, ListAccounts) {
       /*body=*/"", /*headers=*/"",
       GaiaUrls::GetInstance()->ListAccountsURLWithSource(
           GaiaConstants::kChromeSource),
-      /*load_flags=*/0, TRAFFIC_ANNOTATION_FOR_TESTS);
+      network::mojom::CredentialsMode::kInclude, TRAFFIC_ANNOTATION_FOR_TESTS);
   ASSERT_EQ(received_requests_.size(), 1U);
-  EXPECT_EQ(net::LOAD_NORMAL, received_requests_.at(0).load_flags);
-  EXPECT_EQ(GaiaUrls::GetInstance()->gaia_url(),
-            received_requests_.at(0).site_for_cookies);
+  EXPECT_EQ(network::mojom::CredentialsMode::kInclude,
+            received_requests_.at(0).credentials_mode);
+  EXPECT_TRUE(received_requests_.at(0).site_for_cookies.IsEquivalent(
+      net::SiteForCookies::FromUrl(GaiaUrls::GetInstance()->gaia_url())));
   auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_OK, data);
 }
 
@@ -494,13 +532,12 @@ TEST_F(GaiaAuthFetcherTest, LogOutSuccess) {
       /*body=*/"", /*headers=*/"",
       GaiaUrls::GetInstance()->LogOutURLWithSource(
           GaiaConstants::kChromeSource),
-      /*load_flags=*/0, TRAFFIC_ANNOTATION_FOR_TESTS);
+      network::mojom::CredentialsMode::kInclude, TRAFFIC_ANNOTATION_FOR_TESTS);
   auth.TestOnURLLoadCompleteInternal(net::OK);
 }
 
 TEST_F(GaiaAuthFetcherTest, LogOutFailure) {
   net::Error error_no = net::ERR_CONNECTION_RESET;
-  net::URLRequestStatus status(net::URLRequestStatus::FAILED, error_no);
 
   GoogleServiceAuthError expected_error =
       GoogleServiceAuthError::FromConnectionError(error_no);
@@ -512,7 +549,7 @@ TEST_F(GaiaAuthFetcherTest, LogOutFailure) {
       /*body=*/"", /*headers=*/"",
       GaiaUrls::GetInstance()->LogOutURLWithSource(
           GaiaConstants::kChromeSource),
-      /*load_flags=*/0, TRAFFIC_ANNOTATION_FOR_TESTS);
+      network::mojom::CredentialsMode::kInclude, TRAFFIC_ANNOTATION_FOR_TESTS);
   auth.TestOnURLLoadCompleteInternal(error_no);
 }
 
@@ -528,7 +565,7 @@ TEST_F(GaiaAuthFetcherTest, GetCheckConnectionInfo) {
       /*body=*/"", /*headers=*/"",
       GaiaUrls::GetInstance()->GetCheckConnectionInfoURLWithSource(
           GaiaConstants::kChromeSource),
-      /*load_flags=*/0, TRAFFIC_ANNOTATION_FOR_TESTS);
+      network::mojom::CredentialsMode::kInclude, TRAFFIC_ANNOTATION_FOR_TESTS);
   auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_OK, data);
 }
 
@@ -542,7 +579,7 @@ TEST_F(GaiaAuthFetcherTest, RevokeOAuth2TokenSuccess) {
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
   auth.CreateAndStartGaiaFetcherForTesting(
       /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->oauth2_revoke_url(),
-      /*load_flags=*/0, TRAFFIC_ANNOTATION_FOR_TESTS);
+      network::mojom::CredentialsMode::kInclude, TRAFFIC_ANNOTATION_FOR_TESTS);
   auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_OK, data);
 }
 
@@ -556,7 +593,7 @@ TEST_F(GaiaAuthFetcherTest, RevokeOAuth2TokenCanceled) {
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
   auth.CreateAndStartGaiaFetcherForTesting(
       /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->oauth2_revoke_url(),
-      /*load_flags=*/0, TRAFFIC_ANNOTATION_FOR_TESTS);
+      network::mojom::CredentialsMode::kInclude, TRAFFIC_ANNOTATION_FOR_TESTS);
   auth.TestOnURLLoadCompleteInternal(net::ERR_ABORTED);
 }
 
@@ -570,7 +607,7 @@ TEST_F(GaiaAuthFetcherTest, RevokeOAuth2TokenFailed) {
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
   auth.CreateAndStartGaiaFetcherForTesting(
       /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->oauth2_revoke_url(),
-      /*load_flags=*/0, TRAFFIC_ANNOTATION_FOR_TESTS);
+      network::mojom::CredentialsMode::kInclude, TRAFFIC_ANNOTATION_FOR_TESTS);
   auth.TestOnURLLoadCompleteInternal(net::ERR_CERT_CONTAINS_ERRORS);
 }
 
@@ -584,7 +621,7 @@ TEST_F(GaiaAuthFetcherTest, RevokeOAuth2TokenTimeout) {
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
   auth.CreateAndStartGaiaFetcherForTesting(
       /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->oauth2_revoke_url(),
-      /*load_flags=*/0, TRAFFIC_ANNOTATION_FOR_TESTS);
+      network::mojom::CredentialsMode::kInclude, TRAFFIC_ANNOTATION_FOR_TESTS);
   auth.TestOnURLLoadCompleteInternal(net::ERR_TIMED_OUT);
 }
 
@@ -599,7 +636,7 @@ TEST_F(GaiaAuthFetcherTest, RevokeOAuth2TokenInvalidToken) {
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
   auth.CreateAndStartGaiaFetcherForTesting(
       /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->oauth2_revoke_url(),
-      /*load_flags=*/0, TRAFFIC_ANNOTATION_FOR_TESTS);
+      network::mojom::CredentialsMode::kInclude, TRAFFIC_ANNOTATION_FOR_TESTS);
   auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_BAD_REQUEST, data);
 }
 
@@ -614,7 +651,7 @@ TEST_F(GaiaAuthFetcherTest, RevokeOAuth2TokenInvalidRequest) {
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
   auth.CreateAndStartGaiaFetcherForTesting(
       /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->oauth2_revoke_url(),
-      /*load_flags=*/0, TRAFFIC_ANNOTATION_FOR_TESTS);
+      network::mojom::CredentialsMode::kInclude, TRAFFIC_ANNOTATION_FOR_TESTS);
   auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_BAD_REQUEST, data);
 }
 
@@ -629,7 +666,95 @@ TEST_F(GaiaAuthFetcherTest, RevokeOAuth2TokenServerError) {
   TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
   auth.CreateAndStartGaiaFetcherForTesting(
       /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->oauth2_revoke_url(),
-      /*load_flags=*/0, TRAFFIC_ANNOTATION_FOR_TESTS);
+      network::mojom::CredentialsMode::kInclude, TRAFFIC_ANNOTATION_FOR_TESTS);
   auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_INTERNAL_SERVER_ERROR,
                                      data);
+}
+
+TEST_F(GaiaAuthFetcherTest, ReAuthTokenSuccess) {
+  std::string data("{\"encodedRapt\" : \"rapt_token\"}");
+  MockGaiaConsumer consumer;
+  EXPECT_CALL(consumer, OnReAuthProofTokenSuccess("rapt_token")).Times(1);
+
+  TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
+  auth.CreateAndStartGaiaFetcherForTesting(
+      /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->reauth_api_url(),
+      network::mojom::CredentialsMode ::kOmit, TRAFFIC_ANNOTATION_FOR_TESTS);
+  auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_OK, data);
+}
+
+TEST_F(GaiaAuthFetcherTest, ReAuthTokenInvalidRequest) {
+  std::string data("{\"error\" : { \"message\" :  \"INVALID_REQUEST\"} }");
+  MockGaiaConsumer consumer;
+  EXPECT_CALL(consumer,
+              OnReAuthProofTokenFailure(
+                  GaiaAuthConsumer::ReAuthProofTokenStatus::kInvalidRequest))
+      .Times(1);
+
+  TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
+  auth.CreateAndStartGaiaFetcherForTesting(
+      /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->reauth_api_url(),
+      network::mojom::CredentialsMode ::kOmit, TRAFFIC_ANNOTATION_FOR_TESTS);
+  auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_BAD_REQUEST, data);
+}
+
+TEST_F(GaiaAuthFetcherTest, ReAuthTokenInvalidGrant) {
+  std::string data("{\"error\" : { \"message\" :  \"INVALID_GRANT\"} }");
+  MockGaiaConsumer consumer;
+  EXPECT_CALL(consumer,
+              OnReAuthProofTokenFailure(
+                  GaiaAuthConsumer::ReAuthProofTokenStatus::kInvalidGrant))
+      .Times(1);
+
+  TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
+  auth.CreateAndStartGaiaFetcherForTesting(
+      /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->reauth_api_url(),
+      network::mojom::CredentialsMode ::kOmit, TRAFFIC_ANNOTATION_FOR_TESTS);
+  auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_BAD_REQUEST, data);
+}
+
+TEST_F(GaiaAuthFetcherTest, ReAuthTokenUnauthorizedClient) {
+  std::string data("{\"error\" : { \"message\" :  \"UNAUTHORIZED_CLIENT\"} }");
+  MockGaiaConsumer consumer;
+  EXPECT_CALL(
+      consumer,
+      OnReAuthProofTokenFailure(
+          GaiaAuthConsumer::ReAuthProofTokenStatus::kUnauthorizedClient))
+      .Times(1);
+
+  TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
+  auth.CreateAndStartGaiaFetcherForTesting(
+      /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->reauth_api_url(),
+      network::mojom::CredentialsMode ::kOmit, TRAFFIC_ANNOTATION_FOR_TESTS);
+  auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_FORBIDDEN, data);
+}
+
+TEST_F(GaiaAuthFetcherTest, ReAuthTokenInsufficientScope) {
+  std::string data("{\"error\" : { \"message\" :  \"INSUFFICIENT_SCOPE\"} }");
+  MockGaiaConsumer consumer;
+  EXPECT_CALL(consumer,
+              OnReAuthProofTokenFailure(
+                  GaiaAuthConsumer::ReAuthProofTokenStatus::kInsufficientScope))
+      .Times(1);
+
+  TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
+  auth.CreateAndStartGaiaFetcherForTesting(
+      /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->reauth_api_url(),
+      network::mojom::CredentialsMode ::kOmit, TRAFFIC_ANNOTATION_FOR_TESTS);
+  auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_FORBIDDEN, data);
+}
+
+TEST_F(GaiaAuthFetcherTest, ReAuthTokenCredentialNotSet) {
+  std::string data("{\"error\" : { \"message\" :  \"CREDENTIAL_NOT_SET\"} }");
+  MockGaiaConsumer consumer;
+  EXPECT_CALL(consumer,
+              OnReAuthProofTokenFailure(
+                  GaiaAuthConsumer::ReAuthProofTokenStatus::kCredentialNotSet))
+      .Times(1);
+
+  TestGaiaAuthFetcher auth(&consumer, GetURLLoaderFactory());
+  auth.CreateAndStartGaiaFetcherForTesting(
+      /*body=*/"", /*headers=*/"", GaiaUrls::GetInstance()->reauth_api_url(),
+      network::mojom::CredentialsMode ::kOmit, TRAFFIC_ANNOTATION_FOR_TESTS);
+  auth.TestOnURLLoadCompleteInternal(net::OK, net::HTTP_FORBIDDEN, data);
 }

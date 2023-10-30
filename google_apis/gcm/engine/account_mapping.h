@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/time/time.h"
+#include "google_apis/gaia/core_account_id.h"
 #include "google_apis/gcm/base/gcm_export.h"
 
 namespace gcm {
@@ -37,8 +38,8 @@ struct GCM_EXPORT AccountMapping {
   // |status| is infered.
   bool ParseFromString(const std::string& value);
 
-  // Gaia ID of the account. (Acts as key for persistence.)
-  std::string account_id;
+  // Account Id of the account. (Acts as key for persistence.)
+  CoreAccountId account_id;
   // Email address of the tracked account.
   std::string email;
   // OAuth2 access token used to authenticate mappings (not persisted).

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,14 @@
 #include <inttypes.h>
 #include <stddef.h>
 
+#include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "gin/public/isolate_holder.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-locker.h"
+#include "v8/include/v8-statistics.h"
 
 namespace gin {
 
@@ -79,6 +82,9 @@ void DumpCodeStatistics(base::trace_event::MemoryAllocatorDump* dump,
   dump->AddScalar("external_script_source_size",
                   base::trace_event::MemoryAllocatorDump::kUnitsBytes,
                   code_statistics.external_script_source_size());
+  dump->AddScalar("cpu_profiler_metadata_size",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  code_statistics.cpu_profiler_metadata_size());
 }
 
 // Dump the number of native and detached contexts.
@@ -151,17 +157,23 @@ bool CanHaveMultipleIsolates(IsolateHolder::IsolateType isolate_type) {
   LOG(FATAL) << "Unreachable code";
 }
 
-}  // namespace anonymous
+}  // namespace
 
 void V8IsolateMemoryDumpProvider::DumpHeapStatistics(
     const base::trace_event::MemoryDumpArgs& args,
     base::trace_event::ProcessMemoryDump* process_memory_dump) {
+  if (args.determinism == base::trace_event::MemoryDumpDeterminism::FORCE_GC) {
+    // Force GC in V8 using the same API as DevTools uses in "collectGarbage".
+    isolate_holder_->isolate()->LowMemoryNotification();
+  }
   std::string isolate_name = base::StringPrintf(
       "isolate_0x%" PRIXPTR,
       reinterpret_cast<uintptr_t>(isolate_holder_->isolate()));
 
   // Dump statistics of the heap's spaces.
   v8::HeapStatistics heap_statistics;
+  // The total heap sizes should be sampled before the individual space sizes
+  // because of concurrent allocation. DCHECKs below rely on this order.
   isolate_holder_->isolate()->GetHeapStatistics(&heap_statistics);
 
   IsolateHolder::IsolateType isolate_type = isolate_holder_->isolate_type();
@@ -171,7 +183,6 @@ void V8IsolateMemoryDumpProvider::DumpHeapStatistics(
 
   std::string space_name_prefix = dump_base_name + "/heap";
 
-  size_t known_spaces_used_size = 0;
   size_t known_spaces_size = 0;
   size_t known_spaces_physical_size = 0;
   size_t number_of_spaces = isolate_holder_->isolate()->NumberOfHeapSpaces();
@@ -184,7 +195,6 @@ void V8IsolateMemoryDumpProvider::DumpHeapStatistics(
     const size_t space_physical_size = space_statistics.physical_space_size();
 
     known_spaces_size += space_size;
-    known_spaces_used_size += space_used_size;
     known_spaces_physical_size += space_physical_size;
 
     std::string space_dump_name = dump_base_name + "/heap/" +
@@ -205,10 +215,10 @@ void V8IsolateMemoryDumpProvider::DumpHeapStatistics(
                           space_used_size);
   }
 
-  // Sanity checks.
-  DCHECK_EQ(heap_statistics.total_physical_size(), known_spaces_physical_size);
-  DCHECK_EQ(heap_statistics.used_heap_size(), known_spaces_used_size);
-  DCHECK_EQ(heap_statistics.total_heap_size(), known_spaces_size);
+  // Sanity check that all spaces are accounted for in GetHeapSpaceStatistics.
+  // Background threads may be running and allocating concurrently, so the sum
+  // of space sizes may exceed the total heap size that was sampled earlier.
+  DCHECK_LE(heap_statistics.total_heap_size(), known_spaces_size);
 
   // If V8 zaps garbage, all the memory mapped regions become resident,
   // so we add an extra dump to avoid mismatches w.r.t. the total
@@ -216,10 +226,13 @@ void V8IsolateMemoryDumpProvider::DumpHeapStatistics(
   if (heap_statistics.does_zap_garbage()) {
     auto* zap_dump = process_memory_dump->CreateAllocatorDump(
         dump_base_name + "/zapped_for_debug" + dump_name_suffix);
+    size_t zapped_size_for_debugging =
+        known_spaces_size >= known_spaces_physical_size
+            ? known_spaces_size - known_spaces_physical_size
+            : 0;
     zap_dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
                         base::trace_event::MemoryAllocatorDump::kUnitsBytes,
-                        heap_statistics.total_heap_size() -
-                            heap_statistics.total_physical_size());
+                        zapped_size_for_debugging);
   }
 
   // Dump statistics about malloced memory.
@@ -248,6 +261,22 @@ void V8IsolateMemoryDumpProvider::DumpHeapStatistics(
 
   // Dump statistics related to code and bytecode if requested.
   DumpCodeStatistics(code_stats_dump, isolate_holder_);
+
+  // Dump statistics for global handles.
+  auto* global_handles_dump = process_memory_dump->CreateAllocatorDump(
+      dump_base_name + "/global_handles" + dump_name_suffix);
+  global_handles_dump->AddScalar(
+      base::trace_event::MemoryAllocatorDump::kNameSize,
+      base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+      heap_statistics.total_global_handles_size());
+  global_handles_dump->AddScalar(
+      "allocated_objects_size",
+      base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+      heap_statistics.used_global_handles_size());
+  if (system_allocator_name) {
+    process_memory_dump->AddSuballocation(global_handles_dump->guid(),
+                                          system_allocator_name);
+  }
 
   // Dump object statistics only for detailed dumps.
   if (args.level_of_detail !=

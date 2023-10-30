@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,12 @@
 #include "base/files/file_util.h"
 #include "base/i18n/icu_util.h"
 #include "base/location.h"
-#include "base/macros.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/task/single_thread_task_executor.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "gin/array_buffer.h"
 #include "gin/modules/console.h"
@@ -43,7 +43,9 @@ void Run(base::WeakPtr<Runner> runner, const base::FilePath& path) {
 
 class GinShellRunnerDelegate : public ShellRunnerDelegate {
  public:
-  GinShellRunnerDelegate() {}
+  GinShellRunnerDelegate() = default;
+  GinShellRunnerDelegate(const GinShellRunnerDelegate&) = delete;
+  GinShellRunnerDelegate& operator=(const GinShellRunnerDelegate&) = delete;
 
   v8::Local<v8::ObjectTemplate> GetGlobalTemplate(
       ShellRunner* runner,
@@ -57,9 +59,6 @@ class GinShellRunnerDelegate : public ShellRunnerDelegate {
   void UnhandledException(ShellRunner* runner, TryCatch& try_catch) override {
     LOG(ERROR) << try_catch.GetStackTrace();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(GinShellRunnerDelegate);
 };
 
 }  // namespace
@@ -71,7 +70,6 @@ int main(int argc, char** argv) {
   base::i18n::InitializeICU();
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
   gin::V8Initializer::LoadV8Snapshot();
-  gin::V8Initializer::LoadV8Natives();
 #endif
 
   base::SingleThreadTaskExecutor main_thread_task_executor;

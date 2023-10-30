@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,22 @@
 
 #include <stdint.h>
 
+#include <ostream>
 #include <string>
 #include <type_traits>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "base/strings/string_piece.h"
 #include "gin/gin_export.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-container.h"
+#include "v8/include/v8-forward.h"
+#include "v8/include/v8-isolate.h"
+
+namespace base {
+class TimeTicks;
+}
 
 namespace gin {
 
@@ -119,8 +127,25 @@ struct GIN_EXPORT Converter<std::string> {
                      std::string* out);
 };
 
-template<>
-struct GIN_EXPORT Converter<v8::Local<v8::Function> > {
+template <>
+struct GIN_EXPORT Converter<std::u16string> {
+  static v8::Local<v8::Value> ToV8(v8::Isolate* isolate,
+                                   const std::u16string& val);
+  static bool FromV8(v8::Isolate* isolate,
+                     v8::Local<v8::Value> val,
+                     std::u16string* out);
+};
+
+// Converter for C++ TimeTicks to Javascript BigInt (unit: microseconds).
+// TimeTicks can't be converted using the existing Converter<int64_t> because
+// the target type will be Number and will lose precision.
+template <>
+struct GIN_EXPORT Converter<base::TimeTicks> {
+  static v8::Local<v8::Value> ToV8(v8::Isolate* isolate, base::TimeTicks val);
+};
+
+template <>
+struct GIN_EXPORT Converter<v8::Local<v8::Function>> {
   static v8::Local<v8::Value> ToV8(v8::Isolate* isolate,
                                    v8::Local<v8::Function> val);
   static bool FromV8(v8::Isolate* isolate,
@@ -262,6 +287,10 @@ GIN_EXPORT inline v8::Local<v8::String> StringToV8(
 // This crashes when input.size() > v8::String::kMaxLength.
 GIN_EXPORT v8::Local<v8::String> StringToSymbol(v8::Isolate* isolate,
                                                  const base::StringPiece& val);
+
+// This crashes when input.size() > v8::String::kMaxLength.
+GIN_EXPORT v8::Local<v8::String> StringToSymbol(v8::Isolate* isolate,
+                                                const base::StringPiece16& val);
 
 template<typename T>
 bool ConvertFromV8(v8::Isolate* isolate, v8::Local<v8::Value> input,

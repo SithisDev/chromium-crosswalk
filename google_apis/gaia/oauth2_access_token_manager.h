@@ -1,10 +1,15 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef GOOGLE_APIS_GAIA_OAUTH2_ACCESS_TOKEN_MANAGER_H_
 #define GOOGLE_APIS_GAIA_OAUTH2_ACCESS_TOKEN_MANAGER_H_
 
+#include <map>
+#include <set>
+
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
@@ -31,10 +36,11 @@ class OAuth2AccessTokenManager {
     virtual ~Delegate();
 
     // Creates and returns an OAuth2AccessTokenFetcher.
-    virtual std::unique_ptr<OAuth2AccessTokenFetcher> CreateAccessTokenFetcher(
+    [[nodiscard]] virtual std::unique_ptr<OAuth2AccessTokenFetcher>
+    CreateAccessTokenFetcher(
         const CoreAccountId& account_id,
         scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-        OAuth2AccessTokenConsumer* consumer) WARN_UNUSED_RESULT = 0;
+        OAuth2AccessTokenConsumer* consumer) = 0;
 
     // Returns |true| if a refresh token is available for |account_id|, and
     // |false| otherwise.
@@ -64,7 +70,7 @@ class OAuth2AccessTokenManager {
     // Called when an access token is invalidated.
     virtual void OnAccessTokenInvalidated(const CoreAccountId& account_id,
                                           const std::string& client_id,
-                                          const std::set<std::string>& scopes,
+                                          const ScopeSet& scopes,
                                           const std::string& access_token) {}
 
     // Called when an access token is fetched.
@@ -126,7 +132,7 @@ class OAuth2AccessTokenManager {
    private:
     const CoreAccountId account_id_;
     // |consumer_| to call back when this request completes.
-    Consumer* const consumer_;
+    const raw_ptr<Consumer> consumer_;
 
     SEQUENCE_CHECKER(sequence_checker_);
   };
@@ -176,6 +182,10 @@ class OAuth2AccessTokenManager {
 
   explicit OAuth2AccessTokenManager(
       OAuth2AccessTokenManager::Delegate* delegate);
+
+  OAuth2AccessTokenManager(const OAuth2AccessTokenManager&) = delete;
+  OAuth2AccessTokenManager& operator=(const OAuth2AccessTokenManager&) = delete;
+
   virtual ~OAuth2AccessTokenManager();
 
   OAuth2AccessTokenManager::Delegate* GetDelegate();
@@ -217,21 +227,14 @@ class OAuth2AccessTokenManager {
 
   // Fetches an OAuth token for the specified client/scopes. Virtual so it can
   // be overridden for tests.
-  // TODO(https://crbug.com/967598): Move this to protected.
   virtual void FetchOAuth2Token(
       RequestImpl* request,
       const CoreAccountId& account_id,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       const std::string& client_id,
       const std::string& client_secret,
+      const std::string& consumer_name,
       const ScopeSet& scopes);
-
-  // Add a new entry to the cache.
-  void RegisterTokenResponse(
-      const std::string& client_id,
-      const CoreAccountId& account_id,
-      const ScopeSet& scopes,
-      const OAuth2AccessTokenConsumer::TokenResponse& token_response);
 
   // Returns a currently valid OAuth2 access token for the given set of scopes,
   // or NULL if none have been cached. Note the user of this method should
@@ -250,12 +253,10 @@ class OAuth2AccessTokenManager {
 
   // Cancels all requests that are currently in progress. Virtual so it can be
   // overridden for tests.
-  // TODO(https://crbug.com/967598): Move this to protected.
   virtual void CancelAllRequests();
 
   // Cancels all requests related to a given |account_id|. Virtual so it can be
   // overridden for tests.
-  // TODO(https://crbug.com/967598): Move this to protected.
   virtual void CancelRequestsForAccount(const CoreAccountId& account_id);
 
   // Mark an OAuth2 |access_token| issued for |account_id| and |scopes| as
@@ -266,14 +267,6 @@ class OAuth2AccessTokenManager {
   void InvalidateAccessToken(const CoreAccountId& account_id,
                              const ScopeSet& scopes,
                              const std::string& access_token);
-
-  // Invalidates the |access_token| issued for |account_id|, |client_id| and
-  // |scopes|. Virtual so it can be overridden for tests.
-  // TODO(https://crbug.com/967598): Move this to protected.
-  virtual void InvalidateAccessTokenImpl(const CoreAccountId& account_id,
-                                         const std::string& client_id,
-                                         const ScopeSet& scopes,
-                                         const std::string& access_token);
 
   void set_max_authorization_token_fetch_retries_for_testing(int max_retries);
 
@@ -286,11 +279,15 @@ class OAuth2AccessTokenManager {
   const base::ObserverList<DiagnosticsObserver, true>::Unchecked&
   GetDiagnosticsObserversForTesting();
 
- private:
-  // TODO(https://crbug.com/967598): Determine whether ProfileOAuth2TokenService
-  // needs to have API to access to token_cache().
-  friend class ProfileOAuth2TokenService;
+ protected:
+  // Invalidates the |access_token| issued for |account_id|, |client_id| and
+  // |scopes|. Virtual so it can be overridden for tests.
+  virtual void InvalidateAccessTokenImpl(const CoreAccountId& account_id,
+                                         const std::string& client_id,
+                                         const ScopeSet& scopes,
+                                         const std::string& access_token);
 
+ private:
   class Fetcher;
   friend class Fetcher;
 
@@ -319,6 +316,13 @@ class OAuth2AccessTokenManager {
       RequestImpl* request,
       const RequestParameters& client_scopes);
 
+  // Add a new entry to the cache.
+  void RegisterTokenResponse(
+      const std::string& client_id,
+      const CoreAccountId& account_id,
+      const ScopeSet& scopes,
+      const OAuth2AccessTokenConsumer::TokenResponse& token_response);
+
   // Removes an access token for the given set of scopes from the cache.
   // Returns true if the entry was removed, otherwise false.
   bool RemoveCachedTokenResponse(const RequestParameters& client_scopes,
@@ -335,7 +339,7 @@ class OAuth2AccessTokenManager {
   // List of observers to notify when access token status changes.
   base::ObserverList<DiagnosticsObserver, true>::Unchecked
       diagnostics_observer_list_;
-  Delegate* delegate_;
+  raw_ptr<Delegate> delegate_;
   // A map from fetch parameters to a fetcher that is fetching an OAuth2 access
   // token using these parameters.
   std::map<RequestParameters, std::unique_ptr<Fetcher>> pending_fetchers_;
@@ -344,7 +348,9 @@ class OAuth2AccessTokenManager {
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  DISALLOW_COPY_AND_ASSIGN(OAuth2AccessTokenManager);
+  FRIEND_TEST_ALL_PREFIXES(OAuth2AccessTokenManagerTest, ClearCache);
+  FRIEND_TEST_ALL_PREFIXES(OAuth2AccessTokenManagerTest, ClearCacheForAccount);
+  FRIEND_TEST_ALL_PREFIXES(OAuth2AccessTokenManagerTest, OnAccessTokenRemoved);
 };
 
 #endif  // GOOGLE_APIS_GAIA_OAUTH2_ACCESS_TOKEN_MANAGER_H_

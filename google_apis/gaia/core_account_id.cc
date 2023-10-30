@@ -1,8 +1,19 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "google_apis/gaia/core_account_id.h"
+
+#include "base/check.h"
+#include "google_apis/gaia/gaia_auth_util.h"
+
+namespace {
+// Returns whether the string looks like an email (the test is
+// crude an only checks whether it includes an '@').
+bool IsEmailString(const std::string& string) {
+  return string.find('@') != std::string::npos;
+}
+}  // anonymous namespace
 
 CoreAccountId::CoreAccountId() = default;
 
@@ -16,40 +27,76 @@ CoreAccountId& CoreAccountId::operator=(const CoreAccountId&) = default;
 
 CoreAccountId& CoreAccountId::operator=(CoreAccountId&&) noexcept = default;
 
-CoreAccountId::CoreAccountId(const char* id) : id(id) {}
+// static
+CoreAccountId CoreAccountId::FromGaiaId(const std::string& gaia_id) {
+  if (gaia_id.empty())
+    return CoreAccountId();
 
-CoreAccountId::CoreAccountId(std::string&& id) : id(std::move(id)) {}
+  DCHECK(!IsEmailString(gaia_id))
+      << "Expected a Gaia ID and got an email [actual = " << gaia_id << "]";
+  return CoreAccountId::FromString(gaia_id);
+}
 
-CoreAccountId::CoreAccountId(const std::string& id) : id(id) {}
+// static
+CoreAccountId CoreAccountId::FromRobotEmail(const std::string& robot_email) {
+  if (robot_email.empty())
+    return CoreAccountId();
+  DCHECK(gaia::IsGoogleRobotAccountEmail(robot_email))
+      << "Not a valid robot email [robot_email = " << robot_email << "]";
+  return CoreAccountId::FromString(robot_email);
+}
 
-CoreAccountId::operator std::string() const {
-  return id;
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+// static
+CoreAccountId CoreAccountId::FromEmail(const std::string& email) {
+  if (email.empty())
+    return CoreAccountId();
+
+  DCHECK(IsEmailString(email))
+      << "Expected an email [actual = " << email << "]";
+  return CoreAccountId::FromString(email);
+}
+#endif
+
+// static
+CoreAccountId CoreAccountId::FromString(const std::string& value) {
+  CoreAccountId account_id;
+  account_id.id_ = value;
+  return account_id;
 }
 
 bool CoreAccountId::empty() const {
-  return id.empty();
+  return id_.empty();
+}
+
+bool CoreAccountId::IsEmail() const {
+  return IsEmailString(id_);
+}
+
+const std::string& CoreAccountId::ToString() const {
+  return id_;
 }
 
 bool operator<(const CoreAccountId& lhs, const CoreAccountId& rhs) {
-  return lhs.id < rhs.id;
+  return lhs.ToString() < rhs.ToString();
 }
 
 bool operator==(const CoreAccountId& lhs, const CoreAccountId& rhs) {
-  return lhs.id == rhs.id;
+  return lhs.ToString() == rhs.ToString();
 }
 
 bool operator!=(const CoreAccountId& lhs, const CoreAccountId& rhs) {
-  return lhs.id != rhs.id;
+  return lhs.ToString() != rhs.ToString();
 }
 
 std::ostream& operator<<(std::ostream& out, const CoreAccountId& a) {
-  return out << a.id;
+  return out << a.ToString();
 }
 
 std::vector<std::string> ToStringList(
     const std::vector<CoreAccountId>& account_ids) {
   std::vector<std::string> account_ids_string;
   for (const auto& account_id : account_ids)
-    account_ids_string.push_back(account_id.id);
+    account_ids_string.push_back(account_id.ToString());
   return account_ids_string;
 }

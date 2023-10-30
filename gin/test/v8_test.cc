@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 #include "gin/array_buffer.h"
 #include "gin/public/isolate_holder.h"
 #include "gin/v8_initializer.h"
+#include "v8/include/v8-context.h"
+#include "v8/include/v8-initialization.h"
 
 using v8::Context;
 using v8::Local;
@@ -16,15 +18,18 @@ using v8::HandleScope;
 namespace gin {
 
 V8Test::V8Test()
-    : scoped_task_environment_(
-          base::test::ScopedTaskEnvironment::MainThreadType::IO) {}
+    : task_environment_(base::test::TaskEnvironment::MainThreadType::IO) {}
 
 V8Test::~V8Test() = default;
 
 void V8Test::SetUp() {
+  // Multiple gin unittests are by default run in the same process. Since some
+  // tests set non-default V8 flags, we thus cannot freeze flags after V8
+  // initialization.
+  v8::V8::SetFlagsFromString("--no-freeze-flags-after-init");
+
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
   gin::V8Initializer::LoadV8Snapshot();
-  gin::V8Initializer::LoadV8Natives();
 #endif
   gin::IsolateHolder::Initialize(gin::IsolateHolder::kStrictMode,
                                  gin::ArrayBufferAllocator::SharedInstance());

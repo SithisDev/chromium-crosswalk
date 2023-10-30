@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,25 +8,27 @@
 
 #include <memory>
 
+#include "base/base64url.h"
 #include "base/bind.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/supports_user_data.h"
 #include "base/values.h"
 #include "google_apis/gaia/gaia_urls.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_request.h"
+#include "google_apis/gaia/oauth2_mint_token_consent_result.pb.h"
 #include "url/gurl.h"
+#include "url/origin.h"
+#include "url/scheme_host_port.h"
 
 namespace gaia {
 
 namespace {
 
 const char kGmailDomain[] = "gmail.com";
+const char kGoogleDomain[] = "google.com";
 const char kGooglemailDomain[] = "googlemail.com";
-
-const void* const kURLRequestUserDataKey = &kURLRequestUserDataKey;
 
 std::string CanonicalizeEmailImpl(const std::string& email_address,
                                   bool change_googlemail_to_gmail) {
@@ -46,13 +48,6 @@ std::string CanonicalizeEmailImpl(const std::string& email_address,
   VLOG(1) << "Canonicalized " << email_address << " to " << new_email;
   return new_email;
 }
-
-class GaiaURLRequestUserData : public base::SupportsUserData::Data {
- public:
-  static std::unique_ptr<base::SupportsUserData::Data> Create() {
-    return std::make_unique<GaiaURLRequestUserData>();
-  }
-};
 
 }  // namespace
 
@@ -105,13 +100,26 @@ std::string ExtractDomainName(const std::string& email_address) {
   return std::string();
 }
 
-bool IsGaiaSignonRealm(const GURL& url) {
-  if (!url.SchemeIsCryptographic())
-    return false;
-
-  return url == GaiaUrls::GetInstance()->gaia_url();
+bool IsGoogleInternalAccountEmail(const std::string& email) {
+  return ExtractDomainName(SanitizeEmail(email)) == kGoogleDomain;
 }
 
+bool IsGoogleRobotAccountEmail(const std::string& email) {
+  std::string domain_name = gaia::ExtractDomainName(SanitizeEmail(email));
+  return base::EndsWith(domain_name, "gserviceaccount.com") ||
+         base::EndsWith(domain_name, "googleusercontent.com");
+}
+
+bool HasGaiaSchemeHostPort(const GURL& url) {
+  const url::Origin& gaia_origin = GaiaUrls::GetInstance()->gaia_origin();
+  CHECK(!gaia_origin.opaque());
+  CHECK(gaia_origin.GetURL().SchemeIsHTTPOrHTTPS());
+
+  const url::SchemeHostPort& gaia_scheme_host_port =
+      gaia_origin.GetTupleOrPrecursorTupleIfOpaque();
+
+  return url::SchemeHostPort(url) == gaia_scheme_host_port;
+}
 
 bool ParseListAccountsData(const std::string& data,
                            std::vector<ListedAccount>* accounts,
@@ -127,42 +135,46 @@ bool ParseListAccountsData(const std::string& data,
   if (!value)
     return false;
 
-  base::ListValue* list;
-  if (!value->GetAsList(&list) || list->GetSize() < 2)
+  if (!value->is_list())
+    return false;
+  base::Value::ConstListView list = value->GetListDeprecated();
+  if (list.size() < 2u)
     return false;
 
   // Get list of account info.
-  base::ListValue* account_list;
-  if (!list->GetList(1, &account_list))
+  if (!list[1].is_list())
     return false;
+  base::Value::ConstListView account_list = list[1].GetListDeprecated();
 
   // Build a vector of accounts from the cookie.  Order is important: the first
   // account in the list is the primary account.
-  for (size_t i = 0; i < account_list->GetSize(); ++i) {
-    base::ListValue* account;
-    if (account_list->GetList(i, &account) && account != nullptr) {
+  for (size_t i = 0; i < account_list.size(); ++i) {
+    if (account_list[i].is_list()) {
+      base::Value::ConstListView account = account_list[i].GetListDeprecated();
       std::string email;
       // Canonicalize the email since ListAccounts returns "display email".
-      if (account->GetString(3, &email) && !email.empty()) {
+      if (3u < account.size() && account[3].is_string() &&
+          !(email = account[3].GetString()).empty()) {
         // New version if ListAccounts indicates whether the email's session
         // is still valid or not.  If this value is present and false, assume
         // its invalid.  Otherwise assume it's valid to remain compatible with
         // old version.
         int is_email_valid = 1;
-        if (!account->GetInteger(9, &is_email_valid))
-          is_email_valid = 1;
+        if (9u < account.size() && account[9].is_int())
+          is_email_valid = account[9].GetInt();
 
         int signed_out = 0;
-        if (!account->GetInteger(14, &signed_out))
-          signed_out = 0;
+        if (14u < account.size() && account[14].is_int())
+          signed_out = account[14].GetInt();
 
         int verified = 1;
-        if (!account->GetInteger(15, &verified))
-          verified = 1;
+        if (15u < account.size() && account[15].is_int())
+          verified = account[15].GetInt();
 
         std::string gaia_id;
         // ListAccounts must also return the Gaia Id.
-        if (account->GetString(10, &gaia_id) && !gaia_id.empty()) {
+        if (10u < account.size() && account[10].is_string() &&
+            !(gaia_id = account[10].GetString()).empty()) {
           ListedAccount listed_account;
           listed_account.email = CanonicalizeEmail(email);
           listed_account.gaia_id = gaia_id;
@@ -170,15 +182,40 @@ bool ParseListAccountsData(const std::string& data,
           listed_account.signed_out = signed_out != 0;
           listed_account.verified = verified != 0;
           listed_account.raw_email = email;
-          auto* list =
+          auto* accounts_ptr =
               listed_account.signed_out ? signed_out_accounts : accounts;
-          if (list)
-            list->push_back(listed_account);
+          if (accounts_ptr)
+            accounts_ptr->push_back(listed_account);
         }
       }
     }
   }
 
+  return true;
+}
+
+bool ParseOAuth2MintTokenConsentResult(const std::string& consent_result,
+                                       bool* approved,
+                                       std::string* gaia_id) {
+  DCHECK(approved);
+  DCHECK(gaia_id);
+
+  std::string decoded_result;
+  if (!base::Base64UrlDecode(consent_result,
+                             base::Base64UrlDecodePolicy::DISALLOW_PADDING,
+                             &decoded_result)) {
+    VLOG(1) << "Base64UrlDecode() failed to decode the consent result";
+    return false;
+  }
+
+  OAuth2MintTokenConsentResult parsed_result;
+  if (!parsed_result.ParseFromString(decoded_result)) {
+    VLOG(1) << "Failed to parse the consent result protobuf message";
+    return false;
+  }
+
+  *approved = parsed_result.approved();
+  *gaia_id = parsed_result.obfuscated_id();
   return true;
 }
 

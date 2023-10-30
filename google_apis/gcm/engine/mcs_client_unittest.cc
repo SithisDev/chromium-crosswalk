@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,14 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/test/scoped_task_environment.h"
 #include "base/test/simple_test_clock.h"
+#include "base/test/task_environment.h"
 #include "base/timer/timer.h"
 #include "google_apis/gcm/base/fake_encryptor.h"
 #include "google_apis/gcm/base/mcs_util.h"
@@ -130,6 +130,7 @@ class MCSClientTest : public testing::Test {
   ~MCSClientTest() override;
 
   void SetUp() override;
+  void TearDown() override;
 
   void BuildMCSClient();
   void InitializeClient();
@@ -173,7 +174,7 @@ class MCSClientTest : public testing::Test {
   base::SimpleTestClock clock_;
 
   base::ScopedTempDir temp_directory_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<base::RunLoop> run_loop_;
   std::unique_ptr<GCMStore> gcm_store_;
 
@@ -196,10 +197,10 @@ MCSClientTest::MCSClientTest()
       restored_security_token_(0),
       message_send_status_(MCSClient::SENT) {
   EXPECT_TRUE(temp_directory_.CreateUniqueTempDir());
-  run_loop_.reset(new base::RunLoop());
+  run_loop_ = std::make_unique<base::RunLoop>();
 
   // Advance the clock to a non-zero time.
-  clock_.Advance(base::TimeDelta::FromSeconds(1));
+  clock_.Advance(base::Seconds(1));
 }
 
 MCSClientTest::~MCSClientTest() {}
@@ -208,27 +209,36 @@ void MCSClientTest::SetUp() {
   testing::Test::SetUp();
 }
 
+void MCSClientTest::TearDown() {
+  gcm_store_.reset();
+  task_environment_.RunUntilIdle();
+  testing::Test::TearDown();
+}
+
 void MCSClientTest::BuildMCSClient() {
-  gcm_store_.reset(
-      new GCMStoreImpl(temp_directory_.GetPath(),
-                       scoped_task_environment_.GetMainThreadTaskRunner(),
-                       base::WrapUnique<Encryptor>(new FakeEncryptor)));
-  mcs_client_.reset(
-      new TestMCSClient(&clock_, &connection_factory_, gcm_store_.get(),
-                        base::ThreadTaskRunnerHandle::Get(), &recorder_));
+  gcm_store_ = std::make_unique<GCMStoreImpl>(
+      temp_directory_.GetPath(),
+      /*remove_account_mappings_with_email_key=*/true,
+      task_environment_.GetMainThreadTaskRunner(),
+      base::WrapUnique<Encryptor>(new FakeEncryptor));
+  mcs_client_ = std::make_unique<TestMCSClient>(
+      &clock_, &connection_factory_, gcm_store_.get(),
+      base::ThreadTaskRunnerHandle::Get(), &recorder_);
 }
 
 void MCSClientTest::InitializeClient() {
-  gcm_store_->Load(GCMStore::CREATE_IF_MISSING, base::Bind(
-      &MCSClient::Initialize,
-      base::Unretained(mcs_client_.get()),
-      base::Bind(&MCSClientTest::ErrorCallback,
-                 base::Unretained(this)),
-      base::Bind(&MCSClientTest::MessageReceivedCallback,
-                 base::Unretained(this)),
-      base::Bind(&MCSClientTest::MessageSentCallback, base::Unretained(this))));
+  gcm_store_->Load(
+      GCMStore::CREATE_IF_MISSING,
+      base::BindOnce(
+          &MCSClient::Initialize, base::Unretained(mcs_client_.get()),
+          base::BindRepeating(&MCSClientTest::ErrorCallback,
+                              base::Unretained(this)),
+          base::BindRepeating(&MCSClientTest::MessageReceivedCallback,
+                              base::Unretained(this)),
+          base::BindRepeating(&MCSClientTest::MessageSentCallback,
+                              base::Unretained(this))));
   run_loop_->RunUntilIdle();
-  run_loop_.reset(new base::RunLoop());
+  run_loop_ = std::make_unique<base::RunLoop>();
 }
 
 void MCSClientTest::LoginClient(
@@ -242,7 +252,7 @@ void MCSClientTest::LoginClientWithHeartbeat(
   AddExpectedLoginRequest(acknowledged_ids, heartbeat_interval_ms);
   mcs_client_->Login(kAndroidId, kSecurityToken);
   run_loop_->Run();
-  run_loop_.reset(new base::RunLoop());
+  run_loop_ = std::make_unique<base::RunLoop>();
 }
 
 void MCSClientTest::AddExpectedLoginRequest(
@@ -264,10 +274,10 @@ void MCSClientTest::AddExpectedLoginRequest(
 void MCSClientTest::StoreCredentials() {
   gcm_store_->SetDeviceCredentials(
       kAndroidId, kSecurityToken,
-      base::Bind(&MCSClientTest::SetDeviceCredentialsCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&MCSClientTest::SetDeviceCredentialsCallback,
+                     base::Unretained(this)));
   run_loop_->Run();
-  run_loop_.reset(new base::RunLoop());
+  run_loop_ = std::make_unique<base::RunLoop>();
 }
 
 FakeConnectionHandler* MCSClientTest::GetFakeHandler() const {
@@ -277,12 +287,12 @@ FakeConnectionHandler* MCSClientTest::GetFakeHandler() const {
 
 void MCSClientTest::WaitForMCSEvent() {
   run_loop_->Run();
-  run_loop_.reset(new base::RunLoop());
+  run_loop_ = std::make_unique<base::RunLoop>();
 }
 
 void MCSClientTest::PumpLoop() {
   run_loop_->RunUntilIdle();
-  run_loop_.reset(new base::RunLoop());
+  run_loop_ = std::make_unique<base::RunLoop>();
 }
 
 void MCSClientTest::ErrorCallback() {
@@ -292,7 +302,7 @@ void MCSClientTest::ErrorCallback() {
 }
 
 void MCSClientTest::MessageReceivedCallback(const MCSMessage& message) {
-  received_message_.reset(new MCSMessage(message));
+  received_message_ = std::make_unique<MCSMessage>(message);
   DVLOG(1) << "Message received callback invoked, killing loop.";
   run_loop_->Quit();
 }
@@ -428,7 +438,7 @@ TEST_F(MCSClientTest, SendMessageRMQWhileDisconnected) {
   EXPECT_EQ("X", sent_message_id());
   EXPECT_FALSE(GetFakeHandler()->AllOutgoingMessagesReceived());
   GetFakeHandler()->set_fail_send(false);
-  clock()->Advance(base::TimeDelta::FromSeconds(kTTLValue - 1));
+  clock()->Advance(base::Seconds(kTTLValue - 1));
   connection_factory()->Connect();
   WaitForMCSEvent();  // Wait for the login to finish.
   PumpLoop();         // Wait for the send to happen.
@@ -467,7 +477,7 @@ TEST_F(MCSClientTest, SendMessageRMQOnRestart) {
   BuildMCSClient();
   InitializeClient();
 
-  clock()->Advance(base::TimeDelta::FromSeconds(kTTLValue - 1));
+  clock()->Advance(base::Seconds(kTTLValue - 1));
   MCSMessage message2(BuildDataMessage("from", "category", "X", 1, "1",
                                        kTTLValue, 1, kTTLValue - 1, "", 0,
                                        IMMEDIATE_ACK_NO));
@@ -783,7 +793,7 @@ TEST_F(MCSClientTest, ExpiredTTLOnSend) {
                                       IMMEDIATE_ACK_NO));
 
   // Advance time to after the TTL.
-  clock()->Advance(base::TimeDelta::FromSeconds(kTTLValue + 2));
+  clock()->Advance(base::Seconds(kTTLValue + 2));
   EXPECT_TRUE(sent_message_id().empty());
   mcs_client()->SendMessage(message);
 
@@ -811,7 +821,7 @@ TEST_F(MCSClientTest, ExpiredTTLOnRestart) {
 
   // Move the clock forward and rebuild the client, which should fail the
   // message send on restart.
-  clock()->Advance(base::TimeDelta::FromSeconds(kTTLValue + 2));
+  clock()->Advance(base::Seconds(kTTLValue + 2));
   StoreCredentials();
   BuildMCSClient();
   InitializeClient();

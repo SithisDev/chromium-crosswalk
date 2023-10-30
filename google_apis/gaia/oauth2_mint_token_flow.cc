@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,16 @@
 
 #include <stddef.h>
 
+#include <set>
 #include <string>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/span.h"
 #include "base/json/json_reader.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -20,14 +24,15 @@
 #include "base/values.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "net/base/escape.h"
 #include "net/base/net_errors.h"
-#include "services/network/public/cpp/resource_response.h"
+#include "net/cookies/cookie_constants.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace {
 
-const char kForceValueFalse[] = "false";
-const char kForceValueTrue[] = "true";
+const char kValueFalse[] = "false";
+const char kValueTrue[] = "true";
 const char kResponseTypeValueNone[] = "none";
 const char kResponseTypeValueToken[] = "token";
 
@@ -35,32 +40,32 @@ const char kOAuth2IssueTokenBodyFormat[] =
     "force=%s"
     "&response_type=%s"
     "&scope=%s"
+    "&enable_granular_permissions=%s"
     "&client_id=%s"
-    "&origin=%s";
-// TODO(pavely): lib_ver is passed to differentiate IssueToken requests from
-// different code locations. Remove once device_id mismatch is understood.
-// (crbug.com/481596)
+    "&origin=%s"
+    "&lib_ver=%s"
+    "&release_channel=%s";
+const char kOAuth2IssueTokenBodyFormatSelectedUserIdAddendum[] =
+    "&selected_user_id=%s";
 const char kOAuth2IssueTokenBodyFormatDeviceIdAddendum[] =
-    "&device_id=%s&device_type=chrome&lib_ver=extension";
+    "&device_id=%s&device_type=chrome";
+const char kOAuth2IssueTokenBodyFormatConsentResultAddendum[] =
+    "&consent_result=%s";
 const char kIssueAdviceKey[] = "issueAdvice";
-const char kIssueAdviceValueConsent[] = "consent";
+const char kIssueAdviceValueRemoteConsent[] = "remoteConsent";
 const char kAccessTokenKey[] = "token";
-const char kConsentKey[] = "consent";
 const char kExpiresInKey[] = "expiresIn";
-const char kScopesKey[] = "scopes";
-const char kDescriptionKey[] = "description";
-const char kDetailKey[] = "detail";
-const char kDetailSeparators[] = "\n";
+const char kGrantedScopesKey[] = "grantedScopes";
 const char kError[] = "error";
 const char kMessage[] = "message";
 
 static GoogleServiceAuthError CreateAuthError(
     int net_error,
-    const network::ResourceResponseHead* head,
+    const network::mojom::URLResponseHead* head,
     std::unique_ptr<std::string> body) {
-  if (net_error == net::ERR_ABORTED) {
+  if (net_error == net::ERR_ABORTED)
     return GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED);
-  }
+
   if (net_error != net::OK) {
     DLOG(WARNING) << "Server returned error: errno " << net_error;
     return GoogleServiceAuthError::FromConnectionError(net_error);
@@ -70,10 +75,8 @@ static GoogleServiceAuthError CreateAuthError(
   if (body)
     response_body = std::move(*body);
 
-  std::unique_ptr<base::Value> value =
-      base::JSONReader::ReadDeprecated(response_body);
-  base::DictionaryValue* response;
-  if (!value.get() || !value->GetAsDictionary(&response)) {
+  absl::optional<base::Value> value = base::JSONReader::Read(response_body);
+  if (!value || !value->is_dict()) {
     int http_response_code = -1;
     if (head && head->headers)
       http_response_code = head->headers->response_code();
@@ -83,28 +86,44 @@ static GoogleServiceAuthError CreateAuthError(
                            "HTTP Status of the response is: %d",
                            http_response_code));
   }
-  base::DictionaryValue* error;
-  if (!response->GetDictionary(kError, &error)) {
+  const base::Value* error = value->FindDictKey(kError);
+  if (!error) {
     return GoogleServiceAuthError::FromUnexpectedServiceResponse(
         "Not able to find a detailed error in a service response.");
   }
-  std::string message;
-  if (!error->GetString(kMessage, &message)) {
+  const std::string* message = error->FindStringKey(kMessage);
+  if (!message) {
     return GoogleServiceAuthError::FromUnexpectedServiceResponse(
         "Not able to find an error message within a service error.");
   }
-  return GoogleServiceAuthError::FromServiceError(message);
+  return GoogleServiceAuthError::FromServiceError(*message);
+}
+
+bool AreCookiesEqual(const net::CanonicalCookie& lhs,
+                     const net::CanonicalCookie& rhs) {
+  return lhs.IsEquivalent(rhs);
+}
+
+void RecordApiCallResult(OAuth2MintTokenApiCallResult result) {
+  base::UmaHistogramEnumeration(kOAuth2MintTokenApiCallResultHistogram, result);
 }
 
 }  // namespace
 
-IssueAdviceInfoEntry::IssueAdviceInfoEntry() {}
-IssueAdviceInfoEntry::IssueAdviceInfoEntry(const IssueAdviceInfoEntry& other) =
-    default;
-IssueAdviceInfoEntry::~IssueAdviceInfoEntry() {}
+const char kOAuth2MintTokenApiCallResultHistogram[] =
+    "Signin.OAuth2MintToken.ApiCallResult";
 
-bool IssueAdviceInfoEntry::operator ==(const IssueAdviceInfoEntry& rhs) const {
-  return description == rhs.description && details == rhs.details;
+RemoteConsentResolutionData::RemoteConsentResolutionData() = default;
+RemoteConsentResolutionData::~RemoteConsentResolutionData() = default;
+RemoteConsentResolutionData::RemoteConsentResolutionData(
+    const RemoteConsentResolutionData& other) = default;
+RemoteConsentResolutionData& RemoteConsentResolutionData::operator=(
+    const RemoteConsentResolutionData& other) = default;
+
+bool RemoteConsentResolutionData::operator==(
+    const RemoteConsentResolutionData& rhs) const {
+  return url == rhs.url && std::equal(cookies.begin(), cookies.end(),
+                                      rhs.cookies.begin(), &AreCookiesEqual);
 }
 
 OAuth2MintTokenFlow::Parameters::Parameters() : mode(MODE_ISSUE_ADVICE) {}
@@ -113,14 +132,23 @@ OAuth2MintTokenFlow::Parameters::Parameters(
     const std::string& eid,
     const std::string& cid,
     const std::vector<std::string>& scopes_arg,
+    bool enable_granular_permissions,
     const std::string& device_id,
+    const std::string& selected_user_id,
+    const std::string& consent_result,
+    const std::string& version,
+    const std::string& channel,
     Mode mode_arg)
     : extension_id(eid),
       client_id(cid),
       scopes(scopes_arg),
+      enable_granular_permissions(enable_granular_permissions),
       device_id(device_id),
-      mode(mode_arg) {
-}
+      selected_user_id(selected_user_id),
+      consent_result(consent_result),
+      version(version),
+      channel(channel),
+      mode(mode_arg) {}
 
 OAuth2MintTokenFlow::Parameters::Parameters(const Parameters& other) = default;
 
@@ -128,25 +156,26 @@ OAuth2MintTokenFlow::Parameters::~Parameters() {}
 
 OAuth2MintTokenFlow::OAuth2MintTokenFlow(Delegate* delegate,
                                          const Parameters& parameters)
-    : delegate_(delegate), parameters_(parameters), weak_factory_(this) {
-}
+    : delegate_(delegate), parameters_(parameters) {}
 
 OAuth2MintTokenFlow::~OAuth2MintTokenFlow() { }
 
-void OAuth2MintTokenFlow::ReportSuccess(const std::string& access_token,
-                                        int time_to_live) {
+void OAuth2MintTokenFlow::ReportSuccess(
+    const std::string& access_token,
+    const std::set<std::string>& granted_scopes,
+    int time_to_live) {
   if (delegate_)
-    delegate_->OnMintTokenSuccess(access_token, time_to_live);
+    delegate_->OnMintTokenSuccess(access_token, granted_scopes, time_to_live);
 
   // |this| may already be deleted.
 }
 
-void OAuth2MintTokenFlow::ReportIssueAdviceSuccess(
-    const IssueAdviceInfo& issue_advice) {
+void OAuth2MintTokenFlow::ReportRemoteConsentSuccess(
+    const RemoteConsentResolutionData& resolution_data) {
   if (delegate_)
-    delegate_->OnIssueAdviceSuccess(issue_advice);
+    delegate_->OnRemoteConsentSuccess(resolution_data);
 
-  // |this| may already be deleted.
+  // |this| may already be deleted;
 }
 
 void OAuth2MintTokenFlow::ReportFailure(
@@ -162,68 +191,99 @@ GURL OAuth2MintTokenFlow::CreateApiCallUrl() {
 }
 
 std::string OAuth2MintTokenFlow::CreateApiCallBody() {
-  const char* force_value =
-      (parameters_.mode == MODE_MINT_TOKEN_FORCE ||
-       parameters_.mode == MODE_RECORD_GRANT)
-          ? kForceValueTrue : kForceValueFalse;
+  const char* force_value = (parameters_.mode == MODE_MINT_TOKEN_FORCE ||
+                             parameters_.mode == MODE_RECORD_GRANT)
+                                ? kValueTrue
+                                : kValueFalse;
   const char* response_type_value =
       (parameters_.mode == MODE_MINT_TOKEN_NO_FORCE ||
        parameters_.mode == MODE_MINT_TOKEN_FORCE)
           ? kResponseTypeValueToken : kResponseTypeValueNone;
+  const char* enable_granular_permissions_value =
+      parameters_.enable_granular_permissions ? kValueTrue : kValueFalse;
   std::string body = base::StringPrintf(
       kOAuth2IssueTokenBodyFormat,
-      net::EscapeUrlEncodedData(force_value, true).c_str(),
-      net::EscapeUrlEncodedData(response_type_value, true).c_str(),
-      net::EscapeUrlEncodedData(
-          base::JoinString(parameters_.scopes, " "), true).c_str(),
-      net::EscapeUrlEncodedData(parameters_.client_id, true).c_str(),
-      net::EscapeUrlEncodedData(parameters_.extension_id, true).c_str());
+      base::EscapeUrlEncodedData(force_value, true).c_str(),
+      base::EscapeUrlEncodedData(response_type_value, true).c_str(),
+      base::EscapeUrlEncodedData(base::JoinString(parameters_.scopes, " "),
+                                 true)
+          .c_str(),
+      base::EscapeUrlEncodedData(enable_granular_permissions_value, true)
+          .c_str(),
+      base::EscapeUrlEncodedData(parameters_.client_id, true).c_str(),
+      base::EscapeUrlEncodedData(parameters_.extension_id, true).c_str(),
+      base::EscapeUrlEncodedData(parameters_.version, true).c_str(),
+      base::EscapeUrlEncodedData(parameters_.channel, true).c_str());
   if (!parameters_.device_id.empty()) {
     body.append(base::StringPrintf(
         kOAuth2IssueTokenBodyFormatDeviceIdAddendum,
-        net::EscapeUrlEncodedData(parameters_.device_id, true).c_str()));
+        base::EscapeUrlEncodedData(parameters_.device_id, true).c_str()));
+  }
+  if (!parameters_.selected_user_id.empty()) {
+    body.append(base::StringPrintf(
+        kOAuth2IssueTokenBodyFormatSelectedUserIdAddendum,
+        base::EscapeUrlEncodedData(parameters_.selected_user_id, true)
+            .c_str()));
+  }
+  if (!parameters_.consent_result.empty()) {
+    body.append(base::StringPrintf(
+        kOAuth2IssueTokenBodyFormatConsentResultAddendum,
+        base::EscapeUrlEncodedData(parameters_.consent_result, true).c_str()));
   }
   return body;
 }
 
 void OAuth2MintTokenFlow::ProcessApiCallSuccess(
-    const network::ResourceResponseHead* head,
+    const network::mojom::URLResponseHead* head,
     std::unique_ptr<std::string> body) {
   std::string response_body;
   if (body)
     response_body = std::move(*body);
-  std::unique_ptr<base::Value> value =
-      base::JSONReader::ReadDeprecated(response_body);
-  base::DictionaryValue* dict = nullptr;
-  if (!value.get() || !value->GetAsDictionary(&dict)) {
+
+  absl::optional<base::Value> value = base::JSONReader::Read(response_body);
+  if (!value || !value->is_dict()) {
+    RecordApiCallResult(OAuth2MintTokenApiCallResult::kParseJsonFailure);
     ReportFailure(GoogleServiceAuthError::FromUnexpectedServiceResponse(
         "Not able to parse a JSON object from a service response."));
     return;
   }
 
-  std::string issue_advice_value;
-  if (!dict->GetString(kIssueAdviceKey, &issue_advice_value)) {
+  std::string* issue_advice_value = value->FindStringKey(kIssueAdviceKey);
+  if (!issue_advice_value) {
+    RecordApiCallResult(
+        OAuth2MintTokenApiCallResult::kIssueAdviceKeyNotFoundFailure);
     ReportFailure(GoogleServiceAuthError::FromUnexpectedServiceResponse(
         "Not able to find an issueAdvice in a service response."));
     return;
   }
-  if (issue_advice_value == kIssueAdviceValueConsent) {
-    IssueAdviceInfo issue_advice;
-    if (ParseIssueAdviceResponse(dict, &issue_advice))
-      ReportIssueAdviceSuccess(issue_advice);
-    else
+
+  if (*issue_advice_value == kIssueAdviceValueRemoteConsent) {
+    RemoteConsentResolutionData resolution_data;
+    if (ParseRemoteConsentResponse(&(*value), &resolution_data)) {
+      RecordApiCallResult(OAuth2MintTokenApiCallResult::kRemoteConsentSuccess);
+      ReportRemoteConsentSuccess(resolution_data);
+    } else {
+      RecordApiCallResult(
+          OAuth2MintTokenApiCallResult::kParseRemoteConsentFailure);
       ReportFailure(GoogleServiceAuthError::FromUnexpectedServiceResponse(
-          "Not able to parse the contents of consent "
-          "from a service response."));
+          "Not able to parse the contents of remote consent from a service "
+          "response."));
+    }
+    return;
+  }
+
+  std::string access_token;
+  std::set<std::string> granted_scopes;
+  int time_to_live;
+  if (ParseMintTokenResponse(&(*value), &access_token, &granted_scopes,
+                             &time_to_live)) {
+    RecordApiCallResult(OAuth2MintTokenApiCallResult::kMintTokenSuccess);
+    ReportSuccess(access_token, granted_scopes, time_to_live);
   } else {
-    std::string access_token;
-    int time_to_live;
-    if (ParseMintTokenResponse(dict, &access_token, &time_to_live))
-      ReportSuccess(access_token, time_to_live);
-    else
-      ReportFailure(GoogleServiceAuthError::FromUnexpectedServiceResponse(
-          "Not able to parse the contents of access token "
-          "from a service response."));
+    RecordApiCallResult(OAuth2MintTokenApiCallResult::kParseMintTokenFailure);
+    ReportFailure(GoogleServiceAuthError::FromUnexpectedServiceResponse(
+        "Not able to parse the contents of access token "
+        "from a service response."));
   }
 
   // |this| may be deleted!
@@ -231,59 +291,134 @@ void OAuth2MintTokenFlow::ProcessApiCallSuccess(
 
 void OAuth2MintTokenFlow::ProcessApiCallFailure(
     int net_error,
-    const network::ResourceResponseHead* head,
+    const network::mojom::URLResponseHead* head,
     std::unique_ptr<std::string> body) {
+  RecordApiCallResult(OAuth2MintTokenApiCallResult::kApiCallFailure);
   ReportFailure(CreateAuthError(net_error, head, std::move(body)));
 }
 
 // static
 bool OAuth2MintTokenFlow::ParseMintTokenResponse(
-    const base::DictionaryValue* dict, std::string* access_token,
+    const base::Value* dict,
+    std::string* access_token,
+    std::set<std::string>* granted_scopes,
     int* time_to_live) {
   CHECK(dict);
+  CHECK(dict->is_dict());
   CHECK(access_token);
+  CHECK(granted_scopes);
   CHECK(time_to_live);
-  std::string ttl_string;
-  return dict->GetString(kExpiresInKey, &ttl_string) &&
-      base::StringToInt(ttl_string, time_to_live) &&
-      dict->GetString(kAccessTokenKey, access_token);
+
+  const std::string* ttl_string = dict->FindStringKey(kExpiresInKey);
+  if (!ttl_string || !base::StringToInt(*ttl_string, time_to_live))
+    return false;
+
+  const std::string* access_token_ptr = dict->FindStringKey(kAccessTokenKey);
+  if (!access_token_ptr)
+    return false;
+
+  *access_token = *access_token_ptr;
+
+  const std::string* granted_scopes_string =
+      dict->FindStringKey(kGrantedScopesKey);
+
+  if (!granted_scopes_string)
+    return false;
+
+  const std::vector<std::string> granted_scopes_vector =
+      base::SplitString(*granted_scopes_string, " ", base::TRIM_WHITESPACE,
+                        base::SPLIT_WANT_NONEMPTY);
+  if (granted_scopes_vector.empty())
+    return false;
+
+  const std::set<std::string> granted_scopes_set(granted_scopes_vector.begin(),
+                                                 granted_scopes_vector.end());
+  *granted_scopes = std::move(granted_scopes_set);
+  return true;
 }
 
 // static
-bool OAuth2MintTokenFlow::ParseIssueAdviceResponse(
-    const base::DictionaryValue* dict, IssueAdviceInfo* issue_advice) {
+bool OAuth2MintTokenFlow::ParseRemoteConsentResponse(
+    const base::Value* dict,
+    RemoteConsentResolutionData* resolution_data) {
   CHECK(dict);
-  CHECK(issue_advice);
+  CHECK(resolution_data);
 
-  const base::DictionaryValue* consent_dict = nullptr;
-  if (!dict->GetDictionary(kConsentKey, &consent_dict))
+  const base::Value* resolution_dict = dict->FindDictKey("resolutionData");
+  if (!resolution_dict)
     return false;
 
-  const base::ListValue* scopes_list = nullptr;
-  if (!consent_dict->GetList(kScopesKey, &scopes_list))
+  const std::string* resolution_approach =
+      resolution_dict->FindStringKey("resolutionApproach");
+  if (!resolution_approach || *resolution_approach != "resolveInBrowser")
     return false;
 
+  const std::string* resolution_url_string =
+      resolution_dict->FindStringKey("resolutionUrl");
+  if (!resolution_url_string)
+    return false;
+  GURL resolution_url(*resolution_url_string);
+  if (!resolution_url.is_valid())
+    return false;
+
+  const base::Value* browser_cookies =
+      resolution_dict->FindListKey("browserCookies");
+  base::span<const base::Value> cookie_list;
+  if (browser_cookies)
+    cookie_list = browser_cookies->GetListDeprecated();
+
+  base::Time time_now = base::Time::Now();
   bool success = true;
-  for (size_t index = 0; index < scopes_list->GetSize(); ++index) {
-    const base::DictionaryValue* scopes_entry = nullptr;
-    IssueAdviceInfoEntry entry;
-    base::string16 detail;
-    if (!scopes_list->GetDictionary(index, &scopes_entry) ||
-        !scopes_entry->GetString(kDescriptionKey, &entry.description) ||
-        !scopes_entry->GetString(kDetailKey, &detail)) {
+  std::vector<net::CanonicalCookie> cookies;
+  for (const auto& cookie_dict : cookie_list) {
+    if (!cookie_dict.is_dict()) {
       success = false;
       break;
     }
 
-    base::TrimWhitespace(entry.description, base::TRIM_ALL, &entry.description);
-    entry.details = base::SplitString(
-        detail, base::ASCIIToUTF16(kDetailSeparators),
-        base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
-    issue_advice->push_back(entry);
+    // Required parameters:
+    const std::string* name = cookie_dict.FindStringKey("name");
+    const std::string* value = cookie_dict.FindStringKey("value");
+    const std::string* domain = cookie_dict.FindStringKey("domain");
+
+    if (!name || !value || !domain) {
+      success = false;
+      break;
+    }
+
+    // Optional parameters:
+    const std::string* path = cookie_dict.FindStringKey("path");
+    const std::string* max_age_seconds =
+        cookie_dict.FindStringKey("maxAgeSeconds");
+    absl::optional<bool> is_secure = cookie_dict.FindBoolKey("isSecure");
+    absl::optional<bool> is_http_only = cookie_dict.FindBoolKey("isHttpOnly");
+    const std::string* same_site = cookie_dict.FindStringKey("sameSite");
+
+    int64_t max_age = -1;
+    if (max_age_seconds && !base::StringToInt64(*max_age_seconds, &max_age)) {
+      success = false;
+      break;
+    }
+
+    base::Time expiration_time = base::Time();
+    if (max_age > 0)
+      expiration_time = time_now + base::Seconds(max_age);
+
+    std::unique_ptr<net::CanonicalCookie> cookie =
+        net::CanonicalCookie::CreateSanitizedCookie(
+            resolution_url, *name, *value, *domain, path ? *path : "/",
+            time_now, expiration_time, time_now, is_secure ? *is_secure : false,
+            is_http_only ? *is_http_only : false,
+            net::StringToCookieSameSite(same_site ? *same_site : ""),
+            net::COOKIE_PRIORITY_DEFAULT, /* same_party */ false,
+            /* partition_key */ absl::nullopt);
+    cookies.push_back(*cookie);
   }
 
-  if (!success)
-    issue_advice->clear();
+  if (success) {
+    resolution_data->url = std::move(resolution_url);
+    resolution_data->cookies = std::move(cookies);
+  }
 
   return success;
 }

@@ -1,10 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "google_apis/gcm/base/socket_stream.h"
 
 #include <stddef.h>
+#include <cstring>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -30,8 +31,7 @@ SocketInputStream::SocketInputStream(mojo::ScopedDataPipeConsumerHandle stream)
           base::MakeRefCounted<net::DrainableIOBuffer>(io_buffer_,
                                                        kDefaultBufferSize)),
       next_pos_(0),
-      last_error_(net::OK),
-      weak_ptr_factory_(this) {
+      last_error_(net::OK) {
   stream_watcher_.Watch(
       stream_.get(),
       MOJO_HANDLE_SIGNAL_READABLE | MOJO_HANDLE_SIGNAL_PEER_CLOSED,
@@ -216,7 +216,6 @@ void SocketInputStream::CloseStream(net::Error error) {
   DCHECK_LT(error, net::ERR_IO_PENDING);
   ResetInternal();
   last_error_ = error;
-  LOG(ERROR) << "Closing stream with result " << error;
 }
 
 SocketOutputStream::SocketOutputStream(
@@ -226,8 +225,7 @@ SocketOutputStream::SocketOutputStream(
       io_buffer_(
           base::MakeRefCounted<net::IOBufferWithSize>(kDefaultBufferSize)),
       next_pos_(0),
-      last_error_(net::OK),
-      weak_ptr_factory_(this) {
+      last_error_(net::OK) {
   stream_watcher_.Watch(
       stream_.get(),
       MOJO_HANDLE_SIGNAL_WRITABLE | MOJO_HANDLE_SIGNAL_PEER_CLOSED,

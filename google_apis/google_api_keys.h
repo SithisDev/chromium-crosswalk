@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,9 @@
 // If you add more includes to this file, you also need to add them to
 // google_api_keys_unittest.cc.
 #include <string>
+
+#include "build/build_config.h"
+#include "google_apis/buildflags.h"
 
 // These functions enable you to retrieve keys to use for Google APIs
 // such as Translate and Safe Browsing.
@@ -24,11 +27,17 @@
 // https://developers.google.com/console/help/ and
 // https://developers.google.com/console/.
 //
-// The keys must either be provided using preprocessor variables (set
-// via e.g. ~/.gyp/include.gypi). Alternatively, in Chromium builds, they can be
-// overridden at runtime using environment variables of the same name.
-// Environment variable overrides will be ignored for official Google Chrome
-// builds.
+// The keys must either be provided using preprocessor variables (set via e.g.
+// GN args). Alternatively, they can be overridden at runtime using one of the
+// following methods (in priority order):
+// - Command line parameters (only for GOOGLE_CLIENT_ID_MAIN and
+//   GOOGLE_CLIENT_SECRET_MAIN values). The command-line parameters are
+//   --oauth2-client-id and --oauth2-client-secret.
+// - Config file entry of the same name. Path to a config file is set via the
+//   --gaia-config command line parameter. See google_apis/gaia/gaia_config.h
+//   for syntax reference.
+// - Environment variables of the same name. Environment variable overrides will
+//   be ignored for official Google Chrome builds.
 //
 // The names of the preprocessor variables (or environment variables
 // to override them at runtime in Chromium builds) are as follows:
@@ -39,16 +48,9 @@
 // - GOOGLE_DEFAULT_CLIENT_SECRET: If set, this is used as the default
 //   for all client secrets.  This is intended only for development.
 // - GOOGLE_CLIENT_ID_[client name]
-//   (e.g. GOOGLE_CLIENT_ID_CLOUD_PRINT, i.e. one for each item in the
-//   OAuth2Client enumeration below)
 // - GOOGLE_CLIENT_SECRET_[client name]
-//   (e.g. GOOGLE_CLIENT_SECRET_CLOUD_PRINT, i.e. one for each item in
+//   (e.g. GOOGLE_CLIENT_SECRET_REMOTING, i.e. one for each item in
 //   the OAuth2Client enumeration below)
-//
-// The GOOGLE_CLIENT_ID_MAIN and GOOGLE_CLIENT_SECRET_MAIN values can
-// also be set via the command line (this overrides any other
-// setting).  The command-line parameters are --oauth2-client-id and
-// --oauth2-client-secret.
 //
 // If some of the parameters mentioned above are not provided,
 // Chromium will still build and run, but services that require them
@@ -76,9 +78,22 @@ std::string GetNonStableAPIKey();
 // Retrieves the Chrome Remote Desktop API key.
 std::string GetRemotingAPIKey();
 
-#if defined(OS_IOS)
+// Retrieves the Sharing API Key.
+std::string GetSharingAPIKey();
+
+// Retrieves the Speech On-Device API (SODA) API Key.
+std::string GetSodaAPIKey();
+
+// Retrieves the ReadAloud API Key.
+std::string GetReadAloudAPIKey();
+
+// Retrieves the Fresnel API Key.
+std::string GetFresnelAPIKey();
+
+#if BUILDFLAG(SUPPORT_EXTERNAL_GOOGLE_API_KEY)
 // Sets the API key. This should be called as early as possible before this
-// API key is even accessed.
+// API key is even accessed. It must be called before GetAPIKey.
+// TODO(https://crbug.com/1166007): Enforce this is called before GetAPIKey.
 void SetAPIKey(const std::string& api_key);
 #endif
 
@@ -87,12 +102,11 @@ std::string GetMetricsKey();
 
 // Represents the different sets of client IDs and secrets in use.
 enum OAuth2Client {
-  CLIENT_MAIN,         // Several different features use this.
-  CLIENT_CLOUD_PRINT,
+  CLIENT_MAIN,  // Several different features use this.
   CLIENT_REMOTING,
   CLIENT_REMOTING_HOST,
 
-  CLIENT_NUM_ITEMS     // Must be last item.
+  CLIENT_NUM_ITEMS  // Must be last item.
 };
 
 // Returns true if no dummy OAuth2 client ID and secret are set.
@@ -112,7 +126,7 @@ std::string GetOAuth2ClientID(OAuth2Client client);
 // in, e.g. URL-escaped if you use it in a URL.
 std::string GetOAuth2ClientSecret(OAuth2Client client);
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 // Sets the client id for the specified client. Should be called as early as
 // possible before these ids are accessed.
 void SetOAuth2ClientID(OAuth2Client client, const std::string& client_id);

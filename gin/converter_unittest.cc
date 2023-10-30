@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,23 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <string>
+
 #include "base/compiler_specific.h"
-#include "base/stl_util.h"
+#include "base/strings/utf_string_conversions.h"
+#include "gin/function_template.h"
 #include "gin/handle.h"
 #include "gin/public/isolate_holder.h"
 #include "gin/test/v8_test.h"
 #include "gin/wrappable.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-container.h"
+#include "v8/include/v8-forward.h"
+#include "v8/include/v8-function.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-primitive.h"
+#include "v8/include/v8-template.h"
 
 namespace gin {
 
@@ -66,7 +74,7 @@ TEST_F(ConverterTest, Bool) {
       {Undefined(instance_->isolate()).As<Value>(), false},
   };
 
-  for (size_t i = 0; i < base::size(test_data); ++i) {
+  for (size_t i = 0; i < std::size(test_data); ++i) {
     bool result = false;
     EXPECT_TRUE(Converter<bool>::FromV8(instance_->isolate(),
                                         test_data[i].input, &result));
@@ -79,11 +87,35 @@ TEST_F(ConverterTest, Bool) {
   }
 }
 
+TEST_F(ConverterTest, String16) {
+  v8::Isolate* isolate = instance_->isolate();
+
+  HandleScope handle_scope(isolate);
+
+  EXPECT_TRUE(Converter<std::u16string>::ToV8(isolate, u"")
+                  ->StrictEquals(StringToV8(isolate, "")));
+  EXPECT_TRUE(Converter<std::u16string>::ToV8(isolate, u"hello")
+                  ->StrictEquals(StringToV8(isolate, "hello")));
+
+  std::u16string result;
+
+  ASSERT_FALSE(
+      Converter<std::u16string>::FromV8(isolate, v8::False(isolate), &result));
+  ASSERT_FALSE(
+      Converter<std::u16string>::FromV8(isolate, v8::True(isolate), &result));
+  ASSERT_TRUE(Converter<std::u16string>::FromV8(
+      isolate, v8::String::Empty(isolate), &result));
+  EXPECT_EQ(result, std::u16string());
+  ASSERT_TRUE(Converter<std::u16string>::FromV8(
+      isolate, StringToV8(isolate, "hello"), &result));
+  EXPECT_EQ(result, u"hello");
+}
+
 TEST_F(ConverterTest, Int32) {
   HandleScope handle_scope(instance_->isolate());
 
   int test_data_to[] = {-1, 0, 1};
-  for (size_t i = 0; i < base::size(test_data_to); ++i) {
+  for (size_t i = 0; i < std::size(test_data_to); ++i) {
     EXPECT_TRUE(Converter<int32_t>::ToV8(instance_->isolate(), test_data_to[i])
                     ->StrictEquals(
                           Integer::New(instance_->isolate(), test_data_to[i])));
@@ -117,7 +149,7 @@ TEST_F(ConverterTest, Int32) {
       {v8::Undefined(instance_->isolate()).As<Value>(), false, 0},
   };
 
-  for (size_t i = 0; i < base::size(test_data_from); ++i) {
+  for (size_t i = 0; i < std::size(test_data_from); ++i) {
     int32_t result = std::numeric_limits<int32_t>::min();
     bool success = Converter<int32_t>::FromV8(instance_->isolate(),
                                               test_data_from[i].input, &result);
@@ -195,6 +227,47 @@ TEST_F(ConverterTest, VectorOfWrappables) {
   std::vector<MyObject*> out_value2;
   ASSERT_TRUE(ConvertFromV8(isolate, array2, &out_value2));
   EXPECT_THAT(out_value2, testing::ContainerEq(vector));
+}
+
+namespace {
+
+class MoveOnlyObject {
+ public:
+  MoveOnlyObject() = default;
+  MoveOnlyObject(const MoveOnlyObject&) = delete;
+  MoveOnlyObject& operator=(const MoveOnlyObject&) = delete;
+
+  MoveOnlyObject(MoveOnlyObject&&) noexcept = default;
+  MoveOnlyObject& operator=(MoveOnlyObject&&) noexcept = default;
+};
+
+}  // namespace
+
+template <>
+struct Converter<MoveOnlyObject> {
+  static v8::Local<v8::Value> ToV8(v8::Isolate* isolate, MoveOnlyObject in) {
+    return v8::Undefined(isolate);
+  }
+  static bool FromV8(v8::Isolate* isolate,
+                     v8::Local<v8::Value> val,
+                     MoveOnlyObject* out) {
+    *out = MoveOnlyObject();
+    return true;
+  }
+};
+
+TEST_F(ConverterTest, MoveOnlyParameters) {
+  v8::Isolate* isolate = instance_->isolate();
+  v8::HandleScope handle_scope(isolate);
+
+  auto receives_move_only_obj = [](MoveOnlyObject obj) {};
+  auto func_templ = gin::CreateFunctionTemplate(
+      isolate, base::BindRepeating(receives_move_only_obj));
+
+  v8::Local<v8::Context> context = instance_->isolate()->GetCurrentContext();
+  auto func = func_templ->GetFunction(context).ToLocalChecked();
+  v8::Local<v8::Value> argv[] = {v8::Undefined(isolate)};
+  func->Call(context, v8::Undefined(isolate), 1, argv).ToLocalChecked();
 }
 
 }  // namespace gin

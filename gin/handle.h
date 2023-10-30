@@ -1,10 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef GIN_HANDLE_H_
 #define GIN_HANDLE_H_
 
+#include "base/memory/raw_ptr.h"
 #include "gin/converter.h"
 
 namespace gin {
@@ -16,7 +17,7 @@ namespace gin {
 template<typename T>
 class Handle {
  public:
-  Handle() : object_(NULL) {}
+  Handle() : object_(nullptr) {}
 
   Handle(v8::Local<v8::Value> wrapper, T* object)
     : wrapper_(wrapper),
@@ -36,7 +37,7 @@ class Handle {
 
  private:
   v8::Local<v8::Value> wrapper_;
-  T* object_;
+  raw_ptr<T> object_;
 };
 
 template<typename T>
