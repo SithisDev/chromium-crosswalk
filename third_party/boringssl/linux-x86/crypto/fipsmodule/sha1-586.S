@@ -1,5 +1,5 @@
-# This file is generated from a similarly-named Perl script in the BoringSSL
-# source tree. Do not edit by hand.
+// This file is generated from a similarly-named Perl script in the BoringSSL
+// source tree. Do not edit by hand.
 
 #if defined(__i386__)
 #if defined(BORINGSSL_PREFIX)
@@ -3805,3 +3805,4 @@ _sha1_block_data_order_avx:
 .byte	89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112
 .byte	114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
 #endif
+.section	.note.GNU-stack,"",@progbits

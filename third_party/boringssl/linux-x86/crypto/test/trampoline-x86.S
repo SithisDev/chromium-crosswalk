@@ -1,5 +1,5 @@
-# This file is generated from a similarly-named Perl script in the BoringSSL
-# source tree. Do not edit by hand.
+// This file is generated from a similarly-named Perl script in the BoringSSL
+// source tree. Do not edit by hand.
 
 #if defined(__i386__)
 #if defined(BORINGSSL_PREFIX)
@@ -203,3 +203,4 @@ abi_test_clobber_xmm7:
 	ret
 .size	abi_test_clobber_xmm7,.-.L_abi_test_clobber_xmm7_begin
 #endif
+.section	.note.GNU-stack,"",@progbits

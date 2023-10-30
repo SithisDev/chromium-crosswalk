@@ -1,5 +1,5 @@
-# This file is generated from a similarly-named Perl script in the BoringSSL
-# source tree. Do not edit by hand.
+// This file is generated from a similarly-named Perl script in the BoringSSL
+// source tree. Do not edit by hand.
 
 #if defined(__i386__)
 #if defined(BORINGSSL_PREFIX)
@@ -972,3 +972,4 @@ ChaCha20_ssse3:
 .byte	60,97,112,112,114,111,64,111,112,101,110,115,115,108,46,111
 .byte	114,103,62,0
 #endif
+.section	.note.GNU-stack,"",@progbits

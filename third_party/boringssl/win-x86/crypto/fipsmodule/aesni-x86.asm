@@ -7,28 +7,20 @@
 %ifidn __OUTPUT_FORMAT__,obj
 section	code	use32 class=code align=64
 %elifidn __OUTPUT_FORMAT__,win32
-%ifdef __YASM_VERSION_ID__
-%if __YASM_VERSION_ID__ < 01010000h
-%error yasm version 1.1.0 or later needed.
-%endif
-; Yasm automatically includes .00 and complains about redefining it.
-; https://www.tortall.net/projects/yasm/manual/html/objfmt-win32-safeseh.html
-%else
 $@feat.00 equ 1
-%endif
 section	.text	code align=64
 %else
 section	.text	code
 %endif
 ;extern	_OPENSSL_ia32cap_P
-%ifndef NDEBUG
+%ifdef BORINGSSL_DISPATCH_TEST
 extern	_BORINGSSL_function_hit
 %endif
 global	_aes_hw_encrypt
 align	16
 _aes_hw_encrypt:
 L$_aes_hw_encrypt_begin:
-%ifndef NDEBUG
+%ifdef BORINGSSL_DISPATCH_TEST
 	push	ebx
 	push	edx
 	call	L$000pic
@@ -820,7 +812,7 @@ L$_aes_hw_ctr32_encrypt_blocks_begin:
 	push	ebx
 	push	esi
 	push	edi
-%ifndef NDEBUG
+%ifdef BORINGSSL_DISPATCH_TEST
 	push	ebx
 	push	edx
 	call	L$038pic
@@ -2400,7 +2392,7 @@ global	_aes_hw_set_encrypt_key
 align	16
 _aes_hw_set_encrypt_key:
 L$_aes_hw_set_encrypt_key_begin:
-%ifndef NDEBUG
+%ifdef BORINGSSL_DISPATCH_TEST
 	push	ebx
 	push	edx
 	call	L$116pic

@@ -1,5 +1,5 @@
-# This file is generated from a similarly-named Perl script in the BoringSSL
-# source tree. Do not edit by hand.
+// This file is generated from a similarly-named Perl script in the BoringSSL
+// source tree. Do not edit by hand.
 
 #if defined(__i386__)
 #if defined(BORINGSSL_PREFIX)
@@ -291,3 +291,4 @@ gcm_ghash_ssse3:
 .Llow4_mask:
 .long	252645135,252645135,252645135,252645135
 #endif
+.section	.note.GNU-stack,"",@progbits

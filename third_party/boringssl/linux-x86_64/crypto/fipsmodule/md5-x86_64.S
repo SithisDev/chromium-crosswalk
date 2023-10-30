@@ -1,5 +1,5 @@
-# This file is generated from a similarly-named Perl script in the BoringSSL
-# source tree. Do not edit by hand.
+// This file is generated from a similarly-named Perl script in the BoringSSL
+// source tree. Do not edit by hand.
 
 #if defined(__has_feature)
 #if __has_feature(memory_sanitizer) && !defined(OPENSSL_NO_ASM)
@@ -699,3 +699,4 @@ md5_block_asm_data_order:
 .cfi_endproc	
 .size	md5_block_asm_data_order,.-md5_block_asm_data_order
 #endif
+.section	.note.GNU-stack,"",@progbits
