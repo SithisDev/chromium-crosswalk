@@ -1,13 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/containers/flat_set.h"
 
 #include <string>
-#include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/test/move_only_int.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -38,16 +36,15 @@ TEST(FlatSet, IncompleteType) {
 TEST(FlatSet, RangeConstructor) {
   flat_set<int>::value_type input_vals[] = {1, 1, 1, 2, 2, 2, 3, 3, 3};
 
-  flat_set<int> cont(std::begin(input_vals), std::end(input_vals),
-                     base::KEEP_FIRST_OF_DUPES);
+  flat_set<int> cont(std::begin(input_vals), std::end(input_vals));
   EXPECT_THAT(cont, ElementsAre(1, 2, 3));
 }
 
 TEST(FlatSet, MoveConstructor) {
   int input_range[] = {1, 2, 3, 4};
 
-  flat_set<MoveOnlyInt> original(std::begin(input_range), std::end(input_range),
-                                 base::KEEP_FIRST_OF_DUPES);
+  flat_set<MoveOnlyInt> original(std::begin(input_range),
+                                 std::end(input_range));
   flat_set<MoveOnlyInt> moved(std::move(original));
 
   EXPECT_EQ(1U, moved.count(MoveOnlyInt(1)));
@@ -57,7 +54,7 @@ TEST(FlatSet, MoveConstructor) {
 }
 
 TEST(FlatSet, InitializerListConstructor) {
-  flat_set<int> cont({1, 2, 3, 4, 5, 6, 10, 8}, KEEP_FIRST_OF_DUPES);
+  flat_set<int> cont({1, 2, 3, 4, 5, 6, 10, 8});
   EXPECT_THAT(cont, ElementsAre(1, 2, 3, 4, 5, 6, 8, 10));
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,7 @@
 
 #include <objbase.h>
 
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/check.h"
 
 namespace base {
 namespace win {
@@ -19,22 +18,22 @@ namespace win {
 //   SHGetSomeInfo(&file_item, ...);
 //   ...
 //   return;  <-- memory released
-template<typename T>
+template <typename T>
 class ScopedCoMem {
  public:
-  ScopedCoMem() : mem_ptr_(NULL) {}
-  ~ScopedCoMem() {
-    Reset(NULL);
-  }
+  ScopedCoMem() : mem_ptr_(nullptr) {}
 
-  T** operator&() {  // NOLINT
-    DCHECK(mem_ptr_ == NULL);  // To catch memory leaks.
+  ScopedCoMem(const ScopedCoMem&) = delete;
+  ScopedCoMem& operator=(const ScopedCoMem&) = delete;
+
+  ~ScopedCoMem() { Reset(nullptr); }
+
+  T** operator&() {               // NOLINT
+    DCHECK(mem_ptr_ == nullptr);  // To catch memory leaks.
     return &mem_ptr_;
   }
 
-  operator T*() {
-    return mem_ptr_;
-  }
+  operator T*() { return mem_ptr_; }
 
   T* operator->() {
     DCHECK(mem_ptr_ != NULL);
@@ -52,14 +51,10 @@ class ScopedCoMem {
     mem_ptr_ = ptr;
   }
 
-  T* get() const {
-    return mem_ptr_;
-  }
+  T* get() const { return mem_ptr_; }
 
  private:
   T* mem_ptr_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedCoMem);
 };
 
 }  // namespace win

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,16 +17,16 @@
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/location.h"
-#include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/logging.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/sequence_checker.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/system/sys_info.h"
-#include "base/test/gtest_xml_util.h"
+#include "base/task/single_thread_task_executor.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/allow_check_is_test_to_be_called.h"
 #include "base/test/launcher/test_launcher.h"
 #include "base/test/test_switches.h"
 #include "base/test/test_timeouts.h"
@@ -35,7 +35,7 @@
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 #include "base/files/file_descriptor_watcher_posix.h"
 #endif
 
@@ -46,67 +46,84 @@ namespace {
 // This constant controls how many tests are run in a single batch by default.
 const size_t kDefaultTestBatchLimit = 10;
 
-const char kHelpFlag[] = "help";
-
-// Flag to run all tests in a single process.
-const char kSingleProcessTestsFlag[] = "single-process-tests";
-
+#if !BUILDFLAG(IS_ANDROID)
 void PrintUsage() {
-  fprintf(stdout,
-          "Runs tests using the gtest framework, each batch of tests being\n"
-          "run in their own process. Supported command-line flags:\n"
-          "\n"
-          " Common flags:\n"
-          "  --gtest_filter=...\n"
-          "    Runs a subset of tests (see --gtest_help for more info).\n"
-          "\n"
-          "  --help\n"
-          "    Shows this message.\n"
-          "\n"
-          "  --gtest_help\n"
-          "    Shows the gtest help message.\n"
-          "\n"
-          "  --test-launcher-jobs=N\n"
-          "    Sets the number of parallel test jobs to N.\n"
-          "\n"
-          "  --single-process-tests\n"
-          "    Runs the tests and the launcher in the same process. Useful\n"
-          "    for debugging a specific test in a debugger.\n"
-          "\n"
-          " Other flags:\n"
-          "  --test-launcher-filter-file=PATH\n"
-          "    Like --gtest_filter, but read the test filter from PATH.\n"
-          "    Supports multiple filter paths separated by ';'.\n"
-          "    One pattern per line; lines starting with '-' are exclusions.\n"
-          "    See also //testing/buildbot/filters/README.md file.\n"
-          "\n"
-          "  --test-launcher-batch-limit=N\n"
-          "    Sets the limit of test batch to run in a single process to N.\n"
-          "\n"
-          "  --test-launcher-debug-launcher\n"
-          "    Disables autodetection of debuggers and similar tools,\n"
-          "    making it possible to use them to debug launcher itself.\n"
-          "\n"
-          "  --test-launcher-retry-limit=N\n"
-          "    Sets the limit of test retries on failures to N.\n"
-          "\n"
-          "  --test-launcher-summary-output=PATH\n"
-          "    Saves a JSON machine-readable summary of the run.\n"
-          "\n"
-          "  --test-launcher-print-test-stdio=auto|always|never\n"
-          "    Controls when full test output is printed.\n"
-          "    auto means to print it when the test failed.\n"
-          "\n"
-          "  --test-launcher-test-part-results-limit=N\n"
-          "    Sets the limit of failed EXPECT/ASSERT entries in the xml and\n"
-          "    JSON outputs per test to N (default N=10). Negative value \n"
-          "    will disable this limit.\n"
-          "\n"
-          "  --test-launcher-total-shards=N\n"
-          "    Sets the total number of shards to N.\n"
-          "\n"
-          "  --test-launcher-shard-index=N\n"
-          "    Sets the shard index to run to N (from 0 to TOTAL - 1).\n");
+  fprintf(
+      stdout,
+      "Runs tests using the gtest framework, each batch of tests being\n"
+      "run in their own process. Supported command-line flags:\n"
+      "\n"
+      " Common flags:\n"
+      "  --gtest_filter=...\n"
+      "    Runs a subset of tests (see --gtest_help for more info).\n"
+      "\n"
+      "  --help\n"
+      "    Shows this message.\n"
+      "\n"
+      "  --gtest_help\n"
+      "    Shows the gtest help message.\n"
+      "\n"
+      "  --test-launcher-jobs=N\n"
+      "    Sets the number of parallel test jobs to N.\n"
+      "\n"
+      "  --single-process-tests\n"
+      "    Runs the tests and the launcher in the same process. Useful\n"
+      "    for debugging a specific test in a debugger.\n"
+      "\n"
+      " Other flags:\n"
+      "  --test-launcher-filter-file=PATH\n"
+      "    Like --gtest_filter, but read the test filter from PATH.\n"
+      "    Supports multiple filter paths separated by ';'.\n"
+      "    One pattern per line; lines starting with '-' are exclusions.\n"
+      "    See also //testing/buildbot/filters/README.md file.\n"
+      "\n"
+      "  --test-launcher-batch-limit=N\n"
+      "    Sets the limit of test batch to run in a single process to N.\n"
+      "\n"
+      "  --test-launcher-debug-launcher\n"
+      "    Disables autodetection of debuggers and similar tools,\n"
+      "    making it possible to use them to debug launcher itself.\n"
+      "\n"
+      "  --test-launcher-retry-limit=N\n"
+      "    Sets the limit of test retries on failures to N.\n"
+      "  --gtest_repeat=N\n"
+      "    Forces the launcher to run every test N times. -1 is a special"
+      "    value, causing the infinite amount of iterations."
+      "    Repeated tests are run in parallel, unless the number of"
+      "    iterations is infinite or --gtest_break_on_failure is specified"
+      "    (see below)."
+      "    Consider using --test_launcher-jobs flag to speed up the"
+      "    parallel execution."
+      "\n"
+      "  --gtest_break_on_failure\n"
+      "    Stop running repeated tests as soon as one repeat of the test fails."
+      "    This flag forces sequential repeats and prevents parallelised"
+      "    execution."
+      "\n"
+      "  --test-launcher-summary-output=PATH\n"
+      "    Saves a JSON machine-readable summary of the run.\n"
+      "\n"
+      "  --test-launcher-print-test-stdio=auto|always|never\n"
+      "    Controls when full test output is printed.\n"
+      "    auto means to print it when the test failed.\n"
+      "\n"
+      "  --test-launcher-test-part-results-limit=N\n"
+      "    Sets the limit of failed EXPECT/ASSERT entries in the xml and\n"
+      "    JSON outputs per test to N (default N=10). Negative value \n"
+      "    will disable this limit.\n"
+      "\n"
+      "  --test-launcher-total-shards=N\n"
+      "    Sets the total number of shards to N.\n"
+      "\n"
+      "  --test-launcher-shard-index=N\n"
+      "    Sets the shard index to run to N (from 0 to TOTAL - 1).\n"
+      "\n"
+      "  --dont-use-job-objects\n"
+      "    Avoids using job objects in Windows.\n"
+      "\n"
+      "  --test-launcher-print-temp-leaks\n"
+      "    Prints information about leaked files and/or directories in\n"
+      "    child process's temporary directories (Windows and macOS).\n");
   fflush(stdout);
 }
 
@@ -123,13 +140,18 @@ bool GetSwitchValueAsInt(const std::string& switch_name, int* result) {
 
   return true;
 }
+#endif
 
 int LaunchUnitTestsInternal(RunTestSuiteCallback run_test_suite,
                             size_t parallel_jobs,
                             int default_batch_limit,
+                            size_t retry_limit,
                             bool use_job_objects,
+                            RepeatingClosure timeout_callback,
                             OnceClosure gtest_init) {
-#if defined(OS_ANDROID)
+  base::test::AllowCheckIsTestToBeCalled();
+
+#if BUILDFLAG(IS_ANDROID)
   // We can't easily fork on Android, just run the test suite directly.
   return std::move(run_test_suite).Run();
 #else
@@ -151,15 +173,15 @@ int LaunchUnitTestsInternal(RunTestSuiteCallback run_test_suite,
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(kGTestHelpFlag) ||
       CommandLine::ForCurrentProcess()->HasSwitch(kGTestListTestsFlag) ||
-      CommandLine::ForCurrentProcess()->HasSwitch(kSingleProcessTestsFlag) ||
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSingleProcessTests) ||
       CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kTestChildProcess) ||
       force_single_process) {
     return std::move(run_test_suite).Run();
   }
-#endif
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(kHelpFlag)) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kHelpFlag)) {
     PrintUsage();
     return 0;
   }
@@ -180,15 +202,18 @@ int LaunchUnitTestsInternal(RunTestSuiteCallback run_test_suite,
           "--single-process-tests.\n");
   fflush(stdout);
 
-  MessageLoopForIO message_loop;
-#if defined(OS_POSIX)
-  FileDescriptorWatcher file_descriptor_watcher(message_loop.task_runner());
+  base::SingleThreadTaskExecutor executor(base::MessagePumpType::IO);
+#if BUILDFLAG(IS_POSIX)
+  FileDescriptorWatcher file_descriptor_watcher(executor.task_runner());
 #endif
+  use_job_objects =
+      use_job_objects &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(kDontUseJobObjectFlag);
 
   DefaultUnitTestPlatformDelegate platform_delegate;
-  UnitTestLauncherDelegate delegate(
-      &platform_delegate, batch_limit, use_job_objects);
-  TestLauncher launcher(&delegate, parallel_jobs);
+  UnitTestLauncherDelegate delegate(&platform_delegate, batch_limit,
+                                    use_job_objects, timeout_callback);
+  TestLauncher launcher(&delegate, parallel_jobs, retry_limit);
   bool success = launcher.Run();
 
   fprintf(stdout, "Tests took %" PRId64 " seconds.\n",
@@ -196,163 +221,57 @@ int LaunchUnitTestsInternal(RunTestSuiteCallback run_test_suite,
   fflush(stdout);
 
   return (success ? 0 : 1);
+#endif
 }
 
 void InitGoogleTestChar(int* argc, char** argv) {
   testing::InitGoogleTest(argc, argv);
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 void InitGoogleTestWChar(int* argc, wchar_t** argv) {
   testing::InitGoogleTest(argc, argv);
 }
-#endif  // defined(OS_WIN)
-
-// Called if there are no test results, populates results with UNKNOWN results.
-// If There is only one test, will try to determine status by exit_code and
-// was_timeout.
-std::vector<TestResult> ProcessMissingTestResults(
-    const std::vector<std::string>& test_names,
-    const std::string& output,
-    bool was_timeout,
-    bool exit_code) {
-  std::vector<TestResult> results;
-  // We do not have reliable details about test results (parsing test
-  // stdout is known to be unreliable).
-  fprintf(stdout,
-          "Failed to get out-of-band test success data, "
-          "dumping full stdio below:\n%s\n",
-          output.c_str());
-  fflush(stdout);
-
-  // There is only one test and no results.
-  // Try to determine status by exit code.
-  if (test_names.size() == 1) {
-    const std::string& test_name = test_names.front();
-    TestResult test_result;
-    test_result.full_name = test_name;
-
-    if (was_timeout) {
-      test_result.status = TestResult::TEST_TIMEOUT;
-    } else if (exit_code != 0) {
-      test_result.status = TestResult::TEST_FAILURE;
-    } else {
-      // It's strange case when test executed successfully,
-      // but we failed to read machine-readable report for it.
-      test_result.status = TestResult::TEST_UNKNOWN;
-    }
-
-    results.push_back(test_result);
-    return results;
-  }
-  for (auto& test_name : test_names) {
-    TestResult test_result;
-    test_result.full_name = test_name;
-    test_result.status = TestResult::TEST_SKIPPED;
-    results.push_back(test_result);
-  }
-  return results;
-}
-
-// Returns interpreted test results.
-std::vector<TestResult> UnitTestProcessTestResults(
-    const std::vector<std::string>& test_names,
-    const base::FilePath& output_file,
-    const std::string& output,
-    int exit_code,
-    bool was_timeout) {
-  std::vector<TestResult> test_results;
-  bool crashed = false;
-  bool have_test_results =
-      ProcessGTestOutput(output_file, &test_results, &crashed);
-
-  if (!have_test_results) {
-    return ProcessMissingTestResults(test_names, output, was_timeout,
-                                     exit_code);
-  }
-
-  // TODO(phajdan.jr): Check for duplicates and mismatches between
-  // the results we got from XML file and tests we intended to run.
-  std::map<std::string, TestResult> results_map;
-  for (const auto& i : test_results)
-    results_map[i.full_name] = i;
-
-  // Results to be reported back to the test launcher.
-  std::vector<TestResult> final_results;
-
-  for (const auto& i : test_names) {
-    if (Contains(results_map, i)) {
-      TestResult test_result = results_map[i];
-      if (test_result.status == TestResult::TEST_CRASH) {
-        if (was_timeout) {
-          // Fix up the test status: we forcibly kill the child process
-          // after the timeout, so from XML results it looks just like
-          // a crash.
-          test_result.status = TestResult::TEST_TIMEOUT;
-        }
-      } else if (test_result.status == TestResult::TEST_SUCCESS ||
-                 test_result.status == TestResult::TEST_FAILURE) {
-        // We run multiple tests in a batch with a timeout applied
-        // to the entire batch. It is possible that with other tests
-        // running quickly some tests take longer than the per-test timeout.
-        // For consistent handling of tests independent of order and other
-        // factors, mark them as timing out.
-        if (test_result.elapsed_time > TestTimeouts::test_launcher_timeout()) {
-          test_result.status = TestResult::TEST_TIMEOUT;
-        }
-      }
-      test_result.output_snippet = GetTestOutputSnippet(test_result, output);
-      final_results.push_back(test_result);
-    } else {
-      // TODO(phajdan.jr): Explicitly pass the info that the test didn't
-      // run for a mysterious reason.
-      LOG(ERROR) << "no test result for " << i;
-      TestResult test_result;
-      test_result.full_name = i;
-      test_result.status = TestResult::TEST_SKIPPED;
-      test_result.output_snippet = GetTestOutputSnippet(test_result, output);
-      final_results.push_back(test_result);
-    }
-  }
-  // TODO(phajdan.jr): Handle the case where processing XML output
-  // indicates a crash but none of the test results is marked as crashing.
-
-  bool has_non_success_test = false;
-  for (const auto& i : final_results) {
-    if (i.status != TestResult::TEST_SUCCESS) {
-      has_non_success_test = true;
-      break;
-    }
-  }
-
-  if (!has_non_success_test && exit_code != 0) {
-    // This is a bit surprising case: all tests are marked as successful,
-    // but the exit code was not zero. This can happen e.g. under memory
-    // tools that report leaks this way. Mark all tests as a failure on exit,
-    // and for more precise info they'd need to be retried serially.
-    for (auto& i : final_results)
-      i.status = TestResult::TEST_FAILURE_ON_EXIT;
-  }
-
-  for (auto& i : final_results) {
-    // Fix the output snippet after possible changes to the test result.
-    i.output_snippet = GetTestOutputSnippet(i, output);
-  }
-  return final_results;
-}
+#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace
 
+// Flag to avoid using job objects
+const char kDontUseJobObjectFlag[] = "dont-use-job-objects";
+
+MergeTestFilterSwitchHandler::~MergeTestFilterSwitchHandler() = default;
+void MergeTestFilterSwitchHandler::ResolveDuplicate(
+    base::StringPiece key,
+    CommandLine::StringPieceType new_value,
+    CommandLine::StringType& out_value) {
+  if (key != switches::kTestLauncherFilterFile) {
+    out_value = CommandLine::StringType(new_value);
+    return;
+  }
+  if (!out_value.empty()) {
+#if BUILDFLAG(IS_WIN)
+    StrAppend(&out_value, {L";"});
+#else
+    StrAppend(&out_value, {";"});
+#endif
+  }
+  StrAppend(&out_value, {new_value});
+}
+
 int LaunchUnitTests(int argc,
                     char** argv,
-                    RunTestSuiteCallback run_test_suite) {
+                    RunTestSuiteCallback run_test_suite,
+                    size_t retry_limit) {
+  CommandLine::SetDuplicateSwitchHandler(
+      std::make_unique<MergeTestFilterSwitchHandler>());
   CommandLine::Init(argc, argv);
-  size_t parallel_jobs = NumParallelJobs();
+  size_t parallel_jobs = NumParallelJobs(/*cores_per_job=*/1);
   if (parallel_jobs == 0U) {
     return 1;
   }
   return LaunchUnitTestsInternal(std::move(run_test_suite), parallel_jobs,
-                                 kDefaultTestBatchLimit, true,
+                                 kDefaultTestBatchLimit, retry_limit, true,
+                                 DoNothing(),
                                  BindOnce(&InitGoogleTestChar, &argc, argv));
 }
 
@@ -361,7 +280,7 @@ int LaunchUnitTestsSerially(int argc,
                             RunTestSuiteCallback run_test_suite) {
   CommandLine::Init(argc, argv);
   return LaunchUnitTestsInternal(std::move(run_test_suite), 1U,
-                                 kDefaultTestBatchLimit, true,
+                                 kDefaultTestBatchLimit, 1U, true, DoNothing(),
                                  BindOnce(&InitGoogleTestChar, &argc, argv));
 }
 
@@ -370,29 +289,32 @@ int LaunchUnitTestsWithOptions(int argc,
                                size_t parallel_jobs,
                                int default_batch_limit,
                                bool use_job_objects,
+                               RepeatingClosure timeout_callback,
                                RunTestSuiteCallback run_test_suite) {
   CommandLine::Init(argc, argv);
   return LaunchUnitTestsInternal(std::move(run_test_suite), parallel_jobs,
-                                 default_batch_limit, use_job_objects,
+                                 default_batch_limit, 1U, use_job_objects,
+                                 timeout_callback,
                                  BindOnce(&InitGoogleTestChar, &argc, argv));
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 int LaunchUnitTests(int argc,
                     wchar_t** argv,
                     bool use_job_objects,
                     RunTestSuiteCallback run_test_suite) {
   // Windows CommandLine::Init ignores argv anyway.
   CommandLine::Init(argc, NULL);
-  size_t parallel_jobs = NumParallelJobs();
+  size_t parallel_jobs = NumParallelJobs(/*cores_per_job=*/1);
   if (parallel_jobs == 0U) {
     return 1;
   }
   return LaunchUnitTestsInternal(std::move(run_test_suite), parallel_jobs,
-                                 kDefaultTestBatchLimit, use_job_objects,
+                                 kDefaultTestBatchLimit, 1U, use_job_objects,
+                                 DoNothing(),
                                  BindOnce(&InitGoogleTestWChar, &argc, argv));
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 DefaultUnitTestPlatformDelegate::DefaultUnitTestPlatformDelegate() = default;
 
@@ -429,13 +351,11 @@ CommandLine DefaultUnitTestPlatformDelegate::GetCommandLineForChildGTestProcess(
 
   std::string long_flags(
       StrCat({"--", kGTestFilterFlag, "=", JoinString(test_names, ":")}));
-  CHECK_EQ(static_cast<int>(long_flags.size()),
-           WriteFile(flag_file, long_flags.data(),
-                     static_cast<int>(long_flags.size())));
+  CHECK(WriteFile(flag_file, long_flags));
 
   new_cmd_line.AppendSwitchPath(switches::kTestLauncherOutput, output_file);
   new_cmd_line.AppendSwitchPath(kGTestFlagfileFlag, flag_file);
-  new_cmd_line.AppendSwitch(kSingleProcessTestsFlag);
+  new_cmd_line.AppendSwitch(switches::kSingleProcessTests);
 
   return new_cmd_line;
 }
@@ -447,11 +367,12 @@ std::string DefaultUnitTestPlatformDelegate::GetWrapperForChildGTestProcess() {
 UnitTestLauncherDelegate::UnitTestLauncherDelegate(
     UnitTestPlatformDelegate* platform_delegate,
     size_t batch_limit,
-    bool use_job_objects)
+    bool use_job_objects,
+    RepeatingClosure timeout_callback)
     : platform_delegate_(platform_delegate),
       batch_limit_(batch_limit),
-      use_job_objects_(use_job_objects) {
-}
+      use_job_objects_(use_job_objects),
+      timeout_callback_(timeout_callback) {}
 
 UnitTestLauncherDelegate::~UnitTestLauncherDelegate() {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -460,25 +381,6 @@ UnitTestLauncherDelegate::~UnitTestLauncherDelegate() {
 bool UnitTestLauncherDelegate::GetTests(std::vector<TestIdentifier>* output) {
   DCHECK(thread_checker_.CalledOnValidThread());
   return platform_delegate_->GetTests(output);
-}
-
-bool UnitTestLauncherDelegate::WillRunTest(const std::string& test_case_name,
-                                           const std::string& test_name) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  // There is no additional logic to disable specific tests.
-  return true;
-}
-
-std::vector<TestResult> UnitTestLauncherDelegate::ProcessTestResults(
-    const std::vector<std::string>& test_names,
-    const base::FilePath& output_file,
-    const std::string& output,
-    const base::TimeDelta& elapsed_time,
-    int exit_code,
-    bool was_timeout) {
-  return UnitTestProcessTestResults(test_names, output_file, output, exit_code,
-                                    was_timeout);
 }
 
 CommandLine UnitTestLauncherDelegate::GetCommandLine(
@@ -512,6 +414,10 @@ TimeDelta UnitTestLauncherDelegate::GetTimeout() {
 
 size_t UnitTestLauncherDelegate::GetBatchSize() {
   return batch_limit_;
+}
+
+void UnitTestLauncherDelegate::OnTestTimedOut(const CommandLine& cmd_line) {
+  timeout_callback_.Run();
 }
 
 }  // namespace base

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,10 @@
 
 #include <fcntl.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 
 #include "base/files/file.h"
 #include "base/files/file_util.h"
+#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
@@ -18,12 +18,6 @@ namespace base {
 namespace subtle {
 
 namespace {
-
-#if !defined(OS_NACL)
-void LogCreateError(PlatformSharedMemoryRegion::CreateError error) {
-  UMA_HISTOGRAM_ENUMERATION("SharedMemory.CreateError", error);
-}
-#endif
 
 struct ScopedPathUnlinkerTraits {
   static const FilePath* InvalidValue() { return nullptr; }
@@ -38,7 +32,7 @@ struct ScopedPathUnlinkerTraits {
 using ScopedPathUnlinker =
     ScopedGeneric<const FilePath*, ScopedPathUnlinkerTraits>;
 
-#if !defined(OS_NACL)
+#if !BUILDFLAG(IS_NACL)
 bool CheckFDAccessMode(int fd, int expected_mode) {
   int fd_status = fcntl(fd, F_GETFL);
   if (fd_status == -1) {
@@ -57,26 +51,11 @@ bool CheckFDAccessMode(int fd, int expected_mode) {
 
   return true;
 }
-#endif  // !defined(OS_NACL)
+#endif  // !BUILDFLAG(IS_NACL)
 
 }  // namespace
 
-ScopedFDPair::ScopedFDPair() = default;
-
-ScopedFDPair::ScopedFDPair(ScopedFDPair&&) = default;
-
-ScopedFDPair& ScopedFDPair::operator=(ScopedFDPair&&) = default;
-
-ScopedFDPair::~ScopedFDPair() = default;
-
-ScopedFDPair::ScopedFDPair(ScopedFD in_fd, ScopedFD in_readonly_fd)
-    : fd(std::move(in_fd)), readonly_fd(std::move(in_readonly_fd)) {}
-
-FDPair ScopedFDPair::get() const {
-  return {fd.get(), readonly_fd.get()};
-}
-
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 // static
 ScopedFD PlatformSharedMemoryRegion::ExecutableRegion::CreateFD(size_t size) {
   PlatformSharedMemoryRegion region =
@@ -85,7 +64,7 @@ ScopedFD PlatformSharedMemoryRegion::ExecutableRegion::CreateFD(size_t size) {
     return region.PassPlatformHandle().fd;
   return ScopedFD();
 }
-#endif  // defined(OS_LINUX)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 // static
 PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Take(
@@ -139,20 +118,6 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Take(
   return Take(ScopedFDPair(std::move(handle), ScopedFD()), mode, size, guid);
 }
 
-// static
-PlatformSharedMemoryRegion
-PlatformSharedMemoryRegion::TakeFromSharedMemoryHandle(
-    const SharedMemoryHandle& handle,
-    Mode mode) {
-  CHECK(mode == Mode::kReadOnly || mode == Mode::kUnsafe);
-  if (!handle.IsValid())
-    return {};
-
-  return Take(
-      base::subtle::ScopedFDPair(ScopedFD(handle.GetHandle()), ScopedFD()),
-      mode, handle.GetSize(), handle.GetGUID());
-}
-
 FDPair PlatformSharedMemoryRegion::GetPlatformHandle() const {
   return handle_.get();
 }
@@ -203,43 +168,23 @@ bool PlatformSharedMemoryRegion::ConvertToUnsafe() {
   return true;
 }
 
-bool PlatformSharedMemoryRegion::MapAtInternal(off_t offset,
-                                               size_t size,
-                                               void** memory,
-                                               size_t* mapped_size) const {
-  bool write_allowed = mode_ != Mode::kReadOnly;
-  *memory = mmap(nullptr, size, PROT_READ | (write_allowed ? PROT_WRITE : 0),
-                 MAP_SHARED, handle_.fd.get(), offset);
-
-  bool mmap_succeeded = *memory && *memory != MAP_FAILED;
-  if (!mmap_succeeded) {
-    DPLOG(ERROR) << "mmap " << handle_.fd.get() << " failed";
-    return false;
-  }
-
-  *mapped_size = size;
-  return true;
-}
-
 // static
 PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
                                                               size_t size
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
                                                               ,
                                                               bool executable
 #endif
 ) {
-#if defined(OS_NACL)
+#if BUILDFLAG(IS_NACL)
   // Untrusted code can't create descriptors or handles.
   return {};
 #else
   if (size == 0) {
-    LogCreateError(PlatformSharedMemoryRegion::CreateError::SIZE_ZERO);
     return {};
   }
 
   if (size > static_cast<size_t>(std::numeric_limits<int>::max())) {
-    LogCreateError(PlatformSharedMemoryRegion::CreateError::SIZE_TOO_LARGE);
     return {};
   }
 
@@ -255,23 +200,20 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
   // flag.
   FilePath directory;
   if (!GetShmemTempDir(
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
           executable,
 #else
           false /* executable */,
 #endif
           &directory)) {
-    LogCreateError(
-        PlatformSharedMemoryRegion::CreateError::GET_SHMEM_TEMP_DIR_FAILURE);
     return {};
   }
 
   FilePath path;
-  File shm_file(CreateAndOpenFdForTemporaryFileInDir(directory, &path));
+  ScopedFD fd = CreateAndOpenFdForTemporaryFileInDir(directory, &path);
+  File shm_file(fd.release());
 
   if (!shm_file.IsValid()) {
-    LogCreateError(
-        PlatformSharedMemoryRegion::CreateError::CREATE_FILE_MAPPING_FAILURE);
     PLOG(ERROR) << "Creating shared memory in " << path.value() << " failed";
     FilePath dir = path.DirName();
     if (access(dir.value().c_str(), W_OK | X_OK) < 0) {
@@ -294,54 +236,46 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
     // Also open as readonly so that we can ConvertToReadOnly().
     readonly_fd.reset(HANDLE_EINTR(open(path.value().c_str(), O_RDONLY)));
     if (!readonly_fd.is_valid()) {
-      LogCreateError(
-          PlatformSharedMemoryRegion::CreateError::REDUCE_PERMISSIONS_FAILURE);
       DPLOG(ERROR) << "open(\"" << path.value() << "\", O_RDONLY) failed";
       return {};
     }
   }
 
   if (!AllocateFileRegion(&shm_file, 0, size)) {
-    LogCreateError(
-        PlatformSharedMemoryRegion::CreateError::ALLOCATE_FILE_REGION_FAILURE);
     return {};
   }
 
   if (readonly_fd.is_valid()) {
-    struct stat stat = {};
-    if (fstat(shm_file.GetPlatformFile(), &stat) != 0) {
-      LogCreateError(PlatformSharedMemoryRegion::CreateError::FSTAT_FAILURE);
+    stat_wrapper_t shm_stat;
+    if (File::Fstat(shm_file.GetPlatformFile(), &shm_stat) != 0) {
       DPLOG(ERROR) << "fstat(fd) failed";
       return {};
     }
 
-    struct stat readonly_stat = {};
-    if (fstat(readonly_fd.get(), &readonly_stat) != 0) {
-      LogCreateError(PlatformSharedMemoryRegion::CreateError::FSTAT_FAILURE);
+    stat_wrapper_t readonly_stat;
+    if (File::Fstat(readonly_fd.get(), &readonly_stat) != 0) {
       DPLOG(ERROR) << "fstat(readonly_fd) failed";
       return {};
     }
 
-    if (stat.st_dev != readonly_stat.st_dev ||
-        stat.st_ino != readonly_stat.st_ino) {
-      LogCreateError(PlatformSharedMemoryRegion::CreateError::INODES_MISMATCH);
+    if (shm_stat.st_dev != readonly_stat.st_dev ||
+        shm_stat.st_ino != readonly_stat.st_ino) {
       LOG(ERROR) << "Writable and read-only inodes don't match; bailing";
       return {};
     }
   }
 
-  LogCreateError(PlatformSharedMemoryRegion::CreateError::SUCCESS);
   return PlatformSharedMemoryRegion(
       {ScopedFD(shm_file.TakePlatformFile()), std::move(readonly_fd)}, mode,
       size, UnguessableToken::Create());
-#endif  // !defined(OS_NACL)
+#endif  // !BUILDFLAG(IS_NACL)
 }
 
 bool PlatformSharedMemoryRegion::CheckPlatformHandlePermissionsCorrespondToMode(
-    PlatformHandle handle,
+    PlatformSharedMemoryHandle handle,
     Mode mode,
     size_t size) {
-#if !defined(OS_NACL)
+#if !BUILDFLAG(IS_NACL)
   if (!CheckFDAccessMode(handle.fd,
                          mode == Mode::kReadOnly ? O_RDONLY : O_RDWR)) {
     return false;
@@ -363,7 +297,7 @@ bool PlatformSharedMemoryRegion::CheckPlatformHandlePermissionsCorrespondToMode(
   // We also cannot try to mmap() a region as writable and look at the return
   // status because the plugin process crashes if system mmap() fails.
   return true;
-#endif  // !defined(OS_NACL)
+#endif  // !BUILDFLAG(IS_NACL)
 }
 
 PlatformSharedMemoryRegion::PlatformSharedMemoryRegion(

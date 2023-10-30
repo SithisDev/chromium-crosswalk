@@ -1,24 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_LOCATION_H_
 #define BASE_LOCATION_H_
 
-#include <stddef.h>
-
-#include <cassert>
-#include <functional>
 #include <string>
 
 #include "base/base_export.h"
 #include "base/debug/debugging_buildflags.h"
-#include "base/hash/hash.h"
+#include "base/memory/raw_ptr_exclusion.h"
+#include "base/trace_event/base_tracing_forward.h"
 #include "build/build_config.h"
 
 namespace base {
 
-#if defined(__has_builtin)
+#if defined(__clang__)
 // Clang allows detection of these builtins.
 #define SUPPORTS_LOCATION_BUILTINS                                       \
   (__has_builtin(__builtin_FUNCTION) && __has_builtin(__builtin_FILE) && \
@@ -37,6 +34,8 @@ class BASE_EXPORT Location {
  public:
   Location();
   Location(const Location& other);
+  Location(Location&& other) noexcept;
+  Location& operator=(const Location& other);
 
   // Only initializes the file name and program counter, the source information
   // will be null for the strings, and -1 for the line number.
@@ -51,10 +50,16 @@ class BASE_EXPORT Location {
            int line_number,
            const void* program_counter);
 
-  // Comparator for hash map insertion. The program counter should uniquely
+  // Comparator for testing. The program counter should uniquely
   // identify a location.
   bool operator==(const Location& other) const {
     return program_counter_ == other.program_counter_;
+  }
+
+  // Comparator is necessary to use location object within an ordered container
+  // type (eg. std::map).
+  bool operator<(const Location& other) const {
+    return program_counter_ < other.program_counter_;
   }
 
   // Returns true if there is source code location info. If this is false,
@@ -83,10 +88,18 @@ class BASE_EXPORT Location {
   // are not available, this will return "pc:<hex address>".
   std::string ToString() const;
 
+  // Write a representation of this object into a trace.
+  void WriteIntoTrace(perfetto::TracedValue context) const;
+
+#if !BUILDFLAG(FROM_HERE_USES_LOCATION_BUILTINS)
+#if !BUILDFLAG(ENABLE_LOCATION_SOURCE)
   static Location CreateFromHere(const char* file_name);
+#else
   static Location CreateFromHere(const char* function_name,
                                  const char* file_name,
                                  int line_number);
+#endif
+#endif
 
 #if SUPPORTS_LOCATION_BUILTINS && BUILDFLAG(ENABLE_LOCATION_SOURCE)
   static Location Current(const char* function_name = __builtin_FUNCTION(),
@@ -102,41 +115,31 @@ class BASE_EXPORT Location {
   const char* function_name_ = nullptr;
   const char* file_name_ = nullptr;
   int line_number_ = -1;
-  const void* program_counter_ = nullptr;
+
+  // `program_counter_` is not a raw_ptr<...> for performance reasons (based on
+  // analysis of sampling profiler data and tab_search:top100:2020).
+  RAW_PTR_EXCLUSION const void* program_counter_ = nullptr;
 };
 
 BASE_EXPORT const void* GetProgramCounter();
 
+#if BUILDFLAG(FROM_HERE_USES_LOCATION_BUILTINS)
+
+#define FROM_HERE ::base::Location::Current()
+
 // The macros defined here will expand to the current function.
-#if BUILDFLAG(ENABLE_LOCATION_SOURCE)
+#elif BUILDFLAG(ENABLE_LOCATION_SOURCE)
 
 // Full source information should be included.
-#define FROM_HERE FROM_HERE_WITH_EXPLICIT_FUNCTION(__func__)
-#define FROM_HERE_WITH_EXPLICIT_FUNCTION(function_name) \
-  ::base::Location::CreateFromHere(function_name, __FILE__, __LINE__)
+#define FROM_HERE ::base::Location::CreateFromHere(__func__, __FILE__, __LINE__)
 
 #else
 
 // TODO(http://crbug.com/760702) remove the __FILE__ argument from these calls.
 #define FROM_HERE ::base::Location::CreateFromHere(__FILE__)
-#define FROM_HERE_WITH_EXPLICIT_FUNCTION(function_name) \
-  ::base::Location::CreateFromHere(function_name, __FILE__, -1)
 
 #endif
 
 }  // namespace base
-
-namespace std {
-
-// Specialization for using Location in hash tables.
-template <>
-struct hash<::base::Location> {
-  std::size_t operator()(const ::base::Location& loc) const {
-    const void* program_counter = loc.program_counter();
-    return base::Hash(&program_counter, sizeof(void*));
-  }
-};
-
-}  // namespace std
 
 #endif  // BASE_LOCATION_H_

@@ -1,10 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.base.test;
 
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 
 /**
  * Class containing only static methods for querying the status of the reached code profiler.
@@ -17,7 +18,7 @@ public class ReachedCodeProfiler {
      * @return Whether the reached code profiler is enabled.
      */
     public static boolean isEnabled() {
-        return nativeIsReachedCodeProfilerEnabled();
+        return ReachedCodeProfilerJni.get().isReachedCodeProfilerEnabled();
     }
 
     /**
@@ -25,9 +26,12 @@ public class ReachedCodeProfiler {
      *         profiler.
      */
     public static boolean isSupported() {
-        return nativeIsReachedCodeProfilerSupported();
+        return ReachedCodeProfilerJni.get().isReachedCodeProfilerSupported();
     }
 
-    private static native boolean nativeIsReachedCodeProfilerEnabled();
-    private static native boolean nativeIsReachedCodeProfilerSupported();
+    @NativeMethods
+    interface Natives {
+        boolean isReachedCodeProfilerEnabled();
+        boolean isReachedCodeProfilerSupported();
+    }
 }

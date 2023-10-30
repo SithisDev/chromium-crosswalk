@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include "base/macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -47,7 +46,7 @@ TEST_F(SplitStringIntoKeyValuePairsUsingSubstrTest, MissingKeyValueDelimiter) {
 }
 
 TEST_F(SplitStringIntoKeyValuePairsUsingSubstrTest,
-       MissingKeyValuePairDelimeter) {
+       MissingKeyValuePairDelimiter) {
   EXPECT_TRUE(SplitStringIntoKeyValuePairsUsingSubstr(
       "key1:value1,,key3:value3",
       ':',    // Key-value delimiter
@@ -216,6 +215,13 @@ TEST(SplitStringUsingSubstrTest, EmptyString) {
       std::string(), "DELIMITER", TRIM_WHITESPACE, SPLIT_WANT_ALL);
   ASSERT_EQ(1u, results.size());
   EXPECT_THAT(results, ElementsAre(""));
+}
+
+TEST(SplitStringUsingSubstrTest, EmptyDelimiter) {
+  std::vector<std::string> results = SplitStringUsingSubstr(
+      "TEST", std::string(), TRIM_WHITESPACE, SPLIT_WANT_ALL);
+  ASSERT_EQ(1u, results.size());
+  EXPECT_THAT(results, ElementsAre("TEST"));
 }
 
 TEST(StringUtilTest, SplitString_Basics) {

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,12 +19,9 @@
 #include "base/android/library_loader/anchor_functions.h"
 #include "base/android/orderfile/orderfile_buildflags.h"
 #include "base/bits.h"
-#include "base/debug/proc_maps_linux.h"
 #include "base/files/file.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/macros.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/process/process_metrics.h"
 #include "base/strings/string_util.h"
@@ -42,34 +39,8 @@ namespace android {
 
 namespace {
 
-// Android defines the background priority to this value since at least 2009
-// (see Process.java).
-constexpr int kBackgroundPriority = 10;
 // Valid for all Android architectures.
 constexpr size_t kPageSize = 4096;
-
-// Reads a byte per page between |start| and |end| to force it into the page
-// cache.
-// Heap allocations, syscalls and library functions are not allowed in this
-// function.
-// Returns true for success.
-#if defined(ADDRESS_SANITIZER)
-// Disable AddressSanitizer instrumentation for this function. It is touching
-// memory that hasn't been allocated by the app, though the addresses are
-// valid. Furthermore, this takes place in a child process. See crbug.com/653372
-// for the context.
-__attribute__((no_sanitize_address))
-#endif
-void Prefetch(size_t start, size_t end) {
-  unsigned char* start_ptr = reinterpret_cast<unsigned char*>(start);
-  unsigned char* end_ptr = reinterpret_cast<unsigned char*>(end);
-  unsigned char dummy = 0;
-  for (unsigned char* ptr = start_ptr; ptr < end_ptr; ptr += kPageSize) {
-    // Volatile is required to prevent the compiler from eliminating this
-    // loop.
-    dummy ^= *static_cast<volatile unsigned char*>(ptr);
-  }
-}
 
 // Populates the per-page residency between |start| and |end| in |residency|. If
 // successful, |residency| has the size of |end| - |start| in pages.
@@ -96,7 +67,7 @@ std::pair<size_t, size_t> GetTextRange() {
   // Set the end to the page on which the beginning of the last symbol is. The
   // actual symbol may spill into the next page by a few bytes, but this is
   // outside of the executable code range anyway.
-  size_t end_page = base::bits::Align(kEndOfText, kPageSize);
+  size_t end_page = base::bits::AlignUp(kEndOfText, kPageSize);
   return {start_page, end_page};
 }
 
@@ -106,7 +77,7 @@ std::pair<size_t, size_t> GetOrderedTextRange() {
   size_t start_page = kStartOfOrderedText - kStartOfOrderedText % kPageSize;
   // kEndOfUnorderedText is not considered ordered, but the byte immediately
   // before is considered ordered and so can not be contained in the start page.
-  size_t end_page = base::bits::Align(kEndOfOrderedText, kPageSize);
+  size_t end_page = base::bits::AlignUp(kEndOfOrderedText, kPageSize);
   return {start_page, end_page};
 }
 
@@ -144,8 +115,8 @@ bool CollectResidency(size_t start,
     PLOG(ERROR) << "Cannot get the time.";
     return false;
   }
-  uint64_t now =
-      static_cast<uint64_t>(ts.tv_sec) * 1000 * 1000 * 1000 + ts.tv_nsec;
+  uint64_t now = static_cast<uint64_t>(ts.tv_sec) * 1000 * 1000 * 1000 +
+                 static_cast<uint64_t>(ts.tv_nsec);
   std::vector<unsigned char> residency;
   if (!Mincore(start, end, &residency))
     return false;
@@ -174,25 +145,49 @@ void DumpResidency(size_t start,
   CHECK_LE(kEndOfText, end);
   auto start_end = base::StringPrintf("%" PRIuS " %" PRIuS "\n",
                                       kStartOfText - start, kEndOfText - start);
-  file.WriteAtCurrentPos(start_end.c_str(), start_end.size());
+  file.WriteAtCurrentPos(start_end.c_str(), static_cast<int>(start_end.size()));
 
   for (const auto& data_point : *data) {
     auto timestamp =
         base::StringPrintf("%" PRIu64 " ", data_point.timestamp_nanos);
-    file.WriteAtCurrentPos(timestamp.c_str(), timestamp.size());
+    file.WriteAtCurrentPos(timestamp.c_str(),
+                           static_cast<int>(timestamp.size()));
 
     std::vector<char> dump;
     dump.reserve(data_point.residency.size() + 1);
     for (auto c : data_point.residency)
       dump.push_back(c ? '1' : '0');
     dump[dump.size() - 1] = '\n';
-    file.WriteAtCurrentPos(&dump[0], dump.size());
+    file.WriteAtCurrentPos(&dump[0], checked_cast<int>(dump.size()));
   }
 }
 
-// These values are persisted to logs. Entries should not be renumbered and
-// numeric values should never be reused.
-// Used for "LibraryLoader.PrefetchDetailedStatus".
+#if !BUILDFLAG(ORDERFILE_INSTRUMENTATION)
+// Reads a byte per page between |start| and |end| to force it into the page
+// cache.
+// Heap allocations, syscalls and library functions are not allowed in this
+// function.
+// Returns true for success.
+#if defined(ADDRESS_SANITIZER)
+// Disable AddressSanitizer instrumentation for this function. It is touching
+// memory that hasn't been allocated by the app, though the addresses are
+// valid. Furthermore, this takes place in a child process. See crbug.com/653372
+// for the context.
+__attribute__((no_sanitize_address))
+#endif
+void Prefetch(size_t start, size_t end) {
+  unsigned char* start_ptr = reinterpret_cast<unsigned char*>(start);
+  unsigned char* end_ptr = reinterpret_cast<unsigned char*>(end);
+  [[maybe_unused]] unsigned char dummy = 0;
+  for (unsigned char* ptr = start_ptr; ptr < end_ptr; ptr += kPageSize) {
+    // Volatile is required to prevent the compiler from eliminating this
+    // loop.
+    dummy ^= *static_cast<volatile unsigned char*>(ptr);
+  }
+}
+
+// These values were used in the past for recording
+// "LibraryLoader.PrefetchDetailedStatus".
 enum class PrefetchStatus {
   kSuccess = 0,
   kWrongOrdering = 1,
@@ -222,6 +217,9 @@ PrefetchStatus ForkAndPrefetch(bool ordered_only) {
 
   pid_t pid = fork();
   if (pid == 0) {
+    // Android defines the background priority to this value since at least 2009
+    // (see Process.java).
+    constexpr int kBackgroundPriority = 10;
     setpriority(PRIO_PROCESS, 0, kBackgroundPriority);
     // _exit() doesn't call the atexit() handlers.
     for (const auto& range : ranges) {
@@ -243,7 +241,6 @@ PrefetchStatus ForkAndPrefetch(bool ordered_only) {
           case SIGSEGV:
           case SIGBUS:
             return PrefetchStatus::kChildProcessCrashed;
-            break;
           case SIGKILL:
           case SIGTERM:
           default:
@@ -258,6 +255,7 @@ PrefetchStatus ForkAndPrefetch(bool ordered_only) {
     return PrefetchStatus::kChildProcessKilled;
   }
 }
+#endif  // !BUILDFLAG(ORDERFILE_INSTRUMENTATION)
 
 }  // namespace
 
@@ -267,16 +265,13 @@ void NativeLibraryPrefetcher::ForkAndPrefetchNativeLibrary(bool ordered_only) {
   // Avoid forking with orderfile instrumentation because the child process
   // would create a dump as well.
   return;
-#endif
-
+#else
   PrefetchStatus status = ForkAndPrefetch(ordered_only);
-  UMA_HISTOGRAM_BOOLEAN("LibraryLoader.PrefetchStatus",
-                        status == PrefetchStatus::kSuccess);
-  UMA_HISTOGRAM_ENUMERATION("LibraryLoader.PrefetchDetailedStatus", status);
   if (status != PrefetchStatus::kSuccess) {
     LOG(WARNING) << "Cannot prefetch the library. status = "
                  << static_cast<int>(status);
   }
+#endif  // BUILDFLAG(ORDERFILE_INSTRUMENTATION)
 }
 
 // static
@@ -290,8 +285,9 @@ int NativeLibraryPrefetcher::PercentageOfResidentCode(size_t start,
   if (!ok)
     return -1;
   total_pages += residency.size();
-  resident_pages += std::count_if(residency.begin(), residency.end(),
-                                  [](unsigned char x) { return x & 1; });
+  resident_pages +=
+      static_cast<size_t>(std::count_if(residency.begin(), residency.end(),
+                                        [](unsigned char x) { return x & 1; }));
   if (total_pages == 0)
     return -1;
   return static_cast<int>((100 * resident_pages) / total_pages);
@@ -344,54 +340,6 @@ void NativeLibraryPrefetcher::MadviseForResidencyCollection() {
   }
   LOG(WARNING) << "Performing madvise for residency collection";
   MadviseOnRange(GetTextRange(), MADV_RANDOM);
-}
-
-// static
-bool NativeLibraryPrefetcher::GetOrderedCodeInfo(std::string* filename,
-                                                 size_t* start_offset,
-                                                 size_t* size) {
-  // Need all the anchors to identify the range.
-  if (!IsOrderingSane()) {
-    LOG(WARNING) << "Incorrect code ordering";
-    return false;
-  }
-
-  std::vector<base::debug::MappedMemoryRegion> regions;
-  {
-    std::string proc_maps;
-    bool ok = base::debug::ReadProcMaps(&proc_maps);
-    if (!ok)
-      return false;
-    ok = base::debug::ParseProcMaps(proc_maps, &regions);
-    if (!ok)
-      return false;
-  }
-
-  for (const auto& region : regions) {
-    if (region.start <= kStartOfOrderedText &&
-        region.end >= kEndOfOrderedText) {
-      size_t page_size = GetPageSize();
-      size_t page_mask = ~(page_size - 1);
-
-      DCHECK_EQ(0u, region.start % page_size);
-      DCHECK_EQ(0u, region.offset % page_size);  // mmap() enforces this.
-
-      size_t start_offset_in_range =
-          (kStartOfOrderedText & page_mask) - region.start;
-      DCHECK_EQ(0u, start_offset_in_range % page_size);
-      size_t start_offset_in_file = start_offset_in_range + region.offset;
-      DCHECK_EQ(0u, start_offset_in_file % page_size);
-
-      *filename = region.path;
-      *start_offset = start_offset_in_file;
-      *size =
-          base::bits::Align(kEndOfOrderedText - kStartOfOrderedText, page_size);
-      return true;
-    }
-  }
-
-  LOG(WARNING) << "Didn't find the ordered code, yet code is ordered.";
-  return false;
 }
 
 }  // namespace android

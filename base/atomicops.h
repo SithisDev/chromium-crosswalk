@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,6 @@
 // - libstdc++: captures bits/c++config.h for __GLIBCXX__
 #include <cstddef>
 
-#include "base/base_export.h"
 #include "build/build_config.h"
 
 namespace base {
@@ -46,7 +45,7 @@ typedef int32_t Atomic32;
 #ifdef ARCH_CPU_64_BITS
 // We need to be able to go between Atomic64 and AtomicWord implicitly.  This
 // means Atomic64 and AtomicWord should be the same type on 64-bit.
-#if defined(__ILP32__) || defined(OS_NACL)
+#if defined(__ILP32__) || BUILDFLAG(IS_NACL)
 // NaCl's intptr_t is not actually 64-bits on 64-bit!
 // http://code.google.com/p/nativeclient/issues/detail?id=1162
 typedef int64_t Atomic64;
@@ -100,12 +99,10 @@ Atomic32 Release_CompareAndSwap(volatile Atomic32* ptr,
                                 Atomic32 new_value);
 
 void NoBarrier_Store(volatile Atomic32* ptr, Atomic32 value);
-void Acquire_Store(volatile Atomic32* ptr, Atomic32 value);
 void Release_Store(volatile Atomic32* ptr, Atomic32 value);
 
 Atomic32 NoBarrier_Load(volatile const Atomic32* ptr);
 Atomic32 Acquire_Load(volatile const Atomic32* ptr);
-Atomic32 Release_Load(volatile const Atomic32* ptr);
 
 // 64-bit atomic operations (only available on 64-bit processors).
 #ifdef ARCH_CPU_64_BITS
@@ -123,27 +120,19 @@ Atomic64 Release_CompareAndSwap(volatile Atomic64* ptr,
                                 Atomic64 old_value,
                                 Atomic64 new_value);
 void NoBarrier_Store(volatile Atomic64* ptr, Atomic64 value);
-void Acquire_Store(volatile Atomic64* ptr, Atomic64 value);
 void Release_Store(volatile Atomic64* ptr, Atomic64 value);
 Atomic64 NoBarrier_Load(volatile const Atomic64* ptr);
 Atomic64 Acquire_Load(volatile const Atomic64* ptr);
-Atomic64 Release_Load(volatile const Atomic64* ptr);
 #endif  // ARCH_CPU_64_BITS
 
 }  // namespace subtle
 }  // namespace base
 
-#if defined(OS_WIN) && defined(ARCH_CPU_X86_FAMILY)
-// TODO(jfb): Try to use base/atomicops_internals_portable.h everywhere.
-// https://crbug.com/559247.
-#  include "base/atomicops_internals_x86_msvc.h"
-#else
-#  include "base/atomicops_internals_portable.h"
-#endif
+#include "base/atomicops_internals_portable.h"
 
 // On some platforms we need additional declarations to make
 // AtomicWord compatible with our other Atomic* types.
-#if defined(OS_MACOSX) || defined(OS_OPENBSD)
+#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_OPENBSD)
 #include "base/atomicops_internals_atomicword_compat.h"
 #endif
 

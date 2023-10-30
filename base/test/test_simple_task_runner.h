@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,8 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/containers/circular_deque.h"
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/test_pending_task.h"
 #include "base/threading/platform_thread.h"
 
@@ -18,13 +17,13 @@ namespace base {
 
 class TimeDelta;
 
-// ATTENTION: Prefer using base::test::ScopedTaskEnvironment and a task runner
-// obtained from base/task/post_task.h over this class. This class isn't as
-// "simple" as it seems specifically because its attempt at being simple makes
-// it run tasks in a surprising order (delays aren't respected and nesting
-// doesn't behave as usual). Should you prefer to flush all tasks regardless of
-// delays, ScopedTaskEnvironment::TimeSource::MOCK_TIME and
-// ScopedTaskEnvironment::FastForwardUntilNoTasksRemain() have you covered.
+// ATTENTION: Prefer using base::test::TaskEnvironment and a task runner
+// obtained from base/task/thread_pool.h over this class. This class isn't as
+// "simple" as it seems specifically because it runs tasks in a surprising order
+// (delays aren't respected and nesting doesn't behave as usual). Should you
+// prefer to flush all tasks regardless of delays,
+// TaskEnvironment::TimeSource::MOCK_TIME and
+// TaskEnvironment::FastForwardUntilNoTasksRemain() have you covered.
 //
 // TestSimpleTaskRunner is a simple TaskRunner implementation that can
 // be used for testing.  It implements SingleThreadTaskRunner as that
@@ -48,6 +47,9 @@ class TimeDelta;
 class TestSimpleTaskRunner : public SingleThreadTaskRunner {
  public:
   TestSimpleTaskRunner();
+
+  TestSimpleTaskRunner(const TestSimpleTaskRunner&) = delete;
+  TestSimpleTaskRunner& operator=(const TestSimpleTaskRunner&) = delete;
 
   // SingleThreadTaskRunner implementation.
   bool PostDelayedTask(const Location& from_here,
@@ -88,8 +90,6 @@ class TestSimpleTaskRunner : public SingleThreadTaskRunner {
   mutable Lock lock_;
 
   base::circular_deque<TestPendingTask> pending_tasks_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestSimpleTaskRunner);
 };
 
 }  // namespace base

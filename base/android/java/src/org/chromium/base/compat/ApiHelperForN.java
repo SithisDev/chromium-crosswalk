@@ -1,11 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.base.compat;
 
-import android.annotation.TargetApi;
 import android.app.Activity;
+import android.app.Notification;
 import android.app.job.JobInfo;
 import android.app.job.JobScheduler;
 import android.content.ClipData;
@@ -13,23 +13,27 @@ import android.content.ComponentName;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.media.MediaCodec.CryptoInfo;
+import android.net.ConnectivityManager;
 import android.os.Build;
+import android.os.Process;
+import android.security.NetworkSecurityPolicy;
+import android.view.MotionEvent;
 import android.view.PointerIcon;
 import android.view.View;
 import android.view.View.DragShadowBuilder;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.RemoteViews;
 
-import org.chromium.base.annotations.DoNotInline;
+import androidx.annotation.RequiresApi;
 
 /**
  * Utility class to use new APIs that were added in N (API level 24). These need to exist in a
  * separate class so that Android framework can successfully verify classes without
  * encountering the new APIs.
  */
-@DoNotInline
-@TargetApi(Build.VERSION_CODES.N)
+@RequiresApi(Build.VERSION_CODES.N)
 public final class ApiHelperForN {
     private ApiHelperForN() {}
 
@@ -72,5 +76,37 @@ public final class ApiHelperForN {
     public static void setVrModeEnabled(Activity activity, boolean enabled,
             ComponentName requestedComponent) throws PackageManager.NameNotFoundException {
         activity.setVrModeEnabled(enabled, requestedComponent);
+    }
+
+    /** See {@link NetworkSecurityPolicy#isCleartextTrafficPermitted(String)}. */
+    public static boolean isCleartextTrafficPermitted(String host) {
+        return NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(host);
+    }
+
+    /** See {@link View#onResolvePointerIcon(MotionEvent, int)}. */
+    public static PointerIcon onResolvePointerIcon(View view, MotionEvent event, int pointerIndex) {
+        return view.onResolvePointerIcon(event, pointerIndex);
+    }
+
+    /** See {@link Process#getStartUptimeMillis()}. */
+    public static long getStartUptimeMillis() {
+        return Process.getStartUptimeMillis();
+    }
+
+    /** See {@link Notification.Builder#setCustomContentView(RemoteViews)}. */
+    public static Notification.Builder setCustomContentView(
+            Notification.Builder builder, RemoteViews views) {
+        return builder.setCustomContentView(views);
+    }
+
+    /** See {@link Notification.Builder#setCustomBigContentView(RemoteViews)}. */
+    public static Notification.Builder setCustomBigContentView(
+            Notification.Builder builder, RemoteViews view) {
+        return builder.setCustomBigContentView(view);
+    }
+
+    /** See {@link ConnectivityManager#getRestrictBackgroundStatus(ConnectivityManager)}. */
+    public static int getRestrictBackgroundStatus(ConnectivityManager cm) {
+        return cm.getRestrictBackgroundStatus();
     }
 }

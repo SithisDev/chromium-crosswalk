@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,9 @@ void InitIOSRunHook(TestSuite* suite, int argc, char* argv[]);
 // Launches an iOS app that runs the tests in the suite passed to
 // InitIOSRunHook.
 void RunTestsFromIOSApp();
+
+// Returns true if unittests should be run by the XCTest runnner.
+bool ShouldRunIOSUnittestsWithXCTest();
 
 }  // namespace base
 

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,19 +10,22 @@
 
 #include <limits>
 
+#include "base/check.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
+#include "base/notreached.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/process/process_metrics.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/scoped_blocking_call.h"
+#include "base/win/registry.h"
 #include "base/win/windows_version.h"
-#include "base/win/wmi.h"
 
 namespace {
 
-int64_t AmountOfMemory(DWORDLONG MEMORYSTATUSEX::*memory_field) {
+uint64_t AmountOfMemory(DWORDLONG MEMORYSTATUSEX::*memory_field) {
   MEMORYSTATUSEX memory_info;
   memory_info.dwLength = sizeof(memory_info);
   if (!GlobalMemoryStatusEx(&memory_info)) {
@@ -30,8 +33,7 @@ int64_t AmountOfMemory(DWORDLONG MEMORYSTATUSEX::*memory_field) {
     return 0;
   }
 
-  int64_t rv = static_cast<int64_t>(memory_info.*memory_field);
-  return rv < 0 ? std::numeric_limits<int64_t>::max() : rv;
+  return memory_info.*memory_field;
 }
 
 bool GetDiskSpaceInfo(const base::FilePath& path,
@@ -40,8 +42,7 @@ bool GetDiskSpaceInfo(const base::FilePath& path,
   ULARGE_INTEGER available;
   ULARGE_INTEGER total;
   ULARGE_INTEGER free;
-  if (!GetDiskFreeSpaceExW(base::as_wcstr(path.value()), &available, &total,
-                           &free))
+  if (!GetDiskFreeSpaceExW(path.value().c_str(), &available, &total, &free))
     return false;
 
   if (available_bytes) {
@@ -67,20 +68,20 @@ int SysInfo::NumberOfProcessors() {
 }
 
 // static
-int64_t SysInfo::AmountOfPhysicalMemoryImpl() {
+uint64_t SysInfo::AmountOfPhysicalMemoryImpl() {
   return AmountOfMemory(&MEMORYSTATUSEX::ullTotalPhys);
 }
 
 // static
-int64_t SysInfo::AmountOfAvailablePhysicalMemoryImpl() {
+uint64_t SysInfo::AmountOfAvailablePhysicalMemoryImpl() {
   SystemMemoryInfoKB info;
   if (!GetSystemMemoryInfo(&info))
     return 0;
-  return static_cast<int64_t>(info.avail_phys) * 1024;
+  return checked_cast<uint64_t>(info.avail_phys) * 1024;
 }
 
 // static
-int64_t SysInfo::AmountOfVirtualMemory() {
+uint64_t SysInfo::AmountOfVirtualMemory() {
   return AmountOfMemory(&MEMORYSTATUSEX::ullTotalVirtual);
 }
 
@@ -161,23 +162,49 @@ void SysInfo::OperatingSystemVersionNumbers(int32_t* major_version,
                                             int32_t* minor_version,
                                             int32_t* bugfix_version) {
   win::OSInfo* os_info = win::OSInfo::GetInstance();
-  *major_version = os_info->version_number().major;
-  *minor_version = os_info->version_number().minor;
+  *major_version = static_cast<int32_t>(os_info->version_number().major);
+  *minor_version = static_cast<int32_t>(os_info->version_number().minor);
   *bugfix_version = 0;
 }
 
 // static
-SysInfo::HardwareInfo SysInfo::GetHardwareInfoSync() {
-  win::WmiComputerSystemInfo wmi_info = win::WmiComputerSystemInfo::Get();
+std::string ReadHardwareInfoFromRegistry(const wchar_t* reg_value_name) {
+  // On some systems or VMs, the system information and some of the below
+  // locations may be missing info. Attempt to find the info from the below
+  // registry keys in the order provided.
+  static const wchar_t* const kSystemInfoRegKeyPaths[] = {
+      L"HARDWARE\\DESCRIPTION\\System\\BIOS",
+      L"SYSTEM\\CurrentControlSet\\Control\\SystemInformation",
+      L"SYSTEM\\HardwareConfig\\Current",
+  };
 
-  HardwareInfo info;
-  info.manufacturer = UTF16ToUTF8(wmi_info.manufacturer());
-  info.model = UTF16ToUTF8(wmi_info.model());
-  info.serial_number = UTF16ToUTF8(wmi_info.serial_number());
-  DCHECK(IsStringUTF8(info.manufacturer));
-  DCHECK(IsStringUTF8(info.model));
-  DCHECK(IsStringUTF8(info.serial_number));
+  std::wstring value;
+  for (const wchar_t* system_info_reg_key_path : kSystemInfoRegKeyPaths) {
+    base::win::RegKey system_information_key;
+    if (system_information_key.Open(HKEY_LOCAL_MACHINE,
+                                    system_info_reg_key_path,
+                                    KEY_READ) == ERROR_SUCCESS) {
+      if ((system_information_key.ReadValue(reg_value_name, &value) ==
+           ERROR_SUCCESS) &&
+          !value.empty()) {
+        break;
+      }
+    }
+  }
+
+  return base::SysWideToUTF8(value);
+}
+
+// static
+SysInfo::HardwareInfo SysInfo::GetHardwareInfoSync() {
+  HardwareInfo info = {ReadHardwareInfoFromRegistry(L"SystemManufacturer"),
+                       SysInfo::HardwareModelName()};
   return info;
+}
+
+// static
+std::string SysInfo::HardwareModelName() {
+  return ReadHardwareInfoFromRegistry(L"SystemProductName");
 }
 
 }  // namespace base

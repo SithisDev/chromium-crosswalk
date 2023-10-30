@@ -1,11 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.base;
 
+import android.content.Context;
+import android.text.TextUtils;
+
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.MainDex;
+import org.chromium.build.annotations.MainDex;
+
+import java.util.Map;
 
 /**
  * This class provides JNI-related methods to the native library.
@@ -20,12 +25,22 @@ public class JNIUtils {
      * is needed for the few cases where the JNI mechanism is unable to automatically determine the
      * appropriate ClassLoader instance.
      */
-    @CalledByNative
-    public static Object getClassLoader() {
+    private static ClassLoader getClassLoader() {
         if (sJniClassLoader == null) {
             return JNIUtils.class.getClassLoader();
         }
         return sJniClassLoader;
+    }
+
+    /** Returns a ClassLoader which can load Java classes from the specified split. */
+    @CalledByNative
+    public static ClassLoader getSplitClassLoader(String splitName) {
+        Context context = ContextUtils.getApplicationContext();
+        if (!TextUtils.isEmpty(splitName)
+                && BundleUtils.isIsolatedSplitInstalled(context, splitName)) {
+            return BundleUtils.createIsolatedSplitContext(context, splitName).getClassLoader();
+        }
+        return getClassLoader();
     }
 
     /**
@@ -54,5 +69,20 @@ public class JNIUtils {
     public static void enableSelectiveJniRegistration() {
         assert sSelectiveJniRegistrationEnabled == null;
         sSelectiveJniRegistrationEnabled = true;
+    }
+
+    /**
+     * Helper to convert from java maps to two arrays for JNI.
+     */
+    public static <K, V> void splitMap(Map<K, V> map, K[] outKeys, V[] outValues) {
+        assert map.size() == outKeys.length;
+        assert outValues.length == outKeys.length;
+
+        int i = 0;
+        for (Map.Entry<K, V> entry : map.entrySet()) {
+            outKeys[i] = entry.getKey();
+            outValues[i] = entry.getValue();
+            i++;
+        }
     }
 }

@@ -1,24 +1,44 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/profiler/stack_sampler.h"
 
-#include "base/profiler/native_unwinder_mac.h"
+#include <memory>
+
+#include "base/bind.h"
+#include "base/check.h"
+#include "base/profiler/frame_pointer_unwinder.h"
+#include "base/profiler/stack_copier_suspend.h"
 #include "base/profiler/stack_sampler_impl.h"
-#include "base/profiler/thread_delegate_mac.h"
+#include "base/profiler/suspendable_thread_delegate_mac.h"
+#include "base/profiler/unwinder.h"
 
 namespace base {
 
+namespace {
+
+std::vector<std::unique_ptr<Unwinder>> CreateUnwinders() {
+  std::vector<std::unique_ptr<Unwinder>> unwinders;
+  unwinders.push_back(std::make_unique<FramePointerUnwinder>());
+  return unwinders;
+}
+
+}  // namespace
+
 // static
 std::unique_ptr<StackSampler> StackSampler::Create(
-    PlatformThreadId thread_id,
+    SamplingProfilerThreadToken thread_token,
     ModuleCache* module_cache,
+    UnwindersFactory core_unwinders_factory,
+    RepeatingClosure record_sample_callback,
     StackSamplerTestDelegate* test_delegate) {
+  DCHECK(!core_unwinders_factory);
   return std::make_unique<StackSamplerImpl>(
-      std::make_unique<ThreadDelegateMac>(thread_id),
-      std::make_unique<NativeUnwinderMac>(module_cache), module_cache,
-      test_delegate);
+      std::make_unique<StackCopierSuspend>(
+          std::make_unique<SuspendableThreadDelegateMac>(thread_token)),
+      BindOnce(&CreateUnwinders), module_cache,
+      std::move(record_sample_callback), test_delegate);
 }
 
 // static

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * The default {@link TaskExecutor} which maps directly to base/task/post_task.h.
+ * The default {@link TaskExecutor}.
+ * TODO(crbug.com/1026641): Provide direct Java APIs for ThreadPool vs UI thread
+ * task posting instead of sharding based on {@link TaskTraits}.
  */
 class DefaultTaskExecutor implements TaskExecutor {
     private final Map<TaskTraits, TaskRunner> mTraitsToRunnerMap = new HashMap<>();
@@ -30,8 +32,9 @@ class DefaultTaskExecutor implements TaskExecutor {
     }
 
     /**
-     * This maps to a single thread within the native thread pool. Due to that contract we
-     * can't run tasks posted on it until native has started.
+     * If CurrentThread is not specified, or we are being called from within a threadpool task
+     * this maps to a single thread within the native thread pool. If so we can't run tasks
+     * posted on it until native has started.
      */
     @Override
     public SingleThreadTaskRunner createSingleThreadTaskRunner(TaskTraits taskTraits) {
@@ -43,16 +46,12 @@ class DefaultTaskExecutor implements TaskExecutor {
     @Override
     public synchronized void postDelayedTask(TaskTraits taskTraits, Runnable task, long delay) {
         if (taskTraits.hasExtension()) {
-            TaskRunner runner = createTaskRunner(taskTraits);
-            runner.postDelayedTask(task, delay);
-            runner.destroy();
+            createTaskRunner(taskTraits).postDelayedTask(task, delay);
         } else {
             // Caching TaskRunners only for common TaskTraits.
             TaskRunner runner = mTraitsToRunnerMap.get(taskTraits);
             if (runner == null) {
                 runner = createTaskRunner(taskTraits);
-                // Disable destroy() check since object will live forever.
-                runner.disableLifetimeCheck();
                 mTraitsToRunnerMap.put(taskTraits, runner);
             }
             runner.postDelayedTask(task, delay);

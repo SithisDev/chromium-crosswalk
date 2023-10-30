@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,11 @@
 #define BASE_PROFILER_STACK_SAMPLER_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/base_export.h"
-#include "base/macros.h"
+#include "base/callback.h"
+#include "base/profiler/sampling_profiler_thread_token.h"
 #include "base/threading/platform_thread.h"
 
 namespace base {
@@ -16,6 +18,7 @@ namespace base {
 class Unwinder;
 class ModuleCache;
 class ProfileBuilder;
+class StackBuffer;
 class StackSamplerTestDelegate;
 
 // StackSampler is an implementation detail of StackSamplingProfiler. It
@@ -23,52 +26,25 @@ class StackSamplerTestDelegate;
 // for a given thread.
 class BASE_EXPORT StackSampler {
  public:
-  // This class contains a buffer for stack copies that can be shared across
-  // multiple instances of StackSampler.
-  class BASE_EXPORT StackBuffer {
-   public:
-    // The expected alignment of the stack on the current platform. Windows and
-    // System V AMD64 ABIs on x86, x64, and ARM require the stack to be aligned
-    // to twice the pointer size. Excepted from this requirement is code setting
-    // up the stack during function calls (between pushing the return address
-    // and the end of the function prologue). The profiler will sometimes
-    // encounter this exceptional case for leaf frames.
-    static constexpr size_t kPlatformStackAlignment = 2 * sizeof(uintptr_t);
+  // Factory for generating a set of Unwinders for use by the profiler.
+  using UnwindersFactory =
+      OnceCallback<std::vector<std::unique_ptr<Unwinder>>()>;
 
-    StackBuffer(size_t buffer_size);
-    ~StackBuffer();
-
-    // Returns a kPlatformStackAlignment-aligned pointer to the stack buffer.
-    uintptr_t* buffer() const {
-      // Return the first address in the buffer aligned to
-      // kPlatformStackAlignment. The buffer is guaranteed to have enough space
-      // for size() bytes beyond this value.
-      return reinterpret_cast<uintptr_t*>(
-          (reinterpret_cast<uintptr_t>(buffer_.get()) +
-           kPlatformStackAlignment - 1) &
-          ~(kPlatformStackAlignment - 1));
-    }
-
-    size_t size() const { return size_; }
-
-   private:
-    // The buffer to store the stack.
-    const std::unique_ptr<uint8_t[]> buffer_;
-
-    // The size of the requested buffer allocation. The actual allocation is
-    // larger to accommodate alignment requirements.
-    const size_t size_;
-
-    DISALLOW_COPY_AND_ASSIGN(StackBuffer);
-  };
+  StackSampler(const StackSampler&) = delete;
+  StackSampler& operator=(const StackSampler&) = delete;
 
   virtual ~StackSampler();
 
-  // Creates a stack sampler that records samples for thread with |thread_id|.
-  // Returns null if this platform does not support stack sampling.
+  // Creates a stack sampler that records samples for thread with
+  // |thread_token|. Unwinders in |unwinders| must be stored in increasing
+  // priority to guide unwind attempts. Only the unwinder with the lowest
+  // priority is allowed to return with UnwindResult::kCompleted. Returns null
+  // if this platform does not support stack sampling.
   static std::unique_ptr<StackSampler> Create(
-      PlatformThreadId thread_id,
+      SamplingProfilerThreadToken thread_token,
       ModuleCache* module_cache,
+      UnwindersFactory core_unwinders_factory,
+      RepeatingClosure record_sample_callback,
       StackSamplerTestDelegate* test_delegate);
 
   // Gets the required size of the stack buffer.
@@ -81,25 +57,30 @@ class BASE_EXPORT StackSampler {
   // The following functions are all called on the SamplingThread (not the
   // thread being sampled).
 
+  // Performs post-construction initialization on the SamplingThread.
+  virtual void Initialize() {}
+
   // Adds an auxiliary unwinder to handle additional, non-native-code unwind
-  // scenarios.
+  // scenarios. Unwinders must be inserted in increasing priority, following
+  // |unwinders| provided in Create(), to guide unwind attempts.
   virtual void AddAuxUnwinder(std::unique_ptr<Unwinder> unwinder) = 0;
 
   // Records a set of frames and returns them.
   virtual void RecordStackFrames(StackBuffer* stackbuffer,
-                                 ProfileBuilder* profile_builder) = 0;
+                                 ProfileBuilder* profile_builder,
+                                 PlatformThreadId thread_id) = 0;
 
  protected:
   StackSampler();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(StackSampler);
 };
 
 // StackSamplerTestDelegate provides seams for test code to execute during stack
 // collection.
 class BASE_EXPORT StackSamplerTestDelegate {
  public:
+  StackSamplerTestDelegate(const StackSamplerTestDelegate&) = delete;
+  StackSamplerTestDelegate& operator=(const StackSamplerTestDelegate&) = delete;
+
   virtual ~StackSamplerTestDelegate();
 
   // Called after copying the stack and resuming the target thread, but prior to
@@ -108,9 +89,6 @@ class BASE_EXPORT StackSamplerTestDelegate {
 
  protected:
   StackSamplerTestDelegate();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(StackSamplerTestDelegate);
 };
 
 }  // namespace base

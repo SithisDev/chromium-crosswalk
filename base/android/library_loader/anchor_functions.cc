@@ -1,10 +1,9 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/android/library_loader/anchor_functions.h"
 
-#include "base/logging.h"
 #include "build/build_config.h"
 
 #if BUILDFLAG(SUPPORTS_CODE_ORDERING)

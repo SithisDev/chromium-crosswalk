@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "base/command_line.h"
 #include "base/process/kill.h"
 #include "base/process/process.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/test/multiprocess_test.h"
+#include "base/win/windows_version.h"
 #include "testing/multiprocess_func_list.h"
 
 namespace {
@@ -49,13 +49,15 @@ MULTIPROCESS_TEST_MAIN(ReturnNine) {
 }
 
 void ScopedProcessInformationTest::DoCreateProcess(
-    const std::string& main_id, PROCESS_INFORMATION* process_handle) {
-  base::string16 cmd_line = MakeCmdLine(main_id).GetCommandLineString();
+    const std::string& main_id,
+    PROCESS_INFORMATION* process_handle) {
+  base::CommandLine::StringType cmd_line =
+      MakeCmdLine(main_id).GetCommandLineString();
   STARTUPINFO startup_info = {};
   startup_info.cb = sizeof(startup_info);
 
-  EXPECT_TRUE(::CreateProcess(NULL, base::as_writable_wcstr(cmd_line), NULL,
-                              NULL, false, 0, NULL, NULL, &startup_info,
+  EXPECT_TRUE(::CreateProcess(nullptr, std::data(cmd_line), nullptr, nullptr,
+                              false, 0, nullptr, nullptr, &startup_info,
                               process_handle));
 }
 
@@ -82,7 +84,7 @@ TEST_F(ScopedProcessInformationTest, TakeProcess) {
 
   HANDLE process = process_info.TakeProcessHandle();
   EXPECT_EQ(kProcessHandle, process);
-  EXPECT_EQ(NULL, process_info.process_handle());
+  EXPECT_EQ(nullptr, process_info.process_handle());
   EXPECT_EQ(0u, process_info.process_id());
   EXPECT_TRUE(process_info.IsValid());
   process_info.Take();
@@ -94,7 +96,7 @@ TEST_F(ScopedProcessInformationTest, TakeThread) {
 
   HANDLE thread = process_info.TakeThreadHandle();
   EXPECT_EQ(kThreadHandle, thread);
-  EXPECT_EQ(NULL, process_info.thread_handle());
+  EXPECT_EQ(nullptr, process_info.thread_handle());
   EXPECT_EQ(0u, process_info.thread_id());
   EXPECT_TRUE(process_info.IsValid());
   process_info.Take();
@@ -123,6 +125,10 @@ TEST_F(ScopedProcessInformationTest, TakeWholeStruct) {
 }
 
 TEST_F(ScopedProcessInformationTest, Duplicate) {
+  if (base::win::GetVersion() <= base::win::Version::WIN7) {
+    // Disabled on Windows 7 due to flakiness. https://crbug.com/1336879
+    GTEST_SKIP();
+  }
   PROCESS_INFORMATION temp_process_information;
   DoCreateProcess("ReturnSeven", &temp_process_information);
   base::win::ScopedProcessInformation process_info;

@@ -1,93 +1,31 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/allocator/partition_allocator/address_space_randomization.h"
 
-#include "base/allocator/partition_allocator/page_allocator.h"
-#include "base/allocator/partition_allocator/spin_lock.h"
-#include "base/logging.h"
-#include "base/no_destructor.h"
-#include "base/rand_util.h"
+#include "base/allocator/partition_allocator/partition_alloc_check.h"
+#include "base/allocator/partition_allocator/random.h"
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>  // Must be in front of other Windows header files.
 
-#include <VersionHelpers.h>
+#include <versionhelpers.h>
 #endif
 
-namespace base {
+namespace partition_alloc {
 
-namespace {
-
-// This is the same PRNG as used by tcmalloc for mapping address randomness;
-// see http://burtleburtle.net/bob/rand/smallprng.html
-struct RandomContext {
-  subtle::SpinLock lock;
-  bool initialized;
-  uint32_t a;
-  uint32_t b;
-  uint32_t c;
-  uint32_t d;
-};
-
-RandomContext* GetRandomContext() {
-  static NoDestructor<RandomContext> s_RandomContext;
-  return s_RandomContext.get();
-}
-
-#define rot(x, k) (((x) << (k)) | ((x) >> (32 - (k))))
-
-uint32_t RandomValueInternal(RandomContext* x) {
-  uint32_t e = x->a - rot(x->b, 27);
-  x->a = x->b ^ rot(x->c, 17);
-  x->b = x->c + x->d;
-  x->c = x->d + e;
-  x->d = e + x->a;
-  return x->d;
-}
-
-#undef rot
-
-uint32_t RandomValue(RandomContext* x) {
-  subtle::SpinLock::Guard guard(x->lock);
-  if (UNLIKELY(!x->initialized)) {
-    const uint64_t r1 = RandUint64();
-    const uint64_t r2 = RandUint64();
-
-    x->a = static_cast<uint32_t>(r1);
-    x->b = static_cast<uint32_t>(r1 >> 32);
-    x->c = static_cast<uint32_t>(r2);
-    x->d = static_cast<uint32_t>(r2 >> 32);
-
-    x->initialized = true;
-  }
-
-  return RandomValueInternal(x);
-}
-
-}  // namespace
-
-void SetRandomPageBaseSeed(int64_t seed) {
-  RandomContext* x = GetRandomContext();
-  subtle::SpinLock::Guard guard(x->lock);
-  // Set RNG to initial state.
-  x->initialized = true;
-  x->a = x->b = static_cast<uint32_t>(seed);
-  x->c = x->d = static_cast<uint32_t>(seed >> 32);
-}
-
-void* GetRandomPageBase() {
-  uintptr_t random = static_cast<uintptr_t>(RandomValue(GetRandomContext()));
+uintptr_t GetRandomPageBase() {
+  uintptr_t random = static_cast<uintptr_t>(internal::RandomValue());
 
 #if defined(ARCH_CPU_64_BITS)
   random <<= 32ULL;
-  random |= static_cast<uintptr_t>(RandomValue(GetRandomContext()));
+  random |= static_cast<uintptr_t>(internal::RandomValue());
 
-// The kASLRMask and kASLROffset constants will be suitable for the
+// The ASLRMask() and ASLROffset() constants will be suitable for the
 // OS and build configuration.
-#if defined(OS_WIN) && !defined(MEMORY_TOOL_REPLACES_ALLOCATOR)
+#if BUILDFLAG(IS_WIN) && !defined(MEMORY_TOOL_REPLACES_ALLOCATOR)
   // Windows >= 8.1 has the full 47 bits. Use them where available.
   static bool windows_81 = false;
   static bool windows_81_initialized = false;
@@ -96,33 +34,33 @@ void* GetRandomPageBase() {
     windows_81_initialized = true;
   }
   if (!windows_81) {
-    random &= internal::kASLRMaskBefore8_10;
+    random &= internal::ASLRMaskBefore8_10();
   } else {
-    random &= internal::kASLRMask;
+    random &= internal::ASLRMask();
   }
-  random += internal::kASLROffset;
+  random += internal::ASLROffset();
 #else
-  random &= internal::kASLRMask;
-  random += internal::kASLROffset;
-#endif  // defined(OS_WIN) && !defined(MEMORY_TOOL_REPLACES_ALLOCATOR)
+  random &= internal::ASLRMask();
+  random += internal::ASLROffset();
+#endif  // BUILDFLAG(IS_WIN) && !defined(MEMORY_TOOL_REPLACES_ALLOCATOR)
 #else   // defined(ARCH_CPU_32_BITS)
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // On win32 host systems the randomization plus huge alignment causes
   // excessive fragmentation. Plus most of these systems lack ASLR, so the
   // randomization isn't buying anything. In that case we just skip it.
-  // TODO(jschuh): Just dump the randomization when HE-ASLR is present.
+  // TODO(palmer): Just dump the randomization when HE-ASLR is present.
   static BOOL is_wow64 = -1;
   if (is_wow64 == -1 && !IsWow64Process(GetCurrentProcess(), &is_wow64))
     is_wow64 = FALSE;
   if (!is_wow64)
-    return nullptr;
-#endif  // defined(OS_WIN)
-  random &= internal::kASLRMask;
-  random += internal::kASLROffset;
+    return 0;
+#endif  // BUILDFLAG(IS_WIN)
+  random &= internal::ASLRMask();
+  random += internal::ASLROffset();
 #endif  // defined(ARCH_CPU_32_BITS)
 
-  DCHECK_EQ(0ULL, (random & kPageAllocationGranularityOffsetMask));
-  return reinterpret_cast<void*>(random);
+  PA_DCHECK(!(random & internal::PageAllocationGranularityOffsetMask()));
+  return random;
 }
 
-}  // namespace base
+}  // namespace partition_alloc

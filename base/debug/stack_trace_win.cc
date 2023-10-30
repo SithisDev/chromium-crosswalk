@@ -1,23 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/debug/stack_trace.h"
 
 #include <windows.h>
+
 #include <dbghelp.h>
 #include <stddef.h>
 
 #include <algorithm>
 #include <iostream>
+#include <iterator>
 #include <memory>
 
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
-#include "base/stl_util.h"
-#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "build/build_config.h"
 
@@ -32,6 +33,10 @@ LPTOP_LEVEL_EXCEPTION_FILTER g_previous_filter = NULL;
 
 bool g_initialized_symbols = false;
 DWORD g_init_error = ERROR_SUCCESS;
+// STATUS_INFO_LENGTH_MISMATCH is declared in <ntstatus.h>, but including that
+// header creates a conflict with base/win/windows_types.h, so re-declaring it
+// here.
+DWORD g_status_info_length_mismatch = 0xC0000004;
 
 // Prints the exception call stack.
 // This is the unit tests exception filter.
@@ -112,10 +117,51 @@ long WINAPI StackDumpExceptionFilter(EXCEPTION_POINTERS* info) {
 }
 
 FilePath GetExePath() {
-  char16 system_buffer[MAX_PATH];
-  GetModuleFileName(NULL, as_writable_wcstr(system_buffer), MAX_PATH);
+  wchar_t system_buffer[MAX_PATH];
+  GetModuleFileName(NULL, system_buffer, MAX_PATH);
   system_buffer[MAX_PATH - 1] = L'\0';
   return FilePath(system_buffer);
+}
+
+constexpr size_t kSymInitializeRetryCount = 3;
+
+// A wrapper for SymInitialize. SymInitialize seems to occasionally fail
+// because of an internal race condition. So  wrap it and retry a finite
+// number of times.
+// See crbug.com/1339753
+bool SymInitializeWrapper(HANDLE handle, BOOL invade_process) {
+  for (size_t i = 0; i < kSymInitializeRetryCount; ++i) {
+    if (SymInitialize(handle, nullptr, invade_process))
+      return true;
+
+    g_init_error = GetLastError();
+    if (g_init_error != g_status_info_length_mismatch)
+      return false;
+  }
+  DLOG(ERROR) << "SymInitialize failed repeatedly.";
+  return false;
+}
+
+bool SymInitializeCurrentProc() {
+  const HANDLE current_process = GetCurrentProcess();
+  if (SymInitializeWrapper(current_process, TRUE))
+    return true;
+
+  // g_init_error is updated by SymInitializeWrapper.
+  // No need to do "g_init_error = GetLastError()" here.
+  if (g_init_error != ERROR_INVALID_PARAMETER)
+    return false;
+
+  // SymInitialize() can fail with ERROR_INVALID_PARAMETER when something has
+  // already called SymInitialize() in this process. For example, when absl
+  // support for gtest is enabled, it results in absl calling SymInitialize()
+  // almost immediately after startup. In such a case, try to reinit to see if
+  // that succeeds.
+  SymCleanup(current_process);
+  if (SymInitializeWrapper(current_process, TRUE))
+    return true;
+
+  return false;
 }
 
 bool InitializeSymbols() {
@@ -131,10 +177,7 @@ bool InitializeSymbols() {
   SymSetOptions(SYMOPT_DEFERRED_LOADS |
                 SYMOPT_UNDNAME |
                 SYMOPT_LOAD_LINES);
-  if (!SymInitialize(GetCurrentProcess(), NULL, TRUE)) {
-    g_init_error = GetLastError();
-    // TODO(awong): Handle error: SymInitialize can fail with
-    // ERROR_INVALID_PARAMETER.
+  if (!SymInitializeCurrentProc()) {
     // When it fails, we should not call debugbreak since it kills the current
     // process (prevents future tests from running or kills the browser
     // process).
@@ -147,20 +190,20 @@ bool InitializeSymbols() {
   // add the directory of the executable to symbol search path.
   // All following errors are non-fatal.
   static constexpr size_t kSymbolsArraySize = 1024;
-  char16 symbols_path[kSymbolsArraySize];
+  wchar_t symbols_path[kSymbolsArraySize];
 
   // Note: The below function takes buffer size as number of characters,
   // not number of bytes!
-  if (!SymGetSearchPathW(GetCurrentProcess(), as_writable_wcstr(symbols_path),
+  if (!SymGetSearchPathW(GetCurrentProcess(), symbols_path,
                          kSymbolsArraySize)) {
     g_init_error = GetLastError();
     DLOG(WARNING) << "SymGetSearchPath failed: " << g_init_error;
     return false;
   }
 
-  string16 new_path = StrCat(
-      {symbols_path, STRING16_LITERAL(";"), GetExePath().DirName().value()});
-  if (!SymSetSearchPathW(GetCurrentProcess(), as_wcstr(new_path))) {
+  std::wstring new_path = StringPrintf(L"%ls;%ls", symbols_path,
+                                       GetExePath().DirName().value().c_str());
+  if (!SymSetSearchPathW(GetCurrentProcess(), new_path.c_str())) {
     g_init_error = GetLastError();
     DLOG(WARNING) << "SymSetSearchPath failed." << g_init_error;
     return false;
@@ -193,6 +236,9 @@ class SymbolContext {
     return
       Singleton<SymbolContext, LeakySingletonTraits<SymbolContext> >::get();
   }
+
+  SymbolContext(const SymbolContext&) = delete;
+  SymbolContext& operator=(const SymbolContext&) = delete;
 
   // For the given trace, attempts to resolve the symbols, and output a trace
   // to the ostream os.  The format for each line of the backtrace is:
@@ -263,7 +309,6 @@ class SymbolContext {
   }
 
   Lock lock_;
-  DISALLOW_COPY_AND_ASSIGN(SymbolContext);
 };
 
 }  // namespace
@@ -307,17 +352,17 @@ void StackTrace::InitTrace(const CONTEXT* context_record) {
   STACKFRAME64 stack_frame;
   memset(&stack_frame, 0, sizeof(stack_frame));
 #if defined(ARCH_CPU_X86_64)
-  int machine_type = IMAGE_FILE_MACHINE_AMD64;
+  DWORD machine_type = IMAGE_FILE_MACHINE_AMD64;
   stack_frame.AddrPC.Offset = context_record->Rip;
   stack_frame.AddrFrame.Offset = context_record->Rbp;
   stack_frame.AddrStack.Offset = context_record->Rsp;
 #elif defined(ARCH_CPU_ARM64)
-  int machine_type = IMAGE_FILE_MACHINE_ARM64;
+  DWORD machine_type = IMAGE_FILE_MACHINE_ARM64;
   stack_frame.AddrPC.Offset = context_record->Pc;
   stack_frame.AddrFrame.Offset = context_record->Fp;
   stack_frame.AddrStack.Offset = context_record->Sp;
 #elif defined(ARCH_CPU_X86)
-  int machine_type = IMAGE_FILE_MACHINE_I386;
+  DWORD machine_type = IMAGE_FILE_MACHINE_I386;
   stack_frame.AddrPC.Offset = context_record->Eip;
   stack_frame.AddrFrame.Offset = context_record->Ebp;
   stack_frame.AddrStack.Offset = context_record->Esp;
@@ -330,11 +375,11 @@ void StackTrace::InitTrace(const CONTEXT* context_record) {
   while (StackWalk64(machine_type, GetCurrentProcess(), GetCurrentThread(),
                      &stack_frame, &context_copy, NULL,
                      &SymFunctionTableAccess64, &SymGetModuleBase64, NULL) &&
-         count_ < size(trace_)) {
+         count_ < std::size(trace_)) {
     trace_[count_++] = reinterpret_cast<void*>(stack_frame.AddrPC.Offset);
   }
 
-  for (size_t i = count_; i < size(trace_); ++i)
+  for (size_t i = count_; i < std::size(trace_); ++i)
     trace_[i] = NULL;
 }
 

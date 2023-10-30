@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,7 @@ namespace base {
 
 namespace {
 
-constexpr TimeDelta kSleepDuration = TimeDelta::FromMilliseconds(20);
-
+constexpr TimeDelta kSleepDuration = Milliseconds(20);
 }
 
 TEST(ElapsedTimerTest, Simple) {
@@ -25,6 +24,17 @@ TEST(ElapsedTimerTest, Simple) {
   // Can call |Elapsed()| multiple times.
   PlatformThread::Sleep(kSleepDuration);
   EXPECT_GE(timer.Elapsed(), 2 * kSleepDuration);
+}
+
+TEST(ElapsedTimerTest, Mocked) {
+  ScopedMockElapsedTimersForTest mock_elapsed_timer;
+
+  ElapsedTimer timer;
+  EXPECT_EQ(timer.Elapsed(), ScopedMockElapsedTimersForTest::kMockElapsedTime);
+
+  // Real-time doesn't matter.
+  PlatformThread::Sleep(kSleepDuration);
+  EXPECT_EQ(timer.Elapsed(), ScopedMockElapsedTimersForTest::kMockElapsedTime);
 }
 
 class ElapsedThreadTimerTest : public ::testing::Test {
@@ -53,7 +63,7 @@ TEST_F(ElapsedThreadTimerTest, Simple) {
   EXPECT_TRUE(timer.is_supported());
 
   // 1ms of work.
-  constexpr TimeDelta kLoopingTime = TimeDelta::FromMilliseconds(1);
+  constexpr TimeDelta kLoopingTime = Milliseconds(1);
   const ThreadTicks start_ticks = ThreadTicks::Now();
   while (ThreadTicks::Now() - start_ticks < kLoopingTime) {
   }
@@ -71,6 +81,20 @@ TEST_F(ElapsedThreadTimerTest, DoesNotCountSleep) {
   PlatformThread::Sleep(kSleepDuration);
   // Sleep time is not accounted for.
   EXPECT_LT(timer.Elapsed(), kSleepDuration);
+}
+
+TEST_F(ElapsedThreadTimerTest, Mocked) {
+  if (!ThreadTicks::IsSupported())
+    return;
+
+  ScopedMockElapsedTimersForTest mock_elapsed_timer;
+
+  ElapsedThreadTimer timer;
+  EXPECT_EQ(timer.Elapsed(), ScopedMockElapsedTimersForTest::kMockElapsedTime);
+
+  // Real-time doesn't matter.
+  PlatformThread::Sleep(kSleepDuration);
+  EXPECT_EQ(timer.Elapsed(), ScopedMockElapsedTimersForTest::kMockElapsedTime);
 }
 
 }  // namespace base

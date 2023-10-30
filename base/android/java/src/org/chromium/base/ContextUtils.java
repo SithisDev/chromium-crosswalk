@@ -1,19 +1,30 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.base;
 
+import android.app.Activity;
 import android.app.Application;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.res.AssetManager;
+import android.os.Build;
+import android.os.Handler;
 import android.os.Process;
 import android.preference.PreferenceManager;
 
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.MainDex;
+import org.chromium.base.compat.ApiHelperForM;
+import org.chromium.base.compat.ApiHelperForO;
+import org.chromium.build.BuildConfig;
 
 /**
  * This class provides Android application context related utility methods.
@@ -22,8 +33,15 @@ import org.chromium.base.annotations.MainDex;
 public class ContextUtils {
     private static final String TAG = "ContextUtils";
     private static Context sApplicationContext;
-    // TODO(agrieve): Remove sProcessName caching when we stop supporting JB.
-    private static String sProcessName;
+
+    /**
+     * Flag for {@link Context#registerReceiver}: The receiver can receive broadcasts from other
+     * Apps. Has the same behavior as marking a statically registered receiver with "exported=true".
+     *
+     * TODO(mthiesse): Move to ApiHelperForT when we build against T SDK.
+     */
+    public static final int RECEIVER_EXPORTED = 0x2;
+    public static final int RECEIVER_NOT_EXPORTED = 0x4;
 
     /**
      * Initialization-on-demand holder. This exists for thread-safe lazy initialization.
@@ -57,7 +75,6 @@ public class ContextUtils {
      *
      * @param appContext The application context.
      */
-    @MainDex // TODO(agrieve): Could add to whole class if not for ApplicationStatus.initialize().
     public static void initApplicationContext(Context appContext) {
         // Conceding that occasionally in tests, native is loaded before the browser process is
         // started, in which case the browser process re-sets the application context.
@@ -71,8 +88,13 @@ public class ContextUtils {
      *
      * @return The application-wide shared preferences.
      */
+    @SuppressWarnings("DefaultSharedPreferencesCheck")
     private static SharedPreferences fetchAppSharedPreferences() {
-        return PreferenceManager.getDefaultSharedPreferences(sApplicationContext);
+        // This may need to create the prefs directory if we've never used shared prefs before, so
+        // allow disk writes. This is rare but can happen if code used early in startup reads prefs.
+        try (StrictModeContext ignored = StrictModeContext.allowDiskWrites()) {
+            return PreferenceManager.getDefaultSharedPreferences(sApplicationContext);
+        }
     }
 
     /**
@@ -99,10 +121,20 @@ public class ContextUtils {
         Holder.sSharedPreferences = fetchAppSharedPreferences();
     }
 
+    /**
+     * Tests that use the applicationContext may unintentionally use the Context
+     * set by a previously run test.
+     */
+    @VisibleForTesting
+    public static void clearApplicationContextForTests() {
+        sApplicationContext = null;
+        Holder.sSharedPreferences = null;
+    }
+
     private static void initJavaSideApplicationContext(Context appContext) {
         assert appContext != null;
         // Guard against anyone trying to downcast.
-        if (BuildConfig.DCHECK_IS_ON && appContext instanceof Application) {
+        if (BuildConfig.ENABLE_ASSERTS && appContext instanceof Application) {
             appContext = new ContextWrapper(appContext);
         }
         sApplicationContext = appContext;
@@ -128,38 +160,87 @@ public class ContextUtils {
     /**
      * @return Whether the process is isolated.
      */
+    @SuppressWarnings("NewApi")
     public static boolean isIsolatedProcess() {
-        try {
-            return (Boolean) Process.class.getMethod("isIsolated").invoke(null);
-        } catch (Exception e) { // No multi-catch below API level 19 for reflection exceptions.
-            // If fallback logic is ever needed, refer to:
-            // https://chromium-review.googlesource.com/c/chromium/src/+/905563/1
-            throw new RuntimeException(e);
+        // Was not made visible until Android P, but the method has always been there.
+        return Process.isIsolated();
+    }
+
+    /**
+     * @return if current process is SdkSandbox process.
+     */
+    public static boolean isSdkSandboxProcess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return Process.isSdkSandbox();
+        } else {
+            return false;
         }
     }
 
     /** @return The name of the current process. E.g. "org.chromium.chrome:privileged_process0". */
     public static String getProcessName() {
-        // Once we drop support JB, this method can be simplified to not cache sProcessName and call
-        // ActivityThread.currentProcessName().
-        if (sProcessName != null) {
-            return sProcessName;
+        return ApiCompatibilityUtils.getProcessName();
+    }
+
+    /** @return Whether the current process is 64-bit. */
+    public static boolean isProcess64Bit() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return ApiHelperForM.isProcess64Bit();
+        } else {
+            // Android sets CPU_ABI to the first supported ABI for the current process bitness
+            // (for compat reasons), so we can use this to infer our bitness.
+            return Build.SUPPORTED_64_BIT_ABIS.length > 0
+                    && Build.SUPPORTED_64_BIT_ABIS[0].equals(Build.CPU_ABI);
         }
-        try {
-            // An even more convenient ActivityThread.currentProcessName() exists, but was not added
-            // until JB MR2.
-            Class<?> activityThreadClazz = Class.forName("android.app.ActivityThread");
-            Object activityThread =
-                    activityThreadClazz.getMethod("currentActivityThread").invoke(null);
-            // Before JB MR2, currentActivityThread() returns null when called on a non-UI thread.
-            // Cache the name to allow other threads to access it.
-            sProcessName =
-                    (String) activityThreadClazz.getMethod("getProcessName").invoke(activityThread);
-            return sProcessName;
-        } catch (Exception e) { // No multi-catch below API level 19 for reflection exceptions.
-            // If fallback logic is ever needed, refer to:
-            // https://chromium-review.googlesource.com/c/chromium/src/+/905563/1
-            throw new RuntimeException(e);
+    }
+
+    /**
+     * Extract the {@link Activity} if the given {@link Context} either is or wraps one.
+     *
+     * @param context The context to check.
+     * @return Extracted activity if it exists, otherwise null.
+     */
+    public static @Nullable Activity activityFromContext(@Nullable Context context) {
+        // Only retrieves the base context if the supplied context is a ContextWrapper but not an
+        // Activity, because Activity is a subclass of ContextWrapper.
+        while (context instanceof ContextWrapper) {
+            if (context instanceof Activity) return (Activity) context;
+
+            context = ((ContextWrapper) context).getBaseContext();
+        }
+
+        return null;
+    }
+
+    /**
+     * As to Exported V.S. NonExported receiver, please refer to
+     * https://developer.android.com/reference/android/content/Context#registerReceiver(android.content.BroadcastReceiver,%20android.content.IntentFilter,%20int)
+     */
+    public static Intent registerExportedBroadcastReceiver(
+            Context context, BroadcastReceiver receiver, IntentFilter filter, String permission) {
+        return registerBroadcastReceiver(
+                context, receiver, filter, permission, /*scheduler=*/null, RECEIVER_EXPORTED);
+    }
+
+    public static Intent registerNonExportedBroadcastReceiver(
+            Context context, BroadcastReceiver receiver, IntentFilter filter) {
+        return registerBroadcastReceiver(context, receiver, filter, /*permission=*/null,
+                /*scheduler=*/null, RECEIVER_NOT_EXPORTED);
+    }
+
+    public static Intent registerNonExportedBroadcastReceiver(
+            Context context, BroadcastReceiver receiver, IntentFilter filter, Handler scheduler) {
+        return registerBroadcastReceiver(
+                context, receiver, filter, /*permission=*/null, scheduler, RECEIVER_NOT_EXPORTED);
+    }
+
+    private static Intent registerBroadcastReceiver(Context context, BroadcastReceiver receiver,
+            IntentFilter filter, String permission, Handler scheduler, int flags) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return ApiHelperForO.registerReceiver(
+                    context, receiver, filter, permission, scheduler, flags);
+        } else {
+            return context.registerReceiver(receiver, filter, permission, scheduler);
         }
     }
 }

@@ -1,19 +1,19 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/allocator/partition_allocator/oom_callback.h"
 
-#include "base/logging.h"
+#include "base/allocator/partition_allocator/partition_alloc_check.h"
 
-namespace base {
+namespace partition_alloc {
 
 namespace {
 PartitionAllocOomCallback g_oom_callback;
 }  // namespace
 
 void SetPartitionAllocOomCallback(PartitionAllocOomCallback callback) {
-  DCHECK(!g_oom_callback);
+  PA_DCHECK(!g_oom_callback);
   g_oom_callback = callback;
 }
 
@@ -24,4 +24,4 @@ void RunPartitionAllocOomCallback() {
 }
 }  // namespace internal
 
-}  // namespace base
+}  // namespace partition_alloc

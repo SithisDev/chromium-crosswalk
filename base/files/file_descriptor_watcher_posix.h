@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,13 @@
 
 #include "base/base_export.h"
 #include "base/callback.h"
-#include "base/logging.h"
-#include "base/macros.h"
-#include "base/memory/ref_counted.h"
+#include "base/dcheck_is_on.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_pump_for_io.h"
 #include "base/sequence_checker.h"
-#include "base/single_thread_task_runner.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
 
 namespace base {
 
@@ -24,7 +24,7 @@ class SingleThreadTaskRunner;
 // The FileDescriptorWatcher API allows callbacks to be invoked when file
 // descriptors are readable or writable without blocking.
 //
-// To enable this API in unit tests, use a ScopedTaskEnvironment with
+// To enable this API in unit tests, use a TaskEnvironment with
 // MainThreadType::IO.
 //
 // Note: Prefer FileDescriptorWatcher to MessageLoopForIO::WatchFileDescriptor()
@@ -39,6 +39,8 @@ class BASE_EXPORT FileDescriptorWatcher {
   // readable or writable without blocking and the destructor unregisters it.
   class Controller {
    public:
+    Controller(const Controller&) = delete;
+    Controller& operator=(const Controller&) = delete;
     // Unregisters the callback registered by the constructor.
     ~Controller();
 
@@ -73,15 +75,19 @@ class BASE_EXPORT FileDescriptorWatcher {
     // Controller is deleted, ownership of |watcher_| is transfered to a delete
     // task posted to the MessageLoopForIO. This ensures that |watcher_| isn't
     // deleted while it is being used by the MessageLoopForIO.
-    std::unique_ptr<Watcher> watcher_;
+    //
+    // TODO(crbug.com/1298696): Breaks base_unittests.
+    raw_ptr<Watcher, DanglingUntriagedDegradeToNoOpWhenMTE> watcher_;
+
+    // An event for the watcher to notify controller that it's destroyed.
+    // As the |watcher_| is owned by Controller, always outlives the Watcher.
+    base::WaitableEvent on_watcher_destroyed_;
 
     // Validates that the Controller is used on the sequence on which it was
     // instantiated.
-    SequenceChecker sequence_checker_;
+    SEQUENCE_CHECKER(sequence_checker_);
 
     WeakPtrFactory<Controller> weak_factory_{this};
-
-    DISALLOW_COPY_AND_ASSIGN(Controller);
   };
 
   // Registers |io_thread_task_runner| to watch file descriptors for which
@@ -92,6 +98,8 @@ class BASE_EXPORT FileDescriptorWatcher {
   // blocking I/O) since ~Controller waits for a task posted to it.
   explicit FileDescriptorWatcher(
       scoped_refptr<SingleThreadTaskRunner> io_thread_task_runner);
+  FileDescriptorWatcher(const FileDescriptorWatcher&) = delete;
+  FileDescriptorWatcher& operator=(const FileDescriptorWatcher&) = delete;
   ~FileDescriptorWatcher();
 
   // Registers |callback| to be posted on the current sequence when |fd| is
@@ -129,8 +137,6 @@ class BASE_EXPORT FileDescriptorWatcher {
   }
 
   const scoped_refptr<SingleThreadTaskRunner> io_thread_task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(FileDescriptorWatcher);
 };
 
 }  // namespace base

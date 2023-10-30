@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,8 @@ class TestTaskTraitsExtension {
       : enum_trait_(
             trait_helpers::GetEnum<TestExtensionEnumTrait,
                                    TestExtensionEnumTrait::kA>(args...)),
-        bool_trait_(trait_helpers::HasTrait<TestExtensionBoolTrait>(args...)) {}
+        bool_trait_(
+            trait_helpers::HasTrait<TestExtensionBoolTrait, ArgTypes...>()) {}
 
   constexpr TaskTraitsExtensionStorage Serialize() const {
     return {kExtensionId, {{static_cast<uint8_t>(enum_trait_), bool_trait_}}};

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,12 +19,16 @@ class BASE_EXPORT ScopedHardwareBufferFenceSync {
  public:
   ScopedHardwareBufferFenceSync(
       base::android::ScopedHardwareBufferHandle handle,
-      base::ScopedFD fence_fd);
+      base::ScopedFD fence_fd,
+      base::ScopedFD available_fence_fd,
+      bool is_video);
   virtual ~ScopedHardwareBufferFenceSync();
 
   AHardwareBuffer* buffer() const { return handle_.get(); }
   ScopedHardwareBufferHandle TakeBuffer();
   ScopedFD TakeFence();
+  ScopedFD TakeAvailableFence();
+  bool is_video() const { return is_video_; }
 
   // Provides fence which is signaled when the reads for this buffer are done
   // and it can be reused. Must only be called once.
@@ -33,6 +37,8 @@ class BASE_EXPORT ScopedHardwareBufferFenceSync {
  private:
   ScopedHardwareBufferHandle handle_;
   ScopedFD fence_fd_;
+  ScopedFD available_fence_fd_;
+  const bool is_video_;
 };
 
 }  // namespace android

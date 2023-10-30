@@ -1,14 +1,17 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 # Contains flags that we'd like all Chromium .apks to use.
 
-# Not needed for Android and saves a bit of processing time.
--dontpreverify
-
 # Keep line number information, useful for stack traces.
 -keepattributes SourceFile,LineNumberTable
+
+# Enable protobuf-related optimizations.
+-shrinkunusedprotofields
+
+# Allowing Proguard to change modifiers.
+-allowaccessmodification
 
 # Keep all CREATOR fields within Parcelable that are kept.
 -keepclassmembers class * implements android.os.Parcelable {
@@ -20,12 +23,32 @@
 -keepclassmembers class * extends android.app.Fragment {
   public <init>();
 }
--keepclassmembers class * extends android.support.v4.app.Fragment {
-  public <init>();
-}
 -keepclassmembers class * extends androidx.fragment.app.Fragment {
   public <init>();
 }
+
+# AndroidX classes that are inflated via reflection.
+-keep public class androidx.preference.Preference {
+    public <init>(android.content.Context, android.util.AttributeSet);
+}
+-keep public class androidx.preference.PreferenceScreen {
+    public <init>(android.content.Context, android.util.AttributeSet);
+}
+-keep public class androidx.preference.PreferenceCategory {
+    public <init>(android.content.Context, android.util.AttributeSet);
+}
+-keep public class androidx.preference.ListPreference {
+    public <init>(android.content.Context, android.util.AttributeSet);
+}
+
+# SearchView is used in website_preferences_menu.xml and is constructed by
+# Android using reflection.
+-keep class androidx.appcompat.widget.SearchView {
+  public <init>(...);
+}
+
+# Referenced by androidx.preference.PreferenceInflater.
+-keep public class androidx.preference.SwitchPreference {}
 
 # Don't obfuscate Parcelables as they might be marshalled outside Chrome.
 # If we annotated all Parcelables that get put into Bundles other than
@@ -40,41 +63,35 @@
     public static **[] values();
 }
 
-# Allows Proguard freedom in removing these log related calls. We ask for debug
-# and verbose logs to be stripped out in base.Log, so we are just ensuring we
-# get rid of all other debug/verbose logs.
--assumenosideeffects class android.util.Log {
-  static *** d(...);
-  static *** v(...);
-  static *** isLoggable(...);
-}
--checkdiscard class org.chromium.base.Log {
-  public static void d(...);
-  public static void v(...);
-  private static void debug(...);
-  private static void verbose(...);
-  private static String getCallOrigin(...);
+# This is to workaround crbug.com/1204690 - an old GMS app version crashes when
+# ObjectWrapper contains > 1 fields, and this prevents R8 from inserting a
+# synthetic field.
+-keep,allowaccessmodification class com.google.android.gms.dynamic.ObjectWrapper {
+  <fields>;
 }
 
-# The following chart was created on July 20, 2016, to decide on 3 optimization
-# passes for Chrome.
-# optimization passes | time | .dex size | dirty memory per process
-# -----------------------------------------------------------------
-#          1          | 0:48 |  5805676  |         488972
-#          2          | 1:07 |  5777376  |         487092
-#          3          | 1:24 |  5772192  |         486596
-#          4          | 1:42 |  5771124  |         486484
-#          5          | 1:56 |  5770504  |         486432
--optimizationpasses 3
+# Workaround for crbug/1002847. Methods of BaseGmsClient are incorrectly
+# removed even though they are required for the derived class GmsClient
+# to correctly implement Api$Client.
+# TODO: remove once crbug/1002847 resolved.
+-keep public class com.google.android.gms.common.internal.BaseGmsClient {
+  public void disconnect();
+  public void dump(java.lang.String,java.io.FileDescriptor,java.io.PrintWriter,java.lang.String[]);
+  public int getMinApkVersion();
+  public boolean requiresSignIn();
+}
 
-# Horizontal class merging marginally increases dex size (as of Mar 2018).
--optimizations !class/merging/horizontal
+# Remove calls to String.format() where the result goes unused. This can mask
+# exceptions if the parameters to String.format() are invalid, but such cases
+# are generally programming bugs anyways.
+# Not using the return value generally occurs due to logging being stripped.
+-assumenosideeffects class java.lang.String {
+  static java.lang.String format(...);
+}
 
-# Allowing Proguard to change modifiers. This change shrinks the .dex size by
-# ~1%, and reduces the method count by ~4%.
--allowaccessmodification
-
-# The support library contains references to newer platform versions.
-# Don't warn about those in case this app is linking against an older
-# platform version.  We know about them, and they are safe.
--dontwarn android.support.**
+# Allows R8 to remove static field accesses to library APIs when the results
+# are unused (E.g. tell it that it's okay to not trigger <clinit>).
+# Not using the return value generally occurs due to logging being stripped.
+-assumenosideeffects class android.**, java.** {
+  static <fields>;
+}

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 #define BASE_TASK_SEQUENCE_MANAGER_ENQUEUE_ORDER_H_
 
 #include <stdint.h>
+
+#include <limits>
 
 namespace base {
 namespace sequence_manager {
@@ -23,6 +25,11 @@ class EnqueueOrder {
 
   static EnqueueOrder none() { return EnqueueOrder(kNone); }
   static EnqueueOrder blocking_fence() { return EnqueueOrder(kBlockingFence); }
+
+  // Returns an EnqueueOrder that compares greater than any other EnqueueOrder.
+  static EnqueueOrder max() {
+    return EnqueueOrder(std::numeric_limits<uint64_t>::max());
+  }
 
   // It's okay to use EnqueueOrder in boolean expressions keeping in mind
   // that some non-zero values have a special meaning.

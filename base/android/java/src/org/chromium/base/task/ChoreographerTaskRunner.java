@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,16 +37,6 @@ final class ChoreographerTaskRunner implements SingleThreadTaskRunner {
     }
 
     @Override
-    public void destroy() {
-        // NOP
-    }
-
-    @Override
-    public void disableLifetimeCheck() {
-        // NOP
-    }
-
-    @Override
     public void postDelayedTask(Runnable task, long delayMillis) {
         mChoreographer.postFrameCallbackDelayed(new Choreographer.FrameCallback() {
             @Override
@@ -54,10 +44,5 @@ final class ChoreographerTaskRunner implements SingleThreadTaskRunner {
                 task.run();
             }
         }, delayMillis);
-    }
-
-    @Override
-    public void initNativeTaskRunner() {
-        // NOP
     }
 }

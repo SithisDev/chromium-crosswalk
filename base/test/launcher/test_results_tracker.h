@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,12 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/launcher/test_result.h"
 #include "base/threading/thread_checker.h"
 
@@ -32,11 +34,15 @@ class FilePath;
 class TestResultsTracker {
  public:
   TestResultsTracker();
+
+  TestResultsTracker(const TestResultsTracker&) = delete;
+  TestResultsTracker& operator=(const TestResultsTracker&) = delete;
+
   ~TestResultsTracker();
 
   // Initialize the result tracker. Must be called exactly once before
   // calling any other methods. Returns true on success.
-  bool Init(const CommandLine& command_line) WARN_UNUSED_RESULT;
+  [[nodiscard]] bool Init(const CommandLine& command_line);
 
   // Called when a test iteration is starting.
   void OnTestIterationStarting();
@@ -61,6 +67,10 @@ class TestResultsTracker {
   // Adds |result| to the stored test results.
   void AddTestResult(const TestResult& result);
 
+  // Adds to the current iteration the fact that |count| items were leaked by
+  // one or more tests in |test_names| in its temporary directory.
+  void AddLeakedItems(int count, const std::vector<std::string>& test_names);
+
   // Even when no iterations have occurred, we still want to generate output
   // data with "NOTRUN" status for each test. This method generates a
   // placeholder iteration. The first iteration will overwrite the data in the
@@ -80,9 +90,9 @@ class TestResultsTracker {
   // Saves a JSON summary of all test iterations results to |path|. Adds
   // |additional_tags| to the summary (just for this invocation). Returns
   // true on success.
-  bool SaveSummaryAsJSON(
+  [[nodiscard]] bool SaveSummaryAsJSON(
       const FilePath& path,
-      const std::vector<std::string>& additional_tags) const WARN_UNUSED_RESULT;
+      const std::vector<std::string>& additional_tags) const;
 
   // Map where keys are test result statuses, and values are sets of tests
   // which finished with that status.
@@ -95,12 +105,19 @@ class TestResultsTracker {
   TestStatusMap GetTestStatusMapForAllIterations() const;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(TestResultsTrackerTest,
+                           SaveSummaryAsJSONWithLinkInResult);
+  FRIEND_TEST_ALL_PREFIXES(TestResultsTrackerTest,
+                           SaveSummaryAsJSONWithOutTimestampInResult);
+  FRIEND_TEST_ALL_PREFIXES(TestResultsTrackerTest,
+                           SaveSummaryAsJSONWithTimestampInResult);
   void GetTestStatusForIteration(int iteration, TestStatusMap* map) const;
 
   template<typename InputIterator>
   void PrintTests(InputIterator first,
                   InputIterator last,
                   const std::string& description) const;
+  void PrintLeaks(int count, const std::vector<std::string>& test_names) const;
 
   struct AggregateTestResult {
     AggregateTestResult();
@@ -118,6 +135,9 @@ class TestResultsTracker {
     // Aggregate test results grouped by full test name.
     typedef std::map<std::string, AggregateTestResult> ResultsMap;
     ResultsMap results;
+
+    // A sequence of tests that leaked files/dirs in their temp directory.
+    std::vector<std::pair<int, std::vector<std::string>>> leaked_temp_items;
   };
 
   struct CodeLocation {
@@ -129,6 +149,9 @@ class TestResultsTracker {
   };
 
   ThreadChecker thread_checker_;
+
+  // Print tests that leak files and/or directories in their temp dir.
+  bool print_temp_leaks_ = false;
 
   // Set of global tags, i.e. strings indicating conditions that apply to
   // the entire test run.
@@ -154,9 +177,7 @@ class TestResultsTracker {
   int iteration_;
 
   // File handle of output file (can be NULL if no file).
-  FILE* out_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestResultsTracker);
+  raw_ptr<FILE> out_;
 };
 
 }  // namespace base

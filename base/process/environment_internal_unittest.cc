@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,12 +16,12 @@ using EnvironmentInternalTest = PlatformTest;
 namespace base {
 namespace internal {
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 
 namespace {
-void ExpectEnvironmentBlock(const std::vector<string16>& vars,
-                            const string16& block) {
-  string16 expected;
+void ExpectEnvironmentBlock(const std::vector<std::wstring>& vars,
+                            const std::wstring& block) {
+  std::wstring expected;
   for (const auto& var : vars) {
     expected += var;
     expected.push_back('\0');
@@ -32,65 +32,63 @@ void ExpectEnvironmentBlock(const std::vector<string16>& vars,
 }  // namespace
 
 TEST_F(EnvironmentInternalTest, AlterEnvironment) {
-  const char16 empty[] = {'\0'};
-  const char16 a2[] = {'A', '=', '2', '\0', '\0'};
-  const char16 a2b3[] = {'A', '=', '2', '\0', 'B', '=', '3', '\0', '\0'};
+  const wchar_t empty[] = {'\0'};
+  const wchar_t a2[] = {'A', '=', '2', '\0', '\0'};
+  const wchar_t a2b3[] = {'A', '=', '2', '\0', 'B', '=', '3', '\0', '\0'};
   EnvironmentMap changes;
   NativeEnvironmentString e;
 
   e = AlterEnvironment(empty, changes);
   ExpectEnvironmentBlock({}, e);
 
-  changes[STRING16_LITERAL("A")] = STRING16_LITERAL("1");
+  changes[L"A"] = L"1";
   e = AlterEnvironment(empty, changes);
-  ExpectEnvironmentBlock({STRING16_LITERAL("A=1")}, e);
+  ExpectEnvironmentBlock({L"A=1"}, e);
 
   changes.clear();
-  changes[STRING16_LITERAL("A")] = string16();
+  changes[L"A"] = std::wstring();
   e = AlterEnvironment(empty, changes);
   ExpectEnvironmentBlock({}, e);
 
   changes.clear();
   e = AlterEnvironment(a2, changes);
-  ExpectEnvironmentBlock({STRING16_LITERAL("A=2")}, e);
+  ExpectEnvironmentBlock({L"A=2"}, e);
 
   changes.clear();
-  changes[STRING16_LITERAL("A")] = STRING16_LITERAL("1");
+  changes[L"A"] = L"1";
   e = AlterEnvironment(a2, changes);
-  ExpectEnvironmentBlock({STRING16_LITERAL("A=1")}, e);
+  ExpectEnvironmentBlock({L"A=1"}, e);
 
   changes.clear();
-  changes[STRING16_LITERAL("A")] = string16();
+  changes[L"A"] = std::wstring();
   e = AlterEnvironment(a2, changes);
   ExpectEnvironmentBlock({}, e);
 
   changes.clear();
-  changes[STRING16_LITERAL("A")] = string16();
-  changes[STRING16_LITERAL("B")] = string16();
+  changes[L"A"] = std::wstring();
+  changes[L"B"] = std::wstring();
   e = AlterEnvironment(a2b3, changes);
   ExpectEnvironmentBlock({}, e);
 
   changes.clear();
-  changes[STRING16_LITERAL("A")] = string16();
+  changes[L"A"] = std::wstring();
   e = AlterEnvironment(a2b3, changes);
-  ExpectEnvironmentBlock({STRING16_LITERAL("B=3")}, e);
+  ExpectEnvironmentBlock({L"B=3"}, e);
 
   changes.clear();
-  changes[STRING16_LITERAL("B")] = string16();
+  changes[L"B"] = std::wstring();
   e = AlterEnvironment(a2b3, changes);
-  ExpectEnvironmentBlock({STRING16_LITERAL("A=2")}, e);
+  ExpectEnvironmentBlock({L"A=2"}, e);
 
   changes.clear();
-  changes[STRING16_LITERAL("A")] = STRING16_LITERAL("1");
-  changes[STRING16_LITERAL("C")] = STRING16_LITERAL("4");
+  changes[L"A"] = L"1";
+  changes[L"C"] = L"4";
   e = AlterEnvironment(a2b3, changes);
   // AlterEnvironment() currently always puts changed entries at the end.
-  ExpectEnvironmentBlock({STRING16_LITERAL("B=3"), STRING16_LITERAL("A=1"),
-                          STRING16_LITERAL("C=4")},
-                         e);
+  ExpectEnvironmentBlock({L"B=3", L"A=1", L"C=4"}, e);
 }
 
-#else  // !OS_WIN
+#else  // !BUILDFLAG(IS_WIN)
 
 TEST_F(EnvironmentInternalTest, AlterEnvironment) {
   const char* const empty[] = {nullptr};
@@ -157,7 +155,7 @@ TEST_F(EnvironmentInternalTest, AlterEnvironment) {
   EXPECT_TRUE(e[3] == nullptr);
 }
 
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace internal
 }  // namespace base

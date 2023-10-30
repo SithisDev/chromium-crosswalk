@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,9 @@
 #include <mmsystem.h>
 #include <process.h>
 #include <stdint.h>
+#include <windows.foundation.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -16,6 +18,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "base/win/registry.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
@@ -24,7 +27,7 @@ namespace {
 // For TimeDelta::ConstexprInitialization
 constexpr int kExpectedDeltaInMilliseconds = 10;
 constexpr TimeDelta kConstexprTimeDelta =
-    TimeDelta::FromMilliseconds(kExpectedDeltaInMilliseconds);
+    Milliseconds(kExpectedDeltaInMilliseconds);
 
 class MockTimeTicks : public TimeTicks {
  public:
@@ -81,9 +84,8 @@ unsigned __stdcall RolloverTestThreadMain(void* param) {
 // results.
 TimeTicks GetTSC() {
   // Using a fake cycle counter frequency for test purposes.
-  return TimeTicks() +
-         TimeDelta::FromMicroseconds(ReadCycleCounter() *
-                                     Time::kMicrosecondsPerSecond / 10000000);
+  return TimeTicks() + Microseconds(ReadCycleCounter() *
+                                    Time::kMicrosecondsPerSecond / 10000000);
 }
 
 }  // namespace
@@ -150,23 +152,19 @@ TEST(TimeTicks, SubMillisecondTimers) {
   if (!TimeTicks::IsHighResolution())
     return;
 
-  const int kRetries = 1000;
-  bool saw_submillisecond_timer = false;
-
   // Run kRetries attempts to see a sub-millisecond timer.
+  constexpr int kRetries = 1000;
   for (int index = 0; index < kRetries; index++) {
-    TimeTicks last_time = TimeTicks::Now();
+    const TimeTicks start_time = TimeTicks::Now();
     TimeDelta delta;
     // Spin until the clock has detected a change.
     do {
-      delta = TimeTicks::Now() - last_time;
-    } while (delta.InMicroseconds() == 0);
-    if (delta.InMicroseconds() < 1000) {
-      saw_submillisecond_timer = true;
-      break;
-    }
+      delta = TimeTicks::Now() - start_time;
+    } while (delta.is_zero());
+    if (!delta.InMilliseconds())
+      return;
   }
-  EXPECT_TRUE(saw_submillisecond_timer);
+  ADD_FAILURE() << "Never saw a sub-millisecond timer.";
 }
 
 TEST(TimeTicks, TimeGetTimeCaps) {
@@ -252,23 +250,21 @@ TEST(TimeTicks, TimerPerformance) {
 // only used in Chromium for QueryThreadCycleTime, and QueryThreadCycleTime
 // doesn't use a constant-rate timer on ARM64.
 TEST(TimeTicks, TSCTicksPerSecond) {
-  if (ThreadTicks::IsSupported()) {
+  if (time_internal::HasConstantRateTSC()) {
     ThreadTicks::WaitUntilInitialized();
 
     // Read the CPU frequency from the registry.
     base::win::RegKey processor_key(
         HKEY_LOCAL_MACHINE,
-        STRING16_LITERAL("Hardware\\Description\\System\\CentralProcessor\\0"),
-        KEY_QUERY_VALUE);
+        L"Hardware\\Description\\System\\CentralProcessor\\0", KEY_QUERY_VALUE);
     ASSERT_TRUE(processor_key.Valid());
     DWORD processor_mhz_from_registry;
     ASSERT_EQ(ERROR_SUCCESS,
-              processor_key.ReadValueDW(STRING16_LITERAL("~MHz"),
-                                        &processor_mhz_from_registry));
+              processor_key.ReadValueDW(L"~MHz", &processor_mhz_from_registry));
 
     // Expect the measured TSC frequency to be similar to the processor
     // frequency from the registry (0.5% error).
-    double tsc_mhz_measured = ThreadTicks::TSCTicksPerSecond() / 1e6;
+    double tsc_mhz_measured = time_internal::TSCTicksPerSecond() / 1e6;
     EXPECT_NEAR(tsc_mhz_measured, processor_mhz_from_registry,
                 0.005 * processor_mhz_from_registry);
   }
@@ -290,25 +286,29 @@ TEST(TimeTicks, FromQPCValue) {
   // of possible QPC tick values.
   std::vector<int64_t> test_cases;
   test_cases.push_back(0);
-  const int kNumAdvancements = 100;
-  int64_t ticks = 0;
-  int64_t ticks_increment = 10;
-  for (int i = 0; i < kNumAdvancements; ++i) {
-    test_cases.push_back(ticks);
-    ticks += ticks_increment;
-    ticks_increment = ticks_increment * 6 / 5;
+
+  // Build the test cases.
+  {
+    const int kNumAdvancements = 100;
+    int64_t ticks = 0;
+    int64_t ticks_increment = 10;
+    for (int i = 0; i < kNumAdvancements; ++i) {
+      test_cases.push_back(ticks);
+      ticks += ticks_increment;
+      ticks_increment = ticks_increment * 6 / 5;
+    }
+    test_cases.push_back(Time::kQPCOverflowThreshold - 1);
+    test_cases.push_back(Time::kQPCOverflowThreshold);
+    test_cases.push_back(Time::kQPCOverflowThreshold + 1);
+    ticks = Time::kQPCOverflowThreshold + 10;
+    ticks_increment = 10;
+    for (int i = 0; i < kNumAdvancements; ++i) {
+      test_cases.push_back(ticks);
+      ticks += ticks_increment;
+      ticks_increment = ticks_increment * 6 / 5;
+    }
+    test_cases.push_back(std::numeric_limits<int64_t>::max());
   }
-  test_cases.push_back(Time::kQPCOverflowThreshold - 1);
-  test_cases.push_back(Time::kQPCOverflowThreshold);
-  test_cases.push_back(Time::kQPCOverflowThreshold + 1);
-  ticks = Time::kQPCOverflowThreshold + 10;
-  ticks_increment = 10;
-  for (int i = 0; i < kNumAdvancements; ++i) {
-    test_cases.push_back(ticks);
-    ticks += ticks_increment;
-    ticks_increment = ticks_increment * 6 / 5;
-  }
-  test_cases.push_back(std::numeric_limits<int64_t>::max());
 
   // Test that the conversions using FromQPCValue() match those computed here
   // using simple floating-point arithmetic.  The floating-point math provides
@@ -321,7 +321,7 @@ TEST(TimeTicks, FromQPCValue) {
         ticks_per_second;
     const TimeTicks converted_value = TimeTicks::FromQPCValue(ticks);
     const double converted_microseconds_since_origin =
-        static_cast<double>((converted_value - TimeTicks()).InMicroseconds());
+        (converted_value - TimeTicks()).InMicrosecondsF();
     // When we test with very large numbers we end up in a range where adjacent
     // double values are far apart - 512.0 apart in one test failure. In that
     // situation it makes no sense for our epsilon to be 1.0 - it should be
@@ -335,9 +335,7 @@ TEST(TimeTicks, FromQPCValue) {
     // slightly larger than 1.0, even when the converted value is perfect. This
     // epsilon value was chosen because it is slightly larger than the error
     // seen in a test failure caused by the double rounding.
-    const double min_epsilon = 1.002;
-    if (epsilon < min_epsilon)
-      epsilon = min_epsilon;
+    epsilon = std::max(epsilon, 1.002);
     EXPECT_NEAR(expected_microseconds_since_origin,
                 converted_microseconds_since_origin, epsilon)
         << "ticks=" << ticks << ", to be converted via logic path: "
@@ -356,19 +354,41 @@ TEST(TimeDelta, FromFileTime) {
   ft.dwHighDateTime = 0;
 
   // 100100 ns ~= 100 us.
-  EXPECT_EQ(TimeDelta::FromMicroseconds(100), TimeDelta::FromFileTime(ft));
+  EXPECT_EQ(Microseconds(100), TimeDelta::FromFileTime(ft));
 
   ft.dwLowDateTime = 0;
   ft.dwHighDateTime = 1;
 
   // 2^32 * 100 ns ~= 2^32 * 10 us.
-  EXPECT_EQ(TimeDelta::FromMicroseconds((1ull << 32) / 10),
-            TimeDelta::FromFileTime(ft));
+  EXPECT_EQ(Microseconds((1ull << 32) / 10), TimeDelta::FromFileTime(ft));
+}
+
+TEST(TimeDelta, FromWinrtDateTime) {
+  ABI::Windows::Foundation::DateTime dt;
+  dt.UniversalTime = 0;
+
+  // 0 UniversalTime = no delta since epoch.
+  EXPECT_EQ(TimeDelta(), TimeDelta::FromWinrtDateTime(dt));
+
+  dt.UniversalTime = 101;
+
+  // 101 * 100 ns ~= 10.1 microseconds.
+  EXPECT_EQ(Microseconds(10.1), TimeDelta::FromWinrtDateTime(dt));
+}
+
+TEST(TimeDelta, ToWinrtDateTime) {
+  auto time_delta = Seconds(0);
+
+  // No delta since epoch = 0 DateTime.
+  EXPECT_EQ(0, time_delta.ToWinrtDateTime().UniversalTime);
+
+  time_delta = Microseconds(10);
+
+  // 10 microseconds = 100 * 100 ns.
+  EXPECT_EQ(100, time_delta.ToWinrtDateTime().UniversalTime);
 }
 
 TEST(HighResolutionTimer, GetUsage) {
-  EXPECT_EQ(0.0, Time::GetHighResolutionTimerUsage());
-
   Time::ResetHighResolutionTimerUsage();
 
   // 0% usage since the timer isn't activated regardless of how much time has

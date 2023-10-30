@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,7 @@ void WontCompile() {
       static_cast<WeakPtr<DerivedProducer> >(ptr);
 }
 
-#elif defined(NCTEST_AUTO_REF_DOWNCAST)  // [r"fatal error: non-const lvalue reference to type 'WeakPtr<base::DerivedProducer>' cannot bind to a value of unrelated type 'WeakPtr<base::Producer>'"]
+#elif defined(NCTEST_AUTO_REF_DOWNCAST)  // [r"fatal error: non-const lvalue reference to type 'WeakPtr<DerivedProducer>' cannot bind to a value of unrelated type 'WeakPtr<Producer>'"]
 
 void WontCompile() {
   Producer f;
@@ -42,7 +42,7 @@ void WontCompile() {
   WeakPtr<DerivedProducer>& derived_ptr = ptr;
 }
 
-#elif defined(NCTEST_STATIC_REF_DOWNCAST)  // [r"fatal error: non-const lvalue reference to type 'WeakPtr<base::DerivedProducer>' cannot bind to a value of unrelated type 'WeakPtr<base::Producer>'"]
+#elif defined(NCTEST_STATIC_REF_DOWNCAST)  // [r"fatal error: non-const lvalue reference to type 'WeakPtr<DerivedProducer>' cannot bind to a value of unrelated type 'WeakPtr<Producer>'"]
 
 void WontCompile() {
   Producer f;
@@ -115,24 +115,21 @@ void WontCompile() {
   WeakPtr<Unrelated> ptr = AsWeakPtr<Unrelated>(&f);
 }
 
-// TODO(hans): Remove .* and update the static_assert expectations once we roll
-// past Clang r313315. https://crbug.com/765692.
-
-#elif defined(NCTEST_COMPLETELY_UNRELATED_HELPER)  // [r"fatal error: static_assert failed .*\"AsWeakPtr argument must inherit from SupportsWeakPtr\""]
+#elif defined(NCTEST_COMPLETELY_UNRELATED_HELPER)  // [r"fatal error: static assertion failed due to requirement 'std::is_base_of<base::internal::SupportsWeakPtrBase, base::Unrelated>::value': AsWeakPtr argument must inherit from SupportsWeakPtr"]
 
 void WontCompile() {
   Unrelated f;
   WeakPtr<Unrelated> ptr = AsWeakPtr(&f);
 }
 
-#elif defined(NCTEST_DERIVED_COMPLETELY_UNRELATED_HELPER)  // [r"fatal error: static_assert failed .*\"AsWeakPtr argument must inherit from SupportsWeakPtr\""]
+#elif defined(NCTEST_DERIVED_COMPLETELY_UNRELATED_HELPER)  // [r"fatal error: static assertion failed due to requirement 'std::is_base_of<base::internal::SupportsWeakPtrBase, base::DerivedUnrelated>::value': AsWeakPtr argument must inherit from SupportsWeakPtr"]
 
 void WontCompile() {
   DerivedUnrelated f;
   WeakPtr<Unrelated> ptr = AsWeakPtr(&f);
 }
 
-#elif defined(NCTEST_AMBIGUOUS_ANCESTORS)  // [r"fatal error: use of undeclared identifier 'AsWeakPtrImpl'"]
+#elif defined(NCTEST_AMBIGUOUS_ANCESTORS)  // [r"fatal error: no matching function for call to 'AsWeakPtrImpl'"]
 
 void WontCompile() {
   MultiplyDerivedProducer f;

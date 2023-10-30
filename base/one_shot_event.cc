@@ -1,15 +1,16 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/one_shot_event.h"
 
 #include <stddef.h>
+#include <utility>
 
 #include "base/callback.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
-#include "base/task_runner.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/task/task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 
@@ -18,24 +19,22 @@ namespace base {
 struct OneShotEvent::TaskInfo {
   TaskInfo() {}
   TaskInfo(const Location& from_here,
-           const scoped_refptr<SingleThreadTaskRunner>& runner,
+           scoped_refptr<SingleThreadTaskRunner> runner,
            OnceClosure task,
            const TimeDelta& delay)
       : from_here(from_here),
-        runner(runner),
+        runner(std::move(runner)),
         task(std::move(task)),
         delay(delay) {
-    CHECK(runner.get());  // Detect mistakes with a decent stack frame.
+    CHECK(this->runner.get());  // Detect mistakes with a decent stack frame.
   }
   TaskInfo(TaskInfo&&) = default;
+  TaskInfo& operator=(TaskInfo&&) = default;
 
   Location from_here;
   scoped_refptr<SingleThreadTaskRunner> runner;
   OnceClosure task;
   TimeDelta delay;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TaskInfo);
 };
 
 OneShotEvent::OneShotEvent() : signaled_(false) {
@@ -48,16 +47,10 @@ OneShotEvent::OneShotEvent(bool signaled) : signaled_(signaled) {
 }
 OneShotEvent::~OneShotEvent() {}
 
-void OneShotEvent::Post(const Location& from_here, OnceClosure task) const {
-  PostImpl(from_here, std::move(task), ThreadTaskRunnerHandle::Get(),
-           TimeDelta());
-}
-
-void OneShotEvent::Post(
-    const Location& from_here,
-    OnceClosure task,
-    const scoped_refptr<SingleThreadTaskRunner>& runner) const {
-  PostImpl(from_here, std::move(task), runner, TimeDelta());
+void OneShotEvent::Post(const Location& from_here,
+                        OnceClosure task,
+                        scoped_refptr<SingleThreadTaskRunner> runner) const {
+  PostImpl(from_here, std::move(task), std::move(runner), TimeDelta());
 }
 
 void OneShotEvent::PostDelayed(const Location& from_here,
@@ -94,7 +87,7 @@ void OneShotEvent::Signal() {
 
 void OneShotEvent::PostImpl(const Location& from_here,
                             OnceClosure task,
-                            const scoped_refptr<SingleThreadTaskRunner>& runner,
+                            scoped_refptr<SingleThreadTaskRunner> runner,
                             const TimeDelta& delay) const {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -104,7 +97,7 @@ void OneShotEvent::PostImpl(const Location& from_here,
     else
       runner->PostDelayedTask(from_here, std::move(task), delay);
   } else {
-    tasks_.emplace_back(from_here, runner, std::move(task), delay);
+    tasks_.emplace_back(from_here, std::move(runner), std::move(task), delay);
   }
 }
 

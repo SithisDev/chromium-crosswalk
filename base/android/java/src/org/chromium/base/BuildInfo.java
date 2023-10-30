@@ -1,18 +1,28 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.base;
 
+import static android.content.Context.UI_MODE_SERVICE;
+
+import android.app.UiModeManager;
 import android.content.Context;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.res.Configuration;
 import android.os.Build;
 import android.text.TextUtils;
 
+import androidx.annotation.OptIn;
+import androidx.annotation.VisibleForTesting;
+import androidx.core.os.BuildCompat;
+
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.compat.ApiHelperForP;
+import org.chromium.build.BuildConfig;
 
 /**
  * BuildInfo is a utility class providing easy access to {@link PackageInfo} information. This is
@@ -23,6 +33,7 @@ public class BuildInfo {
     private static final int MAX_FINGERPRINT_LENGTH = 128;
 
     private static PackageInfo sBrowserPackageInfo;
+    private static ApplicationInfo sBrowserApplicationInfo;
     private static boolean sInitialized;
 
     /** Not a member variable to avoid creating the instance early (it is set early in start up). */
@@ -46,18 +57,25 @@ public class BuildInfo {
     public final String abiString;
     /** Truncated version of Build.FINGERPRINT (for crash reporting). */
     public final String androidBuildFingerprint;
-    /** A string that is different each time the apk changes. */
-    public final String extractedFileSuffix;
     /** Whether or not the device has apps installed for using custom themes. */
     public final String customThemes;
     /** Product version as stored in Android resources. */
     public final String resourcesVersion;
+    /** Whether we're running on Android TV or not */
+    public final boolean isTV;
+    /** Whether we're running on an Android Automotive OS device or not. */
+    public final boolean isAutomotive;
 
     private static class Holder { private static BuildInfo sInstance = new BuildInfo(); }
 
     @CalledByNative
     private static String[] getAll() {
-        BuildInfo buildInfo = getInstance();
+        return BuildInfo.getInstance().getAllProperties();
+    }
+
+    /** Returns a serialized string array of all properties of this class. */
+    @VisibleForTesting
+    String[] getAllProperties() {
         String hostPackageName = ContextUtils.getApplicationContext().getPackageName();
         return new String[] {
                 Build.BRAND,
@@ -69,21 +87,26 @@ public class BuildInfo {
                 Build.TYPE,
                 Build.BOARD,
                 hostPackageName,
-                String.valueOf(buildInfo.hostVersionCode),
-                buildInfo.hostPackageLabel,
-                buildInfo.packageName,
-                String.valueOf(buildInfo.versionCode),
-                buildInfo.versionName,
-                buildInfo.androidBuildFingerprint,
-                buildInfo.gmsVersionCode,
-                buildInfo.installerPackageName,
-                buildInfo.abiString,
+                String.valueOf(hostVersionCode),
+                hostPackageLabel,
+                packageName,
+                String.valueOf(versionCode),
+                versionName,
+                androidBuildFingerprint,
+                gmsVersionCode,
+                installerPackageName,
+                abiString,
                 sFirebaseAppId,
-                buildInfo.customThemes,
-                buildInfo.resourcesVersion,
-                buildInfo.extractedFileSuffix,
-                isAtLeastQ() ? "1" : "0",
+                customThemes,
+                resourcesVersion,
+                String.valueOf(
+                        ContextUtils.getApplicationContext().getApplicationInfo().targetSdkVersion),
                 isDebugAndroid() ? "1" : "0",
+                isTV ? "1" : "0",
+                Build.VERSION.INCREMENTAL,
+                Build.HARDWARE,
+                isAtLeastT() ? "1" : "0",
+                isAutomotive ? "1" : "0",
         };
     }
 
@@ -91,7 +114,11 @@ public class BuildInfo {
         return seq == null ? "" : seq.toString();
     }
 
-    private static long packageVersionCode(PackageInfo pi) {
+    /**
+     * Return the "long" version code of the given PackageInfo.
+     * Does the right thing for before/after Android P when this got wider.
+     */
+    public static long packageVersionCode(PackageInfo pi) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             return ApiHelperForP.getLongVersionCode(pi);
         } else {
@@ -107,11 +134,19 @@ public class BuildInfo {
         sBrowserPackageInfo = packageInfo;
     }
 
+    /**
+     * @return ApplicationInfo for Chrome/WebView (as opposed to host app).
+     */
+    public ApplicationInfo getBrowserApplicationInfo() {
+        return sBrowserApplicationInfo;
+    }
+
     public static BuildInfo getInstance() {
         return Holder.sInstance;
     }
 
-    private BuildInfo() {
+    @VisibleForTesting
+    BuildInfo() {
         sInitialized = true;
         try {
             Context appContext = ContextUtils.getApplicationContext();
@@ -123,11 +158,13 @@ public class BuildInfo {
                 packageName = sBrowserPackageInfo.packageName;
                 versionCode = packageVersionCode(sBrowserPackageInfo);
                 versionName = nullToEmpty(sBrowserPackageInfo.versionName);
+                sBrowserApplicationInfo = sBrowserPackageInfo.applicationInfo;
                 sBrowserPackageInfo = null;
             } else {
                 packageName = hostPackageName;
                 versionCode = hostVersionCode;
                 versionName = nullToEmpty(pi.versionName);
+                sBrowserApplicationInfo = appContext.getApplicationInfo();
             }
 
             hostPackageLabel = nullToEmpty(pm.getApplicationLabel(pi.applicationInfo));
@@ -137,7 +174,8 @@ public class BuildInfo {
             try {
                 gmsPackageInfo = pm.getPackageInfo("com.google.android.gms", 0);
             } catch (NameNotFoundException e) {
-                Log.d(TAG, "GMS package is not found.", e);
+                // TODO(b/197112084): Re-enable the logging
+                // Log.d(TAG, "GMS package is not found.");
             }
             gmsVersionCode = gmsPackageInfo != null
                     ? String.valueOf(packageVersionCode(gmsPackageInfo))
@@ -177,13 +215,28 @@ public class BuildInfo {
                 abiString = String.format("ABI1: %s, ABI2: %s", Build.CPU_ABI, Build.CPU_ABI2);
             }
 
-            // Append lastUpdateTime to versionCode, since versionCode is unlikely to change when
-            // developing locally but lastUpdateTime is.
-            extractedFileSuffix = String.format("@%x_%x", versionCode, pi.lastUpdateTime);
-
             // The value is truncated, as this is used for crash and UMA reporting.
             androidBuildFingerprint = Build.FINGERPRINT.substring(
                     0, Math.min(Build.FINGERPRINT.length(), MAX_FINGERPRINT_LENGTH));
+
+            // See https://developer.android.com/training/tv/start/hardware.html#runtime-check.
+            UiModeManager uiModeManager =
+                    (UiModeManager) appContext.getSystemService(UI_MODE_SERVICE);
+            isTV = uiModeManager != null
+                    && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION;
+
+            boolean isAutomotive;
+            try {
+                isAutomotive = pm.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE);
+            } catch (SecurityException e) {
+                Log.e(TAG, "Unable to query for Automotive system feature", e);
+
+                // `hasSystemFeature` can possibly throw an exception on modified instances of
+                // Android. In this case, assume the device is not a car since automotive vehicles
+                // should not have such a modification.
+                isAutomotive = false;
+            }
+            this.isAutomotive = isAutomotive;
         } catch (NameNotFoundException e) {
             throw new RuntimeException(e);
         }
@@ -197,28 +250,36 @@ public class BuildInfo {
         return "eng".equals(Build.TYPE) || "userdebug".equals(Build.TYPE);
     }
 
-    // The markers Begin:BuildCompat and End:BuildCompat delimit code
-    // that is autogenerated from Android sources.
-    // Begin:BuildCompat Q
-
     /**
-     * Checks if the device is running on a pre-release version of Android Q or newer.
-     * <p>
-     * <strong>Note:</strong> This method will return {@code false} on devices running release
-     * versions of Android. When Android Q is finalized for release, this method will be deprecated
-     * and all calls should be replaced with {@code Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q}.
-     *
-     * @return {@code true} if Q APIs are available for use, {@code false} otherwise
+     * Wrap BuildCompat.isAtLeastT. This enables it to be shadowed in Robolectric tests.
      */
-    public static boolean isAtLeastQ() {
-        return Build.VERSION.SDK_INT >= 29;
+    @OptIn(markerClass = androidx.core.os.BuildCompat.PrereleaseSdkCheck.class)
+    public static boolean isAtLeastT() {
+        return BuildCompat.isAtLeastT();
     }
 
     /**
-     * Checks if the application targets pre-release SDK Q
+     * Checks if the application targets pre-release SDK T.
+     * This must be manually maintained as the SDK goes through finalization!
+     * Avoid depending on this if possible; this is only intended for WebView.
      */
-    public static boolean targetsAtLeastQ() {
-        return ContextUtils.getApplicationContext().getApplicationInfo().targetSdkVersion >= 29;
+    @OptIn(markerClass = androidx.core.os.BuildCompat.PrereleaseSdkCheck.class)
+    public static boolean targetsAtLeastT() {
+        int target = ContextUtils.getApplicationContext().getApplicationInfo().targetSdkVersion;
+
+        // Logic for pre-API-finalization:
+        // return BuildCompat.isAtLeastT() && target == Build.VERSION_CODES.CUR_DEVELOPMENT;
+
+        // Logic for after API finalization but before public SDK release has to
+        // just hardcode the appropriate SDK integer. This will include Android
+        // builds with the finalized SDK, and also pre-API-finalization builds
+        // (because CUR_DEVELOPMENT == 10000).
+        // return target >= 33;
+
+        // Once the public SDK is upstreamed we can use the defined constant,
+        // deprecate this, then eventually inline this at all callsites and
+        // remove it.
+        return target >= Build.VERSION_CODES.TIRAMISU;
     }
 
     public static void setFirebaseAppId(String id) {
@@ -230,5 +291,4 @@ public class BuildInfo {
         return sFirebaseAppId;
     }
 
-    // End:BuildCompat
 }

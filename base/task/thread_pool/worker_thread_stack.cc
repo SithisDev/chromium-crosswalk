@@ -1,13 +1,12 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/task/thread_pool/worker_thread_stack.h"
 
-#include <algorithm>
-
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/check_op.h"
+#include "base/containers/contains.h"
+#include "base/ranges/algorithm.h"
 #include "base/task/thread_pool/worker_thread.h"
 
 namespace base {
@@ -47,7 +46,7 @@ bool WorkerThreadStack::Contains(const WorkerThread* worker) const {
 void WorkerThreadStack::Remove(const WorkerThread* worker) {
   DCHECK(!IsEmpty());
   DCHECK_NE(worker, stack_.back());
-  auto it = std::find(stack_.begin(), stack_.end(), worker);
+  auto it = ranges::find(stack_, worker);
   DCHECK(it != stack_.end());
   DCHECK_NE(TimeTicks(), (*it)->GetLastUsedTime());
   stack_.erase(it);

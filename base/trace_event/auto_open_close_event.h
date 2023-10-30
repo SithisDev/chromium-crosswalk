@@ -1,11 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_TRACE_EVENT_AUTO_OPEN_CLOSE_EVENT_H_
 #define BASE_TRACE_EVENT_AUTO_OPEN_CLOSE_EVENT_H_
 
-#include "base/macros.h"
+#include "base/check.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
@@ -34,10 +34,12 @@ class AutoOpenCloseEvent : public TraceLog::AsyncEnabledStateObserver {
   // must be pointers to indefinitely lived strings (e.g. hard-coded string
   // literals are okay, but not strings created by c_str())
   AutoOpenCloseEvent(Type type, const char* event_name)
-      : event_name_(event_name), weak_factory_(this) {
+      : event_name_(event_name) {
     base::trace_event::TraceLog::GetInstance()->AddAsyncEnabledStateObserver(
         weak_factory_.GetWeakPtr());
   }
+  AutoOpenCloseEvent(const AutoOpenCloseEvent&) = delete;
+  AutoOpenCloseEvent& operator=(const AutoOpenCloseEvent&) = delete;
   ~AutoOpenCloseEvent() override {
     DCHECK(thread_checker_.CalledOnValidThread());
     base::trace_event::TraceLog::GetInstance()->RemoveAsyncEnabledStateObserver(
@@ -70,9 +72,7 @@ class AutoOpenCloseEvent : public TraceLog::AsyncEnabledStateObserver {
   const char* const event_name_;
   base::TimeTicks start_time_;
   base::ThreadChecker thread_checker_;
-  WeakPtrFactory<AutoOpenCloseEvent> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(AutoOpenCloseEvent);
+  WeakPtrFactory<AutoOpenCloseEvent> weak_factory_{this};
 };
 
 }  // namespace trace_event

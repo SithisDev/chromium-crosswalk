@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,15 +10,16 @@ namespace sequence_manager {
 FakeTask::FakeTask() : FakeTask(0 /* task_type */) {}
 
 FakeTask::FakeTask(TaskType task_type)
-    : Task(internal::PostedTask(OnceClosure(),
+    : Task(internal::PostedTask(nullptr,
+                                OnceClosure(),
                                 FROM_HERE,
-                                TimeDelta(),
+                                base::TimeDelta(),
                                 Nestable::kNestable,
                                 task_type),
+           EnqueueOrder(),
+           EnqueueOrder(),
            TimeTicks(),
-           EnqueueOrder(),
-           EnqueueOrder(),
-           internal::WakeUpResolution::kLow) {}
+           WakeUpResolution::kLow) {}
 
 FakeTaskTiming::FakeTaskTiming()
     : TaskTiming(false /* has_wall_time */, false /* has_thread_time */) {}

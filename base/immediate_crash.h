@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,7 +41,7 @@
 
 #if defined(COMPILER_GCC)
 
-#if defined(OS_NACL)
+#if BUILDFLAG(IS_NACL)
 
 // Crash report accuracy is not guaranteed on NaCl.
 #define TRAP_SEQUENCE1_() __builtin_trap()
@@ -55,13 +55,13 @@
 // to continue after SIGTRAP.
 #define TRAP_SEQUENCE1_() asm volatile("int3")
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
 // Intentionally empty: __builtin_unreachable() is always part of the sequence
 // (see IMMEDIATE_CRASH below) and already emits a ud2 on Mac.
 #define TRAP_SEQUENCE2_() asm volatile("")
 #else
 #define TRAP_SEQUENCE2_() asm volatile("ud2")
-#endif  // defined(OS_MACOSX)
+#endif  // BUILDFLAG(IS_APPLE)
 
 #elif defined(ARCH_CPU_ARMEL)
 
@@ -99,22 +99,18 @@
 
 #elif defined(ARCH_CPU_ARM64)
 
-#define TRAP_SEQUENCE1_() __asm volatile("brk #0\n")
+// Windows ARM64 uses "BRK #F000" as its breakpoint instruction, and
+// __debugbreak() generates that in both VC++ and clang.
+#define TRAP_SEQUENCE1_() __debugbreak()
 // Intentionally empty: __builtin_unreachable() is always part of the sequence
-// (see IMMEDIATE_CRASH below) and already emits a ud2 on Win64
+// (see IMMEDIATE_CRASH below) and already emits a ud2 on Win64,
+// https://crbug.com/958373
 #define TRAP_SEQUENCE2_() __asm volatile("")
 
 #else
 
 #define TRAP_SEQUENCE1_() asm volatile("int3")
-
-#if defined(ARCH_CPU_64_BITS)
-// Intentionally empty: __builtin_unreachable() is always part of the sequence
-// (see IMMEDIATE_CRASH below) and already emits a ud2 on Win64
-#define TRAP_SEQUENCE2_() asm volatile("")
-#else
 #define TRAP_SEQUENCE2_() asm volatile("ud2")
-#endif  // defined(ARCH_CPU_64_bits)
 
 #endif  // __clang__
 
@@ -138,7 +134,7 @@
 // calling function, but to this anonymous lambda. This is still useful as the
 // full name of the lambda will typically include the name of the function that
 // calls CHECK() and the debugger will still break at the right line of code.
-#if !defined(COMPILER_GCC)
+#if !defined(COMPILER_GCC) || defined(__clang__)
 
 #define WRAPPED_TRAP_SEQUENCE_() TRAP_SEQUENCE_()
 
@@ -149,7 +145,7 @@
     [] { TRAP_SEQUENCE_(); }();  \
   } while (false)
 
-#endif  // !defined(COMPILER_GCC)
+#endif  // !defined(COMPILER_GCC) || defined(__clang__)
 
 #if defined(__clang__) || defined(COMPILER_GCC)
 

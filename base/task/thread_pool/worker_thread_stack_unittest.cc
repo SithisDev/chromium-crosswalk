@@ -1,10 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/task/thread_pool/worker_thread_stack.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/memory/ref_counted.h"
 #include "base/task/thread_pool/task_source.h"
 #include "base/task/thread_pool/task_tracker.h"
@@ -24,8 +24,8 @@ class MockWorkerThreadDelegate : public WorkerThread::Delegate {
   WorkerThread::ThreadLabel GetThreadLabel() const override {
     return WorkerThread::ThreadLabel::DEDICATED;
   }
-  void OnMainEntry(const WorkerThread* worker) override {}
-  RunIntentWithRegisteredTaskSource GetWork(WorkerThread* worker) override {
+  void OnMainEntry(WorkerThread* worker) override {}
+  RegisteredTaskSource GetWork(WorkerThread* worker) override {
     return nullptr;
   }
   void DidProcessTask(RegisteredTaskSource task_source) override {
@@ -38,21 +38,21 @@ class ThreadPoolWorkerStackTest : public testing::Test {
  protected:
   void SetUp() override {
     worker_a_ = MakeRefCounted<WorkerThread>(
-        ThreadPriority::NORMAL, std::make_unique<MockWorkerThreadDelegate>(),
+        ThreadType::kDefault, std::make_unique<MockWorkerThreadDelegate>(),
         task_tracker_.GetTrackedRef());
     ASSERT_TRUE(worker_a_);
     worker_b_ = MakeRefCounted<WorkerThread>(
-        ThreadPriority::NORMAL, std::make_unique<MockWorkerThreadDelegate>(),
+        ThreadType::kDefault, std::make_unique<MockWorkerThreadDelegate>(),
         task_tracker_.GetTrackedRef());
     ASSERT_TRUE(worker_b_);
     worker_c_ = MakeRefCounted<WorkerThread>(
-        ThreadPriority::NORMAL, std::make_unique<MockWorkerThreadDelegate>(),
+        ThreadType::kDefault, std::make_unique<MockWorkerThreadDelegate>(),
         task_tracker_.GetTrackedRef());
     ASSERT_TRUE(worker_c_);
   }
 
  private:
-  TaskTracker task_tracker_{"Test"};
+  TaskTracker task_tracker_;
 
  protected:
   scoped_refptr<WorkerThread> worker_a_;

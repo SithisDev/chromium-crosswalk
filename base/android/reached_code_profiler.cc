@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,15 +24,18 @@
 #include "base/linux_util.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
-#include "base/optional.h"
 #include "base/path_service.h"
 #include "base/scoped_generic.h"
-#include "base/single_thread_task_runner.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "build/build_config.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if !BUILDFLAG(SUPPORTS_CODE_ORDERING)
 #error Code ordering support is required for the reached code profiler.
@@ -43,7 +46,7 @@ namespace android {
 
 namespace {
 
-#if !defined(NDEBUG) || defined(COMPONENT_BUILD)
+#if !defined(NDEBUG) || defined(COMPONENT_BUILD) || defined(OFFICIAL_BUILD)
 // Always disabled for debug builds to avoid hitting a limit of signal
 // interrupts that can get delivered into a single HANDLE_EINTR. Also
 // debugging experience would be bad if there are a lot of signals flying
@@ -51,6 +54,8 @@ namespace {
 // Always disabled for component builds because in this case the code is not
 // organized in one contiguous region which is required for the reached code
 // profiler.
+// Disabled for official builds because `g_text_bitfield` isn't included in
+// official builds.
 constexpr const bool kConfigurationSupported = false;
 #else
 constexpr const bool kConfigurationSupported = true;
@@ -60,30 +65,33 @@ constexpr const char kDumpToFileFlag[] = "reached-code-profiler-dump-to-file";
 
 constexpr uint64_t kIterationsBeforeSkipping = 50;
 constexpr uint64_t kIterationsBetweenUpdates = 100;
-constexpr int kProfilerSignal = SIGURG;
+constexpr int kProfilerSignal = SIGWINCH;
 
-constexpr base::TimeDelta kSamplingInterval =
-    base::TimeDelta::FromMilliseconds(10);
-constexpr base::TimeDelta kDumpInterval = base::TimeDelta::FromSeconds(30);
+constexpr base::TimeDelta kSamplingInterval = base::Milliseconds(10);
+constexpr base::TimeDelta kDumpInterval = base::Seconds(30);
 
 void HandleSignal(int signal, siginfo_t* info, void* context) {
   if (signal != kProfilerSignal)
     return;
 
   ucontext_t* ucontext = reinterpret_cast<ucontext_t*>(context);
-  uint32_t address = ucontext->uc_mcontext.arm_pc;
+#if defined(ARCH_CPU_ARM64)
+  uintptr_t address = ucontext->uc_mcontext.pc;
+#else
+  uintptr_t address = ucontext->uc_mcontext.arm_pc;
+#endif
   ReachedAddressesBitset::GetTextBitset()->RecordAddress(address);
 }
 
 struct ScopedTimerCloseTraits {
-  static base::Optional<timer_t> InvalidValue() { return base::nullopt; }
+  static absl::optional<timer_t> InvalidValue() { return absl::nullopt; }
 
-  static void Free(base::Optional<timer_t> x) { timer_delete(*x); }
+  static void Free(absl::optional<timer_t> x) { timer_delete(*x); }
 };
 
 // RAII object holding an interval timer.
 using ScopedTimer =
-    base::ScopedGeneric<base::Optional<timer_t>, ScopedTimerCloseTraits>;
+    base::ScopedGeneric<absl::optional<timer_t>, ScopedTimerCloseTraits>;
 
 void DumpToFile(const base::FilePath& path,
                 scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
@@ -116,8 +124,12 @@ class ReachedCodeProfiler {
     return instance.get();
   }
 
+  ReachedCodeProfiler(const ReachedCodeProfiler&) = delete;
+  ReachedCodeProfiler& operator=(const ReachedCodeProfiler&) = delete;
+
   // Starts to periodically send |kProfilerSignal| to all threads.
-  void Start(LibraryProcessType library_process_type) {
+  void Start(LibraryProcessType library_process_type,
+             base::TimeDelta sampling_interval) {
     if (is_enabled_)
       return;
 
@@ -154,7 +166,8 @@ class ReachedCodeProfiler {
     // Start the interval timer.
     struct itimerspec its;
     memset(&its, 0, sizeof(its));
-    its.it_interval.tv_nsec = kSamplingInterval.InNanoseconds();
+    its.it_interval.tv_nsec =
+        checked_cast<long>(sampling_interval.InNanoseconds());
     its.it_value = its.it_interval;
     ret = timer_settime(timerid, 0, &its, nullptr);
     if (ret) {
@@ -227,9 +240,8 @@ class ReachedCodeProfiler {
 
     dumping_thread_ =
         std::make_unique<base::Thread>("ReachedCodeProfilerDumpingThread");
-    base::Thread::Options options;
-    options.priority = base::ThreadPriority::BACKGROUND;
-    dumping_thread_->StartWithOptions(options);
+    dumping_thread_->StartWithOptions(
+        base::Thread::Options(base::ThreadType::kBackground));
     dumping_thread_->task_runner()->PostDelayedTask(
         FROM_HERE,
         base::BindOnce(&DumpToFile, file_path, dumping_thread_->task_runner()),
@@ -246,8 +258,6 @@ class ReachedCodeProfiler {
   bool is_enabled_;
 
   friend class NoDestructor<ReachedCodeProfiler>;
-
-  DISALLOW_COPY_AND_ASSIGN(ReachedCodeProfiler);
 };
 
 bool ShouldEnableReachedCodeProfiler() {
@@ -268,7 +278,17 @@ void InitReachedCodeProfilerAtStartup(LibraryProcessType library_process_type) {
   if (!ShouldEnableReachedCodeProfiler())
     return;
 
-  ReachedCodeProfiler::GetInstance()->Start(library_process_type);
+  int interval_us = 0;
+  base::TimeDelta sampling_interval = kSamplingInterval;
+  if (base::StringToInt(
+          base::CommandLine::ForCurrentProcess()->GetSwitchValueNative(
+              switches::kReachedCodeSamplingIntervalUs),
+          &interval_us) &&
+      interval_us > 0) {
+    sampling_interval = base::Microseconds(interval_us);
+  }
+  ReachedCodeProfiler::GetInstance()->Start(library_process_type,
+                                            sampling_interval);
 }
 
 bool IsReachedCodeProfilerEnabled() {

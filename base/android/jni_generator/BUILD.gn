@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -15,25 +15,27 @@ generate_jni("jni_sample_header") {
 }
 
 android_library("jni_sample_java") {
-  java_files = [
-    "java/src/org/chromium/example/jni_generator/SampleForTests.java",
+  sources = [
     "java/src/org/chromium/example/jni_generator/SampleForAnnotationProcessor.java",
+    "java/src/org/chromium/example/jni_generator/SampleForTests.java",
   ]
 
   deps = [
-    "//base:base_java",
     "//base:jni_java",
+    "//build/android:build_java",
   ]
 
   annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
 }
 
 android_library("jni_annotation_sample_java") {
-  java_files = [ "java/src/org/chromium/example/jni_generator/SampleForAnnotationProcessor.java" ]
+  sources = [ "java/src/org/chromium/example/jni_generator/SampleForAnnotationProcessor.java" ]
+
   deps = [
-    "//base:base_java",
     "//base:jni_java",
+    "//build/android:build_java",
   ]
+
   annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
 }
 
@@ -64,12 +66,7 @@ shared_library("jni_sample_lib") {
 android_apk("sample_jni_apk") {
   apk_name = "SampleJni"
   android_manifest = "AndroidManifest.xml"
-  target_sdk_version = 24
-  deps = [
-    ":jni_sample_java",
-    "//base:base_java",
-    "//base:jni_java",
-  ]
+  deps = [ ":jni_sample_java" ]
   shared_libraries = [ ":jni_sample_lib" ]
   jni_registration_header = _registration_header
 }
@@ -82,28 +79,25 @@ group("jni_generator_tests") {
   ]
 }
 
-java_cpp_template("processor_args_java") {
-  package_path = "org/chromium/jni_generator"
-  sources = [
-    "ProcessorArgs.template",
-  ]
-  defines = [ "HASH_JNI_NAMES_VALUE=$use_hashed_jni_names" ]
-}
-
 java_annotation_processor("jni_processor") {
-  java_files = [ "java/src/org/chromium/jni_generator/JniProcessor.java" ]
+  sources = [
+    "java/src/org/chromium/jni_generator/JniProcessor.java",
+
+    # Avoids a circular dependency with base:base_java. This is okay because
+    # no target should ever expect to package an annotation processor.
+    "//build/android/java/src/org/chromium/build/annotations/CheckDiscard.java",
+    "//build/android/java/src/org/chromium/build/annotations/MainDex.java",
+  ]
 
   main_class = "org.chromium.jni_generator.JniProcessor"
 
-  annotation_processor_deps = [ "//third_party/auto:auto_service_processor" ]
+  annotation_processor_deps =
+      [ "//third_party/android_deps:auto_service_processor" ]
 
   deps = [
     "//base:jni_java",
+    "//third_party/android_deps:com_google_auto_service_auto_service_annotations_java",
+    "//third_party/android_deps:com_google_guava_guava_java",
     "//third_party/android_deps:com_squareup_javapoet_java",
-    "//third_party/auto:auto_service_java",
-    "//third_party/guava:guava_java",
   ]
-
-  srcjar_deps = [ ":processor_args_java" ]
-  jacoco_never_instrument = true
 }

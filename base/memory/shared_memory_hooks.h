@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,13 @@
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "base/memory/writable_shared_memory_region.h"
 
+namespace mojo {
+class SharedMemoryUtils;
+namespace core::ipcz_driver {
+class BaseSharedMemoryService;
+}
+}  // namespace mojo
+
 namespace base {
 
 class SharedMemoryHooks {
@@ -17,6 +24,8 @@ class SharedMemoryHooks {
 
  private:
   friend class SharedMemoryHooksTest;
+  friend mojo::SharedMemoryUtils;
+  friend class mojo::core::ipcz_driver::BaseSharedMemoryService;
 
   // Allows shared memory region creation to be hooked. Useful for sandboxed
   // processes that are restricted from invoking the platform APIs directly.

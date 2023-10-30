@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/base_jni_headers/JavaHandlerThread_jni.h"
 #include "base/bind.h"
 #include "base/message_loop/message_pump.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/sequence_manager/sequence_manager_impl.h"
@@ -25,13 +26,13 @@ namespace base {
 namespace android {
 
 JavaHandlerThread::JavaHandlerThread(const char* name,
-                                     base::ThreadPriority priority)
+                                     base::ThreadType thread_type)
     : JavaHandlerThread(
           name,
           Java_JavaHandlerThread_create(
               AttachCurrentThread(),
               ConvertUTF8ToJavaString(AttachCurrentThread(), name),
-              base::internal::ThreadPriorityToNiceValue(priority))) {}
+              base::internal::ThreadTypeToNiceValue(thread_type))) {}
 
 JavaHandlerThread::JavaHandlerThread(
     const char* name,
@@ -41,22 +42,22 @@ JavaHandlerThread::JavaHandlerThread(
 JavaHandlerThread::~JavaHandlerThread() {
   JNIEnv* env = base::android::AttachCurrentThread();
   DCHECK(!Java_JavaHandlerThread_isAlive(env, java_thread_));
-  DCHECK(!task_environment_ || task_environment_->pump->IsAborted());
+  DCHECK(!state_ || state_->pump->IsAborted());
   // TODO(mthiesse): We shouldn't leak the MessageLoop as this could affect
   // future tests.
-  if (task_environment_ && task_environment_->pump->IsAborted()) {
+  if (state_ && state_->pump->IsAborted()) {
     // When the Pump has been aborted due to a crash, we intentionally leak the
     // SequenceManager because the SequenceManager hasn't been shut down
     // properly and would trigger DCHECKS. This should only happen in tests,
     // where we handle the exception instead of letting it take down the
     // process.
-    task_environment_.release();
+    state_.release();
   }
 }
 
 void JavaHandlerThread::Start() {
   // Check the thread has not already been started.
-  DCHECK(!task_environment_);
+  DCHECK(!state_);
 
   JNIEnv* env = base::android::AttachCurrentThread();
   base::WaitableEvent initialize_event(
@@ -81,7 +82,6 @@ void JavaHandlerThread::Stop() {
 }
 
 void JavaHandlerThread::InitializeThread(JNIEnv* env,
-                                         const JavaParamRef<jobject>& obj,
                                          jlong event) {
   base::ThreadIdNameManager::GetInstance()->RegisterThread(
       base::PlatformThread::CurrentHandle().platform_handle(),
@@ -90,15 +90,18 @@ void JavaHandlerThread::InitializeThread(JNIEnv* env,
   if (name_)
     PlatformThread::SetName(name_);
 
-  task_environment_ = std::make_unique<TaskEnvironment>();
+  thread_id_ = base::PlatformThread::CurrentId();
+  state_ = std::make_unique<State>();
+#if DCHECK_IS_ON()
+  initialized_ = true;
+#endif
   Init();
   reinterpret_cast<base::WaitableEvent*>(event)->Signal();
 }
 
-void JavaHandlerThread::OnLooperStopped(JNIEnv* env,
-                                        const JavaParamRef<jobject>& obj) {
+void JavaHandlerThread::OnLooperStopped(JNIEnv* env) {
   DCHECK(task_runner()->BelongsToCurrentThread());
-  task_environment_.reset();
+  state_.reset();
 
   CleanUp();
 
@@ -131,10 +134,17 @@ ScopedJavaLocalRef<jthrowable> JavaHandlerThread::GetUncaughtExceptionIfAny() {
   return Java_JavaHandlerThread_getUncaughtExceptionIfAny(env, java_thread_);
 }
 
+PlatformThreadId JavaHandlerThread::GetThreadId() const {
+#if DCHECK_IS_ON()
+  DCHECK(initialized_);
+#endif
+  return thread_id_;
+}
+
 void JavaHandlerThread::StopOnThread() {
   DCHECK(task_runner()->BelongsToCurrentThread());
-  DCHECK(task_environment_);
-  task_environment_->pump->QuitWhenIdle(base::BindOnce(
+  DCHECK(state_);
+  state_->pump->QuitWhenIdle(base::BindOnce(
       &JavaHandlerThread::QuitThreadSafely, base::Unretained(this)));
 }
 
@@ -145,16 +155,16 @@ void JavaHandlerThread::QuitThreadSafely() {
                                           reinterpret_cast<intptr_t>(this));
 }
 
-JavaHandlerThread::TaskEnvironment::TaskEnvironment()
+JavaHandlerThread::State::State()
     : sequence_manager(sequence_manager::CreateUnboundSequenceManager(
           sequence_manager::SequenceManager::Settings::Builder()
-              .SetMessagePumpType(base::MessagePump::Type::JAVA)
+              .SetMessagePumpType(base::MessagePumpType::JAVA)
               .Build())),
       default_task_queue(sequence_manager->CreateTaskQueue(
           sequence_manager::TaskQueue::Spec("default_tq"))) {
   // TYPE_JAVA to get the Android java style message loop.
   std::unique_ptr<MessagePump> message_pump =
-      MessagePump::Create(base::MessagePump::Type::JAVA);
+      MessagePump::Create(base::MessagePumpType::JAVA);
   pump = static_cast<MessagePumpForUI*>(message_pump.get());
 
   // We must set SetTaskRunner before binding because the Android UI pump
@@ -165,7 +175,7 @@ JavaHandlerThread::TaskEnvironment::TaskEnvironment()
   sequence_manager->BindToMessagePump(std::move(message_pump));
 }
 
-JavaHandlerThread::TaskEnvironment::~TaskEnvironment() = default;
+JavaHandlerThread::State::~State() = default;
 
 } // namespace android
 } // namespace base

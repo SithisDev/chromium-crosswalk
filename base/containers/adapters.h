@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,6 @@
 
 #include <iterator>
 #include <utility>
-
-#include "base/macros.h"
 
 namespace base {
 
@@ -24,14 +22,13 @@ class ReversedAdapter {
 
   explicit ReversedAdapter(T& t) : t_(t) {}
   ReversedAdapter(const ReversedAdapter& ra) : t_(ra.t_) {}
+  ReversedAdapter& operator=(const ReversedAdapter&) = delete;
 
   Iterator begin() const { return std::rbegin(t_); }
   Iterator end() const { return std::rend(t_); }
 
  private:
   T& t_;
-
-  DISALLOW_ASSIGN(ReversedAdapter);
 };
 
 }  // namespace internal

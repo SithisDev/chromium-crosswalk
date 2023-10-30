@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@
 
 #include "base/synchronization/waitable_event.h"
 #include "base/task/sequence_manager/sequence_manager_impl.h"
+#include "base/task/task_observer.h"
 #include "base/test/android/java_handler_thread_helpers.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
@@ -17,14 +18,14 @@ class JavaHandlerThreadForTest : public android::JavaHandlerThread {
  public:
   explicit JavaHandlerThreadForTest(
       const char* name,
-      base::ThreadPriority priority = base::ThreadPriority::NORMAL)
-      : android::JavaHandlerThread(name, priority) {}
+      base::ThreadType thread_type = base::ThreadType::kDefault)
+      : android::JavaHandlerThread(name, thread_type) {}
 
-  using android::JavaHandlerThread::task_environment;
-  using android::JavaHandlerThread::TaskEnvironment;
+  using android::JavaHandlerThread::state;
+  using android::JavaHandlerThread::State;
 };
 
-class DummyTaskObserver : public MessageLoop::TaskObserver {
+class DummyTaskObserver : public TaskObserver {
  public:
   explicit DummyTaskObserver(int num_tasks)
       : num_tasks_started_(0), num_tasks_processed_(0), num_tasks_(num_tasks) {}
@@ -34,9 +35,13 @@ class DummyTaskObserver : public MessageLoop::TaskObserver {
         num_tasks_processed_(0),
         num_tasks_(num_tasks) {}
 
+  DummyTaskObserver(const DummyTaskObserver&) = delete;
+  DummyTaskObserver& operator=(const DummyTaskObserver&) = delete;
+
   ~DummyTaskObserver() override = default;
 
-  void WillProcessTask(const PendingTask& pending_task) override {
+  void WillProcessTask(const PendingTask& /* pending_task */,
+                       bool /* was_blocked_or_low_priority */) override {
     num_tasks_started_++;
     EXPECT_LE(num_tasks_started_, num_tasks_);
     EXPECT_EQ(num_tasks_started_, num_tasks_processed_ + 1);
@@ -55,8 +60,6 @@ class DummyTaskObserver : public MessageLoop::TaskObserver {
   int num_tasks_started_;
   int num_tasks_processed_;
   const int num_tasks_;
-
-  DISALLOW_COPY_AND_ASSIGN(DummyTaskObserver);
 };
 
 void PostNTasks(int posts_remaining) {
@@ -86,8 +89,8 @@ void RunTest_AbortDontRunMoreTasks(bool delayed, bool init_java_first) {
       BindOnce(&android::JavaHandlerThreadHelpers::ThrowExceptionAndAbort,
                &test_done_event);
   if (delayed) {
-    java_thread->task_runner()->PostDelayedTask(
-        FROM_HERE, std::move(target), TimeDelta::FromMilliseconds(10));
+    java_thread->task_runner()->PostDelayedTask(FROM_HERE, std::move(target),
+                                                Milliseconds(10));
   } else {
     java_thread->task_runner()->PostTask(FROM_HERE, std::move(target));
     java_thread->task_runner()->PostTask(FROM_HERE,
@@ -128,14 +131,13 @@ TEST_F(JavaHandlerThreadTest, RunTasksWhileShuttingDownJavaThread) {
 
   sequence_manager::internal::SequenceManagerImpl* sequence_manager =
       static_cast<sequence_manager::internal::SequenceManagerImpl*>(
-          java_thread->task_environment()->sequence_manager.get());
+          java_thread->state()->sequence_manager.get());
 
   java_thread->task_runner()->PostTask(
       FROM_HERE, BindLambdaForTesting([&]() {
         sequence_manager->AddTaskObserver(&observer);
         ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-            FROM_HERE, MakeExpectedNotRunClosure(FROM_HERE),
-            TimeDelta::FromDays(1));
+            FROM_HERE, MakeExpectedNotRunClosure(FROM_HERE), Days(1));
         java_thread->StopSequenceManagerForTesting();
         PostNTasks(kNumPosts);
       }));

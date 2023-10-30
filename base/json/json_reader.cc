@@ -1,156 +1,109 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/json/json_reader.h"
 
 #include <utility>
-#include <vector>
 
-#include "base/json/json_parser.h"
 #include "base/logging.h"
-#include "base/optional.h"
+#include "base/parsing_buildflags.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+
+#if BUILDFLAG(BUILD_RUST_JSON_PARSER)
+#include "base/json/json_parser.rs.h"
+#include "base/strings/string_piece_rust.h"
+#else
+#include "base/json/json_parser.h"
+#endif
 
 namespace base {
 
-// Chosen to support 99.9% of documents found in the wild late 2016.
-// http://crbug.com/673263
-const int JSONReader::kStackMaxDepth = 200;
+#if BUILDFLAG(BUILD_RUST_JSON_PARSER)
 
-// Values 1000 and above are used by JSONFileValueSerializer::JsonFileError.
-static_assert(JSONReader::JSON_PARSE_ERROR_COUNT < 1000,
-              "JSONReader error out of bounds");
+namespace {
 
-const char JSONReader::kInvalidEscape[] =
-    "Invalid escape sequence.";
-const char JSONReader::kSyntaxError[] =
-    "Syntax error.";
-const char JSONReader::kUnexpectedToken[] =
-    "Unexpected token.";
-const char JSONReader::kTrailingComma[] =
-    "Trailing comma not allowed.";
-const char JSONReader::kTooMuchNesting[] =
-    "Too much nesting.";
-const char JSONReader::kUnexpectedDataAfterRoot[] =
-    "Unexpected data after root element.";
-const char JSONReader::kUnsupportedEncoding[] =
-    "Unsupported encoding. JSON must be UTF-8.";
-const char JSONReader::kUnquotedDictionaryKey[] =
-    "Dictionary keys must be quoted.";
-const char JSONReader::kInputTooLarge[] =
-    "Input string is too large (>2GB).";
-
-JSONReader::ValueWithError::ValueWithError() = default;
-
-JSONReader::ValueWithError::ValueWithError(ValueWithError&& other) = default;
-
-JSONReader::ValueWithError::~ValueWithError() = default;
-
-JSONReader::ValueWithError& JSONReader::ValueWithError::operator=(
-    ValueWithError&& other) = default;
-
-JSONReader::JSONReader(int options, int max_depth)
-    : parser_(new internal::JSONParser(options, max_depth)) {}
-
-JSONReader::~JSONReader() = default;
-
-// static
-Optional<Value> JSONReader::Read(StringPiece json, int options, int max_depth) {
-  internal::JSONParser parser(options, max_depth);
-  return parser.Parse(json);
+base::expected<Value, JSONReader::Error>
+DecodeJSONInRust(const base::StringPiece& json, int options, size_t max_depth) {
+  int32_t error_line;
+  int32_t error_column;
+  base::ffi::json::json_parser::JsonOptions rust_options;
+  rust_options.allow_trailing_commas =
+      options & base::JSON_ALLOW_TRAILING_COMMAS;
+  rust_options.replace_invalid_characters =
+      options & base::JSON_REPLACE_INVALID_CHARACTERS;
+  rust_options.allow_comments = options & base::JSON_ALLOW_COMMENTS;
+  rust_options.allow_vert_tab = options & base::JSON_ALLOW_VERT_TAB;
+  rust_options.allow_control_chars = options & base::JSON_ALLOW_CONTROL_CHARS;
+  rust_options.allow_x_escapes = options & base::JSON_ALLOW_X_ESCAPES;
+  rust_options.max_depth = max_depth;
+  base::JSONReader::Error error;
+  absl::optional<base::Value> value;
+  bool ok = base::ffi::json::json_parser::decode_json_from_cpp(
+      base::StringPieceToRustSlice(json), rust_options, value, error_line,
+      error_column, error.message);
+  if (!ok) {
+    error.line = error_line;
+    error.column = error_column;
+    return base::unexpected(std::move(error));
+  }
+  return std::move(*value);
 }
 
+}  // anonymous namespace
+
+#endif  // BUILDFLAG(BUILD_RUST_JSON_PARSER)
+
+JSONReader::Error::Error() = default;
+
+JSONReader::Error::Error(Error&& other) = default;
+
+JSONReader::Error::~Error() = default;
+
+JSONReader::Error& JSONReader::Error::operator=(Error&& other) = default;
+
+// static
+absl::optional<Value> JSONReader::Read(StringPiece json,
+                                       int options,
+                                       size_t max_depth) {
+#if BUILDFLAG(BUILD_RUST_JSON_PARSER)
+  auto result = DecodeJSONInRust(json, options, max_depth);
+  if (!result.has_value()) {
+    return absl::nullopt;
+  }
+  return std::move(*result);
+#else   // BUILDFLAG(BUILD_RUST_JSON_PARSER)
+  internal::JSONParser parser(options, max_depth);
+  return parser.Parse(json);
+#endif  // BUILDFLAG(BUILD_RUST_JSON_PARSER)
+}
+
+// static
 std::unique_ptr<Value> JSONReader::ReadDeprecated(StringPiece json,
                                                   int options,
-                                                  int max_depth) {
-  Optional<Value> value = Read(json, options, max_depth);
+                                                  size_t max_depth) {
+  absl::optional<Value> value = Read(json, options, max_depth);
   return value ? Value::ToUniquePtrValue(std::move(*value)) : nullptr;
 }
 
 // static
-JSONReader::ValueWithError JSONReader::ReadAndReturnValueWithError(
-    StringPiece json,
-    int options) {
-  ValueWithError ret;
+JSONReader::Result JSONReader::ReadAndReturnValueWithError(StringPiece json,
+                                                           int options) {
+#if BUILDFLAG(BUILD_RUST_JSON_PARSER)
+  return DecodeJSONInRust(json, options, internal::kAbsoluteMaxDepth);
+#else   // BUILDFLAG(BUILD_RUST_JSON_PARSER)
   internal::JSONParser parser(options);
-  ret.value = parser.Parse(json);
-  if (!ret.value) {
-    ret.error_message = parser.GetErrorMessage();
-    ret.error_code = parser.error_code();
-    ret.error_line = parser.error_line();
-    ret.error_column = parser.error_column();
+  auto value = parser.Parse(json);
+  if (!value) {
+    Error error;
+    error.message = parser.GetErrorMessage();
+    error.line = parser.error_line();
+    error.column = parser.error_column();
+    return base::unexpected(std::move(error));
   }
-  return ret;
-}
 
-// static
-std::unique_ptr<Value> JSONReader::ReadAndReturnErrorDeprecated(
-    StringPiece json,
-    int options,
-    int* error_code_out,
-    std::string* error_msg_out,
-    int* error_line_out,
-    int* error_column_out) {
-  ValueWithError ret = ReadAndReturnValueWithError(json, options);
-  if (ret.value)
-    return Value::ToUniquePtrValue(std::move(*ret.value));
-
-  if (error_code_out)
-    *error_code_out = ret.error_code;
-  if (error_msg_out)
-    *error_msg_out = ret.error_message;
-  if (error_line_out)
-    *error_line_out = ret.error_line;
-  if (error_column_out)
-    *error_column_out = ret.error_column;
-  return nullptr;
-}
-
-// static
-std::string JSONReader::ErrorCodeToString(JsonParseError error_code) {
-  switch (error_code) {
-    case JSON_NO_ERROR:
-      return std::string();
-    case JSON_INVALID_ESCAPE:
-      return kInvalidEscape;
-    case JSON_SYNTAX_ERROR:
-      return kSyntaxError;
-    case JSON_UNEXPECTED_TOKEN:
-      return kUnexpectedToken;
-    case JSON_TRAILING_COMMA:
-      return kTrailingComma;
-    case JSON_TOO_MUCH_NESTING:
-      return kTooMuchNesting;
-    case JSON_UNEXPECTED_DATA_AFTER_ROOT:
-      return kUnexpectedDataAfterRoot;
-    case JSON_UNSUPPORTED_ENCODING:
-      return kUnsupportedEncoding;
-    case JSON_UNQUOTED_DICTIONARY_KEY:
-      return kUnquotedDictionaryKey;
-    case JSON_TOO_LARGE:
-      return kInputTooLarge;
-    case JSON_PARSE_ERROR_COUNT:
-      break;
-  }
-  NOTREACHED();
-  return std::string();
-}
-
-Optional<Value> JSONReader::ReadToValue(StringPiece json) {
-  return parser_->Parse(json);
-}
-
-std::unique_ptr<Value> JSONReader::ReadToValueDeprecated(StringPiece json) {
-  Optional<Value> value = parser_->Parse(json);
-  return value ? std::make_unique<Value>(std::move(*value)) : nullptr;
-}
-
-JSONReader::JsonParseError JSONReader::error_code() const {
-  return parser_->error_code();
-}
-
-std::string JSONReader::GetErrorMessage() const {
-  return parser_->GetErrorMessage();
+  return std::move(*value);
+#endif  // BUILDFLAG(BUILD_RUST_JSON_PARSER)
 }
 
 }  // namespace base

@@ -1,153 +1,100 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/allocator/partition_allocator/memory_reclaimer.h"
 
 #include "base/allocator/partition_allocator/partition_alloc.h"
-#include "base/bind.h"
-#include "base/location.h"
-#include "base/metrics/histogram_functions.h"
-#include "base/timer/elapsed_timer.h"
-#include "base/trace_event/trace_event.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/no_destructor.h"
+#include "base/allocator/partition_allocator/partition_alloc_buildflags.h"
+#include "base/allocator/partition_allocator/partition_alloc_check.h"
+#include "base/allocator/partition_allocator/partition_alloc_config.h"
 
-namespace base {
+#if BUILDFLAG(STARSCAN)
+#include "base/allocator/partition_allocator/starscan/pcscan.h"
+#endif  // BUILDFLAG(STARSCAN)
 
-namespace internal {
+// TODO(bikineev): Temporarily disable *Scan in MemoryReclaimer as it seems to
+// cause significant jank.
+#define PA_STARSCAN_ENABLE_STARSCAN_ON_RECLAIM 0
 
-// TODO(crbug.com/942512): Remove the feature after the M77 branch.
-const Feature kPartitionAllocPeriodicDecommit{"PartitionAllocPeriodicDecommit",
-                                              FEATURE_ENABLED_BY_DEFAULT};
-
-}  // namespace internal
-
-namespace {
-
-bool IsDeprecatedDecommitEnabled() {
-  return !FeatureList::IsEnabled(internal::kPartitionAllocPeriodicDecommit);
-}
-
-}  // namespace
-
-constexpr TimeDelta PartitionAllocMemoryReclaimer::kStatsRecordingTimeDelta;
+namespace partition_alloc {
 
 // static
-PartitionAllocMemoryReclaimer* PartitionAllocMemoryReclaimer::Instance() {
-  static NoDestructor<PartitionAllocMemoryReclaimer> instance;
+MemoryReclaimer* MemoryReclaimer::Instance() {
+  static internal::base::NoDestructor<MemoryReclaimer> instance;
   return instance.get();
 }
 
-void PartitionAllocMemoryReclaimer::RegisterPartition(
-    internal::PartitionRootBase* partition) {
-  AutoLock lock(lock_);
-  DCHECK(partition);
+void MemoryReclaimer::RegisterPartition(PartitionRoot<>* partition) {
+  internal::ScopedGuard lock(lock_);
+  PA_DCHECK(partition);
   auto it_and_whether_inserted = partitions_.insert(partition);
-  DCHECK(it_and_whether_inserted.second);
+  PA_DCHECK(it_and_whether_inserted.second);
 }
 
-void PartitionAllocMemoryReclaimer::UnregisterPartition(
-    internal::PartitionRootBase* partition) {
-  AutoLock lock(lock_);
-  DCHECK(partition);
+void MemoryReclaimer::UnregisterPartition(
+    PartitionRoot<internal::ThreadSafe>* partition) {
+  internal::ScopedGuard lock(lock_);
+  PA_DCHECK(partition);
   size_t erased_count = partitions_.erase(partition);
-  DCHECK_EQ(1u, erased_count);
+  PA_DCHECK(erased_count == 1u);
 }
 
-void PartitionAllocMemoryReclaimer::Start(
-    scoped_refptr<SequencedTaskRunner> task_runner) {
-  DCHECK(!timer_);
-  DCHECK(task_runner);
+MemoryReclaimer::MemoryReclaimer() = default;
+MemoryReclaimer::~MemoryReclaimer() = default;
 
-  {
-    AutoLock lock(lock_);
-    DCHECK(!partitions_.empty());
-  }
+void MemoryReclaimer::ReclaimAll() {
+  constexpr int kFlags = PurgeFlags::kDecommitEmptySlotSpans |
+                         PurgeFlags::kDiscardUnusedSystemPages |
+                         PurgeFlags::kAggressiveReclaim;
+  Reclaim(kFlags);
+}
 
-  if (!FeatureList::IsEnabled(internal::kPartitionAllocPeriodicDecommit))
-    return;
+void MemoryReclaimer::ReclaimNormal() {
+  constexpr int kFlags = PurgeFlags::kDecommitEmptySlotSpans |
+                         PurgeFlags::kDiscardUnusedSystemPages;
+  Reclaim(kFlags);
+}
 
-  // This does not need to run on the main thread, however there are a few
-  // reasons to do it there:
-  // - Most of PartitionAlloc's usage is on the main thread, hence PA's metadata
-  //   is more likely in cache when executing on the main thread.
-  // - Memory reclaim takes the partition lock for each partition. As a
-  //   consequence, while reclaim is running, the main thread is unlikely to be
-  //   able to make progress, as it would be waiting on the lock.
-  // - Finally, this runs in idle time only, so there should be no visible
-  //   impact.
+void MemoryReclaimer::Reclaim(int flags) {
+  internal::ScopedGuard lock(
+      lock_);  // Has to protect from concurrent (Un)Register calls.
+
+  // PCScan quarantines freed slots. Trigger the scan first to let it call
+  // FreeNoHooksImmediate on slots that pass the quarantine.
   //
-  // From local testing, time to reclaim is 100us-1ms, and reclaiming every few
-  // seconds is useful. Since this is meant to run during idle time only, it is
-  // a reasonable starting point balancing effectivenes vs cost. See
-  // crbug.com/942512 for details and experimental results.
-  constexpr TimeDelta kInterval = TimeDelta::FromSeconds(4);
-
-  timer_ = std::make_unique<RepeatingTimer>();
-  timer_->SetTaskRunner(task_runner);
-  // Here and below, |Unretained(this)| is fine as |this| lives forever, as a
-  // singleton.
-  timer_->Start(
-      FROM_HERE, kInterval,
-      BindRepeating(&PartitionAllocMemoryReclaimer::Reclaim, Unretained(this)));
-
-  task_runner->PostDelayedTask(
-      FROM_HERE,
-      BindOnce(&PartitionAllocMemoryReclaimer::RecordStatistics,
-               Unretained(this)),
-      kStatsRecordingTimeDelta);
-}
-
-PartitionAllocMemoryReclaimer::PartitionAllocMemoryReclaimer() = default;
-PartitionAllocMemoryReclaimer::~PartitionAllocMemoryReclaimer() = default;
-
-void PartitionAllocMemoryReclaimer::Reclaim() {
-  TRACE_EVENT0("base", "PartitionAllocMemoryReclaimer::Reclaim()");
-  // Reclaim will almost always call into the kernel, so tail latency of this
-  // task would likely be affected by descheduling.
+  // In turn, FreeNoHooksImmediate may add slots to thread cache. Purge it next
+  // so that the slots are actually freed. (This is done synchronously only for
+  // the current thread.)
   //
-  // On Linux (and Android) at least, ThreadTicks also includes kernel time, so
-  // this is a good measure of the true cost of decommit.
-  ElapsedThreadTimer timer;
-  constexpr int kFlags =
-      PartitionPurgeDecommitEmptyPages | PartitionPurgeDiscardUnusedSystemPages;
-
+  // Lastly decommit empty slot spans and lastly try to discard unused pages at
+  // the end of the remaining active slots.
+#if PA_STARSCAN_ENABLE_STARSCAN_ON_RECLAIM && BUILDFLAG(STARSCAN)
   {
-    AutoLock lock(lock_);  // Has to protect from concurrent (Un)Register calls.
-    for (auto* partition : partitions_)
-      partition->PurgeMemory(kFlags);
+    using PCScan = internal::PCScan;
+    const auto invocation_mode = flags & PurgeFlags::kAggressiveReclaim
+                                     ? PCScan::InvocationMode::kForcedBlocking
+                                     : PCScan::InvocationMode::kBlocking;
+    PCScan::PerformScanIfNeeded(invocation_mode);
   }
+#endif
 
-  has_called_reclaim_ = true;
-  if (timer.is_supported())
-    total_reclaim_thread_time_ += timer.Elapsed();
+#if defined(PA_THREAD_CACHE_SUPPORTED)
+  // Don't completely empty the thread cache outside of low memory situations,
+  // as there is periodic purge which makes sure that it doesn't take too much
+  // space.
+  if (flags & PurgeFlags::kAggressiveReclaim)
+    ThreadCacheRegistry::Instance().PurgeAll();
+#endif
+
+  for (auto* partition : partitions_)
+    partition->PurgeMemory(flags);
 }
 
-void PartitionAllocMemoryReclaimer::DeprecatedReclaim() {
-  if (!IsDeprecatedDecommitEnabled())
-    return;
-
-  Reclaim();
-}
-
-void PartitionAllocMemoryReclaimer::RecordStatistics() {
-  if (!ElapsedThreadTimer().is_supported())
-    return;
-  if (!has_called_reclaim_)
-    return;
-
-  UmaHistogramTimes("Memory.PartitionAlloc.MainThreadTime.5min",
-                    total_reclaim_thread_time_);
-  has_called_reclaim_ = false;
-  total_reclaim_thread_time_ = TimeDelta();
-}
-
-void PartitionAllocMemoryReclaimer::ResetForTesting() {
-  AutoLock lock(lock_);
-
-  has_called_reclaim_ = false;
-  total_reclaim_thread_time_ = TimeDelta();
-  timer_ = nullptr;
+void MemoryReclaimer::ResetForTesting() {
+  internal::ScopedGuard lock(lock_);
   partitions_.clear();
 }
 
-}  // namespace base
+}  // namespace partition_alloc

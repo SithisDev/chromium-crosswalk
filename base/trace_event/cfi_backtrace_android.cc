@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/android/apk_assets.h"
 #include "base/android/library_loader/anchor_functions.h"
+#include "build/build_config.h"
 
 #if !defined(ARCH_CPU_ARMEL)
 #error This file should not be built for this architecture.
@@ -106,10 +107,12 @@ struct CFIUnwindDataRow {
   uint16_t cfi_data;
 
   // Return the RA offset for the current unwind row.
-  size_t ra_offset() const { return (cfi_data & kRAMask) << kRAShift; }
+  uint16_t ra_offset() const {
+    return static_cast<uint16_t>((cfi_data & kRAMask) << kRAShift);
+  }
 
   // Returns the CFA offset for the current unwind row.
-  size_t cfa_offset() const { return cfi_data & kCFAMask; }
+  uint16_t cfa_offset() const { return cfi_data & kCFAMask; }
 };
 
 static_assert(
@@ -164,18 +167,15 @@ void CFIBacktraceAndroid::Initialize() {
 }
 
 void CFIBacktraceAndroid::ParseCFITables() {
-  // The first 4 bytes in the file is the size of UNW_INDEX table.
-  static constexpr size_t kUnwIndexRowSize =
-      sizeof(*unw_index_function_col_) + sizeof(*unw_index_indices_col_);
+  // The first 4 bytes in the file is the number of entries in UNW_INDEX table.
   size_t unw_index_size = 0;
   memcpy(&unw_index_size, cfi_mmap_->data(), sizeof(unw_index_size));
-  DCHECK_EQ(0u, unw_index_size % kUnwIndexRowSize);
   // UNW_INDEX table starts after 4 bytes.
   unw_index_function_col_ =
       reinterpret_cast<const uintptr_t*>(cfi_mmap_->data()) + 1;
-  unw_index_row_count_ = unw_index_size / kUnwIndexRowSize;
+  unw_index_row_count_ = unw_index_size;
   unw_index_indices_col_ = reinterpret_cast<const uint16_t*>(
-      unw_index_function_col_ + unw_index_row_count_);
+      (unw_index_function_col_ + unw_index_row_count_).get());
 
   // The UNW_DATA table data is right after the end of UNW_INDEX table.
   // Interpret the UNW_DATA table as an array of 2 byte numbers since the
@@ -261,8 +261,8 @@ bool CFIBacktraceAndroid::FindCFIRowForPC(uintptr_t func_addr,
   // on this array to find the required function address.
   static const uintptr_t* const unw_index_fn_end =
       unw_index_function_col_ + unw_index_row_count_;
-  const uintptr_t* found =
-      std::lower_bound(unw_index_function_col_, unw_index_fn_end, func_addr);
+  const uintptr_t* found = std::lower_bound(unw_index_function_col_.get(),
+                                            unw_index_fn_end, func_addr);
 
   // If found is start, then the given function is not in the table. If the
   // given pc is start of a function then we cannot unwind.
@@ -274,7 +274,7 @@ bool CFIBacktraceAndroid::FindCFIRowForPC(uintptr_t func_addr,
   // less than the value returned by std::lower_bound().
   --found;
   uintptr_t func_start_addr = *found;
-  size_t row_num = found - unw_index_function_col_;
+  size_t row_num = static_cast<size_t>(found - unw_index_function_col_);
   uint16_t index = unw_index_indices_col_[row_num];
   DCHECK_LE(func_start_addr, func_addr);
   // If the index is CANT_UNWIND then we do not have unwind infomation for the

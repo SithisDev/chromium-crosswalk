@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include <ostream>
 
 #include "base/debug/proc_maps_linux.h"
-#include "base/stl_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 
@@ -31,7 +31,7 @@ struct StackCrawlState {
         max_depth(max_depth),
         have_skipped_self(false) {}
 
-  uintptr_t* frames;
+  raw_ptr<uintptr_t> frames;
   size_t frame_count;
   size_t max_depth;
   bool have_skipped_self;
@@ -51,6 +51,11 @@ _Unwind_Reason_Code TraceStackFrame(_Unwind_Context* context, void* arg) {
   if (state->frame_count >= state->max_depth)
     return _URC_END_OF_STACK;
   return _URC_NO_REASON;
+}
+
+bool EndsWith(const std::string& s, const std::string& suffix) {
+  return s.size() >= suffix.size() &&
+         s.substr(s.size() - suffix.size(), suffix.size()) == suffix;
 }
 
 }  // namespace
@@ -119,12 +124,21 @@ void StackTrace::OutputToStreamWithPrefix(std::ostream* os,
     if (prefix_string)
       *os << prefix_string;
 
-    *os << base::StringPrintf("#%02zd " FMT_ADDR " ", i, address);
+    // Adjust absolute address to be an offset within the mapped region, to
+    // match the format dumped by Android's crash output.
+    if (iter != regions.end()) {
+      address -= iter->start;
+    }
+
+    // The format below intentionally matches that of Android's debuggerd
+    // output. This simplifies decoding by scripts such as stack.py.
+    *os << base::StringPrintf("#%02zd pc " FMT_ADDR " ", i, address);
 
     if (iter != regions.end()) {
-      uintptr_t rel_pc = address - iter->start + iter->offset;
-      const char* path = iter->path.c_str();
-      *os << base::StringPrintf("%s+" FMT_ADDR, path, rel_pc);
+      *os << base::StringPrintf("%s", iter->path.c_str());
+      if (EndsWith(iter->path, ".apk")) {
+        *os << base::StringPrintf(" (offset 0x%llx)", iter->offset);
+      }
     } else {
       *os << "<unknown>";
     }

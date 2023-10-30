@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,8 @@
 #include <type_traits>
 #include <utility>
 
+#include "base/check.h"
 #include "base/compiler_specific.h"
-#include "base/logging.h"
-#include "base/macros.h"
 
 template <class T>
 class scoped_refptr;
@@ -24,16 +23,29 @@ template <class, typename>
 class RefCounted;
 template <class, typename>
 class RefCountedThreadSafe;
+template <class>
+class RefCountedDeleteOnSequence;
 class SequencedTaskRunner;
+class WrappedPromise;
 
 template <typename T>
 scoped_refptr<T> AdoptRef(T* t);
+
+namespace internal {
+
+class BasePromise;
+
+}  // namespace internal
 
 namespace subtle {
 
 enum AdoptRefTag { kAdoptRefTag };
 enum StartRefCountFromZeroTag { kStartRefCountFromZeroTag };
 enum StartRefCountFromOneTag { kStartRefCountFromOneTag };
+
+// scoped_refptr<T> is typically used with one of several RefCounted<T> base
+// classes or with custom AddRef and Release methods. These overloads dispatch
+// on which was used.
 
 template <typename T, typename U, typename V>
 constexpr bool IsRefCountPreferenceOverridden(const T*,
@@ -50,9 +62,41 @@ constexpr bool IsRefCountPreferenceOverridden(
                        std::decay_t<decltype(U::kRefCountPreference)>>::value;
 }
 
+template <typename T, typename U>
+constexpr bool IsRefCountPreferenceOverridden(
+    const T*,
+    const RefCountedDeleteOnSequence<U>*) {
+  return !std::is_same<std::decay_t<decltype(T::kRefCountPreference)>,
+                       std::decay_t<decltype(U::kRefCountPreference)>>::value;
+}
+
 constexpr bool IsRefCountPreferenceOverridden(...) {
   return false;
 }
+
+template <typename T, typename U, typename V>
+constexpr void AssertRefCountBaseMatches(const T*, const RefCounted<U, V>*) {
+  static_assert(std::is_base_of_v<U, T>,
+                "T implements RefCounted<U>, but U is not a base of T.");
+}
+
+template <typename T, typename U, typename V>
+constexpr void AssertRefCountBaseMatches(const T*,
+                                         const RefCountedThreadSafe<U, V>*) {
+  static_assert(
+      std::is_base_of_v<U, T>,
+      "T implements RefCountedThreadSafe<U>, but U is not a base of T.");
+}
+
+template <typename T, typename U>
+constexpr void AssertRefCountBaseMatches(const T*,
+                                         const RefCountedDeleteOnSequence<U>*) {
+  static_assert(
+      std::is_base_of_v<U, T>,
+      "T implements RefCountedDeleteOnSequence<U>, but U is not a base of T.");
+}
+
+constexpr void AssertRefCountBaseMatches(...) {}
 
 }  // namespace subtle
 
@@ -165,14 +209,22 @@ scoped_refptr<T> WrapRefCounted(T* t) {
 //   to another component (if a component merely needs to use t on the stack
 //   without keeping a ref: pass t as a raw T*).
 template <class T>
-class scoped_refptr {
+class TRIVIAL_ABI scoped_refptr {
  public:
   typedef T element_type;
 
   constexpr scoped_refptr() = default;
 
-  // Constructs from raw pointer. constexpr if |p| is null.
-  constexpr scoped_refptr(T* p) : ptr_(p) {
+  // Allow implicit construction from nullptr.
+  constexpr scoped_refptr(std::nullptr_t) {}
+
+  // Constructs from a raw pointer. Note that this constructor allows implicit
+  // conversion from T* to scoped_refptr<T> which is strongly discouraged. If
+  // you are creating a new ref-counted object please use
+  // base::MakeRefCounted<T>() or base::WrapRefCounted<T>(). Otherwise you
+  // should move or copy construct from an existing scoped_refptr<T> to the
+  // ref-counted object.
+  scoped_refptr(T* p) : ptr_(p) {
     if (ptr_)
       AddRef(ptr_);
   }
@@ -221,6 +273,11 @@ class scoped_refptr {
     return ptr_;
   }
 
+  scoped_refptr& operator=(std::nullptr_t) {
+    reset();
+    return *this;
+  }
+
   scoped_refptr& operator=(T* p) { return *this = scoped_refptr(p); }
 
   // Unified assignment operator.
@@ -232,6 +289,10 @@ class scoped_refptr {
   // Sets managed object to null and releases reference to the previous managed
   // object, if it existed.
   void reset() { scoped_refptr().swap(*this); }
+
+  // Returns the owned pointer (if any), releasing ownership to the caller. The
+  // caller is responsible for managing the lifetime of the reference.
+  [[nodiscard]] T* release();
 
   void swap(scoped_refptr& r) noexcept { std::swap(ptr_, r.ptr_); }
 
@@ -260,9 +321,10 @@ class scoped_refptr {
   friend scoped_refptr<U> base::AdoptRef(U*);
   friend class ::base::SequencedTaskRunner;
 
-  // Returns the owned pointer (if any), releasing ownership to the caller. The
-  // caller is responsible for managing the lifetime of the reference.
-  T* release();
+  // Friend access so these classes can use the constructor below as part of a
+  // binary size optimization.
+  friend class ::base::internal::BasePromise;
+  friend class ::base::WrappedPromise;
 
   scoped_refptr(T* p, base::subtle::AdoptRefTag) : ptr_(p) {}
 
@@ -288,12 +350,14 @@ T* scoped_refptr<T>::release() {
 // static
 template <typename T>
 void scoped_refptr<T>::AddRef(T* ptr) {
+  base::subtle::AssertRefCountBaseMatches(ptr, ptr);
   ptr->AddRef();
 }
 
 // static
 template <typename T>
 void scoped_refptr<T>::Release(T* ptr) {
+  base::subtle::AssertRefCountBaseMatches(ptr, ptr);
   ptr->Release();
 }
 

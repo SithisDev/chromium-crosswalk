@@ -1,10 +1,16 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/process/environment_internal.h"
 
 #include <stddef.h>
+
+#include "build/build_config.h"
+
+#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
+#include <string.h>
+#endif
 
 #include <vector>
 
@@ -13,7 +19,7 @@ namespace internal {
 
 namespace {
 
-#if defined(OS_POSIX) || defined(OS_FUCHSIA) || defined(OS_WIN)
+#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_WIN)
 // Parses a null-terminated input string of an environment block. The key is
 // placed into the given string, and the total length of the line, including
 // the terminating null, is returned.
@@ -34,7 +40,7 @@ size_t ParseEnvLine(const NativeEnvironmentString::value_type* input,
 
 }  // namespace
 
-#if defined(OS_POSIX) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 
 std::unique_ptr<char* []> AlterEnvironment(const char* const* const env,
                                            const EnvironmentMap& changes) {
@@ -85,16 +91,16 @@ std::unique_ptr<char* []> AlterEnvironment(const char* const* const env,
   return result;
 }
 
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
 
-NativeEnvironmentString AlterEnvironment(const char16* env,
+NativeEnvironmentString AlterEnvironment(const wchar_t* env,
                                          const EnvironmentMap& changes) {
   NativeEnvironmentString result;
 
   // First build up all of the unchanged environment strings.
-  const char16* ptr = env;
+  const wchar_t* ptr = env;
   while (*ptr) {
-    string16 key;
+    std::wstring key;
     size_t line_length = ParseEnvLine(ptr, &key);
 
     // Keep only values not specified in the change vector.
@@ -107,8 +113,8 @@ NativeEnvironmentString AlterEnvironment(const char16* env,
   // Now append all modified and new values.
   for (const auto& i : changes) {
     // Windows environment blocks cannot handle keys or values with NULs.
-    CHECK_EQ(string16::npos, i.first.find(STRING16_LITERAL('\0')));
-    CHECK_EQ(string16::npos, i.second.find(STRING16_LITERAL('\0')));
+    CHECK_EQ(std::wstring::npos, i.first.find(L'\0'));
+    CHECK_EQ(std::wstring::npos, i.second.find(L'\0'));
     if (!i.second.empty()) {
       result += i.first;
       result.push_back('=');
@@ -122,7 +128,7 @@ NativeEnvironmentString AlterEnvironment(const char16* env,
   return result;
 }
 
-#endif  // OS_POSIX || OS_FUCHSIA
+#endif  // BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 
 }  // namespace internal
 }  // namespace base

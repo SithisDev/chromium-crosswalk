@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define BASE_SEQUENCE_TOKEN_H_
 
 #include "base/base_export.h"
-#include "base/macros.h"
 
 namespace base {
 
@@ -100,14 +99,17 @@ class BASE_EXPORT ScopedSetSequenceTokenForCurrentThread {
   // TaskToken::GetForCurrentThread() will return a TaskToken which is not equal
   // to any TaskToken returned in the scope of another
   // ScopedSetSequenceTokenForCurrentThread.
-  ScopedSetSequenceTokenForCurrentThread(const SequenceToken& sequence_token);
+  explicit ScopedSetSequenceTokenForCurrentThread(
+      const SequenceToken& sequence_token);
+  ScopedSetSequenceTokenForCurrentThread(
+      const ScopedSetSequenceTokenForCurrentThread&) = delete;
+  ScopedSetSequenceTokenForCurrentThread& operator=(
+      const ScopedSetSequenceTokenForCurrentThread&) = delete;
   ~ScopedSetSequenceTokenForCurrentThread();
 
  private:
   const SequenceToken sequence_token_;
   const TaskToken task_token_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedSetSequenceTokenForCurrentThread);
 };
 
 }  // namespace base

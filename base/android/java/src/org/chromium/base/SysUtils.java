@@ -1,10 +1,9 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.base;
 
-import android.annotation.TargetApi;
 import android.app.ActivityManager;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -14,9 +13,13 @@ import android.os.StatFs;
 import android.os.StrictMode;
 import android.util.Log;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.metrics.CachedMetrics;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.build.annotations.MainDex;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -27,6 +30,7 @@ import java.util.regex.Pattern;
  * Exposes system related information about the current device.
  */
 @JNINamespace("base::android")
+@MainDex
 public class SysUtils {
     // A device reporting strictly more total memory in megabytes cannot be considered 'low-end'.
     private static final int ANDROID_LOW_MEMORY_DEVICE_THRESHOLD_MB = 512;
@@ -42,9 +46,6 @@ public class SysUtils {
     private static Integer sAmountOfPhysicalMemoryKB;
 
     private static Boolean sHighEndDiskDevice;
-
-    private static CachedMetrics.BooleanHistogramSample sLowEndMatches =
-            new CachedMetrics.BooleanHistogramSample("Android.SysUtilsLowEndMatches");
 
     private SysUtils() { }
 
@@ -121,8 +122,9 @@ public class SysUtils {
     }
 
     /**
-     * @return Whether or not this device should be considered a low end device.
+     * @return amount of physical ram detected in KB, or 0 if detection failed.
      */
+    @CalledByNative
     public static int amountOfPhysicalMemoryKB() {
         if (sAmountOfPhysicalMemoryKB == null) {
             sAmountOfPhysicalMemoryKB = detectAmountOfPhysicalMemoryKB();
@@ -154,15 +156,10 @@ public class SysUtils {
 
     public static boolean hasCamera(final Context context) {
         final PackageManager pm = context.getPackageManager();
-        // JellyBean support.
-        boolean hasCamera = pm.hasSystemFeature(PackageManager.FEATURE_CAMERA);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            hasCamera |= pm.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY);
-        }
-        return hasCamera;
+        return pm.hasSystemFeature(PackageManager.FEATURE_CAMERA)
+                || pm.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY);
     }
 
-    @TargetApi(Build.VERSION_CODES.KITKAT)
     private static boolean detectLowEndDevice() {
         assert CommandLine.isInitialized();
         if (CommandLine.getInstance().hasSwitch(BaseSwitches.ENABLE_LOW_END_DEVICE_MODE)) {
@@ -172,6 +169,7 @@ public class SysUtils {
             return false;
         }
 
+        // If this logic changes, update the comments above base::SysUtils::IsLowEndDevice.
         sAmountOfPhysicalMemoryKB = detectAmountOfPhysicalMemoryKB();
         boolean isLowEnd = true;
         if (sAmountOfPhysicalMemoryKB <= 0) {
@@ -190,7 +188,8 @@ public class SysUtils {
                                 Context.ACTIVITY_SERVICE))
                                .isLowRamDevice();
         }
-        sLowEndMatches.record(isLowEnd == isLowRam);
+        RecordHistogram.recordBooleanHistogram(
+                "Android.SysUtilsLowEndMatches", isLowEnd == isLowRam);
 
         return isLowEnd;
     }
@@ -200,10 +199,8 @@ public class SysUtils {
      * enabled.
      */
     public static void logPageFaultCountToTracing() {
-        nativeLogPageFaultCountToTracing();
+        SysUtilsJni.get().logPageFaultCountToTracing();
     }
-
-    private static native void nativeLogPageFaultCountToTracing();
 
     /**
      * @return Whether or not this device should be considered a high end device from a disk
@@ -225,5 +222,23 @@ public class SysUtils {
             Log.v(TAG, "Cannot get disk data capacity", e);
         }
         return false;
+    }
+
+    @VisibleForTesting
+    public static void setAmountOfPhysicalMemoryKBForTesting(int physicalMemoryKB) {
+        sAmountOfPhysicalMemoryKB = physicalMemoryKB;
+    }
+
+    /**
+     * @return Whether this device is running Android Go. This is assumed when we're running Android
+     * O or later and we're on a low-end device.
+     */
+    public static boolean isAndroidGo() {
+        return isLowEndDevice() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O;
+    }
+
+    @NativeMethods
+    interface Natives {
+        void logPageFaultCountToTracing();
     }
 }

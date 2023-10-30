@@ -1,8 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/token.h"
+
+#include "base/pickle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
@@ -52,6 +54,38 @@ TEST(TokenTest, ToString) {
             Token(0x0123456789abcdefull, 0x5a5a5a5aa5a5a5a5ull).ToString());
   EXPECT_EQ("FFFFFFFFFFFFFFFDFFFFFFFFFFFFFFFE",
             Token(0xfffffffffffffffdull, 0xfffffffffffffffeull).ToString());
+}
+
+TEST(TokenTest, FromString) {
+  // digits is 40 bytes long. We call FromString on various substrings of it,
+  // which should only succeed when the substring is 32 bytes long.
+  std::string digits = "3141592653589793238462643383279502884197";
+
+  EXPECT_EQ(Token(0x3141592653589793ull, 0x2384626433832795ull),
+            *Token::FromString(digits.substr(0, 32)));
+
+  // FromString should reject any input that isn't 32 bytes long.
+  EXPECT_FALSE(Token::FromString(digits.substr(0, 0)));
+  EXPECT_FALSE(Token::FromString(digits.substr(0, 1)));
+  EXPECT_FALSE(Token::FromString(digits.substr(0, 16)));
+  EXPECT_FALSE(Token::FromString(digits.substr(0, 31)));
+  EXPECT_TRUE(Token::FromString(digits.substr(0, 32)));
+  EXPECT_FALSE(Token::FromString(digits.substr(0, 33)));
+
+  // FromString should reject any input bytes that aren't in [0-9A-F].
+  // Specifically, lower case [a-f] bytes are also rejected.
+  digits[5] = 'a';
+  EXPECT_FALSE(Token::FromString(digits.substr(0, 32)));
+  digits[5] = 'A';
+  EXPECT_TRUE(Token::FromString(digits.substr(0, 32)));
+}
+
+TEST(TokenTest, Pickle) {
+  Pickle pickle;
+  WriteTokenToPickle(&pickle, kTestToken);
+
+  PickleIterator iterator(pickle);
+  EXPECT_EQ(kTestToken, ReadTokenFromPickle(&iterator));
 }
 
 }  // namespace base

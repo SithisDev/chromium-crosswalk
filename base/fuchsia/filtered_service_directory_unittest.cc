@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,19 +6,21 @@
 
 #include <utility>
 
+#include "base/fuchsia/scoped_service_binding.h"
 #include "base/fuchsia/service_directory_test_base.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
-namespace fuchsia {
 
 class FilteredServiceDirectoryTest : public ServiceDirectoryTestBase {
  public:
   FilteredServiceDirectoryTest() {
-    filtered_service_directory_ = std::make_unique<FilteredServiceDirectory>(
-        public_service_directory_.get());
+    filtered_service_directory_ =
+        std::make_unique<FilteredServiceDirectory>(public_service_directory_);
     fidl::InterfaceHandle<::fuchsia::io::Directory> directory;
-    filtered_service_directory_->ConnectClient(directory.NewRequest());
+    EXPECT_EQ(
+        filtered_service_directory_->ConnectClient(directory.NewRequest()),
+        ZX_OK);
     filtered_client_ =
         std::make_unique<sys::ServiceDirectory>(std::move(directory));
   }
@@ -28,9 +30,11 @@ class FilteredServiceDirectoryTest : public ServiceDirectoryTestBase {
   std::unique_ptr<sys::ServiceDirectory> filtered_client_;
 };
 
-// Verify that we can connect to a whitelisted service.
+// Verify that we can connect to an allowed service.
 TEST_F(FilteredServiceDirectoryTest, Connect) {
-  filtered_service_directory_->AddService(testfidl::TestInterface::Name_);
+  EXPECT_EQ(
+      filtered_service_directory_->AddService(testfidl::TestInterface::Name_),
+      ZX_OK);
 
   auto stub = filtered_client_->Connect<testfidl::TestInterface>();
   VerifyTestInterface(&stub, ZX_OK);
@@ -38,7 +42,9 @@ TEST_F(FilteredServiceDirectoryTest, Connect) {
 
 // Verify that multiple connections to the same service work properly.
 TEST_F(FilteredServiceDirectoryTest, ConnectMultiple) {
-  filtered_service_directory_->AddService(testfidl::TestInterface::Name_);
+  EXPECT_EQ(
+      filtered_service_directory_->AddService(testfidl::TestInterface::Name_),
+      ZX_OK);
 
   auto stub1 = filtered_client_->Connect<testfidl::TestInterface>();
   auto stub2 = filtered_client_->Connect<testfidl::TestInterface>();
@@ -46,7 +52,7 @@ TEST_F(FilteredServiceDirectoryTest, ConnectMultiple) {
   VerifyTestInterface(&stub2, ZX_OK);
 }
 
-// Verify that non-whitelisted services are blocked.
+// Verify that non-allowed services are blocked.
 TEST_F(FilteredServiceDirectoryTest, ServiceBlocked) {
   auto stub = filtered_client_->Connect<testfidl::TestInterface>();
   VerifyTestInterface(&stub, ZX_ERR_PEER_CLOSED);
@@ -55,7 +61,9 @@ TEST_F(FilteredServiceDirectoryTest, ServiceBlocked) {
 // Verify that FilteredServiceDirectory handles the case when the target service
 // is not available in the underlying service directory.
 TEST_F(FilteredServiceDirectoryTest, NoService) {
-  filtered_service_directory_->AddService(testfidl::TestInterface::Name_);
+  EXPECT_EQ(
+      filtered_service_directory_->AddService(testfidl::TestInterface::Name_),
+      ZX_OK);
 
   service_binding_.reset();
 
@@ -66,7 +74,9 @@ TEST_F(FilteredServiceDirectoryTest, NoService) {
 // Verify that FilteredServiceDirectory handles the case when the underlying
 // service directory is destroyed.
 TEST_F(FilteredServiceDirectoryTest, NoServiceDir) {
-  filtered_service_directory_->AddService(testfidl::TestInterface::Name_);
+  EXPECT_EQ(
+      filtered_service_directory_->AddService(testfidl::TestInterface::Name_),
+      ZX_OK);
 
   service_binding_.reset();
   outgoing_directory_.reset();
@@ -75,5 +85,13 @@ TEST_F(FilteredServiceDirectoryTest, NoServiceDir) {
   VerifyTestInterface(&stub, ZX_ERR_PEER_CLOSED);
 }
 
-}  // namespace fuchsia
+// Verify that FilteredServiceDirectory allows extra services to be added.
+TEST_F(FilteredServiceDirectoryTest, AdditionalService) {
+  ScopedServiceBinding<testfidl::TestInterface> binding(
+      filtered_service_directory_->outgoing_directory(), &test_service_);
+
+  auto stub = filtered_client_->Connect<testfidl::TestInterface>();
+  VerifyTestInterface(&stub, ZX_OK);
+}
+
 }  // namespace base

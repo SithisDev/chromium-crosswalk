@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,9 @@ class BASE_EXPORT ThreadGroupNativeWin : public ThreadGroupNative {
                        TrackedRef<Delegate> delegate,
                        ThreadGroup* predecessor_thread_group = nullptr);
 
+  ThreadGroupNativeWin(const ThreadGroupNativeWin&) = delete;
+  ThreadGroupNativeWin& operator=(const ThreadGroupNativeWin&) = delete;
+
   ~ThreadGroupNativeWin() override;
 
  private:
@@ -57,8 +60,6 @@ class BASE_EXPORT ThreadGroupNativeWin : public ThreadGroupNative {
   // current |ThreadGroupNativeWin| and a pointer to |environment_| bound
   // to it.
   PTP_WORK work_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(ThreadGroupNativeWin);
 };
 
 using ThreadGroupNativeImpl = ThreadGroupNativeWin;

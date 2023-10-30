@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,13 +23,14 @@
 
 
 // Step 3: Method stubs.
-static void JNI_SampleProxyJni_Foo(JNIEnv* env);
-
 JNI_GENERATOR_EXPORT void
     Java_org_chromium_base_natives_GEN_1JNI_org_1chromium_1example_1SampleProxyJni_1foo(
     JNIEnv* env,
-    jclass jcaller) {
-  return JNI_SampleProxyJni_Foo(env);
+    jclass jcaller,
+    jlong nativePtr) {
+  FooAndroid::BarDelegate* native = reinterpret_cast<FooAndroid::BarDelegate*>(nativePtr);
+  CHECK_NATIVE_PTR(env, jcaller, native, "Foo");
+  return native->Foo(env);
 }
 
 static jint JNI_SampleProxyJni_Bar(JNIEnv* env, jint x,

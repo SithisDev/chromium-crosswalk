@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,12 @@
 #define BASE_ANDROID_APPLICATION_STATUS_LISTENER_H_
 
 #include <jni.h>
+#include <memory>
 
 #include "base/android/jni_android.h"
 #include "base/base_export.h"
-#include "base/macros.h"
+#include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/singleton.h"
 
 namespace base {
 namespace android {
@@ -63,6 +63,10 @@ class BASE_EXPORT ApplicationStatusListener {
   using ApplicationStateChangeCallback =
       base::RepeatingCallback<void(ApplicationState)>;
 
+  ApplicationStatusListener(const ApplicationStatusListener&) = delete;
+  ApplicationStatusListener& operator=(const ApplicationStatusListener&) =
+      delete;
+
   virtual ~ApplicationStatusListener();
 
   // Sets the callback to call when application state changes.
@@ -81,11 +85,11 @@ class BASE_EXPORT ApplicationStatusListener {
   // Expose jni call for ApplicationStatus.getStateForApplication.
   static ApplicationState GetState();
 
+  // Returns true if the app is currently foregrounded.
+  static bool HasVisibleActivities();
+
  protected:
   ApplicationStatusListener();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ApplicationStatusListener);
 };
 
 }  // namespace android

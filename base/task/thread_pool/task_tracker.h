@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,12 @@
 #include <limits>
 #include <memory>
 #include <queue>
+#include <string>
 
 #include "base/atomicops.h"
 #include "base/base_export.h"
 #include "base/callback_forward.h"
-#include "base/logging.h"
-#include "base/macros.h"
-#include "base/metrics/histogram_base.h"
+#include "base/containers/circular_deque.h"
 #include "base/sequence_checker.h"
 #include "base/strings/string_piece.h"
 #include "base/synchronization/waitable_event.h"
@@ -31,7 +30,6 @@
 namespace base {
 
 class ConditionVariable;
-class HistogramBase;
 
 namespace internal {
 
@@ -54,9 +52,9 @@ enum class CanRunPolicy {
 // and records metrics and trace events. This class is thread-safe.
 class BASE_EXPORT TaskTracker {
  public:
-  // |histogram_label| is used as a suffix for histograms, it must not be empty.
-  TaskTracker(StringPiece histogram_label);
-
+  TaskTracker();
+  TaskTracker(const TaskTracker&) = delete;
+  TaskTracker& operator=(const TaskTracker&) = delete;
   virtual ~TaskTracker();
 
   // Initiates shutdown. Once this is called, only BLOCK_SHUTDOWN tasks will
@@ -100,13 +98,14 @@ class BASE_EXPORT TaskTracker {
   bool WillPostTask(Task* task, TaskShutdownBehavior shutdown_behavior);
 
   // Informs this TaskTracker that |task| that is about to be pushed to a task
-  // source with |priority|.
-  void WillPostTaskNow(const Task& task, TaskPriority priority);
+  // source with |priority|. Returns true if this operation is allowed (the
+  // operation should be performed if-and-only-if it is).
+  [[nodiscard]] bool WillPostTaskNow(const Task& task, TaskPriority priority);
 
   // Informs this TaskTracker that |task_source| is about to be queued. Returns
   // a RegisteredTaskSource that should be queued if-and-only-if it evaluates to
   // true.
-  RegisteredTaskSource WillQueueTaskSource(
+  RegisteredTaskSource RegisterTaskSource(
       scoped_refptr<TaskSource> task_source);
 
   // Returns true if a task with |priority| can run under to the current policy.
@@ -118,8 +117,7 @@ class BASE_EXPORT TaskTracker {
   // (which indicates that it should be reenqueued). WillPostTask() must have
   // allowed the task in front of |task_source| to be posted before this is
   // called.
-  RegisteredTaskSource RunAndPopNextTask(
-      RunIntentWithRegisteredTaskSource task_source);
+  RegisteredTaskSource RunAndPopNextTask(RegisteredTaskSource task_source);
 
   // Returns true once shutdown has started (StartShutdown() was called).
   // Note: sequential consistency with the thread calling StartShutdown() isn't
@@ -129,32 +127,6 @@ class BASE_EXPORT TaskTracker {
   // Returns true if shutdown has completed (StartShutdown() was called and
   // no tasks are blocking shutdown).
   bool IsShutdownComplete() const;
-
-  enum class LatencyHistogramType {
-    // Records the latency of each individual task posted through TaskTracker.
-    TASK_LATENCY,
-    // Records the latency of heartbeat tasks which are independent of current
-    // workload. These avoid a bias towards TASK_LATENCY reporting that high-
-    // priority tasks are "slower" than regular tasks because high-priority
-    // tasks tend to be correlated with heavy workloads.
-    HEARTBEAT_LATENCY,
-  };
-
-  // Records two histograms
-  // 1. ThreadPool.[label].HeartbeatLatencyMicroseconds.[suffix]:
-  //    Now() - posted_time
-  // 2. ThreadPool.[label].NumTasksRunWhileQueuing.[suffix]:
-  //    GetNumTasksRun() - num_tasks_run_when_posted.
-  // [label] is the histogram label provided to the constructor.
-  // [suffix] is derived from |task_priority| and |may_block|.
-  void RecordHeartbeatLatencyAndTasksRunWhileQueuingHistograms(
-      TaskPriority task_priority,
-      bool may_block,
-      TimeTicks posted_time,
-      int num_tasks_run_when_posted) const;
-
-  // Returns the number of tasks run so far
-  int GetNumTasksRun() const;
 
   TrackedRef<TaskTracker> GetTrackedRef() {
     return tracked_ref_factory_.GetTrackedRef();
@@ -166,16 +138,22 @@ class BASE_EXPORT TaskTracker {
   bool HasIncompleteTaskSourcesForTesting() const;
 
  protected:
-  // Runs and deletes |task| if |can_run_task| is true. Otherwise, just deletes
-  // |task|. |task| is always deleted in the environment where it runs or would
-  // have run. |task_source| is the task source from which |task| was extracted.
+  // Runs and deletes |task|. |task| is deleted in the environment where it
+  // runs. |task_source| is the task source from which |task| was extracted.
   // |traits| are the traits of |task_source|. An override is expected to call
   // its parent's implementation but is free to perform extra work before and
   // after doing so.
-  virtual void RunOrSkipTask(Task task,
-                             TaskSource* task_source,
-                             const TaskTraits& traits,
-                             bool can_run_task);
+  virtual void RunTask(Task task,
+                       TaskSource* task_source,
+                       const TaskTraits& traits);
+
+  // Allow a subclass to wait more interactively for any running shutdown tasks
+  // before blocking the thread.
+  virtual void BeginCompleteShutdown(base::WaitableEvent& shutdown_event);
+
+  // Asserts that FlushForTesting() is allowed to be called. Overridden in tests
+  // in situations where it is not.
+  virtual void AssertFlushForTestingAllowed() {}
 
  private:
   friend class RegisteredTaskSource;
@@ -186,16 +164,16 @@ class BASE_EXPORT TaskTracker {
   // Called before WillPostTask() informs the tracing system that a task has
   // been posted. Updates |num_items_blocking_shutdown_| if necessary and
   // returns true if the current shutdown state allows the task to be posted.
-  bool BeforeQueueTaskSource(TaskShutdownBehavior effective_shutdown_behavior);
+  bool BeforeQueueTaskSource(TaskShutdownBehavior shutdown_behavior);
 
   // Called before a task with |effective_shutdown_behavior| is run by
   // RunTask(). Updates |num_items_blocking_shutdown_| if necessary and returns
   // true if the current shutdown state allows the task to be run.
-  bool BeforeRunTask(TaskShutdownBehavior effective_shutdown_behavior);
+  bool BeforeRunTask(TaskShutdownBehavior shutdown_behavior);
 
   // Called after a task with |effective_shutdown_behavior| has been run by
   // RunTask(). Updates |num_items_blocking_shutdown_| if necessary.
-  void AfterRunTask(TaskShutdownBehavior effective_shutdown_behavior);
+  void AfterRunTask(TaskShutdownBehavior shutdown_behavior);
 
   // Informs this TaskTracker that |task_source| won't be reenqueued and returns
   // the underlying TaskSource. This is called before destroying a valid
@@ -210,26 +188,36 @@ class BASE_EXPORT TaskTracker {
   // if it reaches zero.
   void DecrementNumIncompleteTaskSources();
 
-  // Calls |flush_callback_for_testing_| if one is available in a lock-safe
-  // manner.
-  void CallFlushCallbackForTesting();
-
-  // Records |Now() - posted_time| to the appropriate |latency_histogram_type|
-  // based on |task_traits|.
-  void RecordLatencyHistogram(LatencyHistogramType latency_histogram_type,
-                              TaskTraits task_traits,
-                              TimeTicks posted_time) const;
-
-  void IncrementNumTasksRun();
+  // Invokes all |flush_callbacks_for_testing_| if any in a lock-safe manner.
+  void InvokeFlushCallbacksForTesting();
 
   // Dummy frames to allow identification of shutdown behavior in a stack trace.
-  void RunContinueOnShutdown(Task* task);
-  void RunSkipOnShutdown(Task* task);
-  void RunBlockShutdown(Task* task);
-  void RunTaskWithShutdownBehavior(TaskShutdownBehavior shutdown_behavior,
-                                   Task* task);
+  void RunContinueOnShutdown(Task& task,
+                             const TaskTraits& traits,
+                             TaskSource* task_source,
+                             const SequenceToken& token);
+  void RunSkipOnShutdown(Task& task,
+                         const TaskTraits& traits,
+                         TaskSource* task_source,
+                         const SequenceToken& token);
+  void RunBlockShutdown(Task& task,
+                        const TaskTraits& traits,
+                        TaskSource* task_source,
+                        const SequenceToken& token);
+  void RunTaskWithShutdownBehavior(Task& task,
+                                   const TaskTraits& traits,
+                                   TaskSource* task_source,
+                                   const SequenceToken& token);
+
+  void NOT_TAIL_CALLED RunTaskImpl(Task& task,
+                                   const TaskTraits& traits,
+                                   TaskSource* task_source,
+                                   const SequenceToken& token);
 
   TaskAnnotator task_annotator_;
+
+  // Suffix for histograms recorded by this TaskTracker.
+  const std::string histogram_label_;
 
   // Indicates whether logging information about TaskPriority::BEST_EFFORT tasks
   // was enabled with a command line switch.
@@ -256,16 +244,17 @@ class BASE_EXPORT TaskTracker {
   // |num_incomplete_task_sources_|. Full synchronization isn't needed
   // because it's atomic, but synchronization is needed to coordinate waking and
   // sleeping at the right time. Fully synchronizes access to
-  // |flush_callback_for_testing_|.
+  // |flush_callbacks_for_testing_|.
   mutable CheckedLock flush_lock_;
 
   // Signaled when |num_incomplete_task_sources_| is or reaches zero or when
   // shutdown completes.
   const std::unique_ptr<ConditionVariable> flush_cv_;
 
-  // Invoked if non-null when |num_incomplete_task_sources_| is zero or when
+  // All invoked, if any, when |num_incomplete_task_sources_| is zero or when
   // shutdown completes.
-  OnceClosure flush_callback_for_testing_ GUARDED_BY(flush_lock_);
+  base::circular_deque<OnceClosure> flush_callbacks_for_testing_
+      GUARDED_BY(flush_lock_);
 
   // Synchronizes access to shutdown related members below.
   mutable CheckedLock shutdown_lock_;
@@ -274,34 +263,10 @@ class BASE_EXPORT TaskTracker {
   // completes.
   std::unique_ptr<WaitableEvent> shutdown_event_ GUARDED_BY(shutdown_lock_);
 
-  // Counter for number of tasks run so far, used to record tasks run while
-  // a task queued to histogram.
-  std::atomic_int num_tasks_run_{0};
-
-  // ThreadPool.TaskLatencyMicroseconds.*,
-  // ThreadPool.HeartbeatLatencyMicroseconds.*, and
-  // ThreadPool.NumTasksRunWhileQueuing.* histograms. The first index is
-  // a TaskPriority. The second index is 0 for non-blocking tasks, 1 for
-  // blocking tasks. Intentionally leaked.
-  // TODO(scheduler-dev): Consider using STATIC_HISTOGRAM_POINTER_GROUP for
-  // these.
-  static constexpr auto kNumTaskPriorities =
-      static_cast<TaskPriorityType>(TaskPriority::HIGHEST) + 1;
-  static constexpr TaskPriorityType kNumBlockingModes = 2;
-  HistogramBase* const task_latency_histograms_[kNumTaskPriorities]
-                                               [kNumBlockingModes];
-  HistogramBase* const heartbeat_latency_histograms_[kNumTaskPriorities]
-                                                    [kNumBlockingModes];
-  HistogramBase* const
-      num_tasks_run_while_queuing_histograms_[kNumTaskPriorities]
-                                             [kNumBlockingModes];
-
   // Ensures all state (e.g. dangling cleaned up workers) is coalesced before
   // destroying the TaskTracker (e.g. in test environments).
   // Ref. https://crbug.com/827615.
   TrackedRefFactory<TaskTracker> tracked_ref_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(TaskTracker);
 };
 
 }  // namespace internal

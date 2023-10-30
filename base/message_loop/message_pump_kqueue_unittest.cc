@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,12 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/run_loop.h"
+#include "base/task/single_thread_task_executor.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
@@ -20,10 +25,9 @@ namespace {
 class MessagePumpKqueueTest : public testing::Test {
  public:
   MessagePumpKqueueTest()
-      : pump_(new MessagePumpKqueue()), loop_(WrapUnique(pump_)) {}
+      : pump_(new MessagePumpKqueue()), executor_(WrapUnique(pump_.get())) {}
 
   MessagePumpKqueue* pump() { return pump_; }
-  MessageLoop* loop() { return &loop_; }
 
   static void CreatePortPair(mac::ScopedMachReceiveRight* receive,
                              mac::ScopedMachSendRight* send) {
@@ -48,8 +52,8 @@ class MessagePumpKqueueTest : public testing::Test {
   }
 
  private:
-  MessagePumpKqueue* pump_;  // Weak, owned by |loop_|.
-  MessageLoop loop_;
+  raw_ptr<MessagePumpKqueue> pump_;  // Weak, owned by |executor_|.
+  SingleThreadTaskExecutor executor_;
 };
 
 class PortWatcher : public MessagePumpKqueue::MachPortWatcher {
@@ -85,7 +89,7 @@ TEST_F(MessagePumpKqueueTest, MachPortBasicWatch) {
   PortWatcher watcher(run_loop.QuitClosure());
   MessagePumpKqueue::MachPortWatchController controller(FROM_HERE);
 
-  loop()->task_runner()->PostTask(
+  ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, BindOnce(
                      [](mach_port_t port, mach_msg_id_t msgid, RunLoop* loop) {
                        mach_msg_return_t kr = SendEmptyMessage(port, msgid);
@@ -116,7 +120,7 @@ TEST_F(MessagePumpKqueueTest, MachPortStopWatching) {
 
   pump()->WatchMachReceivePort(port.get(), &controller, &watcher);
 
-  loop()->task_runner()->PostTask(
+  ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       BindOnce(
           [](MessagePumpKqueue::MachPortWatchController* controller) {
@@ -124,7 +128,7 @@ TEST_F(MessagePumpKqueueTest, MachPortStopWatching) {
           },
           Unretained(&controller)));
 
-  loop()->task_runner()->PostTask(
+  ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, BindOnce(
                      [](mach_port_t port) {
                        EXPECT_EQ(KERN_SUCCESS, SendEmptyMessage(port, 100));
@@ -182,7 +186,7 @@ TEST_F(MessagePumpKqueueTest, MultipleMachWatchers) {
   pump()->WatchMachReceivePort(port2.get(), &controller2, &watcher2);
 
   // Start ping-ponging with by sending the first message to port1.
-  loop()->task_runner()->PostTask(
+  ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, BindOnce(
                      [](mach_port_t port1) {
                        ASSERT_EQ(KERN_SUCCESS,

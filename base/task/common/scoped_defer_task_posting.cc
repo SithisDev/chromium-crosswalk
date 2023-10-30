@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,8 @@ namespace base {
 
 namespace {
 
+// Holds a thread-local pointer to the current scope or null when no
+// scope is active.
 ThreadLocalPointer<ScopedDeferTaskPosting>& GetScopedDeferTaskPostingTLS() {
   static NoDestructor<ThreadLocalPointer<ScopedDeferTaskPosting>> tls;
   return *tls;
@@ -22,14 +24,16 @@ ThreadLocalPointer<ScopedDeferTaskPosting>& GetScopedDeferTaskPostingTLS() {
 void ScopedDeferTaskPosting::PostOrDefer(
     scoped_refptr<SequencedTaskRunner> task_runner,
     const Location& from_here,
-    OnceClosure task) {
+    OnceClosure task,
+    base::TimeDelta delay) {
   ScopedDeferTaskPosting* scope = Get();
   if (scope) {
-    scope->DeferTaskPosting(std::move(task_runner), from_here, std::move(task));
+    scope->DeferTaskPosting(std::move(task_runner), from_here, std::move(task),
+                            delay);
     return;
   }
 
-  task_runner->PostTask(from_here, std::move(task));
+  task_runner->PostDelayedTask(from_here, std::move(task), delay);
 }
 
 // static
@@ -63,18 +67,21 @@ ScopedDeferTaskPosting::~ScopedDeferTaskPosting() {
   }
   Set(nullptr);
   for (DeferredTask& deferred_task : deferred_tasks_) {
-    deferred_task.task_runner->PostTask(deferred_task.from_here,
-                                        std::move(deferred_task.task));
+    deferred_task.task_runner->PostDelayedTask(deferred_task.from_here,
+                                               std::move(deferred_task.task),
+                                               deferred_task.delay);
   }
 }
 
 ScopedDeferTaskPosting::DeferredTask::DeferredTask(
     scoped_refptr<SequencedTaskRunner> task_runner,
     Location from_here,
-    OnceClosure task)
+    OnceClosure task,
+    base::TimeDelta delay)
     : task_runner(std::move(task_runner)),
       from_here(from_here),
-      task(std::move(task)) {}
+      task(std::move(task)),
+      delay(delay) {}
 
 ScopedDeferTaskPosting::DeferredTask::DeferredTask(DeferredTask&&) = default;
 
@@ -83,9 +90,10 @@ ScopedDeferTaskPosting::DeferredTask::~DeferredTask() = default;
 void ScopedDeferTaskPosting::DeferTaskPosting(
     scoped_refptr<SequencedTaskRunner> task_runner,
     const Location& from_here,
-    OnceClosure task) {
+    OnceClosure task,
+    base::TimeDelta delay) {
   deferred_tasks_.push_back(
-      {std::move(task_runner), from_here, std::move(task)});
+      {std::move(task_runner), from_here, std::move(task), delay});
 }
 
 }  // namespace base

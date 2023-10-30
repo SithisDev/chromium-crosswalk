@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,9 @@
 #include "base/android/jni_array.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/base_jni_headers/BuildInfo_jni.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/memory/singleton.h"
+#include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 
 namespace base {
@@ -20,11 +21,11 @@ namespace android {
 namespace {
 
 // We are leaking these strings.
-const char* StrDupParam(const std::vector<std::string>& params, int index) {
+const char* StrDupParam(const std::vector<std::string>& params, size_t index) {
   return strdup(params[index].c_str());
 }
 
-int GetIntParam(const std::vector<std::string>& params, int index) {
+int GetIntParam(const std::vector<std::string>& params, size_t index) {
   int ret = 0;
   bool success = StringToInt(params[index], &ret);
   DCHECK(success);
@@ -75,9 +76,13 @@ BuildInfo::BuildInfo(const std::vector<std::string>& params)
       firebase_app_id_(StrDupParam(params, 18)),
       custom_themes_(StrDupParam(params, 19)),
       resources_version_(StrDupParam(params, 20)),
-      extracted_file_suffix_(params[21]),
-      is_at_least_q_(GetIntParam(params, 22)),
-      is_debug_android_(GetIntParam(params, 23)) {}
+      target_sdk_version_(GetIntParam(params, 21)),
+      is_debug_android_(GetIntParam(params, 22)),
+      is_tv_(GetIntParam(params, 23)),
+      version_incremental_(StrDupParam(params, 24)),
+      hardware_(StrDupParam(params, 25)),
+      is_at_least_t_(GetIntParam(params, 26)),
+      is_automotive_(GetIntParam(params, 27)) {}
 
 // static
 BuildInfo* BuildInfo::GetInstance() {

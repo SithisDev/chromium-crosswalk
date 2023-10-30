@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/logging.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 
 namespace {
@@ -13,8 +14,8 @@ namespace {
 // Internal version that does not use a scoped local pointer.
 jstring ConvertUTF16ToJavaStringImpl(JNIEnv* env,
                                      const base::StringPiece16& str) {
-  jstring result =
-      env->NewString(reinterpret_cast<const jchar*>(str.data()), str.length());
+  jstring result = env->NewString(reinterpret_cast<const jchar*>(str.data()),
+                                  base::checked_cast<jsize>(str.length()));
   base::android::CheckException(env);
   return result;
 }
@@ -25,14 +26,14 @@ namespace base {
 namespace android {
 
 void ConvertJavaStringToUTF8(JNIEnv* env, jstring str, std::string* result) {
-  DCHECK(result);
+  DCHECK(str);
   if (!str) {
-//    LOG(WARNING) << "ConvertJavaStringToUTF8 called with null string.";
+    LOG(WARNING) << "ConvertJavaStringToUTF8 called with null string.";
     result->clear();
     return;
   }
   const jsize length = env->GetStringLength(str);
-  if (!length) {
+  if (length <= 0) {
     result->clear();
     CheckException(env);
     return;
@@ -42,7 +43,8 @@ void ConvertJavaStringToUTF8(JNIEnv* env, jstring str, std::string* result) {
   // function that yields plain (non Java-modified) UTF8.
   const jchar* chars = env->GetStringChars(str, NULL);
   DCHECK(chars);
-  UTF16ToUTF8(reinterpret_cast<const char16*>(chars), length, result);
+  UTF16ToUTF8(reinterpret_cast<const char16_t*>(chars),
+              static_cast<size_t>(length), result);
   env->ReleaseStringChars(str, chars);
   CheckException(env);
 }
@@ -74,7 +76,9 @@ ScopedJavaLocalRef<jstring> ConvertUTF8ToJavaString(JNIEnv* env,
       env, UTF8ToUTF16(str)));
 }
 
-void ConvertJavaStringToUTF16(JNIEnv* env, jstring str, string16* result) {
+void ConvertJavaStringToUTF16(JNIEnv* env,
+                              jstring str,
+                              std::u16string* result) {
   DCHECK(str);
   if (!str) {
     LOG(WARNING) << "ConvertJavaStringToUTF16 called with null string.";
@@ -82,7 +86,7 @@ void ConvertJavaStringToUTF16(JNIEnv* env, jstring str, string16* result) {
     return;
   }
   const jsize length = env->GetStringLength(str);
-  if (!length) {
+  if (length <= 0) {
     result->clear();
     CheckException(env);
     return;
@@ -91,22 +95,24 @@ void ConvertJavaStringToUTF16(JNIEnv* env, jstring str, string16* result) {
   DCHECK(chars);
   // GetStringChars isn't required to NULL-terminate the strings
   // it returns, so the length must be explicitly checked.
-  result->assign(reinterpret_cast<const char16*>(chars), length);
+  result->assign(reinterpret_cast<const char16_t*>(chars),
+                 static_cast<size_t>(length));
   env->ReleaseStringChars(str, chars);
   CheckException(env);
 }
 
-string16 ConvertJavaStringToUTF16(JNIEnv* env, jstring str) {
-  string16 result;
+std::u16string ConvertJavaStringToUTF16(JNIEnv* env, jstring str) {
+  std::u16string result;
   ConvertJavaStringToUTF16(env, str, &result);
   return result;
 }
 
-string16 ConvertJavaStringToUTF16(const JavaRef<jstring>& str) {
+std::u16string ConvertJavaStringToUTF16(const JavaRef<jstring>& str) {
   return ConvertJavaStringToUTF16(AttachCurrentThread(), str.obj());
 }
 
-string16 ConvertJavaStringToUTF16(JNIEnv* env, const JavaRef<jstring>& str) {
+std::u16string ConvertJavaStringToUTF16(JNIEnv* env,
+                                        const JavaRef<jstring>& str) {
   return ConvertJavaStringToUTF16(env, str.obj());
 }
 

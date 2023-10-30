@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,12 @@ import android.content.ContextWrapper;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.support.v4.content.ContextCompat;
 
-import org.chromium.android.support.PackageManagerWrapper;
+import androidx.core.content.ContextCompat;
+
 import org.chromium.base.Log;
-import org.chromium.base.annotations.MainDex;
+import org.chromium.base.test.util.PackageManagerWrapper;
+import org.chromium.build.annotations.MainDex;
 
 import java.io.File;
 import java.io.IOException;

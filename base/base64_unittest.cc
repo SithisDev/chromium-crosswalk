@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/base64.h"
 
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
@@ -22,6 +23,24 @@ TEST(Base64Test, Basic) {
   ok = Base64Decode(encoded, &decoded);
   EXPECT_TRUE(ok);
   EXPECT_EQ(kText, decoded);
+}
+
+TEST(Base64Test, Binary) {
+  const uint8_t kData[] = {0x00, 0x01, 0xFE, 0xFF};
+
+  std::string binary_encoded = Base64Encode(make_span(kData));
+
+  // Check that encoding the same data through the StringPiece interface gives
+  // the same results.
+  std::string string_piece_encoded;
+  Base64Encode(StringPiece(reinterpret_cast<const char*>(kData), sizeof(kData)),
+               &string_piece_encoded);
+
+  EXPECT_EQ(binary_encoded, string_piece_encoded);
+
+  EXPECT_THAT(Base64Decode(binary_encoded),
+              testing::Optional(testing::ElementsAreArray(kData)));
+  EXPECT_FALSE(Base64Decode("invalid base64!"));
 }
 
 TEST(Base64Test, InPlace) {

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,6 +77,12 @@ TEST(HashTest, CString) {
   // null byte.
   str = "hello world; don't read this part";
   EXPECT_EQ(2794219650u, Hash(str, strlen("hello world")));
+}
+
+TEST(HashTest, FastHash) {
+  std::string s;
+  constexpr char kEmptyString[] = "";
+  EXPECT_EQ(FastHash(s), FastHash(kEmptyString));
 }
 
 }  // namespace base

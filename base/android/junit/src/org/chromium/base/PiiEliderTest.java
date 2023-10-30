@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -89,8 +89,38 @@ public class PiiEliderTest {
     }
 
     @Test
+    public void testElideUrl10() {
+        String original = "Caused by: java.lang.ClassNotFoundException: Didn't find class "
+                + "\"org.chromium.components.browser_ui.widget.SurfaceColorOvalView\"";
+        assertEquals(original, PiiElider.elideUrl(original));
+    }
+
+    @Test
+    public void testElideUrl11() {
+        String original = "java.lang.RuntimeException: Unable to start activity "
+                + "ComponentInfo{com.chrome.dev/org.chromium.chrome.browser.ChromeTabbedActivity}: "
+                + "android.view.InflateException: Binary XML file line #20 in "
+                + "com.chrome.dev:layout/0_resource_name_obfuscated:";
+        assertEquals(original, PiiElider.elideUrl(original));
+    }
+
+    @Test
+    public void testElideNonHttpUrl() {
+        String original = "test some-other-scheme://address/01010?param=33&other_param=AAA !!!";
+        String expected = "test HTTP://WEBADDRESS.ELIDED !!!";
+        assertEquals(expected, PiiElider.elideUrl(original));
+    }
+
+    @Test
     public void testDontElideFileSuffixes() {
         String original = "chromium_android_linker.so";
+        assertEquals(original, PiiElider.elideUrl(original));
+    }
+
+    @Test
+    public void testDontElideAndroidPermission() {
+        String original = "java.lang.SecurityException: get package info: "
+                + "Neither user 1210041 nor current process has android.permission.READ_LOGS";
         assertEquals(original, PiiElider.elideUrl(original));
     }
 
@@ -132,5 +162,13 @@ public class PiiEliderTest {
                 + "Caused by: java.lang.NullPointerException: Inner Exception "
                 + "HTTP://WEBADDRESS.ELIDED";
         assertEquals(expected, PiiElider.sanitizeStacktrace(original));
+    }
+
+    @Test
+    public void testDoesNotElideMethodNameInStacktrace() {
+        String original = "java.lang.NullPointerException: Attempt to invoke virtual method 'int "
+                + "org.robolectric.internal.AndroidSandbox.getBackStackEntryCount()' on a null "
+                + "object reference";
+        assertEquals(original, PiiElider.sanitizeStacktrace(original));
     }
 }

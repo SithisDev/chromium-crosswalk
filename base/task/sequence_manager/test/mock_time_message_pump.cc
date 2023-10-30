@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/auto_reset.h"
+#include "base/notreached.h"
 #include "base/test/simple_test_tick_clock.h"
 
 namespace base {
@@ -44,7 +45,7 @@ void MockTimeMessagePump::Run(Delegate* delegate) {
   AutoReset<bool> auto_reset_keep_running(&keep_running_, true);
 
   for (;;) {
-    Delegate::NextWorkInfo info = delegate->DoSomeWork();
+    Delegate::NextWorkInfo info = delegate->DoWork();
 
     if (!keep_running_ || quit_after_do_some_work_)
       break;
@@ -80,8 +81,8 @@ void MockTimeMessagePump::Quit() {
 void MockTimeMessagePump::ScheduleWork() {}
 
 void MockTimeMessagePump::ScheduleDelayedWork(
-    const TimeTicks& delayed_work_time) {
-  next_wake_up_time_ = delayed_work_time;
+    const Delegate::NextWorkInfo& next_work_info) {
+  next_wake_up_time_ = next_work_info.delayed_run_time;
 }
 
 }  // namespace sequence_manager

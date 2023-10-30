@@ -1,11 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_PROFILER_NATIVE_UNWINDER_WIN_H_
 #define BASE_PROFILER_NATIVE_UNWINDER_WIN_H_
 
-#include "base/macros.h"
+#include <vector>
+
 #include "base/profiler/unwinder.h"
 
 namespace base {
@@ -19,10 +20,9 @@ class NativeUnwinderWin : public Unwinder {
   NativeUnwinderWin& operator=(const NativeUnwinderWin&) = delete;
 
   // Unwinder:
-  bool CanUnwindFrom(const Frame* current_frame) const override;
+  bool CanUnwindFrom(const Frame& current_frame) const override;
   UnwindResult TryUnwind(RegisterContext* thread_context,
                          uintptr_t stack_top,
-                         ModuleCache* module_cache,
                          std::vector<Frame>* stack) const override;
 };
 

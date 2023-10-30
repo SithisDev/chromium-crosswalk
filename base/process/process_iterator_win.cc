@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,7 @@ void ProcessIterator::InitProcessEntry(ProcessEntry* entry) {
 
 bool NamedProcessIterator::IncludeEntry() {
   // Case insensitive.
-  return !_wcsicmp(as_wcstr(executable_name_), as_wcstr(entry().exe_file())) &&
+  return !_wcsicmp(executable_name_.c_str(), entry().exe_file()) &&
          ProcessIterator::IncludeEntry();
 }
 

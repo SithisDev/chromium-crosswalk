@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,29 @@
 #include <string>
 
 #include "base/base_export.h"
+#include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "build/build_config.h"
 
+namespace partition_alloc {
+class RandomGenerator;
+}  // namespace partition_alloc
+
 namespace base {
+
+namespace internal {
+
+#if BUILDFLAG(IS_ANDROID)
+// Sets the implementation of RandBytes according to the corresponding
+// base::Feature. Thread safe: allows to switch while RandBytes() is in use.
+void ConfigureRandBytesFieldTrial();
+#endif
+
+#if !BUILDFLAG(IS_NACL)
+void ConfigureBoringSSLBackedRandBytesFieldTrial();
+#endif
+
+}  // namespace internal
 
 // Returns a random number in range [0, UINT64_MAX]. Thread-safe.
 BASE_EXPORT uint64_t RandUint64();
@@ -69,9 +89,81 @@ void RandomShuffle(Itr first, Itr last) {
   std::shuffle(first, last, RandomBitGenerator());
 }
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 BASE_EXPORT int GetUrandomFD();
 #endif
+
+class MetricsSubSampler;
+
+// Fast, insecure pseudo-random number generator.
+//
+// WARNING: This is not the generator you are looking for. This has significant
+// caveats:
+//   - It is non-cryptographic, so easy to miuse
+//   - It is neither fork() nor clone()-safe.
+//   - Synchronization is up to the client.
+//
+// Always prefer base::Rand*() above, unless you have a use case where its
+// overhead is too high, or system calls are disallowed.
+//
+// Performance: As of 2021, rough overhead on Linux on a desktop machine of
+// base::RandUint64() is ~800ns per call (it performs a system call). On Windows
+// it is lower. On the same machine, this generator's cost is ~2ns per call,
+// regardless of platform.
+//
+// This is different from |Rand*()| above as it is guaranteed to never make a
+// system call to generate a new number, except to seed it.  This should *never*
+// be used for cryptographic applications, and is not thread-safe.
+//
+// It is seeded using base::RandUint64() in the constructor, meaning that it
+// doesn't need to be seeded. It can be re-seeded though, with
+// ReseedForTesting(). Its period is long enough that it should not need to be
+// re-seeded during use.
+//
+// Uses the XorShift128+ generator under the hood.
+class BASE_EXPORT InsecureRandomGenerator {
+ public:
+  // Never use outside testing, not enough entropy.
+  void ReseedForTesting(uint64_t seed);
+
+  uint32_t RandUint32();
+  uint64_t RandUint64();
+  // In [0, 1).
+  double RandDouble();
+
+ private:
+  InsecureRandomGenerator();
+  // State.
+  uint64_t a_ = 0, b_ = 0;
+
+  // Before adding a new friend class, make sure that the overhead of
+  // base::Rand*() is too high, using something more representative than a
+  // microbenchmark.
+  //
+  // PartitionAlloc allocations should not take more than 40-50ns per
+  // malloc()/free() pair, otherwise high-level benchmarks regress, and does not
+  // need a secure PRNG, as it's used for ASLR and zeroing some allocations at
+  // free() time.
+  friend class ::partition_alloc::RandomGenerator;
+
+  // Uses the generator to sub-sample metrics.
+  friend class MetricsSubSampler;
+
+  FRIEND_TEST_ALL_PREFIXES(RandUtilTest,
+                           InsecureRandomGeneratorProducesBothValuesOfAllBits);
+  FRIEND_TEST_ALL_PREFIXES(RandUtilTest, InsecureRandomGeneratorChiSquared);
+  FRIEND_TEST_ALL_PREFIXES(RandUtilTest, InsecureRandomGeneratorRandDouble);
+  FRIEND_TEST_ALL_PREFIXES(RandUtilPerfTest, InsecureRandomRandUint64);
+};
+
+class BASE_EXPORT MetricsSubSampler {
+ public:
+  MetricsSubSampler();
+  bool ShouldSample(double probability);
+
+ private:
+  InsecureRandomGenerator generator_;
+};
 
 }  // namespace base
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,11 @@
 #include <memory>
 
 #include "base/debug/alias.h"
+#include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_flattener.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/stl_util.h"
 
 namespace base {
 
@@ -20,16 +21,16 @@ namespace {
 // an error if the flag is already set.
 class MakeActive {
  public:
-  MakeActive(std::atomic<bool>* is_active) : is_active_(is_active) {
+  explicit MakeActive(std::atomic<bool>* is_active) : is_active_(is_active) {
     bool was_active = is_active_->exchange(true, std::memory_order_relaxed);
     CHECK(!was_active);
   }
+  MakeActive(const MakeActive&) = delete;
+  MakeActive& operator=(const MakeActive&) = delete;
   ~MakeActive() { is_active_->store(false, std::memory_order_relaxed); }
 
  private:
-  std::atomic<bool>* is_active_;
-
-  DISALLOW_COPY_AND_ASSIGN(MakeActive);
+  raw_ptr<std::atomic<bool>> is_active_;
 };
 
 }  // namespace
@@ -55,13 +56,11 @@ void HistogramSnapshotManager::PrepareDeltas(
 }
 
 void HistogramSnapshotManager::PrepareDelta(HistogramBase* histogram) {
-  histogram->ValidateHistogramContents();
   PrepareSamples(histogram, histogram->SnapshotDelta());
 }
 
 void HistogramSnapshotManager::PrepareFinalDelta(
     const HistogramBase* histogram) {
-  histogram->ValidateHistogramContents();
   PrepareSamples(histogram, histogram->SnapshotFinalDelta());
 }
 

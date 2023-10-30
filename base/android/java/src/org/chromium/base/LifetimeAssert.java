@@ -1,10 +1,13 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.base;
 
-import android.support.annotation.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
+
+import org.chromium.build.BuildConfig;
+import org.chromium.build.annotations.CheckDiscard;
 
 import java.lang.ref.PhantomReference;
 import java.lang.ref.ReferenceQueue;
@@ -15,10 +18,8 @@ import java.util.Set;
 /**
  * Used to assert that clean-up logic has been run before an object is GC'ed.
  *
- * Class is a no-op withen DCHECK_IS_ON=false, and is entirely removed by
- * proguard (enforced via -checkdiscard).
- *
- * Usage:
+ * <p>Usage:
+ * <pre>
  * class MyClassWithCleanup {
  *     private final mLifetimeAssert = LifetimeAssert.create(this);
  *
@@ -28,7 +29,9 @@ import java.util.Set;
  *         LifetimeAssert.setSafeToGc(mLifetimeAssert, true);
  *     }
  * }
+ * </pre>
  */
+@CheckDiscard("Lifetime assertions aren't used when DCHECK is off.")
 public class LifetimeAssert {
     interface TestHook {
         void onCleaned(WrappedReference ref, String msg);
@@ -57,6 +60,8 @@ public class LifetimeAssert {
 
     @VisibleForTesting
     final WrappedReference mWrapper;
+
+    private final Object mTarget;
 
     @VisibleForTesting
     static class WrappedReference extends PhantomReference<Object> {
@@ -90,7 +95,11 @@ public class LifetimeAssert {
                         try {
                             // This sleeps until a wrapper is available.
                             WrappedReference wrapper = (WrappedReference) sReferenceQueue.remove();
-                            sActiveWrappers.remove(wrapper);
+                            if (!sActiveWrappers.remove(wrapper)) {
+                                // The reference was not a part of the active set. The reference was
+                                // cleared by resetForTesting().
+                                continue;
+                            }
                             if (!wrapper.mSafeToGc) {
                                 String msg = String.format(
                                         "Object of type %s was GC'ed without cleanup. Refer to "
@@ -114,45 +123,74 @@ public class LifetimeAssert {
         }
     }
 
-    private LifetimeAssert(WrappedReference wrapper) {
+    private LifetimeAssert(WrappedReference wrapper, Object target) {
         mWrapper = wrapper;
+        mTarget = target;
     }
 
     public static LifetimeAssert create(Object target) {
-        if (!BuildConfig.DCHECK_IS_ON) {
+        if (!BuildConfig.ENABLE_ASSERTS) {
             return null;
         }
-        return new LifetimeAssert(new WrappedReference(target, new CreationException(), false));
+        return new LifetimeAssert(
+                new WrappedReference(target, new CreationException(), false), target);
     }
 
     public static LifetimeAssert create(Object target, boolean safeToGc) {
-        if (!BuildConfig.DCHECK_IS_ON) {
+        if (!BuildConfig.ENABLE_ASSERTS) {
             return null;
         }
-        return new LifetimeAssert(new WrappedReference(target, new CreationException(), safeToGc));
+        return new LifetimeAssert(
+                new WrappedReference(target, new CreationException(), safeToGc), target);
     }
 
     public static void setSafeToGc(LifetimeAssert asserter, boolean value) {
-        if (BuildConfig.DCHECK_IS_ON) {
-            // asserter is never null when DCHECK_IS_ON.
-            asserter.mWrapper.mSafeToGc = value;
+        if (BuildConfig.ENABLE_ASSERTS) {
+            // This guaratees that the target object is reachable until after mSafeToGc value
+            // is updated here. See comment on Reference.reachabilityFence and review comments
+            // on https://chromium-review.googlesource.com/c/chromium/src/+/1887151 for a
+            // problematic example. This synchronized is used instead of calling
+            // reachabilityFence because robolectric has problems mocking out that method,
+            // and this should work for all Android versions.
+            synchronized (asserter.mTarget) {
+                // asserter is never null when ENABLE_ASSERTS.
+                asserter.mWrapper.mSafeToGc = value;
+            }
         }
     }
 
+    /**
+     * Asserts that the remaining objects used with LifetimeAssert do not need to be destroyed and
+     * can be garbage collected. Always clears the set of tracked object, so consecutive invocations
+     * won't throw with the same cause.
+     */
     public static void assertAllInstancesDestroyedForTesting() throws LifetimeAssertException {
-        if (!BuildConfig.DCHECK_IS_ON) {
+        if (!BuildConfig.ENABLE_ASSERTS) {
             return;
         }
+        // Synchronized set requires manual synchronization when iterating over it.
         synchronized (WrappedReference.sActiveWrappers) {
-            for (WrappedReference ref : WrappedReference.sActiveWrappers) {
-                if (!ref.mSafeToGc) {
-                    String msg = String.format(
-                            "Object of type %s was not destroyed after test completed. Refer to "
-                                    + "\"Caused by\" for where object was created.",
-                            ref.mTargetClass.getName());
-                    throw new LifetimeAssertException(msg, ref.mCreationException);
+            try {
+                for (WrappedReference ref : WrappedReference.sActiveWrappers) {
+                    if (!ref.mSafeToGc) {
+                        String msg = String.format(
+                                "Object of type %s was not destroyed after test completed. "
+                                        + "Refer to \"Caused by\" for where object was created.",
+                                ref.mTargetClass.getName());
+                        throw new LifetimeAssertException(msg, ref.mCreationException);
+                    }
                 }
+            } finally {
+                WrappedReference.sActiveWrappers.clear();
             }
         }
+    }
+
+    /** Clears the set of tracked references. */
+    public static void resetForTesting() {
+        if (!BuildConfig.ENABLE_ASSERTS) {
+            return;
+        }
+        WrappedReference.sActiveWrappers.clear();
     }
 }

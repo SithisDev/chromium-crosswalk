@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include "base/android/jni_string.h"
 #include "base/base_jni_headers/FieldTrialList_jni.h"
 #include "base/lazy_instance.h"
-#include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/field_trial_params.h"
 
@@ -26,6 +25,9 @@ class TrialLogger : public base::FieldTrialList::Observer {
  public:
   TrialLogger() {}
 
+  TrialLogger(const TrialLogger&) = delete;
+  TrialLogger& operator=(const TrialLogger&) = delete;
+
   void OnFieldTrialGroupFinalized(const std::string& trial_name,
                                   const std::string& group_name) override {
     Log(trial_name, group_name);
@@ -39,9 +41,6 @@ class TrialLogger : public base::FieldTrialList::Observer {
 
  protected:
   ~TrialLogger() override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TrialLogger);
 };
 
 base::LazyInstance<TrialLogger>::Leaky g_trial_logger =
@@ -87,4 +86,13 @@ static void JNI_FieldTrialList_LogActiveTrials(JNIEnv* env) {
   for (const base::FieldTrial::ActiveGroup& group : active_groups) {
     TrialLogger::Log(group.trial_name, group.group_name);
   }
+}
+
+static jboolean JNI_FieldTrialList_CreateFieldTrial(
+    JNIEnv* env,
+    const JavaParamRef<jstring>& jtrial_name,
+    const JavaParamRef<jstring>& jgroup_name) {
+  return base::FieldTrialList::CreateFieldTrial(
+             ConvertJavaStringToUTF8(env, jtrial_name),
+             ConvertJavaStringToUTF8(env, jgroup_name)) != nullptr;
 }

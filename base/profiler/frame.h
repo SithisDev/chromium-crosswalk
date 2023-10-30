@@ -1,13 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_PROFILER_FRAME_H_
 #define BASE_PROFILER_FRAME_H_
 
-#include <memory>
-
-#include "base/sampling_heap_profiler/module_cache.h"
+#include "base/base_export.h"
+#include "base/profiler/module_cache.h"
 
 namespace base {
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,6 +52,18 @@ std::vector<FilePath> GetAllPrivateDownloadsDirectories() {
   std::vector<std::string> dirs;
   JNIEnv* env = AttachCurrentThread();
   auto jarray = Java_PathUtils_getAllPrivateDownloadsDirectories(env);
+  base::android::AppendJavaStringArrayToStringVector(env, jarray, &dirs);
+
+  std::vector<base::FilePath> file_paths;
+  for (const auto& dir : dirs)
+    file_paths.emplace_back(dir);
+  return file_paths;
+}
+
+std::vector<FilePath> GetSecondaryStorageDownloadDirectories() {
+  std::vector<std::string> dirs;
+  JNIEnv* env = AttachCurrentThread();
+  auto jarray = Java_PathUtils_getExternalDownloadVolumesNames(env);
   base::android::AppendJavaStringArrayToStringVector(env, jarray, &dirs);
 
   std::vector<base::FilePath> file_paths;

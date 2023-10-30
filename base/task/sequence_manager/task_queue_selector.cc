@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,28 +6,26 @@
 
 #include <utility>
 
-#include "base/logging.h"
+#include "base/bits.h"
+#include "base/check_op.h"
 #include "base/task/sequence_manager/associated_thread_id.h"
 #include "base/task/sequence_manager/task_queue_impl.h"
 #include "base/task/sequence_manager/work_queue.h"
 #include "base/threading/thread_checker.h"
-#include "base/trace_event/traced_value.h"
+#include "base/trace_event/base_tracing.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 namespace sequence_manager {
 namespace internal {
 
-constexpr const int64_t TaskQueueSelector::per_priority_starvation_tolerance_[];
-
 TaskQueueSelector::TaskQueueSelector(
-    scoped_refptr<AssociatedThreadId> associated_thread,
+    scoped_refptr<const AssociatedThreadId> associated_thread,
     const SequenceManager::Settings& settings)
     : associated_thread_(std::move(associated_thread)),
 #if DCHECK_IS_ON()
       random_task_selection_(settings.random_task_selection_seed != 0),
 #endif
-      anti_starvation_logic_for_priorities_disabled_(
-          settings.anti_starvation_logic_for_priorities_disabled),
       delayed_work_queue_sets_("delayed", this, settings),
       immediate_work_queue_sets_("immediate", this, settings) {
 }
@@ -120,30 +118,16 @@ void TaskQueueSelector::RemoveQueueImpl(internal::TaskQueueImpl* queue) {
 #endif
 }
 
-int64_t TaskQueueSelector::GetSortKeyForPriority(
-    TaskQueue::QueuePriority priority) const {
-  switch (priority) {
-    case TaskQueue::kControlPriority:
-      return std::numeric_limits<int64_t>::min();
-
-    case TaskQueue::kBestEffortPriority:
-      return std::numeric_limits<int64_t>::max();
-
-    default:
-      if (anti_starvation_logic_for_priorities_disabled_)
-        return per_priority_starvation_tolerance_[priority];
-      return selection_count_ + per_priority_starvation_tolerance_[priority];
-  }
-}
-
 void TaskQueueSelector::WorkQueueSetBecameEmpty(size_t set_index) {
   non_empty_set_counts_[set_index]--;
   DCHECK_GE(non_empty_set_counts_[set_index], 0);
 
   // There are no delayed or immediate tasks for |set_index| so remove from
-  // |active_priorities_|.
-  if (non_empty_set_counts_[set_index] == 0)
-    active_priorities_.erase(static_cast<TaskQueue::QueuePriority>(set_index));
+  // |active_priority_tracker_|.
+  if (non_empty_set_counts_[set_index] == 0) {
+    active_priority_tracker_.SetActive(
+        static_cast<TaskQueue::QueuePriority>(set_index), false);
+  }
 }
 
 void TaskQueueSelector::WorkQueueSetBecameNonEmpty(size_t set_index) {
@@ -151,12 +135,21 @@ void TaskQueueSelector::WorkQueueSetBecameNonEmpty(size_t set_index) {
   DCHECK_LE(non_empty_set_counts_[set_index], kMaxNonEmptySetCount);
 
   // There is now a delayed or an immediate task for |set_index|, so add to
-  // |active_priorities_|.
+  // |active_priority_tracker_|.
   if (non_empty_set_counts_[set_index] == 1) {
     TaskQueue::QueuePriority priority =
         static_cast<TaskQueue::QueuePriority>(set_index);
-    active_priorities_.insert(GetSortKeyForPriority(priority), priority);
+    active_priority_tracker_.SetActive(priority, true);
   }
+}
+
+void TaskQueueSelector::CollectSkippedOverLowerPriorityTasks(
+    const internal::WorkQueue* selected_work_queue,
+    std::vector<const Task*>* result) const {
+  delayed_work_queue_sets_.CollectSkippedOverLowerPriorityTasks(
+      selected_work_queue, result);
+  immediate_work_queue_sets_.CollectSkippedOverLowerPriorityTasks(
+      selected_work_queue, result);
 }
 
 #if DCHECK_IS_ON() || !defined(NDEBUG)
@@ -175,38 +168,46 @@ bool TaskQueueSelector::CheckContainsQueueForTest(
 }
 #endif
 
-WorkQueue* TaskQueueSelector::SelectWorkQueueToService() {
+WorkQueue* TaskQueueSelector::SelectWorkQueueToService(
+    SelectTaskOption option) {
   DCHECK_CALLED_ON_VALID_THREAD(associated_thread_->thread_checker);
 
-  if (active_priorities_.empty())
+  auto highest_priority = GetHighestPendingPriority(option);
+  if (!highest_priority.has_value())
     return nullptr;
 
   // Select the priority from which we will select a task. Usually this is
   // the highest priority for which we have work, unless we are starving a lower
   // priority.
-  TaskQueue::QueuePriority priority = active_priorities_.min_id();
-  bool chose_delayed_over_immediate;
+  TaskQueue::QueuePriority priority = highest_priority.value();
 
-  // Control tasks are allowed to indefinitely stave out other work and any
-  // control tasks we run should not be counted for task starvation purposes.
-  if (priority != TaskQueue::kControlPriority)
-    selection_count_++;
+  // For selecting an immediate queue only, the highest priority can be used as
+  // a starting priority, but it is required to check work at other priorities.
+  // For the case where a delayed task is at a higher priority than an immediate
+  // task, HighestActivePriority(...) returns the priority of the delayed task
+  // but the resulting queue must be the lower one.
+  if (option == SelectTaskOption::kSkipDelayedTask) {
+    WorkQueue* queue =
+#if DCHECK_IS_ON()
+        random_task_selection_
+            ? ChooseImmediateOnlyWithPriority<SetOperationRandom>(priority)
+            :
+#endif
+            ChooseImmediateOnlyWithPriority<SetOperationOldest>(priority);
+    return queue;
+  }
 
   WorkQueue* queue =
 #if DCHECK_IS_ON()
-      random_task_selection_ ? ChooseWithPriority<SetOperationRandom>(
-                                   priority, &chose_delayed_over_immediate)
+      random_task_selection_ ? ChooseWithPriority<SetOperationRandom>(priority)
                              :
 #endif
-                             ChooseWithPriority<SetOperationOldest>(
-                                 priority, &chose_delayed_over_immediate);
+                             ChooseWithPriority<SetOperationOldest>(priority);
 
-  // If we still have any tasks remaining for |set_index| then adjust it's
-  // sort key.
-  if (active_priorities_.IsInQueue(priority))
-    active_priorities_.ChangeMinKey(GetSortKeyForPriority(priority));
-
-  if (chose_delayed_over_immediate) {
+  // If we have selected a delayed task while having an immediate task of the
+  // same priority, increase the starvation count.
+  if (queue->queue_type() == WorkQueue::QueueType::kDelayed &&
+      !immediate_work_queue_sets_.IsSetEmpty(priority)) {
     immediate_starvation_count_++;
   } else {
     immediate_starvation_count_ = 0;
@@ -214,90 +215,70 @@ WorkQueue* TaskQueueSelector::SelectWorkQueueToService() {
   return queue;
 }
 
-void TaskQueueSelector::AsValueInto(trace_event::TracedValue* state) const {
+Value::Dict TaskQueueSelector::AsValue() const {
   DCHECK_CALLED_ON_VALID_THREAD(associated_thread_->thread_checker);
-  state->SetInteger("immediate_starvation_count", immediate_starvation_count_);
+  Value::Dict state;
+  state.Set("immediate_starvation_count", immediate_starvation_count_);
+  return state;
 }
 
 void TaskQueueSelector::SetTaskQueueSelectorObserver(Observer* observer) {
   task_queue_selector_observer_ = observer;
 }
 
-Optional<TaskQueue::QueuePriority>
-TaskQueueSelector::GetHighestPendingPriority() const {
+absl::optional<TaskQueue::QueuePriority>
+TaskQueueSelector::GetHighestPendingPriority(SelectTaskOption option) const {
   DCHECK_CALLED_ON_VALID_THREAD(associated_thread_->thread_checker);
-  if (active_priorities_.empty())
-    return nullopt;
-  return active_priorities_.min_id();
+  if (!active_priority_tracker_.HasActivePriority())
+    return absl::nullopt;
+
+  TaskQueue::QueuePriority highest_priority =
+      active_priority_tracker_.HighestActivePriority();
+  if (option != SelectTaskOption::kSkipDelayedTask)
+    return highest_priority;
+
+  for (; highest_priority != TaskQueue::kQueuePriorityCount;
+       highest_priority = NextPriority(highest_priority)) {
+    if (active_priority_tracker_.IsActive(highest_priority) &&
+        !immediate_work_queue_sets_.IsSetEmpty(highest_priority)) {
+      return highest_priority;
+    }
+  }
+
+  return absl::nullopt;
 }
 
 void TaskQueueSelector::SetImmediateStarvationCountForTest(
-    size_t immediate_starvation_count) {
+    int immediate_starvation_count) {
   immediate_starvation_count_ = immediate_starvation_count;
 }
 
 bool TaskQueueSelector::HasTasksWithPriority(
-    TaskQueue::QueuePriority priority) {
+    TaskQueue::QueuePriority priority) const {
   return !delayed_work_queue_sets_.IsSetEmpty(priority) ||
          !immediate_work_queue_sets_.IsSetEmpty(priority);
 }
 
-TaskQueueSelector::SmallPriorityQueue::SmallPriorityQueue() {
-  for (size_t i = 0; i < TaskQueue::kQueuePriorityCount; i++) {
-    id_to_index_[i] = kInvalidIndex;
+TaskQueueSelector::ActivePriorityTracker::ActivePriorityTracker() = default;
+
+void TaskQueueSelector::ActivePriorityTracker::SetActive(
+    TaskQueue::QueuePriority priority,
+    bool is_active) {
+  DCHECK_LT(priority, TaskQueue::QueuePriority::kQueuePriorityCount);
+  DCHECK_NE(IsActive(priority), is_active);
+  if (is_active) {
+    active_priorities_ |= (1u << static_cast<size_t>(priority));
+  } else {
+    active_priorities_ &= ~(1u << static_cast<size_t>(priority));
   }
 }
 
-void TaskQueueSelector::SmallPriorityQueue::insert(
-    int64_t key,
-    TaskQueue::QueuePriority id) {
-  DCHECK_LE(size_, TaskQueue::kQueuePriorityCount);
-  DCHECK_LT(id, TaskQueue::kQueuePriorityCount);
-  DCHECK(!IsInQueue(id));
-  // Insert while keeping |keys_| sorted.
-  size_t i = size_;
-  while (i > 0 && key < keys_[i - 1]) {
-    keys_[i] = keys_[i - 1];
-    TaskQueue::QueuePriority moved_id = index_to_id_[i - 1];
-    index_to_id_[i] = moved_id;
-    id_to_index_[moved_id] = i;
-    i--;
-  }
-  keys_[i] = key;
-  index_to_id_[i] = id;
-  id_to_index_[id] = i;
-  size_++;
-}
-
-void TaskQueueSelector::SmallPriorityQueue::erase(TaskQueue::QueuePriority id) {
-  DCHECK_NE(size_, 0u);
-  DCHECK_LT(id, TaskQueue::kQueuePriorityCount);
-  DCHECK(IsInQueue(id));
-  // Erase while keeping |keys_| sorted.
-  size_--;
-  for (size_t i = id_to_index_[id]; i < size_; i++) {
-    keys_[i] = keys_[i + 1];
-    TaskQueue::QueuePriority moved_id = index_to_id_[i + 1];
-    index_to_id_[i] = moved_id;
-    id_to_index_[moved_id] = i;
-  }
-  id_to_index_[id] = kInvalidIndex;
-}
-
-void TaskQueueSelector::SmallPriorityQueue::ChangeMinKey(int64_t new_key) {
-  DCHECK_NE(size_, 0u);
-  TaskQueue::QueuePriority id = index_to_id_[0];
-  size_t i = 0;
-  while ((i + 1) < size_ && keys_[i + 1] < new_key) {
-    keys_[i] = keys_[i + 1];
-    TaskQueue::QueuePriority moved_id = index_to_id_[i + 1];
-    index_to_id_[i] = moved_id;
-    id_to_index_[moved_id] = i;
-    i++;
-  }
-  keys_[i] = new_key;
-  index_to_id_[i] = id;
-  id_to_index_[id] = i;
+TaskQueue::QueuePriority
+TaskQueueSelector::ActivePriorityTracker::HighestActivePriority() const {
+  DCHECK_NE(active_priorities_, 0u)
+      << "CountTrailingZeroBits(0) has undefined behavior";
+  return static_cast<TaskQueue::QueuePriority>(
+      bits::CountTrailingZeroBits(active_priorities_));
 }
 
 }  // namespace internal

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "base/compiler_specific.h"
+#include "base/memory/raw_ptr.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -28,11 +29,11 @@ TEST(WaitableEventTest, ManualBasics) {
 
   event.Reset();
   EXPECT_FALSE(event.IsSignaled());
-  EXPECT_FALSE(event.TimedWait(TimeDelta::FromMilliseconds(10)));
+  EXPECT_FALSE(event.TimedWait(Milliseconds(10)));
 
   event.Signal();
   event.Wait();
-  EXPECT_TRUE(event.TimedWait(TimeDelta::FromMilliseconds(10)));
+  EXPECT_TRUE(event.TimedWait(Milliseconds(10)));
 }
 
 TEST(WaitableEventTest, ManualInitiallySignaled) {
@@ -66,14 +67,14 @@ TEST(WaitableEventTest, AutoBasics) {
 
   event.Reset();
   EXPECT_FALSE(event.IsSignaled());
-  EXPECT_FALSE(event.TimedWait(TimeDelta::FromMilliseconds(10)));
+  EXPECT_FALSE(event.TimedWait(Milliseconds(10)));
 
   event.Signal();
   event.Wait();
-  EXPECT_FALSE(event.TimedWait(TimeDelta::FromMilliseconds(10)));
+  EXPECT_FALSE(event.TimedWait(Milliseconds(10)));
 
   event.Signal();
-  EXPECT_TRUE(event.TimedWait(TimeDelta::FromMilliseconds(10)));
+  EXPECT_TRUE(event.TimedWait(Milliseconds(10)));
 }
 
 TEST(WaitableEventTest, AutoInitiallySignaled) {
@@ -162,7 +163,7 @@ class WaitableEventSignaler : public PlatformThread::Delegate {
 
  private:
   const TimeDelta delay_;
-  WaitableEvent* event_;
+  raw_ptr<WaitableEvent> event_;
 };
 
 // Tests that a WaitableEvent can be safely deleted when |Wait| is done without
@@ -172,7 +173,7 @@ TEST(WaitableEventTest, WaitAndDelete) {
       new WaitableEvent(WaitableEvent::ResetPolicy::AUTOMATIC,
                         WaitableEvent::InitialState::NOT_SIGNALED);
 
-  WaitableEventSignaler signaler(TimeDelta::FromMilliseconds(10), ev);
+  WaitableEventSignaler signaler(Milliseconds(10), ev);
   PlatformThreadHandle thread;
   PlatformThread::Create(0, &signaler, &thread);
 
@@ -191,7 +192,7 @@ TEST(WaitableEventTest, WaitMany) {
                           WaitableEvent::InitialState::NOT_SIGNALED);
   }
 
-  WaitableEventSignaler signaler(TimeDelta::FromMilliseconds(10), ev[2]);
+  WaitableEventSignaler signaler(Milliseconds(10), ev[2]);
   PlatformThreadHandle thread;
   PlatformThread::Create(0, &signaler, &thread);
 
@@ -211,7 +212,7 @@ TEST(WaitableEventTest, TimedWait) {
       new WaitableEvent(WaitableEvent::ResetPolicy::AUTOMATIC,
                         WaitableEvent::InitialState::NOT_SIGNALED);
 
-  TimeDelta thread_delay = TimeDelta::FromMilliseconds(10);
+  TimeDelta thread_delay = Milliseconds(10);
   WaitableEventSignaler signaler(thread_delay, ev);
   PlatformThreadHandle thread;
   TimeTicks start = TimeTicks::Now();
@@ -229,46 +230,37 @@ TEST(WaitableEventTest, SubMsTimedWait) {
   WaitableEvent ev(WaitableEvent::ResetPolicy::AUTOMATIC,
                    WaitableEvent::InitialState::NOT_SIGNALED);
 
-  TimeDelta delay = TimeDelta::FromMicroseconds(900);
+  TimeDelta delay = Microseconds(900);
   TimeTicks start_time = TimeTicks::Now();
   ev.TimedWait(delay);
   EXPECT_GE(TimeTicks::Now() - start_time, delay);
 }
 
-// Tests that TimedWaitUntil can be safely used with various end_time deadline
-// values.
-TEST(WaitableEventTest, TimedWaitUntil) {
-  WaitableEvent ev(WaitableEvent::ResetPolicy::AUTOMATIC,
-                   WaitableEvent::InitialState::NOT_SIGNALED);
+// Tests that timeouts of zero return immediately (true if already signaled,
+// false otherwise).
+TEST(WaitableEventTest, ZeroTimeout) {
+  WaitableEvent ev;
+  TimeTicks start_time = TimeTicks::Now();
+  EXPECT_FALSE(ev.TimedWait(TimeDelta()));
+  EXPECT_LT(TimeTicks::Now() - start_time, Milliseconds(1));
 
-  TimeTicks start_time(TimeTicks::Now());
-  TimeDelta delay = TimeDelta::FromMilliseconds(10);
-
-  // Should be OK to wait for the current time or time in the past.
-  // That should end promptly and be equivalent to IsSignalled.
-  EXPECT_FALSE(ev.TimedWaitUntil(start_time));
-  EXPECT_FALSE(ev.TimedWaitUntil(start_time - delay));
-
-  // Should be OK to wait for zero TimeTicks().
-  EXPECT_FALSE(ev.TimedWaitUntil(TimeTicks()));
-
-  // Waiting for a time in the future shouldn't end before the deadline
-  // if the event isn't signalled.
-  EXPECT_FALSE(ev.TimedWaitUntil(start_time + delay));
-  EXPECT_GE(TimeTicks::Now() - start_time, delay);
-
-  // Test that passing TimeTicks::Max to TimedWaitUntil is valid and isn't
-  // the same as passing TimeTicks(). Also verifies that signaling event
-  // ends the wait promptly.
-  WaitableEventSignaler signaler(delay, &ev);
-  PlatformThreadHandle thread;
+  ev.Signal();
   start_time = TimeTicks::Now();
-  PlatformThread::Create(0, &signaler, &thread);
+  EXPECT_TRUE(ev.TimedWait(TimeDelta()));
+  EXPECT_LT(TimeTicks::Now() - start_time, Milliseconds(1));
+}
 
-  EXPECT_TRUE(ev.TimedWaitUntil(TimeTicks::Max()));
-  EXPECT_GE(TimeTicks::Now() - start_time, delay);
+// Same as ZeroTimeout for negative timeouts.
+TEST(WaitableEventTest, NegativeTimeout) {
+  WaitableEvent ev;
+  TimeTicks start_time = TimeTicks::Now();
+  EXPECT_FALSE(ev.TimedWait(Milliseconds(-10)));
+  EXPECT_LT(TimeTicks::Now() - start_time, Milliseconds(1));
 
-  PlatformThread::Join(thread);
+  ev.Signal();
+  start_time = TimeTicks::Now();
+  EXPECT_TRUE(ev.TimedWait(Milliseconds(-10)));
+  EXPECT_LT(TimeTicks::Now() - start_time, Milliseconds(1));
 }
 
 }  // namespace base

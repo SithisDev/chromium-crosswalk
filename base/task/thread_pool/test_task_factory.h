@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,12 @@
 #include <unordered_set>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
+#include "base/task/task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool/test_utils.h"
-#include "base/task_runner.h"
 #include "base/threading/thread_checker_impl.h"
 
 namespace base {
@@ -25,8 +24,9 @@ namespace test {
 
 // A TestTaskFactory posts tasks to a TaskRunner and verifies that they run as
 // expected. Generates a test failure when:
-// - The RunsTasksInCurrentSequence() method of the TaskRunner returns false on
-//   a thread on which a Task is run.
+// - The RunsTasksInCurrentSequence() method of the SequencedTaskRunner
+//   (kSequenced or kSingleThread modes) returns false on a thread on which a
+//   Task is run.
 // - The TaskRunnerHandles set in the context of the task don't match what's
 //   expected for the tested TaskSourceExecutionMode.
 // - The TaskSourceExecutionMode of the TaskRunner is kSequenced or
@@ -46,6 +46,8 @@ class TestTaskFactory {
   TestTaskFactory(scoped_refptr<TaskRunner> task_runner,
                   TaskSourceExecutionMode execution_mode);
 
+  TestTaskFactory(const TestTaskFactory&) = delete;
+  TestTaskFactory& operator=(const TestTaskFactory&) = delete;
   ~TestTaskFactory();
 
   // Posts a task. The posted task will:
@@ -88,8 +90,6 @@ class TestTaskFactory {
   // Used to verify that all tasks run on the same thread when |execution_mode_|
   // is SINGLE_THREADED.
   ThreadCheckerImpl thread_checker_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestTaskFactory);
 };
 
 }  // namespace test

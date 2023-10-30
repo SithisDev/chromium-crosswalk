@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -27,7 +27,9 @@ _FILE_DIR = os.path.dirname(__file__)
 _CHROMIUM_SRC = os.path.join(_FILE_DIR, os.pardir, os.pardir, os.pardir)
 _BUILD_ANDROID_GYP = os.path.join(_CHROMIUM_SRC, 'build', 'android', 'gyp')
 
-sys.path.append(_BUILD_ANDROID_GYP)
+# Item 0 of sys.path is the directory of the main file; item 1 is PYTHONPATH
+# (if set); item 2 is system libraries.
+sys.path.insert(1, _BUILD_ANDROID_GYP)
 
 from util import build_utils
 
@@ -52,6 +54,8 @@ _MAIN_DEX_REGEX = re.compile(r'^\s*(?:@(?:\w+\.)*\w+\s+)*@MainDex\b',
 # doesn't require name to be prefixed with native, and does not
 # require a native qualifier.
 _EXTRACT_METHODS_REGEX = re.compile(
+    r'(@NativeClassQualifiedName'
+    r'\(\"(?P<native_class_name>.*?)\"\)\s*)?'
     r'(?P<qualifiers>'
     r'((public|private|static|final|abstract|protected|native)\s*)*)\s+'
     r'(?P<return_type>\S*)\s+'
@@ -59,7 +63,7 @@ _EXTRACT_METHODS_REGEX = re.compile(
     flags=re.DOTALL)
 
 _NATIVE_PROXY_EXTRACTION_REGEX = re.compile(
-    r'@NativeMethods\s*(public|private)*\s*interface\s*'
+    r'@NativeMethods[\S\s]+?interface\s*'
     r'(?P<interface_name>\w*)\s*(?P<interface_body>{(\s*.*)+?\s*})')
 
 # Use 100 columns rather than 80 because it makes many lines more readable.
@@ -136,31 +140,28 @@ class NativeMethod(object):
       self.name = self.name[0].upper() + self.name[1:]
 
     self.proxy_name = kwargs.get('proxy_name', self.name)
+    self.hashed_proxy_name = kwargs.get('hashed_proxy_name', None)
+    self.switch_num = None
 
-    has_jcaller = False
     if self.params:
       assert type(self.params) is list
       assert type(self.params[0]) is Param
 
-      for p in self.params[1:]:
-        assert '@JCaller' not in p.annotations, ('Only the first parameter can '
-                                                 'be annotated with @JCaller')
-
-      if '@JCaller' in self.params[0].annotations:
-        has_jcaller = True
-
-    ptr_index = 1 if has_jcaller else 0
-
-    if (self.params and len(self.params) > ptr_index
-        and self.params[ptr_index].datatype == kwargs.get('ptr_type', 'int')
-        and self.params[ptr_index].name.startswith('native')):
+    ptr_type = kwargs.get('ptr_type', 'int')
+    if (self.params and self.params[0].datatype == ptr_type
+        and self.params[0].name.startswith('native')):
+      self.ptr_type = ptr_type
       self.type = 'method'
-      self.p0_type = self.params[ptr_index].name[len('native'):]
-      if kwargs.get('native_class_name'):
-        self.p0_type = kwargs['native_class_name']
+      self.p0_type = kwargs.get('p0_type')
+      if self.p0_type is None:
+        self.p0_type = self.params[0].name[len('native'):]
+        if kwargs.get('native_class_name'):
+          self.p0_type = kwargs['native_class_name']
     else:
       self.type = 'function'
     self.method_id_var_name = kwargs.get('method_id_var_name', None)
+    self.return_and_signature = (self.return_type,
+                                 tuple(p.datatype for p in self.params))
 
 
 class CalledByNative(object):
@@ -204,19 +205,16 @@ def JavaDataTypeToC(java_type):
     return 'jobject'
 
 
-def JavaTypeToProxyCast(type):
+def JavaTypeToProxyCast(java_type):
   """Maps from a java type to the type used by the native proxy GEN_JNI class"""
-  if type in JAVA_POD_TYPE_MAP or type in JAVA_TYPE_MAP:
-    return type
-  # All the array types of JAVA_TYPE_MAP become jobjectArray across jni but
-  # they still need to be passed as the original type on the java side.
-  if type[:-2] in JAVA_POD_TYPE_MAP or type[:-2] in JAVA_TYPE_MAP:
-    return type
+  # All the types and array types of JAVA_TYPE_MAP become jobjectArray across
+  # jni but they still need to be passed as the original type on the java side.
+  raw_type = java_type.rstrip('[]')
+  if raw_type in JAVA_POD_TYPE_MAP or raw_type in JAVA_TYPE_MAP:
+    return java_type
 
-  # Otherwise we have a jobject type that should be an object.
-  if type[-2:] == '[]':
-    return 'Object[]'
-  return 'Object'
+  # All other types should just be passed as Objects or Object arrays.
+  return 'Object' + java_type[len(raw_type):]
 
 
 def WrapCTypeForDeclaration(c_type):
@@ -260,14 +258,9 @@ def JavaReturnValueToC(java_type):
   return java_pod_type_map.get(java_type, 'NULL')
 
 
-def _GetJNIFirstParamType(native):
-  if native.type == 'function' and native.static:
-    return 'jclass'
-  return 'jobject'
-
-
 def _GetJNIFirstParam(native, for_declaration):
-  c_type = _GetJNIFirstParamType(native)
+  c_type = 'jclass' if native.static else 'jobject'
+
   if for_declaration:
     c_type = WrapCTypeForDeclaration(c_type)
   return [c_type + ' jcaller']
@@ -326,6 +319,10 @@ def _StripGenerics(value):
   return ''.join(out)
 
 
+def _NameIsTestOnly(name):
+  return name.endswith('ForTest') or name.endswith('ForTesting')
+
+
 class JniParams(object):
   """Get JNI related parameters."""
 
@@ -374,6 +371,7 @@ class JniParams(object):
         'Ljava/lang/Object',
         'Ljava/lang/String',
         'Ljava/lang/Class',
+        'Ljava/lang/ClassLoader',
         'Ljava/lang/CharSequence',
         'Ljava/lang/Runnable',
         'Ljava/lang/Throwable',
@@ -481,11 +479,7 @@ class JniParams(object):
     return '"%s"' % signature_line[index + len(prefix):]
 
   @staticmethod
-  def MakeProxyParamSignature(params):
-    return ', '.join('%s %s' % (p.datatype, p.name) for p in params)
-
-  @staticmethod
-  def Parse(params, use_proxy_types=False):
+  def Parse(params, use_proxy_types=False, from_javap=False):
     """Parses the params into a list of Param objects."""
     if not params:
       return []
@@ -508,6 +502,12 @@ class JniParams(object):
           datatype=items[0],
           name=(items[1] if len(items) > 1 else 'p%s' % len(ret)),
       )
+      # Handle varargs.
+      if param.datatype.endswith('...'):
+        param.datatype = param.datatype[:-3] + '[]'
+
+      if from_javap:
+        param.datatype = param.datatype.replace('.', '/')
 
       if use_proxy_types:
         param.datatype = JavaTypeToProxyCast(param.datatype)
@@ -685,7 +685,8 @@ RE_SCOPED_JNI_TYPES = re.compile('jobject|jclass|jstring|jthrowable|.*Array')
 
 # Regex to match a string like "@CalledByNative public void foo(int bar)".
 RE_CALLED_BY_NATIVE = re.compile(
-    r'@CalledByNative(?P<Unchecked>(?:Unchecked)?)(?:\("(?P<annotation>.*)"\))?'
+    r'@CalledByNative((?P<Unchecked>(?:Unchecked)?|ForTesting))'
+    r'(?:\("(?P<annotation>.*)"\))?'
     r'(?:\s+@\w+(?:\(.*\))?)*'  # Ignore any other annotations.
     r'\s+(?P<prefix>('
     r'(private|protected|public|static|abstract|final|default|synchronized)'
@@ -728,15 +729,14 @@ def ExtractCalledByNatives(jni_params, contents, always_mangle):
       is_constructor = False
 
     called_by_natives += [
-        CalledByNative(
-            system_class=False,
-            unchecked='Unchecked' in match.group('Unchecked'),
-            static='static' in match.group('prefix'),
-            java_class_name=match.group('annotation') or '',
-            return_type=return_type,
-            name=name,
-            is_constructor=is_constructor,
-            params=JniParams.Parse(match.group('params')))
+        CalledByNative(system_class=False,
+                       unchecked='Unchecked' in match.group('Unchecked'),
+                       static='static' in match.group('prefix'),
+                       java_class_name=match.group('annotation') or '',
+                       return_type=return_type,
+                       name=name,
+                       is_constructor=is_constructor,
+                       params=JniParams.Parse(match.group('params')))
     ]
   # Check for any @CalledByNative occurrences that weren't matched.
   unmatched_lines = re.sub(RE_CALLED_BY_NATIVE, '', contents).split('\n')
@@ -796,12 +796,12 @@ class JNIFromJavaP(object):
       self.called_by_natives += [
           CalledByNative(
               system_class=True,
-              unchecked=False,
+              unchecked=options.unchecked_exceptions,
               static='static' in match.group('prefix'),
               java_class_name='',
               return_type=match.group('return_type').replace('.', '/'),
               name=match.group('name'),
-              params=JniParams.Parse(match.group('params').replace('.', '/')),
+              params=JniParams.Parse(match.group('params'), from_javap=True),
               signature=JniParams.ParseJavaPSignature(contents[lineno + 1]))
       ]
     re_constructor = re.compile('(.*?)public ' +
@@ -812,16 +812,17 @@ class JNIFromJavaP(object):
       if not match:
         continue
       self.called_by_natives += [
-          CalledByNative(
-              system_class=True,
-              unchecked=False,
-              static=False,
-              java_class_name='',
-              return_type=self.fully_qualified_class,
-              name='Constructor',
-              params=JniParams.Parse(match.group('params').replace('.', '/')),
-              signature=JniParams.ParseJavaPSignature(contents[lineno + 1]),
-              is_constructor=True)
+          CalledByNative(system_class=True,
+                         unchecked=options.unchecked_exceptions,
+                         static=False,
+                         java_class_name='',
+                         return_type=self.fully_qualified_class,
+                         name='Constructor',
+                         params=JniParams.Parse(match.group('params'),
+                                                from_javap=True),
+                         signature=JniParams.ParseJavaPSignature(
+                             contents[lineno + 1]),
+                         is_constructor=True)
       ]
     self.called_by_natives = MangleCalledByNatives(
         self.jni_params, self.called_by_natives, options.always_mangle)
@@ -850,8 +851,9 @@ class JNIFromJavaP(object):
   @staticmethod
   def CreateFromClass(class_file, options):
     class_name = os.path.splitext(os.path.basename(class_file))[0]
+    javap_path = os.path.abspath(options.javap)
     p = subprocess.Popen(
-        args=[options.javap, '-c', '-verbose', '-s', class_name],
+        args=[javap_path, '-c', '-verbose', '-s', class_name],
         cwd=os.path.dirname(class_file),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -869,22 +871,15 @@ class JNIFromJavaP(object):
 # declaration in another class (org.chromium.base.natives.GEN_JNI)
 # but generates wrapper code so it can be called through the declaring class.
 class ProxyHelpers(object):
-  NATIVE_PROXY_CLASS_NAME = 'GEN_JNI'
-  NATIVE_PROXY_PACKAGE_NAME = 'org/chromium/base/natives'
-
   MAX_CHARS_FOR_HASHED_NATIVE_METHODS = 8
 
   @staticmethod
   def GetClass(use_hash):
-    if use_hash:
-      return 'N'
-    return ProxyHelpers.NATIVE_PROXY_CLASS_NAME
+    return 'N' if use_hash else 'GEN_JNI'
 
   @staticmethod
   def GetPackage(use_hash):
-    if use_hash:
-      return 'J'
-    return ProxyHelpers.NATIVE_PROXY_PACKAGE_NAME
+    return 'J' if use_hash else 'org/chromium/base/natives'
 
   @staticmethod
   def GetQualifiedClass(use_hash):
@@ -902,16 +897,27 @@ class ProxyHelpers(object):
     if not isinstance(hash_b64, str):
       hash_b64 = hash_b64.decode()
 
-    hashed_name = ('M' + hash_b64).rstrip('=')
-    return hashed_name[0:ProxyHelpers.MAX_CHARS_FOR_HASHED_NATIVE_METHODS]
+    long_hash = ('M' + hash_b64).rstrip('=')
+    hashed_name = long_hash[:ProxyHelpers.MAX_CHARS_FOR_HASHED_NATIVE_METHODS]
+
+    # If the method is a test-only method, we don't care about saving size on
+    # the method name, since it shouldn't show up in the binary. Additionally,
+    # if we just hash the name, our checkers which enforce that we have no
+    # "ForTesting" methods by checking for the suffix "ForTesting" will miss
+    # these. We could preserve the name entirely and not hash anything, but
+    # that risks collisions. So, instead, we just append "ForTesting" to any
+    # test-only hashes, to ensure we catch any test-only methods that
+    # shouldn't be in our final binary.
+    if _NameIsTestOnly(method_name):
+      return hashed_name + '_ForTesting'
+    return hashed_name
 
   @staticmethod
   def CreateProxyMethodName(fully_qualified_class, old_name, use_hash=False):
     """Returns the literal method name for the corresponding proxy method"""
     if use_hash:
-      hashed_name = ProxyHelpers.CreateHashedMethodName(fully_qualified_class,
-                                                        old_name)
-      return hashed_name
+      return ProxyHelpers.CreateHashedMethodName(fully_qualified_class,
+                                                 old_name)
 
     # The annotation processor currently uses a method name
     # org_chromium_example_foo_method_1name escaping _ to _1
@@ -925,25 +931,32 @@ class ProxyHelpers(object):
   def ExtractStaticProxyNatives(fully_qualified_class,
                                 contents,
                                 ptr_type,
-                                use_hash=False):
+                                include_test_only=True):
     methods = []
     for match in _NATIVE_PROXY_EXTRACTION_REGEX.finditer(contents):
       interface_body = match.group('interface_body')
       for method in _EXTRACT_METHODS_REGEX.finditer(interface_body):
         name = method.group('name')
+        if not include_test_only and _NameIsTestOnly(name):
+          continue
+
         params = JniParams.Parse(method.group('params'), use_proxy_types=True)
         return_type = JavaTypeToProxyCast(method.group('return_type'))
-
-        unescaped_proxy_name = ProxyHelpers.CreateProxyMethodName(
-            fully_qualified_class, name, use_hash)
+        proxy_name = ProxyHelpers.CreateProxyMethodName(fully_qualified_class,
+                                                        name,
+                                                        use_hash=False)
+        hashed_proxy_name = ProxyHelpers.CreateProxyMethodName(
+            fully_qualified_class, name, use_hash=True)
         native = NativeMethod(
             static=True,
             java_class_name=None,
             return_type=return_type,
             name=name,
+            native_class_name=method.group('native_class_name'),
             params=params,
             is_proxy=True,
-            proxy_name=unescaped_proxy_name,
+            proxy_name=proxy_name,
+            hashed_proxy_name=hashed_proxy_name,
             ptr_type=ptr_type)
         methods.append(native)
 
@@ -962,9 +975,9 @@ class JNIFromJavaSource(object):
     called_by_natives = ExtractCalledByNatives(self.jni_params, contents,
                                                options.always_mangle)
 
-    natives += ProxyHelpers.ExtractStaticProxyNatives(
-        fully_qualified_class, contents, options.ptr_type,
-        options.use_proxy_hash)
+    natives += ProxyHelpers.ExtractStaticProxyNatives(fully_qualified_class,
+                                                      contents,
+                                                      options.ptr_type)
 
     if len(natives) == 0 and len(called_by_natives) == 0:
       raise SyntaxError(
@@ -989,10 +1002,17 @@ class JNIFromJavaSource(object):
 class HeaderFileGeneratorHelper(object):
   """Include helper methods for header generators."""
 
-  def __init__(self, class_name, fully_qualified_class, use_proxy_hash):
+  def __init__(self,
+               class_name,
+               fully_qualified_class,
+               use_proxy_hash,
+               split_name=None,
+               enable_jni_multiplexing=False):
     self.class_name = class_name
     self.fully_qualified_class = fully_qualified_class
     self.use_proxy_hash = use_proxy_hash
+    self.split_name = split_name
+    self.enable_jni_multiplexing = enable_jni_multiplexing
 
   def GetStubName(self, native):
     """Return the name of the stub function for this native method.
@@ -1004,9 +1024,14 @@ class HeaderFileGeneratorHelper(object):
       A string with the stub function name (used by the JVM).
     """
     if native.is_proxy:
-      method_name = EscapeClassName(native.proxy_name)
+      if self.use_proxy_hash:
+        method_name = EscapeClassName(native.hashed_proxy_name)
+      else:
+        method_name = EscapeClassName(native.proxy_name)
       return 'Java_%s_%s' % (EscapeClassName(
-          ProxyHelpers.GetQualifiedClass(self.use_proxy_hash)), method_name)
+          ProxyHelpers.GetQualifiedClass(
+              self.use_proxy_hash
+              or self.enable_jni_multiplexing)), method_name)
 
     template = Template('Java_${JAVA_NAME}_native${NAME}')
 
@@ -1021,8 +1046,9 @@ class HeaderFileGeneratorHelper(object):
     ret = collections.OrderedDict()
     for entry in origin:
       if isinstance(entry, NativeMethod) and entry.is_proxy:
-        ret[ProxyHelpers.GetClass(self.use_proxy_hash)] \
-          = ProxyHelpers.GetQualifiedClass(self.use_proxy_hash)
+        use_hash = self.use_proxy_hash or self.enable_jni_multiplexing
+        ret[ProxyHelpers.GetClass(use_hash)] \
+          = ProxyHelpers.GetQualifiedClass(use_hash)
         continue
       ret[self.class_name] = self.fully_qualified_class
 
@@ -1055,7 +1081,8 @@ const char kClassPath_${JAVA_CLASS}[] = \
       }
       # Since all proxy methods use the same class, defining this in every
       # header file would result in duplicated extern initializations.
-      if full_clazz != ProxyHelpers.GetQualifiedClass(self.use_proxy_hash):
+      if full_clazz != ProxyHelpers.GetQualifiedClass(
+          self.use_proxy_hash or self.enable_jni_multiplexing):
         ret += [template.substitute(values)]
 
     class_getter = """\
@@ -1063,7 +1090,7 @@ const char kClassPath_${JAVA_CLASS}[] = \
 #define ${JAVA_CLASS}_clazz_defined
 inline jclass ${JAVA_CLASS}_clazz(JNIEnv* env) {
   return base::android::LazyGetClass(env, kClassPath_${JAVA_CLASS}, \
-&g_${JAVA_CLASS}_clazz);
+${MAYBE_SPLIT_NAME_ARG}&g_${JAVA_CLASS}_clazz);
 }
 #endif
 """
@@ -1079,11 +1106,15 @@ JNI_REGISTRATION_EXPORT std::atomic<jclass> g_${JAVA_CLASS}_clazz(nullptr);
 
     for full_clazz in classes.values():
       values = {
-          'JAVA_CLASS': EscapeClassName(full_clazz),
+          'JAVA_CLASS':
+          EscapeClassName(full_clazz),
+          'MAYBE_SPLIT_NAME_ARG':
+          (('"%s", ' % self.split_name) if self.split_name else '')
       }
       # Since all proxy methods use the same class, defining this in every
       # header file would result in duplicated extern initializations.
-      if full_clazz != ProxyHelpers.GetQualifiedClass(self.use_proxy_hash):
+      if full_clazz != ProxyHelpers.GetQualifiedClass(
+          self.use_proxy_hash or self.enable_jni_multiplexing):
         ret += [template.substitute(values)]
 
     return ''.join(ret)
@@ -1104,12 +1135,16 @@ class InlHeaderFileGenerator(object):
     self.jni_params = jni_params
     self.options = options
     self.helper = HeaderFileGeneratorHelper(
-        self.class_name, fully_qualified_class, self.options.use_proxy_hash)
+        self.class_name,
+        fully_qualified_class,
+        self.options.use_proxy_hash,
+        split_name=self.options.split_name,
+        enable_jni_multiplexing=self.options.enable_jni_multiplexing)
 
   def GetContent(self):
     """Returns the content of the JNI binding file."""
     template = Template("""\
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1226,10 +1261,6 @@ $METHOD_STUBS
             name,
         })
 
-  def GetJNIFirstParamForCall(self, native):
-    c_type = _GetJNIFirstParamType(native)
-    return [self.GetJavaParamRefForCall(c_type, 'jcaller')]
-
   def GetImplementationMethodName(self, native):
     class_name = self.class_name
     if native.java_class_name is not None:
@@ -1242,17 +1273,14 @@ $METHOD_STUBS
     is_method = native.type == 'method'
 
     if is_method:
-      if '@JCaller' in native.params[0].annotations:
-        # Native pointer is second param.
-        params = [native.params[0]] + native.params[2:]
-      else:
-        params = native.params[1:]
+      params = native.params[1:]
     else:
       params = native.params
 
     params_in_call = ['env']
-    if not native.static or is_method:
-      params_in_call.extend(self.GetJNIFirstParamForCall(native))
+    if not native.static:
+      # Add jcaller param.
+      params_in_call.append(self.GetJavaParamRefForCall('jobject', 'jcaller'))
 
     for p in params:
       c_type = JavaDataTypeToC(p.datatype)
@@ -1262,27 +1290,6 @@ $METHOD_STUBS
         params_in_call.append(p.name)
 
     params_in_declaration = _GetParamsInDeclaration(native)
-    native_ptr_index = 0
-    if native.static:
-      # If a param is annotation with @JCaller we bind it in the same way
-      # as we'd bind a non-static function (JavaParamRef<jobject> caller will
-      # be the first parameter).
-      # This allows for conversion of non-static to static functions without
-      # touching the native implementation and allows for the JNI annotation
-      # processor to generate bindings for methods that can behave like
-      # non-static methods.
-      if native.params:
-        if '@JCaller' in native.params[0].annotations:
-          if is_method:
-            # Since is_method we have an extra param that isn't in the call
-            # (long nativePtr).
-            native_ptr_index = 1
-            # Replace <jobject> jcaller with @JCaller.
-            params_in_call[1:2] = []
-          # Don't need to do anything for functions since the jobject
-          # will be passed first anyways since we exclude jclass from our
-          # impl signature.
-
     params_in_call = ', '.join(params_in_call)
 
     return_type = return_declaration = JavaDataTypeToC(native.return_type)
@@ -1316,7 +1323,7 @@ $METHOD_STUBS
         optional_error_return = ', ' + optional_error_return
       values.update({
           'OPTIONAL_ERROR_RETURN': optional_error_return,
-          'PARAM0_NAME': native.params[native_ptr_index].name,
+          'PARAM0_NAME': native.params[0].name,
           'P0_TYPE': native.p0_type,
       })
       if self.options.enable_tracing:
@@ -1456,7 +1463,7 @@ JNIEnv* env${FIRST_PARAM_IN_DECLARATION}${PARAMS_IN_DECLARATION})""")
     function_header_template = Template("""\
 ${FUNCTION_SIGNATURE} {""")
     function_header_with_unused_template = Template("""\
-${FUNCTION_SIGNATURE} __attribute__ ((unused));
+[[maybe_unused]] ${FUNCTION_SIGNATURE};
 ${FUNCTION_SIGNATURE} {""")
     template = Template("""
 static std::atomic<jmethodID> g_${JAVA_CLASS}_${METHOD_ID_VAR_NAME}(nullptr);
@@ -1546,13 +1553,28 @@ def GetScriptName():
   return os.sep.join(script_components[base_index:])
 
 
+def _RemoveStaleHeaders(path, output_files):
+  if not os.path.isdir(path):
+    return
+  # Do not remove output files so that timestamps on declared outputs are not
+  # modified unless their contents are changed (avoids reverse deps needing to
+  # be rebuilt).
+  preserve = set(output_files)
+  for root, _, files in os.walk(path):
+    for f in files:
+      file_path = os.path.join(root, f)
+      if file_path not in preserve:
+        if os.path.isfile(file_path) and os.path.splitext(file_path)[1] == '.h':
+          os.remove(file_path)
+
+
 def main():
-  usage = """usage: %prog [OPTIONS]
+  description = """
 This script will parse the given java source code extracting the native
 declarations and print the header file to stdout (or a file).
 See SampleForTests.java for more details.
   """
-  parser = argparse.ArgumentParser(usage=usage)
+  parser = argparse.ArgumentParser(description=description)
 
   parser.add_argument(
       '-j',
@@ -1599,7 +1621,9 @@ See SampleForTests.java for more details.
       'for 64-bit, use long.')
   parser.add_argument('--cpp', default='cpp', help='The path to cpp command.')
   parser.add_argument(
-      '--javap', default='javap', help='The path to javap command.')
+      '--javap',
+      default=build_utils.JAVAP_PATH,
+      help='The path to javap command.')
   parser.add_argument(
       '--enable_profiling',
       action='store_true',
@@ -1610,18 +1634,39 @@ See SampleForTests.java for more details.
       help='Add TRACE_EVENTs to generated functions.')
   parser.add_argument(
       '--always_mangle', action='store_true', help='Mangle all function names')
+  parser.add_argument('--unchecked_exceptions',
+                      action='store_true',
+                      help='Do not check that no exceptions were thrown.')
+  parser.add_argument('--include_test_only',
+                      action='store_true',
+                      help='Whether to maintain ForTesting JNI methods.')
   parser.add_argument(
       '--use_proxy_hash',
       action='store_true',
       help='Hashes the native declaration of methods used '
-      'in @JniNatives interface. And uses a shorter name and package'
-      ' than GEN_JNI.')
+      'in @JniNatives interface.')
+  parser.add_argument('--enable_jni_multiplexing',
+                      action='store_true',
+                      help='Enables JNI multiplexing for Java native methods')
+  parser.add_argument(
+      '--split_name',
+      help='Split name that the Java classes should be loaded from.')
   args = parser.parse_args()
   input_files = args.input_files
   output_files = args.output_files
-  if not output_files:
+  if output_files:
+    output_dirs = set(os.path.dirname(f) for f in output_files)
+    if len(output_dirs) != 1:
+      parser.error(
+          'jni_generator only supports a single output directory per target '
+          '(got {})'.format(output_dirs))
+    output_dir = output_dirs.pop()
+    # Remove existing headers so that moving .java source files but not updating
+    # the corresponding C++ include will be a compile failure (otherwise
+    # incremental builds will usually not catch this).
+    _RemoveStaleHeaders(output_dir, output_files)
+  else:
     output_files = [None] * len(input_files)
-
   temp_dir = tempfile.mkdtemp()
   try:
     if args.jar_file:

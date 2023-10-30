@@ -1,16 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/timer/lap_timer.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 
 namespace base {
 
 namespace {
 
 // Default values.
-constexpr TimeDelta kDefaultTimeLimit = TimeDelta::FromSeconds(3);
+constexpr TimeDelta kDefaultTimeLimit = Seconds(3);
 constexpr int kDefaultWarmupRuns = 5;
 constexpr int kDefaultTimeCheckInterval = 10;
 

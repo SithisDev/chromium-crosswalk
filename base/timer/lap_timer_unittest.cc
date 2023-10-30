@@ -1,9 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/timer/lap_timer.h"
-#include "base/test/scoped_task_environment.h"
+
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -18,16 +19,15 @@ namespace test {
 
 namespace {
 
-constexpr base::TimeDelta kTimeLimit = base::TimeDelta::FromMilliseconds(15);
-constexpr base::TimeDelta kTimeAdvance = base::TimeDelta::FromMilliseconds(1);
+constexpr base::TimeDelta kTimeLimit = base::Milliseconds(15);
+constexpr base::TimeDelta kTimeAdvance = base::Milliseconds(1);
 constexpr int kWarmupRuns = 5;
 constexpr int kTimeCheckInterval = 10;
 
 }  // namespace
 
 TEST(LapTimer, UsageExample) {
-  ScopedTaskEnvironment scoped_task_environment(
-      ScopedTaskEnvironment::TimeSource::MOCK_TIME_AND_NOW);
+  TaskEnvironment task_environment(TaskEnvironment::TimeSource::MOCK_TIME);
 
   LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
 
@@ -35,7 +35,7 @@ TEST(LapTimer, UsageExample) {
   EXPECT_FALSE(timer.IsWarmedUp());
 
   do {
-    scoped_task_environment.FastForwardBy(kTimeAdvance);
+    task_environment.FastForwardBy(kTimeAdvance);
     timer.NextLap();
   } while (!timer.HasTimeLimitExpired());
 
@@ -49,11 +49,10 @@ TEST(LapTimer, UsageExample) {
   EXPECT_TRUE(timer.IsWarmedUp());
 }
 
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
 // iOS simulator does not support using ThreadTicks.
 TEST(LapTimer, ThreadTicksUsageExample) {
-  ScopedTaskEnvironment scoped_task_environment(
-      ScopedTaskEnvironment::TimeSource::MOCK_TIME_AND_NOW);
+  TaskEnvironment task_environment(TaskEnvironment::TimeSource::MOCK_TIME);
   LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval,
                  LapTimer::TimerMethod::kUseThreadTicks);
 
@@ -61,11 +60,11 @@ TEST(LapTimer, ThreadTicksUsageExample) {
   EXPECT_FALSE(timer.IsWarmedUp());
 
   do {
-    scoped_task_environment.FastForwardBy(kTimeAdvance);
+    task_environment.FastForwardBy(kTimeAdvance);
     timer.NextLap();
   } while (!timer.HasTimeLimitExpired());
 
-  // Because advancing the ScopedTaskEnvironment time won't affect the
+  // Because advancing the TaskEnvironment time won't affect the
   // ThreadTicks, laps will be much faster than the regular UsageExample.
   EXPECT_GT(timer.LapsPerSecond(), 1000);
   EXPECT_LT(timer.TimePerLap().InMillisecondsF(), 1.0f);

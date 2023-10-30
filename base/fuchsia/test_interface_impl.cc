@@ -1,11 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/fuchsia/test_interface_impl.h"
 
 namespace base {
-namespace fuchsia {
 
 TestInterfaceImpl::TestInterfaceImpl() = default;
 TestInterfaceImpl::~TestInterfaceImpl() = default;
@@ -14,5 +13,4 @@ void TestInterfaceImpl::Add(int32_t a, int32_t b, AddCallback callback) {
   callback(a + b);
 }
 
-}  // namespace fuchsia
 }  // namespace base

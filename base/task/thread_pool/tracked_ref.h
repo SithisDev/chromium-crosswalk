@@ -1,18 +1,18 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_TASK_THREAD_POOL_TRACKED_REF_H_
 #define BASE_TASK_THREAD_POOL_TRACKED_REF_H_
 
-#include <memory>
-
 #include "base/atomic_ref_count.h"
+#include "base/check.h"
 #include "base/gtest_prod_util.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/template_util.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 namespace internal {
@@ -34,8 +34,7 @@ namespace internal {
 //
 // TrackedRefFactory only makes sense to use on types that are always leaked in
 // production but need to be torn down in tests (blocking destruction is
-// impractical in production -- ref. ScopedAllowBaseSyncPrimitivesForTesting
-// below).
+// impractical in production).
 //
 // Why would we ever need such a thing? In thread_pool there is a clear
 // ownership hierarchy with mostly single owners and little refcounting. In
@@ -128,17 +127,22 @@ class TrackedRef {
 template <class T>
 class TrackedRefFactory {
  public:
-  TrackedRefFactory(T* ptr)
-      : ptr_(ptr), self_ref_(WrapUnique(new TrackedRef<T>(ptr_, this))) {
+  explicit TrackedRefFactory(T* ptr)
+      : ptr_(ptr), self_ref_(TrackedRef<T>(ptr_.get(), this)) {
     DCHECK(ptr_);
   }
 
+  TrackedRefFactory(const TrackedRefFactory&) = delete;
+  TrackedRefFactory& operator=(const TrackedRefFactory&) = delete;
+
   ~TrackedRefFactory() {
     // Enter the destruction phase.
-    ready_to_destroy_ = std::make_unique<WaitableEvent>();
+    ready_to_destroy_.emplace();
 
-    // Release self-ref (if this was the last one it will signal the event right
-    // away).
+    // Release self-ref. If this was the last one it will signal the event right
+    // away. Otherwise it establishes an happens-after relationship between
+    // |ready_to_destroy.emplace()| and the eventual
+    // |ready_to_destroy_->Signal()|.
     self_ref_.reset();
 
     ready_to_destroy_->Wait();
@@ -150,28 +154,26 @@ class TrackedRefFactory {
     // vend new TrackedRefs while it's being destroyed (owners of TrackedRefs
     // may still copy/move their refs around during the destruction phase).
     DCHECK(!live_tracked_refs_.IsZero());
-    return TrackedRef<T>(ptr_, this);
+    return TrackedRef<T>(ptr_.get(), this);
   }
 
  private:
   friend class TrackedRef<T>;
   FRIEND_TEST_ALL_PREFIXES(TrackedRefTest, CopyAndMoveSemantics);
 
-  T* const ptr_;
+  const raw_ptr<T> ptr_;
 
   // The number of live TrackedRefs vended by this factory.
   AtomicRefCount live_tracked_refs_{0};
 
   // Non-null during the destruction phase. Signaled once |live_tracked_refs_|
-  // reaches 0. Note: while this could a direct member, only initializing it in
-  // the destruction phase avoids keeping a handle open for the entire session.
-  std::unique_ptr<WaitableEvent> ready_to_destroy_;
+  // reaches 0. Note: making this optional and only initializing it in the
+  // destruction phase avoids keeping a handle open for the entire session.
+  absl::optional<WaitableEvent> ready_to_destroy_;
 
   // TrackedRefFactory holds a TrackedRef as well to prevent
   // |live_tracked_refs_| from ever reaching zero before ~TrackedRefFactory().
-  std::unique_ptr<TrackedRef<T>> self_ref_;
-
-  DISALLOW_COPY_AND_ASSIGN(TrackedRefFactory);
+  absl::optional<TrackedRef<T>> self_ref_;
 };
 
 }  // namespace internal

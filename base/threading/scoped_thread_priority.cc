@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,43 +6,80 @@
 
 #include "base/location.h"
 #include "base/threading/platform_thread.h"
-#include "base/trace_event/trace_event.h"
+#include "base/trace_event/base_tracing.h"
+#include "build/build_config.h"
 
 namespace base {
 
-#if defined(OS_WIN)
-// Enable the boost of thread priority when the code may load a library. The
-// thread priority boost is required to avoid priority inversion on the loader
-// lock.
-constexpr base::Feature kBoostThreadPriorityOnLibraryLoading{
-    "BoostThreadPriorityOnLibraryLoading", base::FEATURE_DISABLED_BY_DEFAULT};
-#endif  // OS_WIN
+ScopedBoostPriority::ScopedBoostPriority(ThreadType target_thread_type) {
+  DCHECK_LT(target_thread_type, ThreadType::kRealtimeAudio);
+  const ThreadType original_thread_type =
+      PlatformThread::GetCurrentThreadType();
+  const bool should_boost = original_thread_type < target_thread_type &&
+                            PlatformThread::CanChangeThreadType(
+                                original_thread_type, target_thread_type) &&
+                            PlatformThread::CanChangeThreadType(
+                                target_thread_type, original_thread_type);
+  if (should_boost) {
+    original_thread_type_.emplace(original_thread_type);
+    PlatformThread::SetCurrentThreadType(target_thread_type);
+  }
+}
 
-ScopedThreadMayLoadLibraryOnBackgroundThread::
-    ScopedThreadMayLoadLibraryOnBackgroundThread(const Location& from_here) {
-  TRACE_EVENT_BEGIN2("base", "ScopedThreadMayLoadLibraryOnBackgroundThread",
-                     "file_name", from_here.file_name(), "function_name",
-                     from_here.function_name());
+ScopedBoostPriority::~ScopedBoostPriority() {
+  if (original_thread_type_.has_value())
+    PlatformThread::SetCurrentThreadType(original_thread_type_.value());
+}
 
-#if defined(OS_WIN)
-  if (!base::FeatureList::IsEnabled(kBoostThreadPriorityOnLibraryLoading))
+namespace internal {
+
+ScopedMayLoadLibraryAtBackgroundPriority::
+    ScopedMayLoadLibraryAtBackgroundPriority(const Location& from_here,
+                                             std::atomic_bool* already_loaded)
+#if BUILDFLAG(IS_WIN)
+    : already_loaded_(already_loaded)
+#endif  // BUILDFLAG(IS_WIN)
+{
+  TRACE_EVENT_BEGIN(
+      "base", "ScopedMayLoadLibraryAtBackgroundPriority",
+      [&](perfetto::EventContext ctx) {
+        ctx.event()->set_source_location_iid(
+            base::trace_event::InternedSourceLocation::Get(&ctx, from_here));
+      });
+
+#if BUILDFLAG(IS_WIN)
+  if (already_loaded_ && already_loaded_->load(std::memory_order_relaxed))
     return;
 
-  base::ThreadPriority priority = PlatformThread::GetCurrentThreadPriority();
-  if (priority == base::ThreadPriority::BACKGROUND) {
-    original_thread_priority_ = priority;
-    PlatformThread::SetCurrentThreadPriority(base::ThreadPriority::NORMAL);
+  const base::ThreadType thread_type = PlatformThread::GetCurrentThreadType();
+  if (thread_type == base::ThreadType::kBackground) {
+    original_thread_type_ = thread_type;
+    PlatformThread::SetCurrentThreadType(base::ThreadType::kDefault);
+
+    TRACE_EVENT_BEGIN0(
+        "base",
+        "ScopedMayLoadLibraryAtBackgroundPriority : Priority Increased");
   }
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
 }
 
-ScopedThreadMayLoadLibraryOnBackgroundThread::
-    ~ScopedThreadMayLoadLibraryOnBackgroundThread() {
-  TRACE_EVENT_END0("base", "ScopedThreadMayLoadLibraryOnBackgroundThread");
-#if defined(OS_WIN)
-  if (original_thread_priority_)
-    PlatformThread::SetCurrentThreadPriority(original_thread_priority_.value());
-#endif  // OS_WIN
+ScopedMayLoadLibraryAtBackgroundPriority::
+    ~ScopedMayLoadLibraryAtBackgroundPriority() {
+  // Trace events must be closed in reverse order of opening so that they nest
+  // correctly.
+#if BUILDFLAG(IS_WIN)
+  if (original_thread_type_) {
+    TRACE_EVENT_END0(
+        "base",
+        "ScopedMayLoadLibraryAtBackgroundPriority : Priority Increased");
+    PlatformThread::SetCurrentThreadType(original_thread_type_.value());
+  }
+
+  if (already_loaded_)
+    already_loaded_->store(true, std::memory_order_relaxed);
+#endif  // BUILDFLAG(IS_WIN)
+  TRACE_EVENT_END0("base", "ScopedMayLoadLibraryAtBackgroundPriority");
 }
 
+}  // namespace internal
 }  // namespace base

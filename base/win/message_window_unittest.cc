@@ -1,20 +1,28 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "base/win/message_window.h"
+
+#include <windows.h>
 
 #include "base/bind.h"
 #include "base/guid.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/win/message_window.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+// To avoid conflicts with the macro from the Windows SDK...
+#undef FindWindow
 
 namespace base {
 
 namespace {
 
-bool HandleMessage(
-    UINT message, WPARAM wparam, LPARAM lparam, LRESULT* result) {
+bool HandleMessage(UINT message,
+                   WPARAM wparam,
+                   LPARAM lparam,
+                   LRESULT* result) {
   // Return |wparam| as the result of WM_USER message.
   if (message == WM_USER) {
     *result = wparam;
@@ -36,7 +44,7 @@ TEST(MessageWindowTest, Create) {
 TEST(MessageWindowTest, CreateNamed) {
   win::MessageWindow window;
   EXPECT_TRUE(window.CreateNamed(base::BindRepeating(&HandleMessage),
-                                 UTF8ToUTF16("test_message_window")));
+                                 UTF8ToWide("test_message_window")));
 }
 
 // Verifies that the created window can receive messages.
@@ -49,12 +57,12 @@ TEST(MessageWindowTest, SendMessage) {
 
 // Verifies that a named window can be found by name.
 TEST(MessageWindowTest, FindWindow) {
-  string16 name = UTF8ToUTF16(base::GenerateGUID());
+  std::wstring name = UTF8ToWide(base::GenerateGUID());
   win::MessageWindow window;
   EXPECT_TRUE(window.CreateNamed(base::BindRepeating(&HandleMessage), name));
 
   HWND hwnd = win::MessageWindow::FindWindow(name);
-  EXPECT_TRUE(hwnd != NULL);
+  EXPECT_TRUE(hwnd != nullptr);
   EXPECT_EQ(SendMessage(hwnd, WM_USER, 200, 0), 200);
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,26 +8,14 @@
 #include <memory>
 #include <set>
 
-#include "base/bind.h"
-#include "base/callback.h"
-#include "base/feature_list.h"
-#include "base/location.h"
-#include "base/no_destructor.h"
-#include "base/single_thread_task_runner.h"
-#include "base/thread_annotations.h"
-#include "base/time/time.h"
-#include "base/timer/elapsed_timer.h"
-#include "base/timer/timer.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/component_export.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/no_destructor.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/thread_annotations.h"
+#include "base/allocator/partition_allocator/partition_alloc_base/time/time.h"
+#include "base/allocator/partition_allocator/partition_alloc_forward.h"
+#include "base/allocator/partition_allocator/partition_lock.h"
 
-namespace base {
-
-namespace internal {
-
-struct PartitionRootBase;
-
-BASE_EXPORT extern const Feature kPartitionAllocPeriodicDecommit;
-
-}  // namespace internal
+namespace partition_alloc {
 
 // Posts and handles memory reclaim tasks for PartitionAlloc.
 //
@@ -38,47 +26,49 @@ BASE_EXPORT extern const Feature kPartitionAllocPeriodicDecommit;
 //
 // Singleton as this runs as long as the process is alive, and
 // having multiple instances would be wasteful.
-class BASE_EXPORT PartitionAllocMemoryReclaimer {
+class PA_COMPONENT_EXPORT(PARTITION_ALLOC) MemoryReclaimer {
  public:
-  static PartitionAllocMemoryReclaimer* Instance();
+  static MemoryReclaimer* Instance();
+
+  MemoryReclaimer(const MemoryReclaimer&) = delete;
+  MemoryReclaimer& operator=(const MemoryReclaimer&) = delete;
 
   // Internal. Do not use.
   // Registers a partition to be tracked by the reclaimer.
-  void RegisterPartition(internal::PartitionRootBase* partition);
+  void RegisterPartition(PartitionRoot<>* partition);
   // Internal. Do not use.
   // Unregisters a partition to be tracked by the reclaimer.
-  void UnregisterPartition(internal::PartitionRootBase* partition);
-  // Starts the periodic reclaim. Should be called once.
-  void Start(scoped_refptr<SequencedTaskRunner> task_runner);
-  // Triggers an explicit reclaim now.
-  void Reclaim();
-  // Triggers a reclaim. Do not add new callers.
-  void DeprecatedReclaim();
+  void UnregisterPartition(PartitionRoot<>* partition);
 
-  static constexpr TimeDelta kStatsRecordingTimeDelta =
-      TimeDelta::FromMinutes(5);
+  // Triggers an explicit reclaim now to reclaim as much free memory as
+  // possible. The API callers need to invoke this method periodically
+  // if they want to use memory reclaimer.
+  // See also GetRecommendedReclaimIntervalInMicroseconds()'s comment.
+  void ReclaimNormal();
+
+  // Returns a recommended interval to invoke ReclaimNormal.
+  int64_t GetRecommendedReclaimIntervalInMicroseconds() {
+    return internal::base::Seconds(4).InMicroseconds();
+  }
+
+  // Triggers an explicit reclaim now reclaiming all free memory
+  void ReclaimAll();
 
  private:
-  PartitionAllocMemoryReclaimer();
-  ~PartitionAllocMemoryReclaimer();
+  MemoryReclaimer();
+  ~MemoryReclaimer();
+  // |flags| is an OR of base::PartitionPurgeFlags
+  void Reclaim(int flags);
   void ReclaimAndReschedule();
-  void RecordStatistics();
   void ResetForTesting();
 
-  // Total time spent in |Reclaim()|.
-  bool has_called_reclaim_ = false;
-  TimeDelta total_reclaim_thread_time_;
-  // Schedules periodic |Reclaim()|.
-  std::unique_ptr<RepeatingTimer> timer_;
+  internal::Lock lock_;
+  std::set<PartitionRoot<>*> partitions_ PA_GUARDED_BY(lock_);
 
-  Lock lock_;
-  std::set<internal::PartitionRootBase*> partitions_ GUARDED_BY(lock_);
-
-  friend class NoDestructor<PartitionAllocMemoryReclaimer>;
-  friend class PartitionAllocMemoryReclaimerTest;
-  DISALLOW_COPY_AND_ASSIGN(PartitionAllocMemoryReclaimer);
+  friend class internal::base::NoDestructor<MemoryReclaimer>;
+  friend class MemoryReclaimerTest;
 };
 
-}  // namespace base
+}  // namespace partition_alloc
 
 #endif  // BASE_ALLOCATOR_PARTITION_ALLOCATOR_MEMORY_RECLAIMER_H_

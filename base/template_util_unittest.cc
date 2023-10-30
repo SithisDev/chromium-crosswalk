@@ -1,10 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/template_util.h"
 
 #include <string>
+#include <type_traits>
 
 #include "base/containers/flat_tree.h"
 #include "base/test/move_only_int.h"
@@ -28,12 +29,6 @@ std::ostream& operator<<(std::ostream& os, const StructWithOperator& v) {
 struct StructWithToString {
   std::string ToString() const { return ""; }
 };
-
-// is_non_const_reference<Type>
-static_assert(!is_non_const_reference<int>::value, "IsNonConstReference");
-static_assert(!is_non_const_reference<const int&>::value,
-              "IsNonConstReference");
-static_assert(is_non_const_reference<int&>::value, "IsNonConstReference");
 
 // A few standard types that definitely support printing.
 static_assert(internal::SupportsOstreamOperator<int>::value,
@@ -84,35 +79,47 @@ static_assert(internal::SupportsToString<StructWithToString>::value,
 static_assert(internal::SupportsToString<const StructWithToString&>::value,
               "struct with .ToString() should be printable by const ref");
 
-// base::is_trivially_copyable
-class TrivialCopy {
- public:
-  TrivialCopy(int d) : data_(d) {}
+// is_scoped_enum
+TEST(TemplateUtil, IsScopedEnum) {
+  static_assert(!is_scoped_enum<int>::value, "");
+  static_assert(!is_scoped_enum<SimpleEnum>::value, "");
+  static_assert(!is_scoped_enum<EnumWithExplicitType>::value, "");
+  static_assert(is_scoped_enum<ScopedEnum>::value, "");
+}
 
- protected:
-  int data_;
-};
+TEST(TemplateUtil, RemoveCvRefT) {
+  static_assert(std::is_same<int, remove_cvref_t<const int>>::value, "");
+  static_assert(std::is_same<int, remove_cvref_t<const volatile int>>::value,
+                "");
+  static_assert(std::is_same<int, remove_cvref_t<int&>>::value, "");
+  static_assert(std::is_same<int, remove_cvref_t<const int&>>::value, "");
+  static_assert(std::is_same<int, remove_cvref_t<const volatile int&>>::value,
+                "");
+  static_assert(std::is_same<int, remove_cvref_t<int&&>>::value, "");
+  static_assert(
+      std::is_same<SimpleStruct, remove_cvref_t<const SimpleStruct&>>::value,
+      "");
+  static_assert(std::is_same<int*, remove_cvref_t<int*>>::value, "");
 
-class TrivialCopyButWithDestructor : public TrivialCopy {
- public:
-  TrivialCopyButWithDestructor(int d) : TrivialCopy(d) {}
-  ~TrivialCopyButWithDestructor() { data_ = 0; }
-};
+  // Test references and pointers to arrays.
+  static_assert(std::is_same<int[3], remove_cvref_t<int[3]>>::value, "");
+  static_assert(std::is_same<int[3], remove_cvref_t<int(&)[3]>>::value, "");
+  static_assert(std::is_same<int(*)[3], remove_cvref_t<int(*)[3]>>::value, "");
 
-static_assert(base::is_trivially_copyable<TrivialCopy>::value,
-              "TrivialCopy should be detected as trivially copyable");
-static_assert(!base::is_trivially_copyable<TrivialCopyButWithDestructor>::value,
-              "TrivialCopyButWithDestructor should not be detected as "
-              "trivially copyable");
+  // Test references and pointers to functions.
+  static_assert(std::is_same<void(int), remove_cvref_t<void(int)>>::value, "");
+  static_assert(std::is_same<void(int), remove_cvref_t<void (&)(int)>>::value,
+                "");
+  static_assert(
+      std::is_same<void (*)(int), remove_cvref_t<void (*)(int)>>::value, "");
+}
 
-class NoCopy {
- public:
-  NoCopy(const NoCopy&) = delete;
-};
-
-static_assert(
-    !base::is_trivially_copy_constructible<std::vector<NoCopy>>::value,
-    "is_trivially_copy_constructible<std::vector<T>> must be compiled.");
+TEST(TemplateUtil, IsConstantEvaluated) {
+  // base::is_constant_evaluated() should return whether it is evaluated as part
+  // of a constant expression.
+  static_assert(is_constant_evaluated(), "");
+  EXPECT_FALSE(is_constant_evaluated());
+}
 
 }  // namespace
 

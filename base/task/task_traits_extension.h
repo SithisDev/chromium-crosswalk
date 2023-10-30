@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -197,10 +197,8 @@ struct TaskTraitsExtension {
 
 // Tests that that a trait extension accepts all |ArgsTypes...|.
 template <class... ArgTypes>
-struct AreValidTraitsForExtension
-    : std::integral_constant<
-          bool,
-          std::is_constructible<TaskTraitsExtension, ArgTypes...>::value> {};
+using AreValidTraitsForExtension =
+    std::is_constructible<TaskTraitsExtension, ArgTypes...>;
 
 // Helper function that returns the TaskTraitsExtensionStorage of a
 // serialized extension created with |args...| if there are arguments that are

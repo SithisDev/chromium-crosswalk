@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,7 @@ import javax.annotation.concurrent.GuardedBy;
  */
 @JNINamespace("base::android")
 public final class MultiprocessTestClientLauncher {
-    private static final String TAG = "cr_MProcTCLauncher";
+    private static final String TAG = "MProcTCLauncher";
 
     private static final int CONNECTION_TIMEOUT_MS = 10 * 1000;
 
@@ -200,6 +200,8 @@ public final class MultiprocessTestClientLauncher {
     @CalledByNative
     private static int launchClient(
             final String[] commandLine, final FileDescriptorInfo[] filesToMap) {
+        assert Looper.myLooper() != Looper.getMainLooper();
+
         initLauncherThread();
 
         final MultiprocessTestClientLauncher launcher =
@@ -270,6 +272,7 @@ public final class MultiprocessTestClientLauncher {
         // this gets called.
         if (launcher != null) {
             Integer mainResult = launcher.getMainReturnCode(timeoutMs);
+            launcher.mLauncher.stop();
             return mainResult == null ? MainReturnCodeResult.createTimeoutMainResult()
                                       : MainReturnCodeResult.createMainResult(mainResult);
         }
@@ -387,7 +390,7 @@ public final class MultiprocessTestClientLauncher {
         done.acquireUninterruptibly();
     }
 
-    private static <R> R runOnLauncherAndGetResult(Callable<R> callable) {
+    private static <RT> RT runOnLauncherAndGetResult(Callable<RT> callable) {
         if (isRunningOnLauncherThread()) {
             try {
                 return callable.call();
@@ -396,7 +399,7 @@ public final class MultiprocessTestClientLauncher {
             }
         }
         try {
-            FutureTask<R> task = new FutureTask<R>(callable);
+            FutureTask<RT> task = new FutureTask<RT>(callable);
             sLauncherHandler.post(task);
             return task.get();
         } catch (Exception e) {
