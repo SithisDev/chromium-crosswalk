@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,18 +8,19 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.util.Log;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.android_webview.AwWebResourceResponse;
 import org.chromium.android_webview.DefaultVideoPosterRequestHandler;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
+import org.chromium.components.embedder_support.util.WebResourceResponseInfo;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,8 +51,7 @@ public class AwContentsClientGetDefaultVideoPosterTest {
             return getPoster();
         }
 
-        public void waitForGetDefaultVideoPosterCalled() throws InterruptedException,
-                TimeoutException {
+        public void waitForGetDefaultVideoPosterCalled() throws TimeoutException {
             mVideoPosterCallbackHelper.waitForCallback(0);
         }
 
@@ -85,12 +85,30 @@ public class AwContentsClientGetDefaultVideoPosterTest {
     @Test
     @Feature({"AndroidWebView"})
     @SmallTest
-    public void testInterceptDefaultVidoePosterURL() throws Throwable {
+    public void testDefaultVideoPosterCSP() throws Throwable {
+        DefaultVideoPosterClient contentsClient = new DefaultVideoPosterClient(
+                InstrumentationRegistry.getInstrumentation().getContext());
+        AwTestContainerView testContainerView =
+                mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
+        // Even though this content security policy does not allow loading from
+        // android-webview-video-poster: this should still work as it's exempt from CSP.
+        String data = "<html><head>"
+                + "<meta http-equiv='Content-Security-Policy' content=\"default-src 'self';\">"
+                + "<body><video id='video' control src='' /> </body></html>";
+        mActivityTestRule.loadDataAsync(
+                testContainerView.getAwContents(), data, "text/html", false);
+        contentsClient.waitForGetDefaultVideoPosterCalled();
+    }
+
+    @Test
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testInterceptDefaultVidoePosterURL() {
         DefaultVideoPosterClient contentsClient = new DefaultVideoPosterClient(
                 InstrumentationRegistry.getInstrumentation().getTargetContext());
         DefaultVideoPosterRequestHandler handler =
                 new DefaultVideoPosterRequestHandler(contentsClient);
-        AwWebResourceResponse requestData =
+        WebResourceResponseInfo requestData =
                 handler.shouldInterceptRequest(handler.getDefaultVideoPosterURL());
         Assert.assertTrue(requestData.getMimeType().equals("image/png"));
         Bitmap bitmap = BitmapFactory.decodeStream(requestData.getData());
@@ -108,7 +126,7 @@ public class AwContentsClientGetDefaultVideoPosterTest {
         NullContentsClient contentsClient = new NullContentsClient();
         DefaultVideoPosterRequestHandler handler =
                 new DefaultVideoPosterRequestHandler(contentsClient);
-        AwWebResourceResponse requestData =
+        WebResourceResponseInfo requestData =
                 handler.shouldInterceptRequest(handler.getDefaultVideoPosterURL());
         Assert.assertTrue(requestData.getMimeType().equals("image/png"));
         InputStream in = requestData.getData();

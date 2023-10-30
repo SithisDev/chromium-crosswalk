@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,11 @@ import android.content.BroadcastReceiver;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.Proxy;
+import android.os.Handler;
 import android.os.Looper;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -41,7 +43,7 @@ public class ContentViewMiscTest {
     private AwContents mAwContents;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContentsClient = new TestAwContentsClient();
         final AwTestContainerView testContainerView =
                 mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
@@ -67,16 +69,24 @@ public class ContentViewMiscTest {
         // Set up mock contexts to use with the listener
         final AtomicReference<BroadcastReceiver> receiverRef =
                 new AtomicReference<BroadcastReceiver>();
-        final AdvancedMockContext appContext = new AdvancedMockContext(
-                InstrumentationRegistry.getInstrumentation()
-                        .getTargetContext()
-                        .getApplicationContext()) {
-            @Override
-            public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter) {
-                receiverRef.set(receiver);
-                return null;
-            }
-        };
+        final AdvancedMockContext appContext =
+                new AdvancedMockContext(InstrumentationRegistry.getInstrumentation()
+                                                .getTargetContext()
+                                                .getApplicationContext()) {
+                    @Override
+                    public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter,
+                            String broadcastPermission, Handler scheduler) {
+                        receiverRef.set(receiver);
+                        return null;
+                    }
+
+                    @Override
+                    public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter,
+                            String broadcastPermission, Handler scheduler, int flags) {
+                        receiverRef.set(receiver);
+                        return null;
+                    }
+                };
         ContextUtils.initApplicationContextForTests(appContext);
 
         // Set up a delegate so we know when native code is about to get

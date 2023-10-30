@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,29 +9,36 @@
 
 #include "android_webview/browser/gfx/browser_view_renderer_client.h"
 #include "android_webview/browser/gfx/compositor_frame_consumer.h"
+#include "android_webview/browser/gfx/root_frame_sink.h"
+#include "android_webview/browser/gfx/root_frame_sink_proxy.h"
+#include "android_webview/common/aw_features.h"
 #include "base/auto_reset.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/logging.h"
+#include "base/memory/raw_ptr.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/supports_user_data.h"
 #include "base/trace_event/traced_value.h"
 #include "cc/base/math_util.h"
+#include "components/viz/common/features.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
 #include "components/viz/common/quads/compositor_frame.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/use_zoom_for_dsf_policy.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "ui/gfx/geometry/point.h"
-#include "ui/gfx/geometry/scroll_offset.h"
+#include "ui/gfx/geometry/point_conversions.h"
+#include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 
 namespace android_webview {
 
@@ -59,11 +66,11 @@ class BrowserViewRendererUserData : public base::SupportsUserData::Data {
     BrowserViewRendererUserData* data =
         static_cast<BrowserViewRendererUserData*>(
             web_contents->GetUserData(kBrowserViewRendererUserDataKey));
-    return data ? data->bvr_ : NULL;
+    return data ? data->bvr_.get() : NULL;
   }
 
  private:
-  BrowserViewRenderer* bvr_;
+  raw_ptr<BrowserViewRenderer> bvr_;
 };
 
 }  // namespace
@@ -109,12 +116,19 @@ BrowserViewRenderer::BrowserViewRenderer(
       max_page_scale_factor_(0.f),
       on_new_picture_enable_(false),
       clear_view_(false),
-      offscreen_pre_raster_(false),
-      weak_ptr_factory_(this) {}
+      offscreen_pre_raster_(false) {
+  begin_frame_source_ = std::make_unique<BeginFrameSourceWebView>();
+  root_frame_sink_proxy_ = std::make_unique<RootFrameSinkProxy>(
+      ui_task_runner_, this, begin_frame_source_.get());
+  UpdateBeginFrameSource();
+}
 
 BrowserViewRenderer::~BrowserViewRenderer() {
   DCHECK(compositor_map_.empty());
   DCHECK(!current_compositor_frame_consumer_);
+
+  // We need to destroy |root_frame_sink_proxy_| before |begin_frame_source_|;
+  root_frame_sink_proxy_.reset();
 }
 
 base::WeakPtr<CompositorFrameProducer> BrowserViewRenderer::GetWeakPtr() {
@@ -128,7 +142,16 @@ void BrowserViewRenderer::SetCurrentCompositorFrameConsumer(
   }
   current_compositor_frame_consumer_ = compositor_frame_consumer;
   if (current_compositor_frame_consumer_) {
-    current_compositor_frame_consumer_->SetCompositorFrameProducer(this);
+    // Previous renderer will evict CompositorFrame, compositor needs to submit
+    // next frames with new local surface id.
+    if (compositor_)
+      compositor_->WasEvicted();
+
+    RootFrameSinkGetter root_sink_getter;
+    if (root_frame_sink_proxy_)
+      root_sink_getter = root_frame_sink_proxy_->GetRootFrameSinkCallback();
+    current_compositor_frame_consumer_->SetCompositorFrameProducer(
+        this, std::move(root_sink_getter));
     OnParentDrawDataUpdated(current_compositor_frame_consumer_);
   }
 }
@@ -143,6 +166,13 @@ void BrowserViewRenderer::RegisterWithWebContents(
 void BrowserViewRenderer::TrimMemory() {
   DCHECK(ui_task_runner_->BelongsToCurrentThread());
   TRACE_EVENT0("android_webview", "BrowserViewRenderer::TrimMemory");
+
+  // Trimming memory might destroy HardwareRenderer which will evict
+  // CompositorFrame, compositor needs to submit next frames with new local
+  // surface id.
+  if (compositor_)
+    compositor_->WasEvicted();
+
   // Just set the memory limit to 0 and drop all tiles. This will be reset to
   // normal levels in the next DrawGL call.
   if (!offscreen_pre_raster_)
@@ -212,15 +242,15 @@ gfx::Rect BrowserViewRenderer::ComputeTileRectAndUpdateMemoryPolicy() {
 }
 
 content::SynchronousCompositor* BrowserViewRenderer::FindCompositor(
-    const CompositorID& compositor_id) const {
-  const auto& compositor_iterator = compositor_map_.find(compositor_id);
+    const viz::FrameSinkId& frame_sink_id) const {
+  const auto& compositor_iterator = compositor_map_.find(frame_sink_id);
   if (compositor_iterator == compositor_map_.end())
     return nullptr;
 
   return compositor_iterator->second;
 }
 
-void BrowserViewRenderer::PrepareToDraw(const gfx::Vector2d& scroll,
+void BrowserViewRenderer::PrepareToDraw(const gfx::Point& scroll,
                                         const gfx::Rect& global_visible_rect) {
   last_on_draw_scroll_offset_ = scroll;
   last_on_draw_global_visible_rect_ = global_visible_rect;
@@ -244,6 +274,9 @@ bool BrowserViewRenderer::CanOnDraw() {
 bool BrowserViewRenderer::OnDrawHardware() {
   DCHECK(current_compositor_frame_consumer_);
   TRACE_EVENT0("android_webview", "BrowserViewRenderer::OnDrawHardware");
+
+  const bool did_invalidate = did_invalidate_since_last_draw_;
+  did_invalidate_since_last_draw_ = false;
 
   if (!CanOnDraw()) {
     return false;
@@ -292,9 +325,10 @@ bool BrowserViewRenderer::OnDrawHardware() {
       copy_request_ptr->set_result_task_runner(ui_task_runner_);
   }
   std::unique_ptr<ChildFrame> child_frame = std::make_unique<ChildFrame>(
-      std::move(future), compositor_id_, viewport_size_for_tile_priority,
-      external_draw_constraints_.transform, offscreen_pre_raster_,
-      std::move(requests));
+      std::move(future), frame_sink_id_, viewport_size_for_tile_priority,
+      external_draw_constraints_.transform, offscreen_pre_raster_, dip_scale_,
+      std::move(requests), did_invalidate,
+      begin_frame_source_->LastDispatchedBeginFrameArgs());
 
   ReturnUnusedResource(
       current_compositor_frame_consumer_->SetFrameOnUI(std::move(child_frame)));
@@ -315,15 +349,15 @@ void BrowserViewRenderer::OnParentDrawDataUpdated(
 bool BrowserViewRenderer::DoUpdateParentDrawData() {
   ParentCompositorDrawConstraints new_constraints;
   viz::FrameTimingDetailsMap new_timing_details;
-  CompositorID id;
+  viz::FrameSinkId id;
   uint32_t frame_token = 0u;
   current_compositor_frame_consumer_->TakeParentDrawDataOnUI(
       &new_constraints, &id, &new_timing_details, &frame_token);
 
   content::SynchronousCompositor* compositor = FindCompositor(id);
   if (compositor) {
-    compositor_->DidPresentCompositorFrames(std::move(new_timing_details),
-                                            frame_token);
+    compositor->DidPresentCompositorFrames(std::move(new_timing_details),
+                                           frame_token);
   }
 
   if (external_draw_constraints_ == new_constraints)
@@ -335,6 +369,11 @@ bool BrowserViewRenderer::DoUpdateParentDrawData() {
 void BrowserViewRenderer::OnViewTreeForceDarkStateChanged(
     bool view_tree_force_dark_state) {
   client_->OnViewTreeForceDarkStateChanged(view_tree_force_dark_state);
+}
+
+void BrowserViewRenderer::ChildSurfaceWasEvicted() {
+  if (compositor_)
+    compositor_->WasEvicted();
 }
 
 void BrowserViewRenderer::RemoveCompositorFrameConsumer(
@@ -359,24 +398,25 @@ void BrowserViewRenderer::ReturnUnusedResource(
       viz::TransferableResource::ReturnResources(
           child_frame->frame->resource_list);
   content::SynchronousCompositor* compositor =
-      FindCompositor(child_frame->compositor_id);
+      FindCompositor(child_frame->frame_sink_id);
   if (compositor && !resources.empty())
     compositor->ReturnResources(child_frame->layer_tree_frame_sink_id,
                                 std::move(resources));
 }
 
 void BrowserViewRenderer::ReturnUsedResources(
-    const std::vector<viz::ReturnedResource>& resources,
-    const CompositorID& compositor_id,
+    std::vector<viz::ReturnedResource> resources,
+    const viz::FrameSinkId& frame_sink_id,
     uint32_t layer_tree_frame_sink_id) {
-  content::SynchronousCompositor* compositor = FindCompositor(compositor_id);
+  content::SynchronousCompositor* compositor = FindCompositor(frame_sink_id);
   if (compositor && !resources.empty())
-    compositor->ReturnResources(layer_tree_frame_sink_id, resources);
+    compositor->ReturnResources(layer_tree_frame_sink_id, std::move(resources));
   has_rendered_frame_ = true;
 }
 
 bool BrowserViewRenderer::OnDrawSoftware(SkCanvas* canvas) {
-  return CanOnDraw() && CompositeSW(canvas);
+  did_invalidate_since_last_draw_ = false;
+  return CanOnDraw() && CompositeSW(canvas, /*software_canvas=*/true);
 }
 
 bool BrowserViewRenderer::NeedToDrawBackgroundColor() {
@@ -395,19 +435,17 @@ sk_sp<SkPicture> BrowserViewRenderer::CapturePicture(int width,
   }
 
   SkPictureRecorder recorder;
-  SkCanvas* rec_canvas = recorder.beginRecording(width, height, NULL, 0);
+  SkCanvas* rec_canvas = recorder.beginRecording(width, height);
   if (compositor_) {
     {
       // Reset scroll back to the origin, will go back to the old
       // value when scroll_reset is out of scope.
-      base::AutoReset<gfx::Vector2dF> scroll_reset(&scroll_offset_unscaled_,
-                                                   gfx::Vector2dF());
-      compositor_->DidChangeRootLayerScrollOffset(
-          gfx::ScrollOffset(scroll_offset_unscaled_));
-      CompositeSW(rec_canvas);
+      base::AutoReset<gfx::PointF> scroll_reset(&scroll_offset_unscaled_,
+                                                gfx::PointF());
+      compositor_->DidChangeRootLayerScrollOffset(scroll_offset_unscaled_);
+      CompositeSW(rec_canvas, /*software_canvas=*/false);
     }
-    compositor_->DidChangeRootLayerScrollOffset(
-        gfx::ScrollOffset(scroll_offset_unscaled_));
+    compositor_->DidChangeRootLayerScrollOffset(scroll_offset_unscaled_);
   }
   return recorder.finishRecordingAsPicture();
 }
@@ -442,6 +480,7 @@ void BrowserViewRenderer::SetIsPaused(bool paused) {
                        "paused",
                        paused);
   is_paused_ = paused;
+  UpdateBeginFrameSource();
 }
 
 void BrowserViewRenderer::SetViewVisibility(bool view_visible) {
@@ -460,6 +499,7 @@ void BrowserViewRenderer::SetWindowVisibility(bool window_visible) {
                        "window_visible",
                        window_visible);
   window_visible_ = window_visible;
+  UpdateBeginFrameSource();
 }
 
 void BrowserViewRenderer::OnSizeChanged(int width, int height) {
@@ -488,12 +528,14 @@ void BrowserViewRenderer::OnAttachedToWindow(int width, int height) {
   size_.SetSize(width, height);
   if (offscreen_pre_raster_)
     ComputeTileRectAndUpdateMemoryPolicy();
+  UpdateBeginFrameSource();
 }
 
 void BrowserViewRenderer::OnDetachedFromWindow() {
   TRACE_EVENT0("android_webview", "BrowserViewRenderer::OnDetachedFromWindow");
   attached_to_window_ = false;
   ReleaseHardware();
+  UpdateBeginFrameSource();
 }
 
 void BrowserViewRenderer::ZoomBy(float delta) {
@@ -535,52 +577,63 @@ bool BrowserViewRenderer::IsClientVisible() const {
              : !was_attached_ || (attached_to_window_ && window_visible_);
 }
 
+void BrowserViewRenderer::UpdateBeginFrameSource() {
+  if (IsClientVisible()) {
+    begin_frame_source_->SetParentSource(
+        RootBeginFrameSourceWebView::GetInstance());
+  } else {
+    begin_frame_source_->SetParentSource(nullptr);
+  }
+}
+
 gfx::Rect BrowserViewRenderer::GetScreenRect() const {
   return gfx::Rect(client_->GetLocationOnScreen(), size_);
 }
 
 void BrowserViewRenderer::DidInitializeCompositor(
     content::SynchronousCompositor* compositor,
-    int process_id,
-    int routing_id) {
+    const viz::FrameSinkId& frame_sink_id) {
   TRACE_EVENT_INSTANT0("android_webview",
                        "BrowserViewRenderer::DidInitializeCompositor",
                        TRACE_EVENT_SCOPE_THREAD);
   DCHECK(compositor);
-  CompositorID compositor_id(process_id, routing_id);
   // This assumes that a RenderViewHost has at most 1 synchronous compositor
   // througout its lifetime.
-  DCHECK(compositor_map_.count(compositor_id) == 0);
-  compositor_map_[compositor_id] = compositor;
+  DCHECK(compositor_map_.count(frame_sink_id) == 0);
+  compositor_map_[frame_sink_id] = compositor;
+  if (root_frame_sink_proxy_)
+    root_frame_sink_proxy_->AddChildFrameSinkId(frame_sink_id);
+
+  compositor->SetBeginFrameSource(begin_frame_source_.get());
 
   // At this point, the RVHChanged event for the new RVH that contains the
   // |compositor| might have been fired already, in which case just set the
   // current compositor with the new compositor.
-  if (compositor_id.Equals(compositor_id_))
+  if (frame_sink_id == frame_sink_id_)
     SetActiveCompositor(compositor);
 }
 
 void BrowserViewRenderer::DidDestroyCompositor(
     content::SynchronousCompositor* compositor,
-    int process_id,
-    int routing_id) {
+    const viz::FrameSinkId& frame_sink_id) {
   TRACE_EVENT_INSTANT0("android_webview",
                        "BrowserViewRenderer::DidDestroyCompositor",
                        TRACE_EVENT_SCOPE_THREAD);
-  CompositorID compositor_id(process_id, routing_id);
-  DCHECK(compositor_map_.count(compositor_id));
+  DCHECK(compositor_map_.count(frame_sink_id));
   if (compositor_ == compositor) {
     compositor_ = nullptr;
     copy_requests_.clear();
   }
 
-  compositor_map_.erase(compositor_id);
+  if (root_frame_sink_proxy_)
+    root_frame_sink_proxy_->RemoveChildFrameSinkId(frame_sink_id);
+  compositor_map_.erase(frame_sink_id);
 }
 
-void BrowserViewRenderer::SetActiveCompositorID(
-    const CompositorID& compositor_id) {
-  compositor_id_ = compositor_id;
-  SetActiveCompositor(FindCompositor(compositor_id));
+void BrowserViewRenderer::SetActiveFrameSinkId(
+    const viz::FrameSinkId& frame_sink_id) {
+  frame_sink_id_ = frame_sink_id;
+  SetActiveCompositor(FindCompositor(frame_sink_id));
 }
 
 void BrowserViewRenderer::SetActiveCompositor(
@@ -603,18 +656,15 @@ void BrowserViewRenderer::SetDipScale(float dip_scale) {
   CHECK_GT(dip_scale_, 0.f);
 }
 
-gfx::Vector2d BrowserViewRenderer::max_scroll_offset() const {
+gfx::Point BrowserViewRenderer::max_scroll_offset() const {
   DCHECK_GT(dip_scale_, 0.f);
-  float scale = content::IsUseZoomForDSFEnabled()
-                    ? page_scale_factor_
-                    : dip_scale_ * page_scale_factor_;
-  return gfx::ToCeiledVector2d(
-      gfx::ScaleVector2d(max_scroll_offset_unscaled_, scale));
+  return gfx::ToCeiledPoint(
+      gfx::ScalePoint(max_scroll_offset_unscaled_, page_scale_factor_));
 }
 
-void BrowserViewRenderer::ScrollTo(const gfx::Vector2d& scroll_offset) {
-  gfx::Vector2d max_offset = max_scroll_offset();
-  gfx::Vector2dF scroll_offset_unscaled;
+void BrowserViewRenderer::ScrollTo(const gfx::Point& scroll_offset) {
+  gfx::Point max_offset = max_scroll_offset();
+  gfx::PointF scroll_offset_unscaled;
   // To preserve the invariant that scrolling to the maximum physical pixel
   // value also scrolls to the maximum dip pixel value we transform the physical
   // offset into the dip offset by using a proportion (instead of dividing by
@@ -650,14 +700,13 @@ void BrowserViewRenderer::ScrollTo(const gfx::Vector2d& scroll_offset) {
                        scroll_offset_unscaled.y());
 
   if (compositor_)
-    compositor_->DidChangeRootLayerScrollOffset(
-        gfx::ScrollOffset(scroll_offset_unscaled));
+    compositor_->DidChangeRootLayerScrollOffset(scroll_offset_unscaled);
 }
 
 void BrowserViewRenderer::RestoreScrollAfterTransition(
-    const gfx::Vector2d& scroll_offset) {
+    const gfx::Point& scroll_offset) {
   // Determine if the clipped scroll offset.
-  gfx::Vector2d clipped_offset = scroll_offset;
+  gfx::Point clipped_offset = scroll_offset;
   clipped_offset.SetToMin(max_scroll_offset());
 
   // If the scroll will be clipped due to the max scroll then we haven't
@@ -686,25 +735,25 @@ void BrowserViewRenderer::DidUpdateContent(
 }
 
 void BrowserViewRenderer::SetTotalRootLayerScrollOffset(
-    const gfx::Vector2dF& scroll_offset_unscaled) {
+    const gfx::PointF& scroll_offset_unscaled) {
   if (scroll_offset_unscaled_ == scroll_offset_unscaled)
     return;
   scroll_offset_unscaled_ = scroll_offset_unscaled;
 
-  gfx::Vector2d max_offset = max_scroll_offset();
-  gfx::Vector2d scroll_offset;
+  gfx::Point max_offset = max_scroll_offset();
+  gfx::Point scroll_offset;
   // For an explanation as to why this is done this way see the comment in
   // BrowserViewRenderer::ScrollTo.
   if (max_scroll_offset_unscaled_.x()) {
     scroll_offset.set_x(
-        gfx::ToRoundedInt((scroll_offset_unscaled.x() * max_offset.x()) /
-                          max_scroll_offset_unscaled_.x()));
+        base::ClampRound((scroll_offset_unscaled.x() * max_offset.x()) /
+                         max_scroll_offset_unscaled_.x()));
   }
 
   if (max_scroll_offset_unscaled_.y()) {
     scroll_offset.set_y(
-        gfx::ToRoundedInt((scroll_offset_unscaled.y() * max_offset.y()) /
-                          max_scroll_offset_unscaled_.y()));
+        base::ClampRound((scroll_offset_unscaled.y() * max_offset.y()) /
+                         max_scroll_offset_unscaled_.y()));
   }
 
   DCHECK_LE(0, scroll_offset.x());
@@ -717,8 +766,8 @@ void BrowserViewRenderer::SetTotalRootLayerScrollOffset(
 
 void BrowserViewRenderer::UpdateRootLayerState(
     content::SynchronousCompositor* compositor,
-    const gfx::Vector2dF& total_scroll_offset,
-    const gfx::Vector2dF& total_max_scroll_offset,
+    const gfx::PointF& total_scroll_offset,
+    const gfx::PointF& total_max_scroll_offset,
     const gfx::SizeF& scrollable_size,
     float page_scale_factor,
     float min_page_scale_factor,
@@ -727,8 +776,7 @@ void BrowserViewRenderer::UpdateRootLayerState(
     return;
 
   gfx::SizeF scrollable_size_dip = scrollable_size;
-  if (content::IsUseZoomForDSFEnabled())
-    scrollable_size_dip.Scale(1 / dip_scale_);
+  scrollable_size_dip.Scale(1 / dip_scale_);
 
   TRACE_EVENT_INSTANT1(
       "android_webview", "BrowserViewRenderer::UpdateRootLayerState",
@@ -769,7 +817,7 @@ void BrowserViewRenderer::UpdateRootLayerState(
 
 std::unique_ptr<base::trace_event::ConvertableToTraceFormat>
 BrowserViewRenderer::RootLayerStateAsValue(
-    const gfx::Vector2dF& total_scroll_offset,
+    const gfx::PointF& total_scroll_offset,
     const gfx::SizeF& scrollable_size_dip) {
   std::unique_ptr<base::trace_event::TracedValue> state(
       new base::trace_event::TracedValue());
@@ -809,7 +857,8 @@ void BrowserViewRenderer::DidOverscroll(
   gfx::Vector2dF fling_velocity_pixels =
       gfx::ScaleVector2d(current_fling_velocity, physical_pixel_scale);
 
-  client_->DidOverscroll(rounded_overscroll_delta, fling_velocity_pixels);
+  client_->DidOverscroll(rounded_overscroll_delta, fling_velocity_pixels,
+                         begin_frame_source_->inside_begin_frame());
 }
 
 ui::TouchHandleDrawable* BrowserViewRenderer::CreateDrawable() {
@@ -825,6 +874,41 @@ void BrowserViewRenderer::CopyOutput(
   PostInvalidate(compositor_);
 }
 
+void BrowserViewRenderer::Invalidate() {
+  if (compositor_)
+    compositor_->DidInvalidate();
+  PostInvalidate(compositor_);
+}
+
+void BrowserViewRenderer::ReturnResourcesFromViz(
+    viz::FrameSinkId frame_sink_id,
+    uint32_t layer_tree_frame_sink_id,
+    std::vector<viz::ReturnedResource> resources) {
+  ReturnUsedResources(std::move(resources), frame_sink_id,
+                      layer_tree_frame_sink_id);
+}
+
+void BrowserViewRenderer::OnCompositorFrameTransitionDirectiveProcessed(
+    viz::FrameSinkId frame_sink_id,
+    uint32_t layer_tree_frame_sink_id,
+    uint32_t sequence_id) {
+  content::SynchronousCompositor* compositor = FindCompositor(frame_sink_id);
+  if (compositor) {
+    compositor->OnCompositorFrameTransitionDirectiveProcessed(
+        layer_tree_frame_sink_id, sequence_id);
+  }
+}
+
+void BrowserViewRenderer::OnInputEvent() {
+  if (root_frame_sink_proxy_)
+    root_frame_sink_proxy_->OnInputEvent();
+}
+
+void BrowserViewRenderer::AddBeginFrameCompletionCallback(
+    base::OnceClosure callback) {
+  begin_frame_source_->AddBeginFrameCompletionCallback(std::move(callback));
+}
+
 void BrowserViewRenderer::PostInvalidate(
     content::SynchronousCompositor* compositor) {
   TRACE_EVENT_INSTANT0("android_webview", "BrowserViewRenderer::PostInvalidate",
@@ -832,12 +916,14 @@ void BrowserViewRenderer::PostInvalidate(
   if (compositor != compositor_)
     return;
 
-  client_->PostInvalidate();
+  did_invalidate_since_last_draw_ = true;
+  client_->PostInvalidate(
+      RootBeginFrameSourceWebView::GetInstance()->inside_begin_frame());
 }
 
-bool BrowserViewRenderer::CompositeSW(SkCanvas* canvas) {
+bool BrowserViewRenderer::CompositeSW(SkCanvas* canvas, bool software_canvas) {
   DCHECK(compositor_);
-  return compositor_->DemandDrawSw(canvas);
+  return compositor_->DemandDrawSw(canvas, software_canvas);
 }
 
 std::string BrowserViewRenderer::ToString() const {

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,5 +12,7 @@ import java.util.concurrent.Executor;
 public interface ProxyControllerBoundaryInterface {
     void setProxyOverride(
             String[][] proxyRules, String[] bypassRules, Runnable listener, Executor executor);
+    void setProxyOverride(String[][] proxyRules, String[] bypassRules, Runnable listener,
+            Executor executor, boolean reverseBypass);
     void clearProxyOverride(Runnable listener, Executor executor);
 }

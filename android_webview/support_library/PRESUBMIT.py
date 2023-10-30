@@ -1,10 +1,13 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Presubmit tests for android_webview/support_library/
 
 Runs various style checks before upload.
 """
+
+USE_PYTHON3 = True
+
 
 def CheckChangeOnUpload(input_api, output_api):
   results = []
@@ -30,9 +33,9 @@ def _CheckAnnotatedInvocationHandlers(input_api, output_api):
 
   sources = lambda affected_file: input_api.FilterSourceFile(
       affected_file,
-      black_list=(input_api.DEFAULT_BLACK_LIST +
+      files_to_skip=(input_api.DEFAULT_FILES_TO_SKIP +
                   (r'.*support_lib_boundary[\\\/]util[\\\/].*',)),
-      white_list=(r'.*\.java$',))
+      files_to_check=(r'.*\.java$',))
 
   for f in input_api.AffectedSourceFiles(sources):
     for line_num, line in f.ChangedContents():

@@ -1,12 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.support_lib_glue;
 
+import static org.chromium.support_lib_glue.SupportLibWebViewChromiumFactory.recordApiCall;
+
 import com.android.webview.chromium.SharedTracingControllerAdapter;
 
 import org.chromium.support_lib_boundary.TracingControllerBoundaryInterface;
+import org.chromium.support_lib_glue.SupportLibWebViewChromiumFactory.ApiCall;
 
 import java.io.OutputStream;
 import java.util.Collection;
@@ -24,6 +27,7 @@ public class SupportLibTracingControllerAdapter implements TracingControllerBoun
 
     @Override
     public boolean isTracing() {
+        recordApiCall(ApiCall.TRACING_CONTROLLER_IS_TRACING);
         return mTracingController.isTracing();
     }
 
@@ -31,11 +35,13 @@ public class SupportLibTracingControllerAdapter implements TracingControllerBoun
     public void start(int predefinedCategories,
                       Collection<String> customIncludedCategories, int mode)
             throws IllegalStateException, IllegalArgumentException {
+        recordApiCall(ApiCall.TRACING_CONTROLLER_START);
         mTracingController.start(predefinedCategories, customIncludedCategories, mode);
     }
 
     @Override
     public boolean stop(OutputStream outputStream, Executor executor) {
+        recordApiCall(ApiCall.TRACING_CONTROLLER_STOP);
         return mTracingController.stop(outputStream, executor);
     }
 }

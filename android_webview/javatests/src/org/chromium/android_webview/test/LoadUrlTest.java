@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,10 @@ package org.chromium.android_webview.test;
 import static org.chromium.android_webview.test.AwActivityTestRule.WAIT_TIMEOUT_MS;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.util.Base64;
 import android.util.Pair;
+
+import androidx.test.filters.SmallTest;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -21,11 +22,15 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.android_webview.AwContents;
+import org.chromium.android_webview.common.AwFeatures;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.JSUtils;
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content_public.browser.test.util.HistoryUtils;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.util.TestWebServer;
 
 import java.io.UnsupportedEncodingException;
@@ -35,6 +40,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Test suite for loadUrl().
@@ -47,13 +53,13 @@ public class LoadUrlTest {
     private AwEmbeddedTestServer mTestServer;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mTestServer = AwEmbeddedTestServer.createAndStartServer(
                 InstrumentationRegistry.getInstrumentation().getTargetContext());
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -135,6 +141,61 @@ public class LoadUrlTest {
         Assert.assertEquals(expectedTitle, mActivityTestRule.getTitleOnUiThread(awContents));
     }
 
+    private static class OnProgressChangedClient extends TestAwContentsClient {
+        List<Integer> mProgresses = new ArrayList<Integer>();
+
+        @Override
+        public void onProgressChanged(int progress) {
+            super.onProgressChanged(progress);
+            mProgresses.add(Integer.valueOf(progress));
+            if (progress == 100 && mCallbackHelper.getCallCount() == 0) {
+                mCallbackHelper.notifyCalled();
+            }
+        }
+
+        public void waitForFullLoad() throws TimeoutException {
+            mCallbackHelper.waitForFirst();
+        }
+        private CallbackHelper mCallbackHelper = new CallbackHelper();
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    @DisabledTest(message = "http://crbug.com/1356194")
+    public void testProgress() throws Throwable {
+        final OnProgressChangedClient contentsClient = new OnProgressChangedClient();
+        final AwTestContainerView testContainerView =
+                mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
+
+        TestWebServer webServer = TestWebServer.start();
+        try {
+            final String url = webServer.setResponse("/page.html", "<html>Page</html>", null);
+
+            /* Before loading, progress is 100. */
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(
+                    ()
+                            -> Assert.assertEquals(100,
+                                    testContainerView.getAwContents().getMostRecentProgress()));
+
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(
+                    () -> testContainerView.getAwContents().loadUrl(url, null));
+            contentsClient.waitForFullLoad();
+            /* After loading, progress is 100. */
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(
+                    ()
+                            -> Assert.assertEquals(100,
+                                    testContainerView.getAwContents().getMostRecentProgress()));
+
+            /* At some point during the load, progress was not 100. */
+            Assert.assertTrue(contentsClient.mProgresses.size() > 1);
+            Assert.assertFalse(contentsClient.mProgresses.get(0) == 100);
+
+        } finally {
+            webServer.shutdown();
+        }
+    }
+
     /**
      * Loads url on the UI thread and blocks until onPageFinished is called.
      */
@@ -200,6 +261,49 @@ public class LoadUrlTest {
         }
     }
 
+    /**
+     * Make a test server URL look like it is a different origin.
+     */
+    private static String toDifferentOriginUrl(String url) {
+        if (url.contains("localhost")) {
+            return url.replace("localhost", "127.0.0.1");
+        } else if (url.contains("127.0.0.1")) {
+            return url.replace("127.0.0.1", "localhost");
+        } else {
+            throw new RuntimeException("Can't convert url " + url + " to different origin");
+        }
+    }
+
+    /** Call loadUrl() and expect it to throw IllegalArgumentException. */
+    private void loadWithInvalidHeaders(AwContents awContents, Map<String, String> extraHeaders)
+            throws Exception {
+        Assert.assertTrue(TestThreadUtils.runOnUiThreadBlocking(() -> {
+            try {
+                awContents.loadUrl("about:blank", extraHeaders);
+                return false;
+            } catch (IllegalArgumentException e) {
+                return true;
+            }
+        }));
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testLoadUrlWithInvalidExtraHeaders() throws Exception {
+        final TestAwContentsClient contentsClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
+        final AwContents awContents = testContainerView.getAwContents();
+
+        final String[] invalids = {"null\u0000", "cr\r", "nl\n"};
+        for (String invalid : invalids) {
+            // try each invalid string as a key and a value
+            loadWithInvalidHeaders(awContents, createHeadersMap(new String[] {"foo", invalid}));
+            loadWithInvalidHeaders(awContents, createHeadersMap(new String[] {invalid, "foo"}));
+        }
+    }
+
     @Test
     @SmallTest
     @Feature({"AndroidWebView"})
@@ -224,7 +328,7 @@ public class LoadUrlTest {
         int onReceivedTitleCallCount = onReceivedTitleHelper.getCallCount();
         loadUrlWithExtraHeadersSync(awContents, contentsClient.getOnPageFinishedHelper(), url2,
                 createHeadersMap(extraHeaders));
-        // Verify that extra headers are passed to the loaded url.
+        // Verify that extra headers are passed to the loaded url, but not to the image subresource.
         validateHeadersValue(awContents, contentsClient, extraHeaders, true);
         onReceivedTitleHelper.waitForCallback(onReceivedTitleCallCount);
         Assert.assertEquals("5", onReceivedTitleHelper.getTitle());
@@ -277,6 +381,30 @@ public class LoadUrlTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView"})
+    public void testLoadWithoutExtraHeadersClearsState() throws Throwable {
+        final TestAwContentsClient contentsClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        AwActivityTestRule.enableJavaScriptOnUiThread(awContents);
+        String[] extraHeaders = {
+                "X-ExtraHeaders1", "extra-header-data1", "x-extraHeaders2", "EXTRA-HEADER-DATA2"};
+        final String url =
+                mTestServer.getURL("/echoheader?" + extraHeaders[0] + "&" + extraHeaders[2]);
+
+        loadUrlWithExtraHeadersSync(awContents, contentsClient.getOnPageFinishedHelper(), url,
+                createHeadersMap(extraHeaders));
+        validateHeadersValue(awContents, contentsClient, extraHeaders, true);
+
+        // Load the same URL again without the extra headers specified.
+        mActivityTestRule.loadUrlSync(awContents, contentsClient.getOnPageFinishedHelper(), url);
+        // Check they're not still there.
+        validateHeadersValue(awContents, contentsClient, extraHeaders, false);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
     public void testRedirectAndReloadWithExtraHeaders() throws Throwable {
         final TestAwContentsClient contentsClient = new TestAwContentsClient();
         final AwTestContainerView testContainerView =
@@ -304,6 +432,73 @@ public class LoadUrlTest {
         // WebView will only reload the main page.
         mActivityTestRule.reloadSync(awContents, contentsClient.getOnPageFinishedHelper());
         // No extra headers. This is consistent with legacy behavior.
+        validateHeadersFromJson(
+                awContents, contentsClient, extraHeaders, echoRedirectedUrlHeader, false);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    @CommandLineFlags.Add("enable-features=" + AwFeatures.WEBVIEW_EXTRA_HEADERS_SAME_ORIGIN_ONLY)
+    // TODO(crbug.com/1038002) remove flag when enabled by default
+    public void testCrossOriginRedirectWithExtraHeaders() throws Throwable {
+        final TestAwContentsClient contentsClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        final String echoRedirectedUrlHeader = "echo header";
+        final String echoInitialUrlHeader = "data content";
+
+        AwActivityTestRule.enableJavaScriptOnUiThread(awContents);
+
+        String[] extraHeaders = {
+                "X-ExtraHeaders1", "extra-header-data1", "x-extraHeaders2", "EXTRA-HEADER-DATA2"};
+        final String redirectedUrl =
+                toDifferentOriginUrl(mTestServer.getURL("/echoheader-and-set-data?header="
+                        + extraHeaders[0] + "&header=" + extraHeaders[2]));
+        final String initialUrl =
+                mTestServer.getURL("/server-redirect-echoheader?url=" + encodeUrl(redirectedUrl)
+                        + "&header=" + extraHeaders[0] + "&header=" + extraHeaders[2]);
+        loadUrlWithExtraHeadersSync(awContents, contentsClient.getOnPageFinishedHelper(),
+                initialUrl, createHeadersMap(extraHeaders));
+        validateHeadersFromJson(
+                awContents, contentsClient, extraHeaders, echoInitialUrlHeader, true);
+        // Check that the headers were removed when the request was redirected to another origin.
+        validateHeadersFromJson(
+                awContents, contentsClient, extraHeaders, echoRedirectedUrlHeader, false);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    @CommandLineFlags.Add("enable-features=" + AwFeatures.WEBVIEW_EXTRA_HEADERS_SAME_ORIGIN_ONLY)
+    // TODO(crbug.com/1038002) remove flag when enabled by default
+    public void testRedirectToPreviousExtraHeaders() throws Throwable {
+        final TestAwContentsClient contentsClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        final String echoRedirectedUrlHeader = "echo header";
+
+        AwActivityTestRule.enableJavaScriptOnUiThread(awContents);
+
+        String[] extraHeaders = {
+                "X-ExtraHeaders1", "extra-header-data1", "x-extraHeaders2", "EXTRA-HEADER-DATA2"};
+        final String redirectedUrl = mTestServer.getURL("/echoheader-and-set-data?header="
+                + extraHeaders[0] + "&header=" + extraHeaders[2]);
+        final String initialUrl =
+                mTestServer.getURL("/server-redirect-echoheader?url=" + encodeUrl(redirectedUrl));
+
+        // First load the redirect target URL with extra headers
+        loadUrlWithExtraHeadersSync(awContents, contentsClient.getOnPageFinishedHelper(),
+                redirectedUrl, createHeadersMap(extraHeaders));
+        validateHeadersFromJson(
+                awContents, contentsClient, extraHeaders, echoRedirectedUrlHeader, true);
+
+        // Now load the initial URL without any extra headers and let it redirect;
+        // the extra headers should not be added to the redirected request.
+        mActivityTestRule.loadUrlSync(
+                awContents, contentsClient.getOnPageFinishedHelper(), initialUrl);
         validateHeadersFromJson(
                 awContents, contentsClient, extraHeaders, echoRedirectedUrlHeader, false);
     }
@@ -458,6 +653,91 @@ public class LoadUrlTest {
                     awContents, contentsClient.getOnPageFinishedHelper(), url);
             onReceivedTitleHelper.waitForCallback(onReceivedTitleCallCount);
             Assert.assertEquals(CommonResources.ABOUT_TITLE, onReceivedTitleHelper.getTitle());
+        } finally {
+            webServer.shutdown();
+        }
+    }
+
+    // Test loadDataSync() with a page containing an iframe that has a data:
+    // URL for its source. WebView handles conversion from data: URLs to origins
+    // in  a different way than normal desktop and Android builds so we want to
+    // make sure commit time checks properly pass on WebView.
+    // See http://crbug.com/1013171 for details.
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testLoadDataWithDataUrlIframe() throws Throwable {
+        final TestAwContentsClient contentsClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        AwActivityTestRule.enableJavaScriptOnUiThread(awContents);
+
+        final String iframeLoadedMessage = "iframe loaded";
+        final String iframeHtml = "<html><body><script>"
+                + "console.log('" + iframeLoadedMessage + "')"
+                + ";</script></body></html>";
+        final String pageHtml = "<html><body>"
+                + "<iframe src=\"data:text/html," + iframeHtml + "\"></iframe>"
+                + "</body></html>";
+
+        CallbackHelper onPageFinishedHelper = contentsClient.getOnPageFinishedHelper();
+        int onPageFinishedCallCount = onPageFinishedHelper.getCallCount();
+
+        TestAwContentsClient.AddMessageToConsoleHelper addMessageToConsoleHelper =
+                contentsClient.getAddMessageToConsoleHelper();
+        int logCallCount = addMessageToConsoleHelper.getCallCount();
+
+        // Test load with an anonymous opaque origin.
+        mActivityTestRule.loadDataSync(
+                awContents, contentsClient.getOnPageFinishedHelper(), pageHtml, "text/html", false);
+        onPageFinishedHelper.waitForCallback(onPageFinishedCallCount);
+
+        addMessageToConsoleHelper.waitForCallback(logCallCount);
+        Assert.assertEquals(iframeLoadedMessage, addMessageToConsoleHelper.getMessage());
+    }
+
+    // Test loadUrlSync() with a page containing an iframe that has a data: URL
+    // for its source. WebView handles conversion from data: URLs to origins in
+    // a different way than normal desktop and Android builds so we want to make
+    // sure commit time checks properly pass on WebView.
+    // See http://crbug.com/1013171 for details.
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testLoadUrlWithDataUrlIframe() throws Throwable {
+        final TestAwContentsClient contentsClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        AwActivityTestRule.enableJavaScriptOnUiThread(awContents);
+
+        final String iframeLoadedMessage = "iframe loaded";
+        final String iframeHtml = "<html><body><script>"
+                + "console.log('" + iframeLoadedMessage + "')"
+                + ";</script></body></html>";
+        final String pageHtml = "<html><body>"
+                + "<iframe src=\"data:text/html," + iframeHtml + "\"></iframe>"
+                + "</body></html>";
+
+        CallbackHelper onPageFinishedHelper = contentsClient.getOnPageFinishedHelper();
+        int onPageFinishedCallCount = onPageFinishedHelper.getCallCount();
+
+        TestAwContentsClient.AddMessageToConsoleHelper addMessageToConsoleHelper =
+                contentsClient.getAddMessageToConsoleHelper();
+        int logCallCount = addMessageToConsoleHelper.getCallCount();
+
+        // Test load with an opaque origin that contains precursor info.
+        TestWebServer webServer = TestWebServer.start();
+        try {
+            final String url = webServer.setResponse("/page.html", pageHtml, null);
+
+            mActivityTestRule.loadUrlSync(
+                    awContents, contentsClient.getOnPageFinishedHelper(), url);
+            onPageFinishedHelper.waitForCallback(onPageFinishedCallCount);
+
+            addMessageToConsoleHelper.waitForCallback(logCallCount);
+            Assert.assertEquals(iframeLoadedMessage, addMessageToConsoleHelper.getMessage());
         } finally {
             webServer.shutdown();
         }

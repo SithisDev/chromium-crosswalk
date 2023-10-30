@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,23 +6,20 @@
 
 #include <utility>
 
-#include "android_webview/browser/aw_contents.h"
-#include "android_webview/browser/gfx/browser_view_renderer.h"
-#include "android_webview/common/aw_content_client.h"
-#include "android_webview/native_jni/AwDevToolsServer_jni.h"
+#include "android_webview/browser_jni_headers/AwDevToolsServer_jni.h"
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/json/json_writer.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "content/public/browser/android/devtools_auth.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_socket_factory.h"
-#include "content/public/browser/web_contents.h"
-#include "content/public/common/user_agent.h"
+#include "content/public/common/content_switches.h"
 #include "net/base/net_errors.h"
+#include "net/socket/tcp_server_socket.h"
 #include "net/socket/unix_domain_server_socket_posix.h"
 
 using base::android::JavaParamRef;
@@ -41,6 +38,10 @@ class UnixDomainServerSocketFactory : public content::DevToolsSocketFactory {
   explicit UnixDomainServerSocketFactory(const std::string& socket_name)
       : socket_name_(socket_name), last_tethering_socket_(0) {}
 
+  UnixDomainServerSocketFactory(const UnixDomainServerSocketFactory&) = delete;
+  UnixDomainServerSocketFactory& operator=(
+      const UnixDomainServerSocketFactory&) = delete;
+
  private:
   // content::DevToolsAgentHost::ServerSocketFactory.
   std::unique_ptr<net::ServerSocket> CreateForHttpServer() override {
@@ -49,7 +50,7 @@ class UnixDomainServerSocketFactory : public content::DevToolsSocketFactory {
             base::BindRepeating(&content::CanUserConnectToDevTools),
             true /* use_abstract_namespace */));
     if (socket->BindAndListen(socket_name_, kBackLog) != net::OK)
-      return std::unique_ptr<net::ServerSocket>();
+      return nullptr;
 
     return std::move(socket);
   }
@@ -63,16 +64,64 @@ class UnixDomainServerSocketFactory : public content::DevToolsSocketFactory {
             base::BindRepeating(&content::CanUserConnectToDevTools),
             true /* use_abstract_namespace */));
     if (socket->BindAndListen(*name, kBackLog) != net::OK)
-      return std::unique_ptr<net::ServerSocket>();
+      return nullptr;
 
     return std::move(socket);
   }
 
   std::string socket_name_;
   int last_tethering_socket_;
-
-  DISALLOW_COPY_AND_ASSIGN(UnixDomainServerSocketFactory);
 };
+
+class TCPServerSocketFactory : public content::DevToolsSocketFactory {
+ public:
+  TCPServerSocketFactory(const std::string& address, uint16_t port)
+      : address_(address), port_(port) {}
+
+  TCPServerSocketFactory(const TCPServerSocketFactory&) = delete;
+  TCPServerSocketFactory& operator=(const TCPServerSocketFactory&) = delete;
+
+ private:
+  // content::DevToolsSocketFactory.
+  std::unique_ptr<net::ServerSocket> CreateForHttpServer() override {
+    std::unique_ptr<net::ServerSocket> socket(
+        new net::TCPServerSocket(nullptr, net::NetLogSource()));
+    if (socket->ListenWithAddressAndPort(address_, port_, kBackLog) != net::OK)
+      return nullptr;
+
+    net::IPEndPoint endpoint;
+    return socket;
+  }
+
+  std::unique_ptr<net::ServerSocket> CreateForTethering(
+      std::string* out_name) override {
+    return nullptr;
+  }
+
+  std::string address_;
+  uint16_t port_;
+};
+
+std::unique_ptr<content::DevToolsSocketFactory> CreateSocketFactory() {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kRemoteDebuggingPort)) {
+    uint16_t port = 0;
+    int temp_port;
+    std::string port_str =
+        command_line.GetSwitchValueASCII(switches::kRemoteDebuggingPort);
+    if (base::StringToInt(port_str, &temp_port) && temp_port >= 1024 &&
+        temp_port < 65535) {
+      port = static_cast<uint16_t>(temp_port);
+    } else {
+      DLOG(WARNING) << "Invalid http debugger port number " << temp_port;
+    }
+    return std::make_unique<TCPServerSocketFactory>("127.0.0.1", port);
+  }
+
+  return std::make_unique<UnixDomainServerSocketFactory>(
+      base::StringPrintf(kSocketNameFormat, getpid()));
+}
 
 }  // namespace
 
@@ -89,12 +138,8 @@ void AwDevToolsServer::Start() {
     return;
   is_started_ = true;
 
-  std::unique_ptr<content::DevToolsSocketFactory> factory(
-      new UnixDomainServerSocketFactory(
-          base::StringPrintf(kSocketNameFormat, getpid())));
   DevToolsAgentHost::StartRemoteDebuggingServer(
-      std::move(factory),
-      base::FilePath(), base::FilePath());
+      CreateSocketFactory(), base::FilePath(), base::FilePath());
 }
 
 void AwDevToolsServer::Stop() {

@@ -28,7 +28,7 @@ that have been published to the beta track. The Play Store updates users to the
 APK with the highest `versionCode` among eligible tracks.
 
 Google publishes an APK of Android System WebView to the beta track based on the
-[same release cycle](https://chromiumdash.appspot.com/schedule) as Chrome Beta. 
+[same release cycle](https://chromiumdash.appspot.com/schedule) as Chrome Beta.
 
 Similarly, builds of Chrome for "Dev" channel releases include a build of
 WebView which gets published to an alpha track. Only users belonging to specific
@@ -75,11 +75,6 @@ user to choose](/android_webview/docs/prerelease.md#android-n_o_or-p) which of
 the installed versions of Chrome to use as the WebView.
 
 ## Trichrome (Android Q+)
-
-*** promo
-The channels described in the following section are not yet available via the
-Play Store, but will be by the date of release of Android Q.
-***
 
 For Android Q+, WebView and Chrome are again separately installed APKs. However,
 Google began building a separate package of WebView for each of the four Chrome

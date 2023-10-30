@@ -1,19 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "android_webview/browser/state_serializer.h"
 
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "base/pickle.h"
 #include "base/time/time.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_entry_restore_context.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/restore_type.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/page_state.h"
+#include "content/public/common/referrer.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/page_state/page_state.h"
 
 // Reasons for not re-using TabNavigation under chrome/ as of 20121116:
 // * Android WebView has different requirements for fields to store since
@@ -42,9 +47,17 @@ void WriteToPickle(content::WebContents& web_contents, base::Pickle* pickle) {
 
   content::NavigationController& controller = web_contents.GetController();
   const int entry_count = controller.GetEntryCount();
-  const int selected_entry = controller.GetCurrentEntryIndex();
-  DCHECK_GE(entry_count, 0);
-  DCHECK_GE(selected_entry, -1);  // -1 is valid
+  const int selected_entry = controller.GetLastCommittedEntryIndex();
+  if (blink::features::IsInitialNavigationEntryEnabled()) {
+    // When InitialNavigationEntry is enabled, a NavigationEntry will always
+    // exist, so there will always be at least 1 entry.
+    DCHECK_GE(entry_count, 1);
+    DCHECK_GE(selected_entry, 0);
+  } else {
+    // When InitialNavigationEntry is disabled, there might be 0 entries.
+    DCHECK_GE(entry_count, 0);
+    DCHECK_GE(selected_entry, -1);  // -1 is valid
+  }
   DCHECK_LT(selected_entry, entry_count);
 
   pickle->WriteInt(entry_count);
@@ -85,20 +98,20 @@ bool RestoreFromPickle(base::PickleIterator* iterator,
   if (selected_entry >= entry_count)
     return false;
 
+  std::unique_ptr<content::NavigationEntryRestoreContext> context =
+      content::NavigationEntryRestoreContext::Create();
   std::vector<std::unique_ptr<content::NavigationEntry>> entries;
   entries.reserve(entry_count);
   for (int i = 0; i < entry_count; ++i) {
     entries.push_back(content::NavigationEntry::Create());
-    if (!internal::RestoreNavigationEntryFromPickle(state_version, iterator,
-                                                    entries[i].get()))
+    if (!internal::RestoreNavigationEntryFromPickle(
+            state_version, iterator, entries[i].get(), context.get()))
       return false;
   }
 
   // |web_contents| takes ownership of these entries after this call.
   content::NavigationController& controller = web_contents->GetController();
-  controller.Restore(selected_entry,
-                     content::RestoreType::LAST_SESSION_EXITED_CLEANLY,
-                     &entries);
+  controller.Restore(selected_entry, content::RestoreType::kRestored, &entries);
   DCHECK_EQ(0u, entries.size());
   controller.LoadIfNecessary();
 
@@ -178,20 +191,39 @@ void WriteNavigationEntryToPickle(uint32_t state_version,
   // way.
 }
 
-bool RestoreNavigationEntryFromPickle(base::PickleIterator* iterator,
-                                      content::NavigationEntry* entry) {
-  return RestoreNavigationEntryFromPickle(AW_STATE_VERSION, iterator, entry);
+bool RestoreNavigationEntryFromPickle(
+    base::PickleIterator* iterator,
+    content::NavigationEntry* entry,
+    content::NavigationEntryRestoreContext* context) {
+  return RestoreNavigationEntryFromPickle(AW_STATE_VERSION, iterator, entry,
+                                          context);
 }
 
-bool RestoreNavigationEntryFromPickle(uint32_t state_version,
-                                      base::PickleIterator* iterator,
-                                      content::NavigationEntry* entry) {
+bool RestoreNavigationEntryFromPickle(
+    uint32_t state_version,
+    base::PickleIterator* iterator,
+    content::NavigationEntry* entry,
+    content::NavigationEntryRestoreContext* context) {
   DCHECK(IsSupportedVersion(state_version));
+  DCHECK(iterator);
+  DCHECK(entry);
+  DCHECK(context);
+
+  GURL deserialized_url;
   {
     string url;
     if (!iterator->ReadString(&url))
       return false;
-    entry->SetURL(GURL(url));
+    deserialized_url = GURL(url);
+
+    // Note: The url will be cloberred by the SetPageState call below (see how
+    // RecursivelyGenerateFrameEntries uses PageState data to create
+    // FrameNavigationEntries).
+    //
+    // Nevertheless, we call SetURL here to temporarily set the URL, because it
+    // modifies the state that might be depended on in some calls below (e.g.
+    // the SetVirtualURL call).
+    entry->SetURL(deserialized_url);
   }
 
   {
@@ -201,8 +233,11 @@ bool RestoreNavigationEntryFromPickle(uint32_t state_version,
     entry->SetVirtualURL(GURL(virtual_url));
   }
 
+  content::Referrer deserialized_referrer;
   {
-    content::Referrer referrer;
+    // Note: The referrer will be cloberred by the SetPageState call below (see
+    // how RecursivelyGenerateFrameEntries uses PageState data to create
+    // FrameNavigationEntries).
     string referrer_url;
     int policy;
 
@@ -211,13 +246,12 @@ bool RestoreNavigationEntryFromPickle(uint32_t state_version,
     if (!iterator->ReadInt(&policy))
       return false;
 
-    referrer.url = GURL(referrer_url);
-    referrer.policy = static_cast<network::mojom::ReferrerPolicy>(policy);
-    entry->SetReferrer(referrer);
+    deserialized_referrer.url = GURL(referrer_url);
+    deserialized_referrer.policy = content::Referrer::ConvertToPolicy(policy);
   }
 
   {
-    base::string16 title;
+    std::u16string title;
     if (!iterator->ReadString16(&title))
       return false;
     entry->SetTitle(title);
@@ -227,8 +261,38 @@ bool RestoreNavigationEntryFromPickle(uint32_t state_version,
     string content_state;
     if (!iterator->ReadString(&content_state))
       return false;
-    entry->SetPageState(
-        content::PageState::CreateFromEncodedData(content_state));
+
+    // In legacy output of WebViewProvider.saveState, the |content_state|
+    // might be empty - we need to gracefully handle such data when
+    // it is deserialized via WebViewProvider.restoreState.
+    if (content_state.empty()) {
+      // Ensure that the deserialized/restored content::NavigationEntry (and
+      // the content::FrameNavigationEntry underneath) has a valid PageState.
+      entry->SetPageState(blink::PageState::CreateFromURL(deserialized_url),
+                          context);
+
+      // The |deserialized_referrer| might be inconsistent with the referrer
+      // embedded inside the PageState set above.  Nevertheless, to minimize
+      // changes to behavior of old session restore entries, we restore the
+      // deserialized referrer here.
+      //
+      // TODO(lukasza): Consider including the |deserialized_referrer| in the
+      // PageState set above + drop the SetReferrer call below.  This will
+      // slightly change the legacy behavior, but will make PageState and
+      // Referrer consistent.
+      entry->SetReferrer(deserialized_referrer);
+    } else {
+      // Note that PageState covers and will clobber some of the values covered
+      // by data within |iterator| (e.g. URL and referrer).
+      entry->SetPageState(
+          blink::PageState::CreateFromEncodedData(content_state), context);
+
+      // |deserialized_url| and |deserialized_referrer| are redundant wrt
+      // PageState, but they should be consistent / in-sync.
+      DCHECK_EQ(deserialized_url, entry->GetURL());
+      DCHECK_EQ(deserialized_referrer.url, entry->GetReferrer().url);
+      DCHECK_EQ(deserialized_referrer.policy, entry->GetReferrer().policy);
+    }
   }
 
   {
@@ -254,7 +318,7 @@ bool RestoreNavigationEntryFromPickle(uint32_t state_version,
 
   if (state_version >= internal::AW_STATE_VERSION_DATA_URL) {
     const char* data;
-    int size;
+    size_t size;
     if (!iterator->ReadData(&data, &size))
       return false;
     if (size > 0) {

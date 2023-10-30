@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,23 +7,29 @@ package org.chromium.android_webview.test;
 import static org.chromium.android_webview.test.OnlyRunIn.ProcessMode.SINGLE_PROCESS;
 
 import android.content.Intent;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.support.test.filters.MediumTest;
+
+import androidx.test.filters.MediumTest;
 
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.android_webview.VariationsSeedLoader;
-import org.chromium.android_webview.VariationsUtils;
+import org.chromium.android_webview.common.AwSwitches;
+import org.chromium.android_webview.common.variations.VariationsServiceMetricsHelper;
+import org.chromium.android_webview.common.variations.VariationsUtils;
 import org.chromium.android_webview.test.services.MockVariationsSeedServer;
 import org.chromium.android_webview.test.util.VariationsTestUtils;
+import org.chromium.android_webview.variations.VariationsSeedLoader;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.CommandLineFlags;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,24 +42,56 @@ import java.util.concurrent.TimeoutException;
 @RunWith(AwJUnit4ClassRunner.class)
 @OnlyRunIn(SINGLE_PROCESS)
 public class VariationsSeedLoaderTest {
+    private static final long CURRENT_TIME_MILLIS = 1234567890;
+    private static final long EXPIRED_TIMESTAMP = 0;
     private static final long TIMEOUT_MILLIS = 10000;
 
-    private static class TestLoaderResult extends CallbackHelper {
-        private boolean mSeedRequested;
+    // Needed for tests that test histograms, which rely on native code.
+    @Rule
+    public AwActivityTestRule mActivityTestRule = new AwActivityTestRule();
+
+    /**
+     * Helper class to interact with {@link TestLoader}. This can be used to retrieve whether
+     * TestLoader requested a seed.
+     */
+    public static class TestLoaderResult extends CallbackHelper {
+        private volatile boolean mBackgroundWorkFinished;
+        private volatile boolean mForegroundWorkFinished;
+        private volatile boolean mSeedRequested;
 
         public boolean wasSeedRequested() {
             assert getCallCount() > 0;
             return mSeedRequested;
         }
 
-        public void notifyCalled(boolean seedRequested) {
-            mSeedRequested = seedRequested;
-            super.notifyCalled();
+        public void markSeedRequested() {
+            mSeedRequested = true;
+        }
+
+        public void onBackgroundWorkFinished() {
+            mBackgroundWorkFinished = true;
+            maybeNotifyCalled();
+        }
+
+        public void onForegroundWorkFinished() {
+            mForegroundWorkFinished = true;
+            maybeNotifyCalled();
+        }
+
+        private void maybeNotifyCalled() {
+            if (mBackgroundWorkFinished && mForegroundWorkFinished) {
+                notifyCalled();
+            }
         }
     }
 
-    private static class TestLoader extends VariationsSeedLoader {
-        private boolean mSeedRequested;
+    /**
+     * A {@link VariationsSeedLoader} which is suitable for integration tests. This overrides the
+     * default timeout to be suitable for integration tests, allowing the test to call
+     * startVariationsInit() immediately before finishVariationsInit(). This also overrides the
+     * service Intent to match the test environment.
+     */
+    public static class TestLoader extends VariationsSeedLoader {
         private TestLoaderResult mResult;
 
         public TestLoader(TestLoaderResult result) {
@@ -68,14 +106,25 @@ public class VariationsSeedLoaderTest {
         }
 
         @Override
-        protected void requestSeedFromService(long oldSeedDate) {
-            super.requestSeedFromService(oldSeedDate);
-            mSeedRequested = true;
+        protected boolean requestSeedFromService(long oldSeedDate) {
+            boolean result = super.requestSeedFromService(oldSeedDate);
+            mResult.markSeedRequested();
+            return result;
         }
 
         @Override
         protected void onBackgroundWorkFinished() {
-            mResult.notifyCalled(mSeedRequested);
+            mResult.onBackgroundWorkFinished();
+        }
+
+        @Override
+        protected long getSeedLoadTimeoutMillis() {
+            return TIMEOUT_MILLIS;
+        }
+
+        @Override
+        protected long getCurrentTimeMillis() {
+            return CURRENT_TIME_MILLIS;
         }
     }
 
@@ -83,21 +132,23 @@ public class VariationsSeedLoaderTest {
 
     // Create a TestLoader, run it on the UI thread, and block until it's finished. The return value
     // indicates whether the loader decided to request a new seed.
-    private boolean runTestLoaderBlocking() throws InterruptedException, TimeoutException {
+    private boolean runTestLoaderBlocking() throws TimeoutException {
         final TestLoaderResult result = new TestLoaderResult();
         Runnable run = () -> {
             TestLoader loader = new TestLoader(result);
             loader.startVariationsInit();
             loader.finishVariationsInit();
+            result.onForegroundWorkFinished();
         };
 
         CallbackHelper onRequestReceived = MockVariationsSeedServer.getRequestHelper();
         int requestsReceived = onRequestReceived.getCallCount();
         Assert.assertTrue("Failed to post seed loader Runnable", mMainHandler.post(run));
-        result.waitForCallback("Timed out waiting for loader to finish background work.", 0);
+        result.waitForCallback("Timed out waiting for loader to finish.", 0);
         if (result.wasSeedRequested()) {
-            onRequestReceived.waitForCallback("Seed requested, but timed out waiting for request" +
-                    " to arrive in MockVariationsSeedServer", requestsReceived);
+            onRequestReceived.waitForCallback("Seed requested, but timed out waiting for request"
+                            + " to arrive in MockVariationsSeedServer",
+                    requestsReceived);
             return true;
         }
         return false;
@@ -106,14 +157,22 @@ public class VariationsSeedLoaderTest {
     @Before
     public void setUp() throws IOException {
         mMainHandler = new Handler(Looper.getMainLooper());
-        RecordHistogram.setDisabledForTests(true);
         VariationsTestUtils.deleteSeeds();
     }
 
     @After
     public void tearDown() throws IOException {
-        RecordHistogram.setDisabledForTests(false);
         VariationsTestUtils.deleteSeeds();
+    }
+
+    private void assertSingleRecordInHistogram(String histogramName, int expectedValue) {
+        Assert.assertEquals(1, RecordHistogram.getHistogramTotalCountForTesting(histogramName));
+        Assert.assertEquals(
+                1, RecordHistogram.getHistogramValueCountForTesting(histogramName, expectedValue));
+        // Check that the value didn't get recorded in the highest bucket. If expectedValue and
+        // expectedValue*2 are in the same bucket, we probably messed up the bucket configuration.
+        Assert.assertEquals(0,
+                RecordHistogram.getHistogramValueCountForTesting(histogramName, expectedValue * 2));
     }
 
     // Test the case that:
@@ -229,6 +288,31 @@ public class VariationsSeedLoaderTest {
     }
 
     // Test the case that:
+    // VariationsUtils.getSeedFile() - doesn't exist
+    // VariationsUtils.getNewSeedFile() - exists, empty
+    @Test
+    @MediumTest
+    public void testHaveEmptyNewSeed() throws Exception {
+        try {
+            File oldFile = VariationsUtils.getSeedFile();
+            File newFile = VariationsUtils.getNewSeedFile();
+            Assert.assertTrue("Seed file should not already exist", newFile.createNewFile());
+
+            boolean seedRequested = runTestLoaderBlocking();
+
+            // Neither file should have been touched.
+            Assert.assertFalse("Old seed file should not exist", oldFile.exists());
+            Assert.assertTrue("New seed file not found", newFile.exists());
+            Assert.assertEquals("New seed file is not empty", 0L, newFile.length());
+
+            // Since the "new" seed was empty/invalid, another seed should be requested.
+            Assert.assertTrue("No seed requested", seedRequested);
+        } finally {
+            VariationsTestUtils.deleteSeeds();
+        }
+    }
+
+    // Test the case that:
     // VariationsUtils.getSeedFile() - exists, timestamp = epoch
     // VariationsUtils.getNewSeedFile() - exists, timestamp = epoch + 1 day
     @Test
@@ -276,6 +360,71 @@ public class VariationsSeedLoaderTest {
                     seedRequested);
         } finally {
             VariationsTestUtils.deleteSeeds();
+        }
+    }
+
+    // Tests that the finch-seed-expiration-age flag works.
+    @Test
+    @MediumTest
+    @CommandLineFlags.Add(AwSwitches.FINCH_SEED_EXPIRATION_AGE + "=0")
+    public void testFinchSeedExpirationAgeFlag() throws Exception {
+        try {
+            // Create a new seed file with a recent timestamp.
+            File oldFile = VariationsUtils.getSeedFile();
+            VariationsTestUtils.writeMockSeed(oldFile);
+            oldFile.setLastModified(CURRENT_TIME_MILLIS);
+
+            boolean seedRequested = runTestLoaderBlocking();
+
+            Assert.assertTrue("Seed file should be requested", seedRequested);
+        } finally {
+            VariationsTestUtils.deleteSeeds();
+        }
+    }
+
+    // Tests that the finch-seed-min-update-period flag overrides the seed request throttling.
+    @Test
+    @MediumTest
+    @CommandLineFlags.Add(AwSwitches.FINCH_SEED_MIN_UPDATE_PERIOD + "=0")
+    public void testFinchSeedMinUpdatePeriodFlag() throws Exception {
+        try {
+            // Update the last modified time of the stamp file to simulate having just requested a
+            // new seed from the service.
+            VariationsUtils.getStampFile().createNewFile();
+            VariationsUtils.updateStampTime(CURRENT_TIME_MILLIS);
+
+            boolean seedRequested = runTestLoaderBlocking();
+
+            Assert.assertTrue("Seed file should be requested", seedRequested);
+        } finally {
+            VariationsTestUtils.deleteSeeds();
+        }
+    }
+
+    // Tests that metrics passed from the service get recorded to histograms.
+    @Test
+    @MediumTest
+    public void testRecordMetricsFromService() throws Exception {
+        try {
+            long nineMinutesMs = TimeUnit.MINUTES.toMillis(9);
+            long twoWeeksMs = TimeUnit.DAYS.toMillis(14);
+            long threeWeeksMs = TimeUnit.DAYS.toMillis(21);
+
+            VariationsServiceMetricsHelper metrics =
+                    VariationsServiceMetricsHelper.fromBundle(new Bundle());
+            metrics.setJobInterval(threeWeeksMs);
+            metrics.setJobQueueTime(twoWeeksMs);
+            MockVariationsSeedServer.setMetricsBundle(metrics.toBundle());
+
+            runTestLoaderBlocking();
+
+            assertSingleRecordInHistogram(VariationsSeedLoader.DOWNLOAD_JOB_INTERVAL_HISTOGRAM_NAME,
+                    (int) TimeUnit.MILLISECONDS.toMinutes(threeWeeksMs));
+            assertSingleRecordInHistogram(
+                    VariationsSeedLoader.DOWNLOAD_JOB_QUEUE_TIME_HISTOGRAM_NAME,
+                    (int) TimeUnit.MILLISECONDS.toMinutes(twoWeeksMs));
+        } finally {
+            MockVariationsSeedServer.setMetricsBundle(null);
         }
     }
 }

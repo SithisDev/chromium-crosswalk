@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.ui.base.ViewAndroidDelegate;
 
 import java.util.LinkedHashMap;
@@ -64,7 +65,7 @@ public class AwViewAndroidDelegate extends ViewAndroidDelegate {
 
     @Override
     public View acquireView() {
-        ViewGroup containerView = getContainerView();
+        ViewGroup containerView = getContainerViewGroup();
         if (containerView == null) return null;
         View anchorView = new View(containerView.getContext());
         containerView.addView(anchorView);
@@ -76,7 +77,7 @@ public class AwViewAndroidDelegate extends ViewAndroidDelegate {
     @Override
     public void removeView(View anchorView) {
         mAnchorViews.remove(anchorView);
-        ViewGroup containerView = getContainerView();
+        ViewGroup containerView = getContainerViewGroup();
         if (containerView != null) {
             containerView.removeView(anchorView);
         }
@@ -103,7 +104,7 @@ public class AwViewAndroidDelegate extends ViewAndroidDelegate {
     @Override
     public void setViewPosition(View anchorView, float x, float y, float width, float height,
             int leftMargin, int topMargin) {
-        ViewGroup containerView = getContainerView();
+        ViewGroup containerView = getContainerViewGroup();
         if (!mAnchorViews.containsKey(anchorView) || containerView == null) return;
 
         mAnchorViews.put(anchorView, new Position(x, y, width, height, leftMargin, topMargin));

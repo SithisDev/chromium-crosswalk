@@ -1,16 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "android_webview/browser/aw_render_process.h"
 
+#include "android_webview/browser_jni_headers/AwRenderProcess_jni.h"
 #include "base/android/jni_android.h"
 #include "base/android/scoped_java_ref.h"
-
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
-
-#include "android_webview/native_jni/AwRenderProcess_jni.h"
+#include "ipc/ipc_channel_proxy.h"
 
 using base::android::AttachCurrentThread;
 using content::BrowserThread;
@@ -38,14 +37,16 @@ AwRenderProcess* AwRenderProcess::GetInstanceForRenderProcessHost(
 }
 
 AwRenderProcess::AwRenderProcess(RenderProcessHost* render_process_host)
-    : render_process_host_(render_process_host), weak_factory_(this) {
+    : render_process_host_(render_process_host) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   java_obj_.Reset(Java_AwRenderProcess_create(AttachCurrentThread()));
-  CHECK(!java_obj_.is_null());
+  CHECK(java_obj_);
   if (render_process_host_->IsReady()) {
     Ready();
   }
+  render_process_host_->GetChannel()->GetRemoteAssociatedInterface(
+      &renderer_remote_);
   render_process_host->AddObserver(this);
 }
 
@@ -54,6 +55,14 @@ AwRenderProcess::~AwRenderProcess() {
 
   Java_AwRenderProcess_setNative(AttachCurrentThread(), java_obj_, 0);
   java_obj_.Reset();
+}
+
+void AwRenderProcess::ClearCache() {
+  renderer_remote_->ClearCache();
+}
+
+void AwRenderProcess::SetJsOnlineProperty(bool network_up) {
+  renderer_remote_->SetJsOnlineProperty(network_up);
 }
 
 void AwRenderProcess::Ready() {
@@ -77,6 +86,14 @@ bool AwRenderProcess::TerminateChildProcess(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   return render_process_host_->Shutdown(0);
+}
+
+bool AwRenderProcess::IsProcessLockedToSiteForTesting(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  return render_process_host_->IsProcessLockedToSiteForTesting();  // IN-TEST
 }
 
 base::android::ScopedJavaLocalRef<jobject> AwRenderProcess::GetJavaObject() {

@@ -1,12 +1,16 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef ANDROID_WEBVIEW_BROWSER_NETWORK_SERVICE_AW_URL_LOADER_THROTTLE_H_
 #define ANDROID_WEBVIEW_BROWSER_NETWORK_SERVICE_AW_URL_LOADER_THROTTLE_H_
 
-#include "base/macros.h"
-#include "content/public/common/url_loader_throttle.h"
+#include <string>
+#include <vector>
+
+#include "base/memory/raw_ptr.h"
+#include "third_party/blink/public/common/loader/url_loader_throttle.h"
+#include "url/origin.h"
 
 class GURL;
 
@@ -17,28 +21,33 @@ class HttpRequestHeaders;
 namespace android_webview {
 class AwResourceContext;
 
-class AwURLLoaderThrottle : public content::URLLoaderThrottle {
+class AwURLLoaderThrottle : public blink::URLLoaderThrottle {
  public:
   explicit AwURLLoaderThrottle(AwResourceContext* aw_resource_context);
+
+  AwURLLoaderThrottle(const AwURLLoaderThrottle&) = delete;
+  AwURLLoaderThrottle& operator=(const AwURLLoaderThrottle&) = delete;
+
   ~AwURLLoaderThrottle() override;
 
-  // content::URLLoaderThrottle implementation:
+  // blink::URLLoaderThrottle implementation:
   void WillStartRequest(network::ResourceRequest* request,
                         bool* defer) override;
   void WillRedirectRequest(
       net::RedirectInfo* redirect_info,
-      const network::ResourceResponseHead& response_head,
+      const network::mojom::URLResponseHead& response_head,
       bool* defer,
       std::vector<std::string>* to_be_removed_request_headers,
-      net::HttpRequestHeaders* modified_request_headers) override;
+      net::HttpRequestHeaders* modified_request_headers,
+      net::HttpRequestHeaders* modified_cors_exempt_request_headers) override;
 
  private:
   void AddExtraHeadersIfNeeded(const GURL& url,
                                net::HttpRequestHeaders* headers);
 
-  AwResourceContext* aw_resource_context_;
-
-  DISALLOW_COPY_AND_ASSIGN(AwURLLoaderThrottle);
+  raw_ptr<AwResourceContext> aw_resource_context_;
+  std::vector<std::string> added_headers_;
+  url::Origin original_origin_;
 };
 
 }  // namespace android_webview

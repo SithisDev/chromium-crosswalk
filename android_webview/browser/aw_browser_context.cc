@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,58 +8,63 @@
 #include <string>
 #include <utility>
 
-#include "android_webview/browser/aw_browser_policy_connector.h"
 #include "android_webview/browser/aw_browser_process.h"
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/aw_download_manager_delegate.h"
-#include "android_webview/browser/aw_feature_list.h"
 #include "android_webview/browser/aw_form_database_service.h"
-#include "android_webview/browser/aw_metrics_service_client.h"
 #include "android_webview/browser/aw_permission_manager.h"
 #include "android_webview/browser/aw_quota_manager_bridge.h"
 #include "android_webview/browser/aw_resource_context.h"
 #include "android_webview/browser/aw_web_ui_controller_factory.h"
 #include "android_webview/browser/cookie_manager.h"
-#include "android_webview/browser/net/aw_url_request_context_getter.h"
+#include "android_webview/browser/metrics/aw_metrics_service_client.h"
 #include "android_webview/browser/network_service/net_helpers.h"
-#include "android_webview/browser/safe_browsing/aw_safe_browsing_whitelist_manager.h"
+#include "android_webview/browser/safe_browsing/aw_safe_browsing_allowlist_manager.h"
+#include "android_webview/browser_jni_headers/AwBrowserContext_jni.h"
+#include "android_webview/common/aw_features.h"
+#include "android_webview/common/aw_switches.h"
+#include "android_webview/common/crash_reporter/crash_keys.h"
 #include "base/base_paths_posix.h"
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/feature_list.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
-#include "base/single_thread_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/single_thread_task_runner.h"
 #include "components/autofill/core/browser/autocomplete_history_manager.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/cdm/browser/media_drm_storage_impl.h"
+#include "components/crash/core/common/crash_key.h"
 #include "components/download/public/common/in_progress_download_manager.h"
 #include "components/keyed_service/core/simple_key_map.h"
 #include "components/policy/core/browser/browser_policy_connector_base.h"
 #include "components/policy/core/browser/configuration_policy_pref_store.h"
-#include "components/policy/core/browser/url_blacklist_manager.h"
+#include "components/policy/core/browser/url_blocklist_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/in_memory_pref_store.h"
 #include "components/prefs/json_pref_store.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/pref_service_factory.h"
-#include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/prefs/segregated_pref_store.h"
+#include "components/profile_metrics/browser_profile_type.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/url_formatter/url_fixer.h"
 #include "components/user_prefs/user_prefs.h"
-#include "components/variations/net/variations_http_headers.h"
-#include "components/visitedlink/browser/visitedlink_master.h"
+#include "components/visitedlink/browser/visitedlink_writer.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/cors_exempt_headers.h"
 #include "content/public/browser/download_request_utils.h"
 #include "content/public/browser/ssl_host_state_delegate.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/zoom_level_delegate.h"
 #include "media/mojo/buildflags.h"
+#include "net/http/http_util.h"
 #include "net/proxy_resolution/proxy_config_service_android.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
-#include "services/network/public/cpp/features.h"
-#include "services/preferences/tracked/segregated_pref_store.h"
+#include "services/cert_verifier/public/mojom/cert_verifier_service_factory.mojom.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 
 using base::FilePath;
 using content::BrowserThread;
@@ -72,10 +77,71 @@ const void* const kDownloadManagerDelegateKey = &kDownloadManagerDelegateKey;
 
 AwBrowserContext* g_browser_context = NULL;
 
+crash_reporter::CrashKeyString<1> g_web_view_compat_crash_key(
+    crash_keys::kWeblayerWebViewCompatMode);
+
 // Empty method to skip origin security check as DownloadManager will set its
 // own method.
 bool IgnoreOriginSecurityCheck(const GURL& url) {
   return true;
+}
+
+void MigrateProfileData(base::FilePath cache_path,
+                        base::FilePath context_storage_path) {
+  TRACE_EVENT0("startup", "MigrateProfileData");
+  FilePath old_cache_path;
+  base::PathService::Get(base::DIR_CACHE, &old_cache_path);
+  old_cache_path = old_cache_path.DirName().Append(
+      FILE_PATH_LITERAL("org.chromium.android_webview"));
+
+  if (base::PathExists(old_cache_path)) {
+    bool success = base::CreateDirectory(cache_path);
+    if (success)
+      success &= base::Move(old_cache_path, cache_path);
+    DCHECK(success);
+  }
+
+  base::FilePath old_context_storage_path;
+  base::PathService::Get(base::DIR_ANDROID_APP_DATA, &old_context_storage_path);
+
+  if (!base::PathExists(context_storage_path)) {
+    base::CreateDirectory(context_storage_path);
+  }
+
+  auto migrate_context_storage_data = [&old_context_storage_path,
+                                       &context_storage_path](auto& suffix) {
+    FilePath old_file = old_context_storage_path.Append(suffix);
+    if (base::PathExists(old_file)) {
+      FilePath new_file = context_storage_path.Append(suffix);
+
+      if (base::PathExists(new_file)) {
+        bool success =
+            base::Move(new_file, new_file.AddExtension(".partial-migration"));
+        DCHECK(success);
+      }
+      bool success = base::Move(old_file, new_file);
+      DCHECK(success);
+    }
+  };
+
+  // These were handled in the initial migration
+  migrate_context_storage_data("Web Data");
+  migrate_context_storage_data("Web Data-journal");
+  migrate_context_storage_data("GPUCache");
+  migrate_context_storage_data("blob_storage");
+  migrate_context_storage_data("Session Storage");
+
+  // These were missed in the initial migration
+  migrate_context_storage_data("File System");
+  migrate_context_storage_data("IndexedDB");
+  migrate_context_storage_data("Local Storage");
+  migrate_context_storage_data("QuotaManager");
+  migrate_context_storage_data("QuotaManager-journal");
+  migrate_context_storage_data("Service Worker");
+  migrate_context_storage_data("VideoDecodeStats");
+  migrate_context_storage_data("databases");
+  migrate_context_storage_data("shared_proto_db");
+  migrate_context_storage_data("webrtc_event_logs");
 }
 
 }  // namespace
@@ -84,10 +150,31 @@ AwBrowserContext::AwBrowserContext()
     : context_storage_path_(GetContextStoragePath()),
       simple_factory_key_(GetPath(), IsOffTheRecord()) {
   DCHECK(!g_browser_context);
+
+  TRACE_EVENT0("startup", "AwBrowserContext::AwBrowserContext");
+
+  profile_metrics::SetBrowserProfileType(
+      this, profile_metrics::BrowserProfileType::kRegular);
+
+  g_web_view_compat_crash_key.Set("0");
+
+  if (IsDefaultBrowserContext()) {
+    MigrateProfileData(GetCacheDir(), GetContextStoragePath());
+  }
+
   g_browser_context = this;
   SimpleKeyMap::GetInstance()->Associate(this, &simple_factory_key_);
 
-  BrowserContext::Initialize(this, context_storage_path_);
+  CreateUserPrefService();
+
+  visitedlink_writer_ =
+      std::make_unique<visitedlink::VisitedLinkWriter>(this, this, false);
+  visitedlink_writer_->Init();
+
+  form_database_service_ =
+      std::make_unique<AwFormDatabaseService>(context_storage_path_);
+
+  EnsureResourceContextInitialized();
 
   // This constructor is entered during the creation of ContentBrowserClient,
   // before browser threads are created. Therefore any checks to enforce
@@ -96,8 +183,10 @@ AwBrowserContext::AwBrowserContext()
 
 AwBrowserContext::~AwBrowserContext() {
   DCHECK_EQ(this, g_browser_context);
-  BrowserContext::NotifyWillBeDestroyed(this);
+  NotifyWillBeDestroyed();
   SimpleKeyMap::GetInstance()->Dissociate(this);
+  ShutdownStoragePartitions();
+
   g_browser_context = NULL;
 }
 
@@ -120,8 +209,8 @@ base::FilePath AwBrowserContext::GetCacheDir() {
   if (!base::PathService::Get(base::DIR_CACHE, &cache_path)) {
     NOTREACHED() << "Failed to get app cache directory for Android WebView";
   }
-  cache_path =
-      cache_path.Append(FILE_PATH_LITERAL("org.chromium.android_webview"));
+  cache_path = cache_path.Append(FILE_PATH_LITERAL("Default"))
+                   .Append(FILE_PATH_LITERAL("HTTP Cache"));
   return cache_path;
 }
 
@@ -136,14 +225,8 @@ base::FilePath AwBrowserContext::GetPrefStorePath() {
   return pref_store_path;
 }
 
-// static
 base::FilePath AwBrowserContext::GetCookieStorePath() {
-  FilePath cookie_store_path;
-  if (!base::PathService::Get(base::DIR_ANDROID_APP_DATA, &cookie_store_path)) {
-    NOTREACHED() << "Failed to get app data directory for Android WebView";
-  }
-  cookie_store_path = cookie_store_path.Append(FILE_PATH_LITERAL("Cookies"));
-  return cookie_store_path;
+  return GetCookieManager()->GetCookieStorePath();
 }
 
 // static
@@ -153,6 +236,7 @@ base::FilePath AwBrowserContext::GetContextStoragePath() {
     NOTREACHED() << "Failed to get app data directory for Android WebView";
   }
 
+  user_data_dir = user_data_dir.Append(FILE_PATH_LITERAL("Default"));
   return user_data_dir;
 }
 
@@ -183,8 +267,7 @@ void AwBrowserContext::RegisterPrefs(PrefRegistrySimple* registry) {
 }
 
 void AwBrowserContext::CreateUserPrefService() {
-  browser_policy_connector_ = std::make_unique<AwBrowserPolicyConnector>();
-
+  TRACE_EVENT0("startup", "AwBrowserContext::CreateUserPrefService");
   auto pref_registry = base::MakeRefCounted<user_prefs::PrefRegistrySyncable>();
 
   RegisterPrefs(pref_registry.get());
@@ -198,21 +281,24 @@ void AwBrowserContext::CreateUserPrefService() {
 
   pref_service_factory.set_user_prefs(base::MakeRefCounted<SegregatedPrefStore>(
       base::MakeRefCounted<InMemoryPrefStore>(),
-      base::MakeRefCounted<JsonPrefStore>(GetPrefStorePath()), persistent_prefs,
-      /*validation_delegate=*/nullptr));
+      base::MakeRefCounted<JsonPrefStore>(GetPrefStorePath()),
+      std::move(persistent_prefs)));
 
-  policy::URLBlacklistManager::RegisterProfilePrefs(pref_registry.get());
+  policy::URLBlocklistManager::RegisterProfilePrefs(pref_registry.get());
+  AwBrowserPolicyConnector* browser_policy_connector =
+      AwBrowserProcess::GetInstance()->browser_policy_connector();
   pref_service_factory.set_managed_prefs(
       base::MakeRefCounted<policy::ConfigurationPolicyPrefStore>(
-          browser_policy_connector_.get(),
-          browser_policy_connector_->GetPolicyService(),
-          browser_policy_connector_->GetHandlerList(),
+          browser_policy_connector,
+          browser_policy_connector->GetPolicyService(),
+          browser_policy_connector->GetHandlerList(),
           policy::POLICY_LEVEL_MANDATORY));
 
   user_pref_service_ = pref_service_factory.Create(pref_registry);
 
-  // TODO(amalova): Do not call this method for non-default profile.
-  MigrateLocalStatePrefs();
+  if (IsDefaultBrowserContext()) {
+    MigrateLocalStatePrefs();
+  }
 
   user_prefs::UserPrefs::Set(this, user_pref_service_.get());
 }
@@ -224,7 +310,7 @@ void AwBrowserContext::MigrateLocalStatePrefs() {
   }
 
   user_pref_service_->Set(cdm::prefs::kMediaDrmStorage,
-                          *(local_state->Get(cdm::prefs::kMediaDrmStorage)));
+                          local_state->GetValue(cdm::prefs::kMediaDrmStorage));
   local_state->ClearPref(cdm::prefs::kMediaDrmStorage);
 }
 
@@ -237,35 +323,9 @@ std::vector<std::string> AwBrowserContext::GetAuthSchemes() {
   return supported_schemes;
 }
 
-void AwBrowserContext::PreMainMessageLoopRun() {
-  CreateUserPrefService();
-
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService)) {
-    // TODO(amalova): Create a new instance for non-default profiles.
-    url_request_context_getter_ =
-        AwBrowserProcess::GetInstance()->GetAwURLRequestContext();
-  }
-
-  scoped_refptr<base::SequencedTaskRunner> db_task_runner =
-      base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
-  visitedlink_master_.reset(
-      new visitedlink::VisitedLinkMaster(this, this, false));
-  visitedlink_master_->Init();
-
-  form_database_service_.reset(
-      new AwFormDatabaseService(context_storage_path_));
-
-  EnsureResourceContextInitialized(this);
-
-  content::WebUIControllerFactory::RegisterFactory(
-      AwWebUIControllerFactory::GetInstance());
-}
-
 void AwBrowserContext::AddVisitedURLs(const std::vector<GURL>& urls) {
-  DCHECK(visitedlink_master_);
-  visitedlink_master_->AddURLs(urls);
+  DCHECK(visitedlink_writer_);
+  visitedlink_writer_->AddURLs(urls);
 }
 
 AwQuotaManagerBridge* AwBrowserContext::GetQuotaManagerBridge() {
@@ -273,6 +333,10 @@ AwQuotaManagerBridge* AwBrowserContext::GetQuotaManagerBridge() {
     quota_manager_bridge_ = AwQuotaManagerBridge::Create(this);
   }
   return quota_manager_bridge_.get();
+}
+
+void AwBrowserContext::SetWebLayerRunningInSameProcess(JNIEnv* env) {
+  g_web_view_compat_crash_key.Set("1");
 }
 
 AwFormDatabaseService* AwBrowserContext::GetFormDatabaseService() {
@@ -292,6 +356,11 @@ AwBrowserContext::GetAutocompleteHistoryManager() {
   return autocomplete_history_manager_.get();
 }
 
+CookieManager* AwBrowserContext::GetCookieManager() {
+  // TODO(amalova): create cookie manager for non-default profile
+  return CookieManager::GetInstance();
+}
+
 base::FilePath AwBrowserContext::GetPath() {
   return context_storage_path_;
 }
@@ -303,7 +372,7 @@ bool AwBrowserContext::IsOffTheRecord() {
 
 content::ResourceContext* AwBrowserContext::GetResourceContext() {
   if (!resource_context_) {
-    resource_context_.reset(new AwResourceContext);
+    resource_context_ = std::make_unique<AwResourceContext>();
   }
   return resource_context_.get();
 }
@@ -327,14 +396,24 @@ storage::SpecialStoragePolicy* AwBrowserContext::GetSpecialStoragePolicy() {
   return NULL;
 }
 
+content::PlatformNotificationService*
+AwBrowserContext::GetPlatformNotificationService() {
+  return nullptr;
+}
+
 content::PushMessagingService* AwBrowserContext::GetPushMessagingService() {
   // TODO(johnme): Support push messaging in WebView.
   return NULL;
 }
 
+content::StorageNotificationService*
+AwBrowserContext::GetStorageNotificationService() {
+  return nullptr;
+}
+
 content::SSLHostStateDelegate* AwBrowserContext::GetSSLHostStateDelegate() {
   if (!ssl_host_state_delegate_.get()) {
-    ssl_host_state_delegate_.reset(new AwSSLHostStateDelegate());
+    ssl_host_state_delegate_ = std::make_unique<AwSSLHostStateDelegate>();
   }
   return ssl_host_state_delegate_.get();
 }
@@ -342,7 +421,7 @@ content::SSLHostStateDelegate* AwBrowserContext::GetSSLHostStateDelegate() {
 content::PermissionControllerDelegate*
 AwBrowserContext::GetPermissionControllerDelegate() {
   if (!permission_manager_.get())
-    permission_manager_.reset(new AwPermissionManager());
+    permission_manager_ = std::make_unique<AwPermissionManager>();
   return permission_manager_.get();
 }
 
@@ -366,32 +445,24 @@ AwBrowserContext::GetBrowsingDataRemoverDelegate() {
   return nullptr;
 }
 
-net::URLRequestContextGetter* AwBrowserContext::CreateRequestContext(
-    content::ProtocolHandlerMap* protocol_handlers,
-    content::URLRequestInterceptorScopedVector request_interceptors) {
-  DCHECK(!base::FeatureList::IsEnabled(network::features::kNetworkService));
-  // This function cannot actually create the request context because
-  // there is a reentrant dependency on GetResourceContext() via
-  // content::StoragePartitionImplMap::Create(). This is not fixable
-  // until http://crbug.com/159193. Until then, assert that the context
-  // has already been allocated and just handle setting the protocol_handlers.
-  DCHECK(url_request_context_getter_);
-  url_request_context_getter_->SetHandlersAndInterceptors(
-      protocol_handlers, std::move(request_interceptors));
-  return url_request_context_getter_.get();
-}
-
-net::URLRequestContextGetter* AwBrowserContext::CreateMediaRequestContext() {
-  DCHECK(!base::FeatureList::IsEnabled(network::features::kNetworkService));
-  return AwBrowserProcess::GetInstance()->GetAwURLRequestContext();
+content::ReduceAcceptLanguageControllerDelegate*
+AwBrowserContext::GetReduceAcceptLanguageControllerDelegate() {
+  return nullptr;
 }
 
 download::InProgressDownloadManager*
 AwBrowserContext::RetriveInProgressDownloadManager() {
   return new download::InProgressDownloadManager(
-      nullptr, base::FilePath(),
+      nullptr, base::FilePath(), nullptr,
       base::BindRepeating(&IgnoreOriginSecurityCheck),
-      base::BindRepeating(&content::DownloadRequestUtils::IsURLSafe), nullptr);
+      base::BindRepeating(&content::DownloadRequestUtils::IsURLSafe),
+      /*wake_lock_provider_binder*/ base::NullCallback());
+}
+
+std::unique_ptr<content::ZoomLevelDelegate>
+AwBrowserContext::CreateZoomLevelDelegate(
+    const base::FilePath& partition_path) {
+  return nullptr;
 }
 
 void AwBrowserContext::RebuildTable(
@@ -407,14 +478,14 @@ void AwBrowserContext::SetExtendedReportingAllowed(bool allowed) {
       ::prefs::kSafeBrowsingExtendedReportingOptInAllowed, allowed);
 }
 
-// TODO(amalova): Make sure NetworkContext is configured correctly when
+// TODO(amalova): Make sure NetworkContextParams is configured correctly when
 // off-the-record
-network::mojom::NetworkContextParamsPtr
-AwBrowserContext::GetNetworkContextParams(
+void AwBrowserContext::ConfigureNetworkContextParams(
     bool in_memory,
-    const base::FilePath& relative_partition_path) {
-  network::mojom::NetworkContextParamsPtr context_params =
-      network::mojom::NetworkContextParams::New();
+    const base::FilePath& relative_partition_path,
+    network::mojom::NetworkContextParams* context_params,
+    cert_verifier::mojom::CertVerifierCreationParams*
+        cert_verifier_creation_params) {
   context_params->user_agent = android_webview::GetUserAgent();
 
   // TODO(ntfschr): set this value to a proper value based on the user's
@@ -427,17 +498,25 @@ AwBrowserContext::GetNetworkContextParams(
   // HTTP cache
   context_params->http_cache_enabled = true;
   context_params->http_cache_max_size = GetHttpCacheSize();
-  context_params->http_cache_path = GetCacheDir();
+  context_params->http_cache_directory = GetCacheDir();
 
   // WebView should persist and restore cookies between app sessions (including
   // session cookies).
-  context_params->cookie_path = AwBrowserContext::GetCookieStorePath();
+  context_params->file_paths = network::mojom::NetworkContextFilePaths::New();
+  base::FilePath cookie_path = AwBrowserContext::GetCookieStorePath();
+  context_params->file_paths->data_directory = cookie_path.DirName();
+  context_params->file_paths->cookie_database_name = cookie_path.BaseName();
   context_params->restore_old_session_cookies = true;
   context_params->persist_session_cookies = true;
   context_params->cookie_manager_params =
       network::mojom::CookieManagerParams::New();
   context_params->cookie_manager_params->allow_file_scheme_cookies =
-      CookieManager::GetInstance()->AllowFileSchemeCookies();
+      GetCookieManager()->GetAllowFileSchemeCookies();
+  context_params->cookie_manager_params->cookie_access_delegate_type =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kWebViewEnableModernCookieSameSite)
+          ? network::mojom::CookieAccessDelegateType::ALWAYS_NONLEGACY
+          : network::mojom::CookieAccessDelegateType::ALWAYS_LEGACY;
 
   context_params->initial_ssl_config = network::mojom::SSLConfig::New();
   // Allow SHA-1 to be used for locally-installed trust anchors, as WebView
@@ -447,13 +526,16 @@ AwBrowserContext::GetNetworkContextParams(
   // https://security.googleblog.com/2017/09/chromes-plan-to-distrust-symantec.html,
   // defer to the Android system.
   context_params->initial_ssl_config->symantec_enforcement_disabled = true;
+  // Do not enforce Legacy TLS removal if support is still enabled.
+  if (base::FeatureList::IsEnabled(
+          android_webview::features::kWebViewLegacyTlsSupport)) {
+    context_params->initial_ssl_config->version_min =
+        network::mojom::SSLVersion::kTLS1;
+  }
 
   // WebView does not currently support Certificate Transparency
   // (http://crbug.com/921750).
   context_params->enforce_chrome_ct_policy = false;
-
-  // WebView does not support ftp yet.
-  context_params->enable_ftp_url_support = false;
 
   context_params->enable_brotli = base::FeatureList::IsEnabled(
       android_webview::features::kWebViewBrotliSupport);
@@ -461,16 +543,28 @@ AwBrowserContext::GetNetworkContextParams(
   context_params->check_clear_text_permitted =
       AwContentBrowserClient::get_check_cleartext_permitted();
 
-  // Update the cors_exempt_header_list to include internally-added headers, to
-  // avoid triggering CORS checks.
-  content::UpdateCorsExemptHeader(context_params.get());
-  variations::UpdateCorsExemptHeaderForVariations(context_params.get());
-
   // Add proxy settings
   AwProxyConfigMonitor::GetInstance()->AddProxyToNetworkContextParams(
       context_params);
+}
 
-  return context_params;
+base::android::ScopedJavaLocalRef<jobject> JNI_AwBrowserContext_GetDefaultJava(
+    JNIEnv* env) {
+  return g_browser_context->GetJavaBrowserContext();
+}
+
+base::android::ScopedJavaLocalRef<jobject>
+AwBrowserContext::GetJavaBrowserContext() {
+  if (!obj_) {
+    JNIEnv* env = base::android::AttachCurrentThread();
+    obj_ = Java_AwBrowserContext_create(env, reinterpret_cast<intptr_t>(this),
+                                        IsDefaultBrowserContext());
+  }
+  return base::android::ScopedJavaLocalRef<jobject>(obj_);
+}
+
+jlong AwBrowserContext::GetQuotaManagerBridge(JNIEnv* env) {
+  return reinterpret_cast<intptr_t>(GetQuotaManagerBridge());
 }
 
 }  // namespace android_webview

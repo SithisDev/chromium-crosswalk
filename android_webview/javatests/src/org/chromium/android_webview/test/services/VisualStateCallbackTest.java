@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@ package org.chromium.android_webview.test.services;
 import static org.chromium.android_webview.test.OnlyRunIn.ProcessMode.MULTI_PROCESS;
 
 import android.content.Context;
-import android.support.test.filters.SmallTest;
 import android.view.ViewGroup;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -37,7 +38,8 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 
 /**
- * Test VisualStateCallback when render process is gone.
+ * Test VisualStateCallback when render process is gone. Test is not batched because it tests
+ * behaviour in multiprocesses.
  */
 @RunWith(AwJUnit4ClassRunner.class)
 public class VisualStateCallbackTest {
@@ -140,7 +142,7 @@ public class VisualStateCallbackTest {
     private RenderProcessGoneHelper mHelper;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         RenderProcessGoneTestAwContentsClient contentsClient =
                 new RenderProcessGoneTestAwContentsClient();
         AwTestContainerView testView = mActivityTestRule.createAwTestContainerViewOnMainSync(

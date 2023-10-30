@@ -1,12 +1,12 @@
 <!--
- * Copyright 2015 The Chromium Authors. All rights reserved.
+ * Copyright 2015 The Chromium Authors
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
 -->
 
 <manifest
     xmlns:android="http://schemas.android.com/apk/res/android"
-    package="org.chromium.webview_shell"
+    package="{{manifest_package|default('org.chromium.webview_shell')}}"
     android:versionCode="1"
     android:versionName="1.0" >
 
@@ -89,6 +89,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
                 <data android:scheme="http" />
                 <data android:scheme="https" />
                 <data android:mimeType="text/html"/>
@@ -96,6 +97,15 @@
                 <data android:mimeType="application/xhtml+xml"/>
                 <data android:mimeType="application/vnd.wap.xhtml+xml"/> <!-- XHTML MP -->
             </intent-filter>
+        </activity>
+        <activity
+            android:name="org.chromium.webview_shell.WebViewBrowserSecondProcessActivity"
+            android:process=":second_process"
+            android:label="@string/title_activity_browser_second_process"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize"
+            android:colorMode="wideColorGamut"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density">
         </activity>
         <activity
             android:name="org.chromium.webview_shell.WebViewLayoutTestActivity"
@@ -125,6 +135,12 @@
 
         <activity
             android:name="org.chromium.webview_shell.WebViewAnimationTestActivity"
+            android:noHistory="true"
+            android:exported="true">
+        </activity>
+
+        <activity
+            android:name="org.chromium.webview_shell.WebPlatformTestsActivity"
             android:noHistory="true"
             android:exported="true">
         </activity>

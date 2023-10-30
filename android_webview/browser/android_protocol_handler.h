@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,32 +10,19 @@
 
 class GURL;
 
-namespace net {
-class URLRequestInterceptor;
-}  // namespace net
+namespace embedder_support {
+class InputStream;
+}
 
 namespace android_webview {
-class InputStream;
 
-// These methods create interceptors for Android WebView-specific schemes:
-//
-//  - "content:" scheme is used for accessing data from Android content
-//    providers, see http://developer.android.com/guide/topics/providers/
-//      content-provider-basics.html#ContentURIs
-std::unique_ptr<net::URLRequestInterceptor>
-CreateContentSchemeRequestInterceptor();
-
-//  - "file:" scheme extension for accessing application assets and resources
-//    (file:///android_asset/ and file:///android_res/), see
-//    http://developer.android.com/reference/android/webkit/
-//      WebSettings.html#setAllowFileAccess(boolean)
-std::unique_ptr<net::URLRequestInterceptor> CreateAssetFileRequestInterceptor();
-
-std::unique_ptr<InputStream> CreateInputStream(JNIEnv* env, const GURL& url);
+std::unique_ptr<embedder_support::InputStream> CreateInputStream(
+    JNIEnv* env,
+    const GURL& url);
 
 bool GetInputStreamMimeType(JNIEnv* env,
                             const GURL& url,
-                            InputStream* stream,
+                            embedder_support::InputStream* stream,
                             std::string* mime_type);
 
 }  // namespace android_webview

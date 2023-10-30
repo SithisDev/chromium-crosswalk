@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,12 @@
 
 #include <vector>
 
-#include "android_webview/browser/gfx/compositor_id.h"
 #include "base/memory/weak_ptr.h"
 #include "components/viz/common/resources/returned_resource.h"
+
+namespace viz {
+class FrameSinkId;
+}
 
 namespace android_webview {
 
@@ -18,16 +21,16 @@ class CompositorFrameConsumer;
 class CompositorFrameProducer {
  public:
   virtual base::WeakPtr<CompositorFrameProducer> GetWeakPtr() = 0;
-  virtual void ReturnUsedResources(
-      const std::vector<viz::ReturnedResource>& resources,
-      const CompositorID& compositor_id,
-      uint32_t layer_tree_frame_sink_id) = 0;
+  virtual void ReturnUsedResources(std::vector<viz::ReturnedResource> resources,
+                                   const viz::FrameSinkId& frame_sink_id,
+                                   uint32_t layer_tree_frame_sink_id) = 0;
   virtual void OnParentDrawDataUpdated(
       CompositorFrameConsumer* compositor_frame_consumer) = 0;
   virtual void OnViewTreeForceDarkStateChanged(
       bool view_tree_force_dark_state) = 0;
   virtual void RemoveCompositorFrameConsumer(
       CompositorFrameConsumer* consumer) = 0;
+  virtual void ChildSurfaceWasEvicted() = 0;
 
  protected:
   virtual ~CompositorFrameProducer() {}

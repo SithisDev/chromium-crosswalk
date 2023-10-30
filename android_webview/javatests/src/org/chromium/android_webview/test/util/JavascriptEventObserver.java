@@ -1,11 +1,17 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview.test.util;
 
+import org.chromium.android_webview.AwFeatureList;
+import org.chromium.android_webview.common.AwFeatures;
+import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.content_public.browser.JavascriptInjector;
 import org.chromium.content_public.browser.WebContents;
+
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * This class is used to be notified when a javascript event happened. It add itself as
@@ -16,8 +22,8 @@ import org.chromium.content_public.browser.WebContents;
  * 3. In javascript call notifyJava() when you want Java side know something is done.
  */
 public class JavascriptEventObserver {
-    private final Object mEvent = new Object();
-    private boolean mHappened;
+    private final CallbackHelper mCallbackHelper = new CallbackHelper();
+    private int mCurCallCount;
 
     /**
      * Register into javascript, must be called in UI thread.
@@ -26,7 +32,9 @@ public class JavascriptEventObserver {
      * @param name the name of object used in javascript
      */
     public void register(WebContents webContents, String name) {
-        JavascriptInjector.fromWebContents(webContents)
+        JavascriptInjector
+                .fromWebContents(webContents,
+                        AwFeatureList.isEnabled(AwFeatures.WEBVIEW_JAVA_JS_BRIDGE_MOJO))
                 .addPossiblyUnsafeInterface(this, name, null);
     }
 
@@ -34,30 +42,13 @@ public class JavascriptEventObserver {
      * Wait for the javascript event happen for specific time, there is no timeout parameter,
      * return true if the event happened.
      */
-    public boolean waitForEvent(long time) throws InterruptedException {
-        synchronized (mEvent) {
-            if (mHappened) return mHappened;
-            long deadline = System.currentTimeMillis() + time;
-            while (!mHappened && System.currentTimeMillis() < deadline) {
-                mEvent.wait(deadline - System.currentTimeMillis());
-            }
-            boolean happened = mHappened;
-            mHappened = false;
-            return happened;
-        }
-    }
-
-    /**
-     * Wait for the javascript event happen, there is no timeout parameter, you usually
-     * should depend on unit test's timeout.
-     */
-    public void waitForEvent() throws InterruptedException {
-        synchronized (mEvent) {
-            if (mHappened) return;
-            while (!mHappened) {
-                mEvent.wait();
-            }
-            mHappened = false;
+    public boolean waitForEvent(long time) {
+        try {
+            mCallbackHelper.waitForCallback(mCurCallCount, 1, time, TimeUnit.MILLISECONDS);
+            mCurCallCount = mCallbackHelper.getCallCount();
+            return true;
+        } catch (TimeoutException e) {
+            return false;
         }
     }
 
@@ -66,9 +57,6 @@ public class JavascriptEventObserver {
      * parameter of register() method.
      */
     public void notifyJava() {
-        synchronized (mEvent) {
-            mHappened = true;
-            mEvent.notify();
-        }
+        mCallbackHelper.notifyCalled();
     }
 }

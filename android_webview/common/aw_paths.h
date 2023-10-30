@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,12 @@ enum {
   PATH_START = 11000,
 
   DIR_CRASH_DUMPS = PATH_START,  // Directory where crash dumps are written.
+
+  DIR_COMPONENTS_ROOT,  // Directory where components installed via component
+                        // updater.
+
+  DIR_COMPONENTS_TEMP,  // Directory where temporary copies of components are
+                        // made.
 
   DIR_SAFE_BROWSING,  // Directory where safe browsing related cookies are
                       // stored.

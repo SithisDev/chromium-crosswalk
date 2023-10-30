@@ -1,15 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.webview_ui_test.test.util;
 
-import static android.support.test.espresso.matcher.RootMatchers.withDecorView;
-import static android.support.test.espresso.matcher.ViewMatchers.hasDescendant;
-import static android.support.test.espresso.matcher.ViewMatchers.isCompletelyDisplayed;
-import static android.support.test.espresso.matcher.ViewMatchers.withChild;
-import static android.support.test.espresso.matcher.ViewMatchers.withClassName;
-import static android.support.test.espresso.matcher.ViewMatchers.withText;
+import static androidx.test.espresso.matcher.RootMatchers.withDecorView;
+import static androidx.test.espresso.matcher.ViewMatchers.isCompletelyDisplayed;
+import static androidx.test.espresso.matcher.ViewMatchers.withChild;
+import static androidx.test.espresso.matcher.ViewMatchers.withClassName;
 
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.Matchers.endsWith;
@@ -18,16 +16,16 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import android.content.Intent;
-import android.os.Build;
-import android.support.test.espresso.BaseLayerComponent;
-import android.support.test.espresso.DaggerBaseLayerComponent;
-import android.support.test.rule.ActivityTestRule;
 import android.webkit.WebView;
 
-import org.junit.Assert;
+import androidx.test.espresso.BaseLayerComponent;
+import androidx.test.espresso.DaggerBaseLayerComponent;
+
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
+import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.BaseActivityTestRule;
 import org.chromium.webview_ui_test.R;
 import org.chromium.webview_ui_test.WebViewUiTestActivity;
 
@@ -39,7 +37,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Note that this must be run on test thread.
  *
  */
-public class WebViewUiTestRule extends ActivityTestRule<WebViewUiTestActivity> {
+public class WebViewUiTestRule extends BaseActivityTestRule<WebViewUiTestActivity> {
     private static final long ACTION_BAR_POPUP_TIMEOUT = scaleTimeout(5000L);
     private static final long ACTION_BAR_CHECK_INTERVAL = 200L;
 
@@ -52,12 +50,6 @@ public class WebViewUiTestRule extends ActivityTestRule<WebViewUiTestActivity> {
     }
 
     @Override
-    protected void afterActivityLaunched() {
-        mSyncWrapper = new WebViewSyncWrapper((WebView) getActivity().findViewById(R.id.webview));
-        super.afterActivityLaunched();
-    }
-
-    @Override
     public Statement apply(Statement base, Description desc) {
         UseLayout a = desc.getAnnotation(UseLayout.class);
         if (a != null) {
@@ -67,40 +59,30 @@ public class WebViewUiTestRule extends ActivityTestRule<WebViewUiTestActivity> {
     }
 
     @Override
-    public WebViewUiTestActivity launchActivity(Intent i) {
+    public void launchActivity(Intent i) {
         if (mLayout != null && !mLayout.isEmpty()) {
+            if (i == null) i = getActivityIntent();
             i.putExtra(WebViewUiTestActivity.EXTRA_TEST_LAYOUT_FILE, mLayout);
         }
-        return super.launchActivity(i);
+        super.launchActivity(i);
+        mSyncWrapper = new WebViewSyncWrapper((WebView) getActivity().findViewById(R.id.webview));
     }
 
-    public WebViewUiTestActivity launchActivity() {
-        return launchActivity(new Intent());
+    public void launchActivity() {
+        launchActivity(null);
     }
 
     public void loadDataSync(
             String data, String mimeType, String encoding, boolean confirmByJavaScript) {
-        try {
-            mSyncWrapper.loadDataSync(data, mimeType, encoding, confirmByJavaScript);
-        } catch (InterruptedException e) {
-            Assert.fail(e.getMessage());
-        }
+        mSyncWrapper.loadDataSync(data, mimeType, encoding, confirmByJavaScript);
     }
 
     public void loadJavaScriptSync(String js, boolean appendConfirmationJavascript) {
-        try {
-            mSyncWrapper.loadJavaScriptSync(js, appendConfirmationJavascript);
-        } catch (InterruptedException e) {
-            Assert.fail(e.getMessage());
-        }
+        mSyncWrapper.loadJavaScriptSync(js, appendConfirmationJavascript);
     }
 
     public void loadFileSync(String html, boolean confirmByJavaScript) {
-        try {
-            mSyncWrapper.loadFileSync(html, confirmByJavaScript);
-        } catch (InterruptedException e) {
-            Assert.fail(e.getMessage());
-        }
+        mSyncWrapper.loadFileSync(html, confirmByJavaScript);
     }
 
     /**
@@ -127,12 +109,7 @@ public class WebViewUiTestRule extends ActivityTestRule<WebViewUiTestActivity> {
     public boolean isActionBarDisplayed() {
         final AtomicBoolean isDisplayed = new AtomicBoolean(false);
         try {
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    isDisplayed.set(isActionBarDisplayedFunc());
-                }
-            });
+            ThreadUtils.runOnUiThreadBlocking(() -> isDisplayed.set(isActionBarDisplayedFunc()));
         } catch (Throwable e) {
             throw new RuntimeException("Exception while checking action bar", e);
         }
@@ -142,31 +119,11 @@ public class WebViewUiTestRule extends ActivityTestRule<WebViewUiTestActivity> {
     private boolean isActionBarDisplayedFunc() {
         if (mBaseLayerComponent == null) mBaseLayerComponent = DaggerBaseLayerComponent.create();
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            // For M and above
-            if (hasItem(withDecorView(withChild(allOf(
-                    withClassName(endsWith("PopupBackgroundView")),
-                    isCompletelyDisplayed())))).matches(
-                    mBaseLayerComponent.activeRootLister().listActiveRoots())) {
-                return true;
-            }
-        } else {
-            // For L
-            if (hasItem(withDecorView(hasDescendant(allOf(
-                    withClassName(endsWith("ActionMenuItemView")),
-                    isCompletelyDisplayed())))).matches(
-                    mBaseLayerComponent.activeRootLister().listActiveRoots())) {
-                return true;
-            }
-
-            // Paste option is a popup on L
-            if (hasItem(withDecorView(withChild(withText("Paste")))).matches(
-                    mBaseLayerComponent.activeRootLister().listActiveRoots())) {
-                return true;
-            }
+        if (hasItem(withDecorView(withChild(allOf(withClassName(endsWith("PopupBackgroundView")),
+                            isCompletelyDisplayed()))))
+                        .matches(mBaseLayerComponent.activeRootLister().listActiveRoots())) {
+            return true;
         }
-
-
         return false;
     }
 

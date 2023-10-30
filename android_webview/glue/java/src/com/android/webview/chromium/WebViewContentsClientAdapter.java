@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,27 +33,26 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-
-import com.android.webview.chromium.WebViewDelegateFactory.WebViewDelegate;
+import android.webkit.WebViewDelegate;
 
 import org.chromium.android_webview.AwConsoleMessage;
-import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwContentsClientBridge;
 import org.chromium.android_webview.AwGeolocationPermissions;
 import org.chromium.android_webview.AwHistogramRecorder;
 import org.chromium.android_webview.AwHttpAuthHandler;
 import org.chromium.android_webview.AwRenderProcessGoneDetail;
-import org.chromium.android_webview.AwWebResourceResponse;
 import org.chromium.android_webview.JsPromptResultReceiver;
 import org.chromium.android_webview.JsResultReceiver;
-import org.chromium.android_webview.ScopedSysTraceEvent;
 import org.chromium.android_webview.permission.AwPermissionRequest;
 import org.chromium.android_webview.permission.Resource;
 import org.chromium.base.Callback;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.TraceEvent;
+import org.chromium.base.metrics.ScopedSysTraceEvent;
 import org.chromium.base.task.PostTask;
+import org.chromium.components.embedder_support.util.WebResourceResponseInfo;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 
 import java.lang.ref.WeakReference;
@@ -61,8 +60,6 @@ import java.security.Principal;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.WeakHashMap;
 
 /**
@@ -106,11 +103,13 @@ class WebViewContentsClientAdapter extends SharedWebViewContentsClientAdapter {
      *
      * @param webView the {@link WebView} instance that this adapter is serving.
      */
-    WebViewContentsClientAdapter(WebView webView, Context context,
-            WebViewDelegate webViewDelegate) {
+    @SuppressWarnings("HandlerLeak")
+    WebViewContentsClientAdapter(
+            WebView webView, Context context, WebViewDelegate webViewDelegate) {
         super(webView, webViewDelegate, context);
         try (ScopedSysTraceEvent event =
                         ScopedSysTraceEvent.scoped("WebViewContentsClientAdapter.constructor")) {
+            // See //android_webview/docs/how-does-on-create-window-work.md for more details.
             mUiThreadHandler = new Handler() {
                 @Override
                 public void handleMessage(Message msg) {
@@ -217,7 +216,7 @@ class WebViewContentsClientAdapter extends SharedWebViewContentsClientAdapter {
      * @see AwContentsClient#shouldInterceptRequest(java.lang.String)
      */
     @Override
-    public AwWebResourceResponse shouldInterceptRequest(AwWebResourceRequest request) {
+    public WebResourceResponseInfo shouldInterceptRequest(AwWebResourceRequest request) {
         try {
             TraceEvent.begin("WebViewContentsClientAdapter.shouldInterceptRequest");
             if (TRACE) Log.i(TAG, "shouldInterceptRequest=" + request.url);
@@ -225,17 +224,9 @@ class WebViewContentsClientAdapter extends SharedWebViewContentsClientAdapter {
                     mWebView, new WebResourceRequestAdapter(request));
             if (response == null) return null;
 
-            // AwWebResourceResponse should support null headers. b/16332774.
-            Map<String, String> responseHeaders = response.getResponseHeaders();
-            if (responseHeaders == null) responseHeaders = new HashMap<String, String>();
-
-            return new AwWebResourceResponse(
-                    response.getMimeType(),
-                    response.getEncoding(),
-                    response.getData(),
-                    response.getStatusCode(),
-                    response.getReasonPhrase(),
-                    responseHeaders);
+            return new WebResourceResponseInfo(response.getMimeType(), response.getEncoding(),
+                    response.getData(), response.getStatusCode(), response.getReasonPhrase(),
+                    response.getResponseHeaders());
         } finally {
             TraceEvent.end("WebViewContentsClientAdapter.shouldInterceptRequest");
         }
@@ -450,7 +441,7 @@ class WebViewContentsClientAdapter extends SharedWebViewContentsClientAdapter {
             if (mPictureListener != null) {
                 PostTask.postDelayedTask(UiThreadTaskTraits.DEFAULT, () -> {
                     if (mPictureListener != null) {
-                        if (TRACE) Log.i(TAG, "onPageFinished-fake");
+                        if (TRACE) Log.i(TAG, "onNewPicture - from onPageFinished workaround.");
                         mPictureListener.onNewPicture(
                                 mWebView, mPictureListenerInvalidateOnly ? null : new Picture());
                     }
@@ -520,7 +511,9 @@ class WebViewContentsClientAdapter extends SharedWebViewContentsClientAdapter {
                                             "onGeolocationPermissionsShowPrompt",
                                             String.class,
                                             GeolocationPermissions.Callback.class)) {
-                // This is only required for pre-M versions of android.
+                // The default WebChromeClient.onGeolocationPermissionsShowPrompt() implementation
+                // is a NOOP (does not invoke the callback). Explicitly invoke the callback in
+                // chromium code to deny the permission.
                 callback.invoke(origin, false, false);
                 return;
             }
@@ -720,7 +713,7 @@ class WebViewContentsClientAdapter extends SharedWebViewContentsClientAdapter {
             String message, String url) {
         // Note we must unwrap the Context here due to JsDialogHelper only using instanceof to
         // check if a Context is an Activity.
-        Context activityContext = AwContents.activityFromContext(mContext);
+        Context activityContext = ContextUtils.activityFromContext(mContext);
         if (activityContext == null) {
             Log.w(TAG, "Unable to create JsDialog without an Activity");
             return false;
@@ -749,6 +742,7 @@ class WebViewContentsClientAdapter extends SharedWebViewContentsClientAdapter {
     }
 
     @Override
+    @SuppressWarnings("HandlerLeak")
     public void onReceivedSslError(final Callback<Boolean> callback, SslError error) {
         try {
             TraceEvent.begin("WebViewContentsClientAdapter.onReceivedSslError");
@@ -1087,7 +1081,7 @@ class WebViewContentsClientAdapter extends SharedWebViewContentsClientAdapter {
                     result |= Resource.AUDIO_CAPTURE;
                 } else if (resource.equals(PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID)) {
                     result |= Resource.PROTECTED_MEDIA_ID;
-                } else if (resource.equals(AwPermissionRequest.RESOURCE_MIDI_SYSEX)) {
+                } else if (resource.equals(PermissionRequest.RESOURCE_MIDI_SYSEX)) {
                     result |= Resource.MIDI_SYSEX;
                 }
             }
@@ -1106,7 +1100,7 @@ class WebViewContentsClientAdapter extends SharedWebViewContentsClientAdapter {
                 result.add(PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID);
             }
             if ((resources & Resource.MIDI_SYSEX) != 0) {
-                result.add(AwPermissionRequest.RESOURCE_MIDI_SYSEX);
+                result.add(PermissionRequest.RESOURCE_MIDI_SYSEX);
             }
             String[] resource_array = new String[result.size()];
             return result.toArray(resource_array);

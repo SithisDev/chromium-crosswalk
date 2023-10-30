@@ -1,16 +1,17 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "android_webview/browser/aw_form_database_service.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/webdata/common/webdata_constants.h"
 
@@ -38,7 +39,7 @@ AwFormDatabaseService::AwFormDatabaseService(const base::FilePath path)
   // TODO(pkasting): http://crbug.com/740773 This should likely be sequenced,
   // not single-threaded; it's also possible these objects can each use their
   // own sequences instead of sharing this one.
-  auto db_task_runner = base::CreateSingleThreadTaskRunnerWithTraits(
+  auto db_task_runner = base::ThreadPool::CreateSingleThreadTaskRunner(
       {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
        base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
   web_database_ = new WebDatabaseService(path.Append(kWebDataFilename),
@@ -47,9 +48,8 @@ AwFormDatabaseService::AwFormDatabaseService(const base::FilePath path)
   web_database_->LoadDatabase();
 
   autofill_data_ = new autofill::AutofillWebDataService(
-      web_database_, ui_task_runner, db_task_runner,
-      base::Bind(&DatabaseErrorCallback));
-  autofill_data_->Init();
+      web_database_, ui_task_runner, db_task_runner);
+  autofill_data_->Init(base::BindOnce(&DatabaseErrorCallback));
 }
 
 AwFormDatabaseService::~AwFormDatabaseService() {
@@ -79,7 +79,7 @@ bool AwFormDatabaseService::HasFormData() {
   has_form_data_result_ = false;
   has_form_data_completion_.Reset();
   using awds = autofill::AutofillWebDataService;
-  base::PostTask(
+  base::ThreadPool::PostTask(
       FROM_HERE,
       base::BindOnce(
           base::IgnoreResult(&awds::GetCountOfValuesContainedBetween),

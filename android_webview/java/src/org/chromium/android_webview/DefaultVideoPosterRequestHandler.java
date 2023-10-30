@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@ import android.util.Log;
 
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
+import org.chromium.components.embedder_support.util.WebResourceResponseInfo;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 
 import java.io.IOException;
@@ -76,14 +77,14 @@ public class DefaultVideoPosterRequestHandler {
      * Used to get the image if the url is mDefaultVideoPosterURL.
      *
      * @param url the url requested
-     * @return AwWebResourceResponse which caller can get the image if the url is
+     * @return WebResourceResponseInfo which caller can get the image if the url is
      * the default video poster URL, otherwise null is returned.
      */
-    public AwWebResourceResponse shouldInterceptRequest(final String url) {
+    public WebResourceResponseInfo shouldInterceptRequest(final String url) {
         if (!mDefaultVideoPosterURL.equals(url)) return null;
 
         try {
-            return new AwWebResourceResponse("image/png", null, getInputStream(mContentClient));
+            return new WebResourceResponseInfo("image/png", null, getInputStream(mContentClient));
         } catch (IOException e) {
             Log.e(TAG, null, e);
             return null;

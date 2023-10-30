@@ -41,14 +41,44 @@ On Android 7 (Nougat) and later, you can install multiple channels at the same
 time. This allows you to play with our latest code, while still keeping a tested
 version of WebView around.
 
-## How do I try a pre-release channel?
+## How do I try a pre-release channel? {#switch-channel}
 
 Steps depend on your version of Android:
 
+### Android 10 and later (Q, R, etc.)
+
+Pre-release channels must be downloaded and installed as separate apps, but only
+one must be chosen to provide the system's WebView implementation at any given
+time.
+
+*** note
+WebView pre-release channels are independent of Chrome in Android 10 and later.
+Chrome can no longer be used as a WebView implementation in Android 10 and
+later.
+***
+
+1. Download a pre-release channel of WebView from the play store, available here:
+   - [WebView Beta](https://play.google.com/store/apps/details?id=com.google.android.webview.beta)
+   - [WebView Dev](https://play.google.com/store/apps/details?id=com.google.android.webview.dev)
+   - [WebView Canary](https://play.google.com/store/apps/details?id=com.google.android.webview.canary)
+2. Follow the [steps to enable Android's developer options
+   menu](https://developer.android.com/studio/debug/dev-options)
+3. Choose Developer Options > WebView implementation (see figure)
+
+   ![The "WebView implementation" menu](/android_webview/docs/images/webview_implementations_menu_10.png)
+
+4. Choose the channel that you would like to use for WebView
+
+#### Returning to stable WebView
+
+1. To return to WebView stable, select "Android System WebView" again in the
+   WebView implementation menu
+
 ### Android 7 through 9 (Nougat/Oreo/Pie)
 
-Pre-release channels must be downloaded and installed as separate apps, but one
-must be chosen to provide the system's WebView implementation at any given time.
+Pre-release channels must be downloaded and installed as separate apps, but only
+one must be chosen to provide the system's WebView implementation at any given
+time.
 
 1. Download a pre-release channel of Chrome from the play store, available here:
    - [Chrome Beta](https://play.google.com/store/apps/details?id=com.chrome.beta)
@@ -102,6 +132,31 @@ Any WebView-related bugs can be filed
 To best enable us to resolve the issue, please ensure you provide all of the
 information requested in the bug report template.
 
+## Work profile, multiple users, or Samsung Secure Folder {#multiple-profiles}
+
+*** aside
+This only applies to Android 8 (Oreo) and above.
+***
+
+If your Android device has been configured with a work profile, you'll need to
+install pre-release WebView for both your work profile and regular profile. You
+can only change WebView channel if you've enabled this for all profiles on the
+device. Then you should be able to successfully switch WebView channels
+following the steps above.
+
+Some devices [may support multiple user
+accounts](https://support.google.com/nexus/answer/2865483?hl=en). Similar to
+work profile, your pre-release WebView channel must be installed and enabled for
+each user account on the device.
+
+Some Samsung phones support a feature called [Secure
+Folder](https://www.samsung.com/global/galaxy/what-is/secure-folder/). Under the
+hood, this is implemented by creating a new user profile, similar to work
+profile or multiple users. If you've previously enabled the Secure Folder
+feature, you'll need to add your WebView channel to the folder. Open the folder,
+click "add apps," and select the desired WebView channel. Then you should be
+able to select WebView from the menu above.
+
 ## Command line tools
 
 Choosing your WebView implementation on Android 7 (Nougat) or later can also
@@ -113,12 +168,16 @@ adb shell cmd webviewupdate set-webview-implementation <packagename>
 
 Package names are as follows:
 
-|App name                |Package name                            |
-|-----------------------:|----------------------------------------|
-|Chrome (stable)         |com.android.chrome                      |
-|Chrome Beta             |com.chrome.beta                         |
-|Chrome Dev              |com.chrome.dev                          |
-|Chrome Canary           |com.chrome.canary                       |
+|App name                    |Package name                            |
+|---------------------------:|----------------------------------------|
+|Chrome (stable, 7/8/9 only) |com.android.chrome                      |
+|Chrome Beta (7/8/9 only)    |com.chrome.beta                         |
+|Chrome Dev (7/8/9 only)     |com.chrome.dev                          |
+|Chrome Canary (7/8/9 only)  |com.chrome.canary                       |
+|WebView (stable)            |com.google.android.webview              |
+|WebView Beta (10+ only)     |com.google.android.webview.beta         |
+|WebView Dev (10+ only)      |com.google.android.webview.dev          |
+|WebView Canary (10+ only)   |com.google.android.webview.canary       |
 
 ## See also
 - [WebView channels in detail](/android_webview/docs/channels.md)

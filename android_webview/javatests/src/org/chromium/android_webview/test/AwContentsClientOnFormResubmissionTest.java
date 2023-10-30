@@ -1,15 +1,14 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview.test;
 
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
 import android.os.Message;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.util.Base64;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -66,7 +65,7 @@ public class AwContentsClientOnFormResubmissionTest {
             "<html><head><title>Reload</title></head><body>HELLO</body></html>";
 
     // Server timeout in seconds. Used to detect dontResend case.
-    private static final long TIMEOUT = scaleTimeout(3);
+    private static final long TIMEOUT = 3L;
 
     // The web server.
     private TestWebServer mServer;
@@ -84,7 +83,7 @@ public class AwContentsClientOnFormResubmissionTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mServer.shutdown();
     }
 

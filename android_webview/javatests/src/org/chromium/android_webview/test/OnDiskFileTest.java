@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@ package org.chromium.android_webview.test;
 
 import android.content.Context;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -44,8 +45,8 @@ public class OnDiskFileTest {
                                                 .getTargetContext()
                                                 .getCacheDir()
                                                 .getPath(),
-                "org.chromium.android_webview");
-        FileUtils.recursivelyDeleteFile(webViewCacheDir);
+                "WebView/Default/HTTP Cache");
+        FileUtils.recursivelyDeleteFile(webViewCacheDir, FileUtils.DELETE_ALL);
 
         mActivityTestRule.startBrowserProcess();
         final TestAwContentsClient contentClient = new TestAwContentsClient();
@@ -75,12 +76,12 @@ public class OnDiskFileTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView"})
-    public void testCookiePathIsInsideDataDir() throws Exception {
+    public void testCookiePathIsInsideDataDir() {
         File webViewCookiePath = new File(InstrumentationRegistry.getInstrumentation()
                                                   .getTargetContext()
                                                   .getDir("webview", Context.MODE_PRIVATE)
                                                   .getPath(),
-                "Cookies");
+                "Default/Cookies");
         webViewCookiePath.delete();
 
         // Set a cookie and flush it to disk. This should guarantee the cookie file is created.

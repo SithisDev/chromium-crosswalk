@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,9 @@ package org.chromium.android_webview.test.util;
 
 import org.junit.Assert;
 
-import org.chromium.android_webview.VariationsUtils;
+import org.chromium.android_webview.common.variations.VariationsUtils;
+import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.components.variations.firstrun.VariationsSeedFetcher.SeedInfo;
 
 import java.io.File;
@@ -17,18 +19,20 @@ import java.util.Arrays;
 /**
  * Utilities for dealing with variations seeds.
  */
+@JNINamespace("android_webview")
 public class VariationsTestUtils {
+    // This should match the Feature definition in variations_test_utils.cc.
+    public static final String TEST_FEATURE_NAME = "WebViewTestFeature";
+
     public static void assertSeedsEqual(SeedInfo expected, SeedInfo actual) {
         Assert.assertTrue("Expected " + expected + " but got " + actual,
                 seedsEqual(expected, actual));
     }
 
     public static boolean seedsEqual(SeedInfo a, SeedInfo b) {
-        return strEqual(a.signature, b.signature) &&
-            strEqual(a.country, b.country) &&
-            strEqual(a.date, b.date) &&
-            (a.isGzipCompressed == b.isGzipCompressed) &&
-            Arrays.equals(a.seedData, b.seedData);
+        return strEqual(a.signature, b.signature) && strEqual(a.country, b.country)
+                && (a.date == b.date) && (a.isGzipCompressed == b.isGzipCompressed)
+                && Arrays.equals(a.seedData, b.seedData);
     }
 
     private static boolean strEqual(String a, String b) {
@@ -40,7 +44,7 @@ public class VariationsTestUtils {
         seed.seedData = "bogus seed data".getBytes();
         seed.signature = "bogus seed signature";
         seed.country = "GB";
-        seed.date = "Sun, 23 Jun 1912 00:00:00 GMT";
+        seed.date = 946684800000L; // New Year's 2000 GMT
         return seed;
     }
 
@@ -64,5 +68,14 @@ public class VariationsTestUtils {
         if (file.exists() && !file.delete()) {
             throw new IOException("Failed to delete " + file);
         }
+    }
+
+    public static void disableSignatureVerificationForTesting() {
+        VariationsTestUtilsJni.get().disableSignatureVerificationForTesting();
+    }
+
+    @NativeMethods
+    interface Natives {
+        void disableSignatureVerificationForTesting();
     }
 }

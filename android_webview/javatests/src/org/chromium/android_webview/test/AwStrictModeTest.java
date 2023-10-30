@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@ package org.chromium.android_webview.test;
 
 import android.os.StrictMode;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.LargeTest;
+
+import androidx.test.filters.LargeTest;
 
 import org.junit.After;
 import org.junit.Before;
@@ -46,20 +47,20 @@ public class AwStrictModeTest {
     private StrictMode.VmPolicy mOldVmPolicy;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContentsClient = new TestAwContentsClient();
         enableStrictModeOnUiThreadSync();
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         disableStrictModeOnUiThreadSync();
     }
 
     @Test
     @LargeTest
     @Feature({"AndroidWebView"})
-    public void testStartup() throws Exception {
+    public void testStartup() {
         startEverythingSync();
     }
 
@@ -106,7 +107,7 @@ public class AwStrictModeTest {
         });
     }
 
-    private void startEverythingSync() throws Exception {
+    private void startEverythingSync() {
         mActivityTestRule.getActivity();
         mActivityTestRule.createAwBrowserContext();
         mActivityTestRule.startBrowserProcess();

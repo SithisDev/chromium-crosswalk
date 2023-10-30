@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,8 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.webkit.CookieManager;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
+
+import androidx.webkit.WebViewClientCompat;
 
 /**
  * This activity is designed for Android Jank testing of WebView. It takes a URL as an argument, and
@@ -27,7 +28,7 @@ public class JankActivity extends Activity {
         WebView webView = (WebView) findViewById(R.id.webview);
         CookieManager.setAcceptFileSchemeCookies(true);
 
-        webView.setWebViewClient(new WebViewClient() {
+        webView.setWebViewClient(new WebViewClientCompat() {
             @SuppressWarnings("deprecation") // because we support api level 19 and up.
             @Override
             public boolean shouldOverrideUrlLoading(WebView webView, String url) {

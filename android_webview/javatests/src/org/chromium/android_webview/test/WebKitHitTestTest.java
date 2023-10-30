@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,13 @@ import static org.chromium.android_webview.test.AwActivityTestRule.WAIT_TIMEOUT_
 
 import android.os.Handler;
 import android.os.Message;
+import android.os.SystemClock;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.LargeTest;
-import android.support.test.filters.SmallTest;
 import android.view.KeyEvent;
 import android.webkit.WebView.HitTestResult;
+
+import androidx.test.filters.LargeTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -24,6 +26,7 @@ import org.junit.runner.RunWith;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.test.util.AwTestTouchUtils;
 import org.chromium.android_webview.test.util.CommonResources;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnPageCommitVisibleHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
@@ -60,7 +63,7 @@ public class WebKitHitTestTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (mWebServer != null) {
             mWebServer.shutdown();
         }
@@ -82,16 +85,17 @@ public class WebKitHitTestTest {
                 + href + "\" " + "onclick=\"return false;\">" + anchorText + "</a>");
     }
 
-    private void simulateTabDownUpOnUiThread() throws Throwable {
+    private void simulateTabDownUpOnUiThread() {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            mAwContents.getWebContents().getEventForwarder().dispatchKeyEvent(
-                    new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TAB));
-            mAwContents.getWebContents().getEventForwarder().dispatchKeyEvent(
-                    new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_TAB));
+            long eventTime = SystemClock.uptimeMillis();
+            mAwContents.getWebContents().getEventForwarder().dispatchKeyEvent(new KeyEvent(
+                    eventTime, eventTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_TAB, 0));
+            mAwContents.getWebContents().getEventForwarder().dispatchKeyEvent(new KeyEvent(
+                    eventTime, eventTime, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_TAB, 0));
         });
     }
 
-    private void simulateInput(boolean byTouch) throws Throwable {
+    private void simulateInput(boolean byTouch) {
         // Send a touch click event if byTouch is true. Otherwise, send a TAB
         // key event to change the focused element of the page.
         if (byTouch) {
@@ -105,8 +109,7 @@ public class WebKitHitTestTest {
         return a == null ? b == null : a.equals(b);
     }
 
-    private void pollForHitTestDataOnUiThread(
-            final int expectedType, final String expectedExtra) throws Throwable {
+    private void pollForHitTestDataOnUiThread(final int expectedType, final String expectedExtra) {
         mActivityTestRule.pollUiThread(() -> {
             AwContents.HitTestData data = mAwContents.getLastHitTestResult();
             return expectedType == data.hitTestResultType
@@ -114,10 +117,8 @@ public class WebKitHitTestTest {
         });
     }
 
-    private void pollForHrefAndImageSrcOnUiThread(
-            final String expectedHref,
-            final String expectedAnchorText,
-            final String expectedImageSrc) throws Throwable {
+    private void pollForHrefAndImageSrcOnUiThread(final String expectedHref,
+            final String expectedAnchorText, final String expectedImageSrc) {
         mActivityTestRule.pollUiThread(() -> {
             AwContents.HitTestData data = mAwContents.getLastHitTestResult();
             return stringEquals(expectedHref, data.href)
@@ -399,6 +400,7 @@ public class WebKitHitTestTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "WebKitHitTest"})
+    @DisabledTest(message = "https://crbug.com/1172381")
     public void testUnknownTypeUnrecognizedNode() throws Throwable {
         // Since UNKNOWN_TYPE is the default, hit test another type first for
         // this test to be valid.

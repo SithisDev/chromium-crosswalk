@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,35 +10,43 @@
 #include "android_webview/browser/gfx/compositor_frame_consumer.h"
 #include "android_webview/browser/gfx/hardware_renderer.h"
 #include "android_webview/browser/gfx/parent_compositor_draw_constraints.h"
-#include "base/logging.h"
-#include "base/macros.h"
+#include "android_webview/browser/gfx/root_frame_sink.h"
+#include "base/check.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
-#include "ui/gfx/geometry/vector2d.h"
+#include "base/task/single_thread_task_runner.h"
+#include "components/viz/common/surfaces/frame_sink_id.h"
+#include "ui/gfx/geometry/point.h"
 
 namespace android_webview {
 
+class AwVulkanContextProvider;
 class ChildFrame;
 class CompositorFrameProducer;
-class HardwareRenderer;
-struct CompositorID;
 
 // This class is used to pass data between UI thread and RenderThread.
 class RenderThreadManager : public CompositorFrameConsumer {
  public:
   explicit RenderThreadManager(
       const scoped_refptr<base::SingleThreadTaskRunner>& ui_loop);
+
+  RenderThreadManager(const RenderThreadManager&) = delete;
+  RenderThreadManager& operator=(const RenderThreadManager&) = delete;
+
   ~RenderThreadManager() override;
 
+  void SetRootFrameSinkGetterForTesting(
+      RootFrameSinkGetter root_frame_sink_getter);
   // CompositorFrameConsumer methods.
   void SetCompositorFrameProducer(
-      CompositorFrameProducer* compositor_frame_producer) override;
-  void SetScrollOffsetOnUI(gfx::Vector2d scroll_offset) override;
+      CompositorFrameProducer* compositor_frame_producer,
+      RootFrameSinkGetter root_frame_sink_getter) override;
+  void SetScrollOffsetOnUI(gfx::Point scroll_offset) override;
   std::unique_ptr<ChildFrame> SetFrameOnUI(
       std::unique_ptr<ChildFrame> frame) override;
   void TakeParentDrawDataOnUI(ParentCompositorDrawConstraints* constraints,
-                              CompositorID* compositor_id,
+                              viz::FrameSinkId* frame_sink_id,
                               viz::FrameTimingDetailsMap* timing_details,
                               uint32_t* frame_token) override;
   ChildFrameQueue PassUncommittedFrameOnUI() override;
@@ -46,22 +54,25 @@ class RenderThreadManager : public CompositorFrameConsumer {
   void RemoveFromCompositorFrameProducerOnUI();
 
   // Render thread methods.
-  gfx::Vector2d GetScrollOffsetOnRT();
+  gfx::Point GetScrollOffsetOnRT();
   ChildFrameQueue PassFramesOnRT();
   void PostParentDrawDataToChildCompositorOnRT(
       const ParentCompositorDrawConstraints& parent_draw_constraints,
-      const CompositorID& compositor_id,
+      const viz::FrameSinkId& frame_sink_id,
       viz::FrameTimingDetailsMap timing_details,
       uint32_t frame_token);
-  void InsertReturnedResourcesOnRT(
-      const std::vector<viz::ReturnedResource>& resources,
-      const CompositorID& compositor_id,
-      uint32_t layer_tree_frame_sink_id);
+  void InsertReturnedResourcesOnRT(std::vector<viz::ReturnedResource> resources,
+                                   const viz::FrameSinkId& frame_sink_id,
+                                   uint32_t layer_tree_frame_sink_id);
 
   void CommitFrameOnRT();
+  void SetVulkanContextProviderOnRT(AwVulkanContextProvider* context_provider);
   void UpdateViewTreeForceDarkStateOnRT(bool view_tree_force_dark_state);
-  void DrawOnRT(bool save_restore, HardwareRendererDrawParams* params);
-  void DestroyHardwareRendererOnRT(bool save_restore);
+  void DrawOnRT(bool save_restore,
+                const HardwareRendererDrawParams& params,
+                const OverlaysParams& overlays_params);
+  void DestroyHardwareRendererOnRT(bool save_restore, bool abandon_context);
+  void RemoveOverlaysOnRT(OverlaysParams::MergeTransactionFn merge_transaction);
 
   // May be created on either thread.
   class InsideHardwareReleaseReset {
@@ -71,7 +82,7 @@ class RenderThreadManager : public CompositorFrameConsumer {
     ~InsideHardwareReleaseReset();
 
    private:
-    RenderThreadManager* render_thread_manager_;
+    raw_ptr<RenderThreadManager> render_thread_manager_;
   };
 
  private:
@@ -107,20 +118,20 @@ class RenderThreadManager : public CompositorFrameConsumer {
   // Accessed by RT thread.
   std::unique_ptr<HardwareRenderer> hardware_renderer_;
   bool view_tree_force_dark_state_ = false;
+  raw_ptr<AwVulkanContextProvider> vulkan_context_provider_ = nullptr;
 
   // Accessed by both UI and RT thread.
   mutable base::Lock lock_;
-  gfx::Vector2d scroll_offset_;
+  RootFrameSinkGetter root_frame_sink_getter_;
+  gfx::Point scroll_offset_;
   ChildFrameQueue child_frames_;
   bool mark_hardware_release_;
   ParentCompositorDrawConstraints parent_draw_constraints_;
-  CompositorID compositor_id_for_presentation_feedbacks_;
+  viz::FrameSinkId frame_sink_id_for_presentation_feedbacks_;
   viz::FrameTimingDetailsMap timing_details_;
   uint32_t presented_frame_token_ = 0u;
 
-  base::WeakPtrFactory<RenderThreadManager> weak_factory_on_ui_thread_;
-
-  DISALLOW_COPY_AND_ASSIGN(RenderThreadManager);
+  base::WeakPtrFactory<RenderThreadManager> weak_factory_on_ui_thread_{this};
 };
 
 }  // namespace android_webview

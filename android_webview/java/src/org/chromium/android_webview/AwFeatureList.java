@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,15 @@ import android.content.pm.PackageManager;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.MainDex;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.build.annotations.MainDex;
 
 /**
  * Java accessor for base/feature_list.h state.
  */
 @JNINamespace("android_webview")
 @MainDex
-final public class AwFeatureList {
+public final class AwFeatureList {
     // Do not instantiate this class.
     private AwFeatureList() {}
 
@@ -25,7 +26,6 @@ final public class AwFeatureList {
     private static Boolean sPageStartedOnCommitForBrowserNavigations;
 
     private static boolean computePageStartedOnCommitForBrowserNavigations() {
-        if (!nativeIsEnabled(WEBVIEW_PAGE_STARTED_ON_COMMIT)) return false;
         if (GMS_PACKAGE.equals(ContextUtils.getApplicationContext().getPackageName())) {
             try {
                 PackageInfo gmsPackage =
@@ -60,13 +60,38 @@ final public class AwFeatureList {
      * @return Whether the feature is enabled or not.
      */
     public static boolean isEnabled(String featureName) {
-        return nativeIsEnabled(featureName);
+        return AwFeatureListJni.get().isEnabled(featureName);
     }
 
-    // Alphabetical:
-    public static final String WEBVIEW_CONNECTIONLESS_SAFE_BROWSING =
-            "WebViewConnectionlessSafeBrowsing";
-    public static final String WEBVIEW_PAGE_STARTED_ON_COMMIT = "WebViewPageStartedOnCommit";
+    /**
+     * Returns the configured feature parameter value as an integer.
+     *
+     * If the feature is not enabled or the parameter does not exist, this method
+     * will return the |defaultValue|.
+     *
+     * Calling this method will mark the field trial as active. See details
+     * in base/metrics/field_trial_params.h
+     *
+     * Note: Features queried through this API must be added to the array
+     * |kFeaturesExposedToJava| in android_webview/browser/aw_feature_list.cc
+     *
+     * @param featureName The name of the feature to query.
+     * @param paramName The name of the feature parameter to query.
+     * @param defaultValue The default value to return if the feature or parameter is not found.
+     * @return The configured parameter value as an integer.
+     */
+    public static int getFeatureParamValueAsInt(
+            String featureName, String paramName, int defaultValue) {
+        assert featureName != null : "featureName should not be null";
+        assert paramName != null : "paramName should not be null";
 
-    private static native boolean nativeIsEnabled(String featureName);
+        return AwFeatureListJni.get().getFeatureParamValueAsInt(
+                featureName, paramName, defaultValue);
+    }
+
+    @NativeMethods
+    interface Natives {
+        boolean isEnabled(String featureName);
+        int getFeatureParamValueAsInt(String featureName, String paramName, int defaultValue);
+    }
 }

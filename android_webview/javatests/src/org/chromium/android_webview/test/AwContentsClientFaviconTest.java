@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@ import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -68,7 +69,7 @@ public class AwContentsClientFaviconTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (mWebServer != null) mWebServer.shutdown();
     }
 

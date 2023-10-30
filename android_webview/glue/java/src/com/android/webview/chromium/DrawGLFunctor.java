@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@ package com.android.webview.chromium;
 import android.graphics.Canvas;
 import android.os.Build;
 import android.view.View;
-
-import com.android.webview.chromium.WebViewDelegateFactory.WebViewDelegate;
+import android.webkit.WebViewDelegate;
 
 import org.chromium.android_webview.AwContents;
+import org.chromium.base.annotations.JniIgnoreNatives;
 
 /**
  * Simple Java abstraction and wrapper for the native DrawGLFunctor flow.
@@ -18,6 +18,7 @@ import org.chromium.android_webview.AwContents;
  * and then drawn and detached from the view tree any number of times (using requestDrawGL and
  * detach respectively).
  */
+@JniIgnoreNatives
 class DrawGLFunctor implements AwContents.NativeDrawGLFunctor {
     private static final String TAG = DrawGLFunctor.class.getSimpleName();
 
@@ -49,7 +50,9 @@ class DrawGLFunctor implements AwContents.NativeDrawGLFunctor {
         assert canvas != null;
         if (sSupportFunctorReleasedCallback) {
             assert releasedCallback != null;
-            mWebViewDelegate.callDrawGlFunction(canvas, mNativeDrawGLFunctor, releasedCallback);
+            GlueApiHelperForN.callDrawGlFunction(
+                    mWebViewDelegate, canvas, mNativeDrawGLFunctor, releasedCallback);
+
         } else {
             assert releasedCallback == null;
             mWebViewDelegate.callDrawGlFunction(canvas, mNativeDrawGLFunctor);
@@ -88,6 +91,8 @@ class DrawGLFunctor implements AwContents.NativeDrawGLFunctor {
         nativeSetChromiumAwDrawGLFunction(functionPointer);
     }
 
+    // The Android framework performs manual JNI registration on these methods,
+    // so the method signatures cannot change without updating the framework.
     private static native long nativeCreateGLFunctor(long viewContext);
     private static native void nativeDestroyGLFunctor(long functor);
     private static native void nativeSetChromiumAwDrawGLFunction(long functionPointer);

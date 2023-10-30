@@ -1,18 +1,17 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef ANDROID_WEBVIEW_BROWSER_AW_COOKIE_ACCESS_POLICY_H_
 #define ANDROID_WEBVIEW_BROWSER_AW_COOKIE_ACCESS_POLICY_H_
 
-#include "base/lazy_instance.h"
-#include "base/macros.h"
+#include "base/no_destructor.h"
 #include "base/synchronization/lock.h"
 
 class GURL;
 
 namespace net {
-class URLRequest;
+class SiteForCookies;
 }  // namespace net
 
 namespace android_webview {
@@ -23,6 +22,9 @@ namespace android_webview {
 class AwCookieAccessPolicy {
  public:
   static AwCookieAccessPolicy* GetInstance();
+
+  AwCookieAccessPolicy(const AwCookieAccessPolicy&) = delete;
+  AwCookieAccessPolicy& operator=(const AwCookieAccessPolicy&) = delete;
 
   // Can we read/write any cookies? Can be called from any thread.
   bool GetShouldAcceptCookies();
@@ -36,32 +38,25 @@ class AwCookieAccessPolicy {
   bool GetShouldAcceptThirdPartyCookies(int render_process_id,
                                         int render_frame_id,
                                         int frame_tree_node_id);
-  bool GetShouldAcceptThirdPartyCookies(const net::URLRequest& request);
-
-  // Whether or not to allow cookies to bet sent or set for |request|. Can only
-  // be called from the IO thread.
-  bool AllowCookies(const net::URLRequest& request);
 
   // Whether or not to allow cookies for requests with these parameters.
   bool AllowCookies(const GURL& url,
-                    const GURL& first_party,
+                    const net::SiteForCookies& site_for_cookies,
                     int render_process_id,
                     int render_frame_id);
 
  private:
-  friend struct base::LazyInstanceTraitsBase<AwCookieAccessPolicy>;
+  friend class base::NoDestructor<AwCookieAccessPolicy>;
   friend class AwCookieAccessPolicyTest;
 
   AwCookieAccessPolicy();
   ~AwCookieAccessPolicy();
 
   bool CanAccessCookies(const GURL& url,
-                        const GURL& site_for_cookies,
+                        const net::SiteForCookies& site_for_cookies,
                         bool accept_third_party_cookies);
   bool accept_cookies_;
   base::Lock lock_;
-
-  DISALLOW_COPY_AND_ASSIGN(AwCookieAccessPolicy);
 };
 
 }  // namespace android_webview

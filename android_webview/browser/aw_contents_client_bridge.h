@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,17 @@
 
 #include <memory>
 
-#include "android_webview/browser/net/aw_web_resource_request.h"
+#include "android_webview/browser/network_service/aw_web_resource_request.h"
 #include "android_webview/browser/safe_browsing/aw_url_checker_delegate_impl.h"
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
 #include "base/containers/id_map.h"
 #include "base/supports_user_data.h"
-#include "components/security_interstitials/content/unsafe_resource.h"
+#include "components/security_interstitials/core/unsafe_resource.h"
 #include "content/public/browser/certificate_request_result_type.h"
 #include "content/public/browser/javascript_dialog_manager.h"
-#include "content/public/browser/resource_request_info.h"
+#include "content/public/browser/web_contents.h"
 #include "net/http/http_response_headers.h"
 
 class GURL;
@@ -63,16 +63,15 @@ class AwContentsClientBridge {
       base::OnceCallback<void(AwUrlCheckerDelegateImpl::SafeBrowsingAction,
                               bool)>;
 
-  // Adds the handler to the UserData registry.
+  // Adds the handler to the UserData registry. Dissociate should be called
+  // before handler is deleted.
   static void Associate(content::WebContents* web_contents,
                         AwContentsClientBridge* handler);
+  // Removes any handlers associated to the UserData registry.
+  static void Dissociate(content::WebContents* web_contents);
   static AwContentsClientBridge* FromWebContents(
       content::WebContents* web_contents);
-  static AwContentsClientBridge* FromWebContentsGetter(
-      const content::ResourceRequestInfo::WebContentsGetter&
-          web_contents_getter);
-  static AwContentsClientBridge* FromID(int render_process_id,
-                                        int render_frame_id);
+
   AwContentsClientBridge(JNIEnv* env,
                          const base::android::JavaRef<jobject>& obj);
   ~AwContentsClientBridge();
@@ -89,17 +88,20 @@ class AwContentsClientBridge {
   void RunJavaScriptDialog(
       content::JavaScriptDialogType dialog_type,
       const GURL& origin_url,
-      const base::string16& message_text,
-      const base::string16& default_prompt_text,
+      const std::u16string& message_text,
+      const std::u16string& default_prompt_text,
       content::JavaScriptDialogManager::DialogClosedCallback callback);
   void RunBeforeUnloadDialog(
       const GURL& origin_url,
       content::JavaScriptDialogManager::DialogClosedCallback callback);
-  bool ShouldOverrideUrlLoading(const base::string16& url,
+  bool ShouldOverrideUrlLoading(const std::u16string& url,
                                 bool has_user_gesture,
                                 bool is_redirect,
-                                bool is_main_frame,
+                                bool is_outermost_main_frame,
                                 bool* ignore_navigation);
+
+  bool SendBrowseIntent(const std::u16string& url);
+
   void NewDownload(const GURL& url,
                    const std::string& user_agent,
                    const std::string& content_disposition,
@@ -117,7 +119,8 @@ class AwContentsClientBridge {
   // host name lookup failure etc.)
   void OnReceivedError(const AwWebResourceRequest& request,
                        int error_code,
-                       bool safebrowsing_hit);
+                       bool safebrowsing_hit,
+                       bool should_omit_notifications_for_safebrowsing_hit);
 
   void OnSafeBrowsingHit(const AwWebResourceRequest& request,
                          const safe_browsing::SBThreatType& threat_type,

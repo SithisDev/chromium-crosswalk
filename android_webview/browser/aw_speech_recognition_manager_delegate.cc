@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,6 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/macros.h"
-#include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "components/prefs/pref_service.h"
@@ -82,10 +80,9 @@ void AwSpeechRecognitionManagerDelegate::CheckRecognitionIsAllowed(
 
   // Check that the render frame type is appropriate, and whether or not we
   // need to request permission from the user.
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&CheckRenderFrameType, std::move(callback),
-                     render_process_id, render_frame_id));
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&CheckRenderFrameType, std::move(callback),
+                                render_process_id, render_frame_id));
 }
 
 content::SpeechRecognitionEventListener*
@@ -108,8 +105,8 @@ void AwSpeechRecognitionManagerDelegate::CheckRenderFrameType(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Regular tab contents.
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(std::move(callback), true /* check_permission */,
                      true /* allowed */));
 }

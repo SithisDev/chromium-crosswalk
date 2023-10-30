@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview.test;
 
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -26,7 +26,7 @@ public class AwContentsContainerViewTest {
     private AwTestContainerView mContainerView;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContentsClient = new TestAwContentsClient();
         mContainerView = mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
     }
@@ -34,7 +34,7 @@ public class AwContentsContainerViewTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView"})
-    public void testContainerViewClickable() throws Throwable {
+    public void testContainerViewClickable() {
         Assert.assertTrue(mContainerView.isClickable());
     }
 }

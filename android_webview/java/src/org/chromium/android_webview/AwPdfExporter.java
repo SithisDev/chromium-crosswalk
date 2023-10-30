@@ -1,10 +1,9 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview;
 
-import android.annotation.SuppressLint;
 import android.os.CancellationSignal;
 import android.os.ParcelFileDescriptor;
 import android.print.PrintAttributes;
@@ -13,12 +12,12 @@ import android.view.ViewGroup;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 
 /**
  * Export the android webview as a PDF.
  * @TODO(sgurun) explain the ownership of this class and its native counterpart
  */
-@SuppressLint("NewApi")  // Printing requires API level 19.
 @JNINamespace("android_webview")
 public class AwPdfExporter {
 
@@ -84,7 +83,8 @@ public class AwPdfExporter {
         mResultCallback = resultCallback;
         mAttributes = attributes;
         mFd = fd;
-        nativeExportToPdf(mNativeAwPdfExporter, mFd.getFd(), pages, cancellationSignal);
+        AwPdfExporterJni.get().exportToPdf(
+                mNativeAwPdfExporter, AwPdfExporter.this, mFd.getFd(), pages, cancellationSignal);
     }
 
     @CalledByNative
@@ -159,6 +159,9 @@ public class AwPdfExporter {
         return mAttributes.getMinMargins().getBottomMils();
     }
 
-    private native void nativeExportToPdf(
-            long nativeAwPdfExporter, int fd, int[] pages, CancellationSignal cancellationSignal);
+    @NativeMethods
+    interface Natives {
+        void exportToPdf(long nativeAwPdfExporter, AwPdfExporter caller, int fd, int[] pages,
+                CancellationSignal cancellationSignal);
+    }
 }

@@ -1,11 +1,12 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview.test;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.MediumTest;
+
+import androidx.test.filters.MediumTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -18,7 +19,6 @@ import org.chromium.android_webview.AwSettings;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.ui.display.DisplayAndroid;
@@ -35,7 +35,6 @@ public class AwLegacyQuirksTest {
 
     // WebView layout width tests are flaky: http://crbug.com/746264
     @Test
-    @RetryOnFailure
     @MediumTest
     @Feature({"AndroidWebView"})
     @DisabledTest(message = "crbug.com/746264")
@@ -81,7 +80,6 @@ public class AwLegacyQuirksTest {
 
     // WebView layout width tests are flaky: http://crbug.com/746264
     @Test
-    @RetryOnFailure
     @MediumTest
     @Feature({"AndroidWebView"})
     @DisabledTest(message = "crbug.com/746264")
@@ -114,7 +112,6 @@ public class AwLegacyQuirksTest {
 
     // WebView layout width tests are flaky: http://crbug.com/746264
     @Test
-    @RetryOnFailure
     @MediumTest
     @Feature({"AndroidWebView"})
     @DisabledTest(message = "crbug.com/746264")
@@ -377,12 +374,11 @@ public class AwLegacyQuirksTest {
     }
 
     private AwTestContainerView createAwTestContainerViewOnMainSyncInQuirksMode(
-            final AwContentsClient client) throws Exception {
+            final AwContentsClient client) {
         return mActivityTestRule.createAwTestContainerViewOnMainSync(client, true);
     }
 
-    private void ensureScaleBecomes(final float targetScale, final AwContents awContents)
-            throws Throwable {
+    private void ensureScaleBecomes(final float targetScale, final AwContents awContents) {
         AwActivityTestRule.pollInstrumentationThread(
                 () -> targetScale == mActivityTestRule.getScaleOnUiThread(awContents));
     }

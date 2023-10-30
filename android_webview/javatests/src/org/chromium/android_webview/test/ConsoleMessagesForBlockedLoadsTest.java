@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,10 @@ package org.chromium.android_webview.test;
 
 import static org.junit.Assert.assertNotEquals;
 
-import android.support.test.filters.SmallTest;
 import android.util.Pair;
 import android.webkit.WebSettings;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -48,7 +49,7 @@ public class ConsoleMessagesForBlockedLoadsTest {
     private TestWebServer mWebServer;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContentsClient = new TestAwContentsClient();
         mTestContainerView = mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
         mAwContents = mTestContainerView.getAwContents();
@@ -56,7 +57,7 @@ public class ConsoleMessagesForBlockedLoadsTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (mWebServer != null) mWebServer.shutdown();
     }
 
@@ -93,7 +94,7 @@ public class ConsoleMessagesForBlockedLoadsTest {
         mActivityTestRule.loadUrlSync(
                 mAwContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
         AwConsoleMessage errorMessage = getSingleErrorMessage();
-        assertNotEquals(errorMessage.message().indexOf(iframeUrl), -1);
+        assertNotEquals(errorMessage.message().indexOf(mWebServer.getBaseUrl()), -1);
     }
 
     @Test

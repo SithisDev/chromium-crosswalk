@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,11 @@
 #include "base/android/jni_array.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "content/public/browser/client_certificate_delegate.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "net/cert/x509_certificate.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_private_key.h"
@@ -48,14 +48,14 @@ class AwContentsClientBridgeTest : public Test {
   void SetUp() override;
   void TestCertType(SSLClientCertType type, const std::string& expected_name);
   // Create the TestBrowserThreads. Just instantiate the member variable.
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   base::android::ScopedJavaGlobalRef<jobject> jbridge_;
   std::unique_ptr<AwContentsClientBridge> bridge_;
   scoped_refptr<SSLCertRequestInfo> cert_request_info_;
   scoped_refptr<X509Certificate> selected_cert_;
   scoped_refptr<SSLPrivateKey> selected_key_;
   int cert_selected_callbacks_;
-  JNIEnv* env_;
+  raw_ptr<JNIEnv> env_;
 };
 
 class TestClientCertificateDelegate
@@ -63,6 +63,10 @@ class TestClientCertificateDelegate
  public:
   explicit TestClientCertificateDelegate(AwContentsClientBridgeTest* test)
       : test_(test) {}
+
+  TestClientCertificateDelegate(const TestClientCertificateDelegate&) = delete;
+  TestClientCertificateDelegate& operator=(
+      const TestClientCertificateDelegate&) = delete;
 
   // content::ClientCertificateDelegate.
   void ContinueWithCertificate(scoped_refptr<net::X509Certificate> cert,
@@ -72,9 +76,7 @@ class TestClientCertificateDelegate
   }
 
  private:
-  AwContentsClientBridgeTest* test_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestClientCertificateDelegate);
+  raw_ptr<AwContentsClientBridgeTest> test_;
 };
 
 }  // namespace
@@ -85,7 +87,7 @@ void AwContentsClientBridgeTest::SetUp() {
   jbridge_.Reset(
       env_,
       Java_MockAwContentsClientBridge_getAwContentsClientBridge(env_).obj());
-  bridge_.reset(new AwContentsClientBridge(env_, jbridge_));
+  bridge_ = std::make_unique<AwContentsClientBridge>(env_, jbridge_);
   selected_cert_ = nullptr;
   cert_selected_callbacks_ = 0;
   cert_request_info_ = base::MakeRefCounted<net::SSLCertRequestInfo>();

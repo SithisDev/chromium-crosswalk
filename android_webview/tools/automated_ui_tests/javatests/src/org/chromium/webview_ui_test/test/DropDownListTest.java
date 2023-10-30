@@ -1,29 +1,29 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.webview_ui_test.test;
 
-import static android.support.test.espresso.Espresso.onView;
-import static android.support.test.espresso.action.ViewActions.click;
-import static android.support.test.espresso.matcher.RootMatchers.withDecorView;
-import static android.support.test.espresso.matcher.ViewMatchers.isEnabled;
-import static android.support.test.espresso.matcher.ViewMatchers.withId;
-import static android.support.test.espresso.matcher.ViewMatchers.withText;
-import static android.support.test.espresso.web.assertion.WebViewAssertions.webMatches;
-import static android.support.test.espresso.web.sugar.Web.onWebView;
-import static android.support.test.espresso.web.webdriver.DriverAtoms.findElement;
+import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.action.ViewActions.click;
+import static androidx.test.espresso.matcher.RootMatchers.withDecorView;
+import static androidx.test.espresso.matcher.ViewMatchers.isEnabled;
+import static androidx.test.espresso.matcher.ViewMatchers.withId;
+import static androidx.test.espresso.matcher.ViewMatchers.withText;
+import static androidx.test.espresso.web.assertion.WebViewAssertions.webMatches;
+import static androidx.test.espresso.web.sugar.Web.onWebView;
+import static androidx.test.espresso.web.webdriver.DriverAtoms.findElement;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertEquals;
 
 import android.graphics.Point;
-import android.os.Build;
-import android.support.test.espresso.web.sugar.Web;
-import android.support.test.espresso.web.webdriver.Locator;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.view.View;
 import android.webkit.WebView;
+
+import androidx.test.espresso.web.sugar.Web;
+import androidx.test.espresso.web.webdriver.Locator;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -31,7 +31,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
-import org.chromium.base.test.util.DisableIf;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.webview_ui_test.R;
 import org.chromium.webview_ui_test.WebViewUiTestActivity;
 import org.chromium.webview_ui_test.test.util.Actions;
@@ -42,6 +42,8 @@ import org.chromium.webview_ui_test.test.util.WebViewUiTestRule;
 /**
  * Tests for WebView ActionMode.
  */
+// TODO(aluo): Re-enable once crbug.com/947352 is fixed.
+@DisabledTest(message = "https://crbug.com/947352")
 @RunWith(BaseJUnit4ClassRunner.class)
 public class DropDownListTest {
     @Rule
@@ -85,15 +87,10 @@ public class DropDownListTest {
     /**
      * Test Drop Down List works in ViewPort Scale Factor > 1 in wideViewPortMode
      */
-    // TODO(aluo): Re-enable once crbug.com/947352 is fixed.
-    @DisableIf.
-    Build(message = "crbug.com/947352", sdk_is_greater_than = Build.VERSION_CODES.LOLLIPOP,
-            sdk_is_less_than = Build.VERSION_CODES.P)
     @Test
     @SmallTest
     @UseLayout("edittext_webview")
-    public void
-    testDropDownScaledViewPortUseWideViewPort() {
+    public void testDropDownScaledViewPortUseWideViewPort() {
         onView(withId(R.id.webview)).perform(Actions.setUseWideViewPort());
         mWebViewActivityRule.loadFileSync(HTML_SCALED, false);
         WebView webView = (WebView) mWebViewActivityRule.getActivity()
@@ -135,9 +132,8 @@ public class DropDownListTest {
      * Get the scroll position of the view
      */
     private Point getScroll(View v) {
-        int x, y;
-        x = v.getScrollX();
-        y = v.getScrollY();
+        int x = v.getScrollX();
+        int y = v.getScrollY();
         return new Point(x, y);
     }
 

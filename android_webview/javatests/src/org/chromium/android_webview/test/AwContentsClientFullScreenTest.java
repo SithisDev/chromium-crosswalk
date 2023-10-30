@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,13 @@ package org.chromium.android_webview.test;
 import static org.chromium.android_webview.test.AwActivityTestRule.WAIT_TIMEOUT_MS;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.MediumTest;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 
+import androidx.test.filters.MediumTest;
+
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -20,14 +22,16 @@ import org.junit.runner.RunWith;
 
 import org.chromium.android_webview.test.util.JSUtils;
 import org.chromium.android_webview.test.util.JavascriptEventObserver;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.CriteriaNotSatisfiedException;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.DOMUtils;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.browser.test.util.TouchCommon;
+import org.chromium.url.GURL;
 
 import java.util.concurrent.TimeoutException;
 
@@ -61,7 +65,7 @@ public class AwContentsClientFullScreenTest {
     private AwTestContainerView mTestContainerView;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContentsClient = new FullScreenVideoTestAwContentsClient(
                 mActivityTestRule.getActivity(), mActivityTestRule.isHardwareAcceleratedTest());
         mTestContainerView = mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
@@ -326,8 +330,9 @@ public class AwContentsClientFullScreenTest {
     }
 
     private boolean shouldPlayOnFullScreenView() throws Exception {
-        String testUrl = mTestContainerView.getAwContents().getUrl();
-        return VIDEO_TEST_URL.equals(testUrl) && DOMUtils.isFullscreen(getWebContentsOnUiThread());
+        GURL testUrl = mTestContainerView.getAwContents().getUrl();
+        return new GURL(VIDEO_TEST_URL).equals(testUrl)
+                && DOMUtils.isFullscreen(getWebContentsOnUiThread());
     }
 
     private void playVideo() throws Exception {
@@ -345,22 +350,16 @@ public class AwContentsClientFullScreenTest {
                 mTestContainerView.getWebContents(), CUSTOM_PLAY_CONTROL_ID);
     }
 
-    private void waitUntilHaveEnoughDataForPlay() throws Exception {
+    private void waitUntilHaveEnoughDataForPlay() {
         // crbug.com/936757: you are expected to wait before media playback is ready.
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                try {
-                    // Checking HTMLMediaElement.readyState == 4 (HAVE_ENOUGH_DATA).
-                    int readyState = DOMUtils.getNodeField(
-                            "readyState", getWebContentsOnUiThread(), VIDEO_ID, Integer.class);
-                    updateFailureReason(
-                            "Expected readyState == 4, but timed out when readyState == "
-                            + readyState);
-                    return readyState == 4; // HAVE_ENOUGH_DATA
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                // Checking HTMLMediaElement.readyState == 4 (HAVE_ENOUGH_DATA).
+                int readyState = DOMUtils.getNodeField(
+                        "readyState", getWebContentsOnUiThread(), VIDEO_ID, Integer.class);
+                Criteria.checkThat(readyState, Matchers.is(4));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
         });
     }
@@ -385,17 +384,14 @@ public class AwContentsClientFullScreenTest {
     private void assertWaitForKeepScreenOnActive(final View view, final boolean expected) {
         // We need to poll because it takes time to synchronize the state between the android
         // views and Javascript.
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                try {
-                    return getKeepScreenOnOnInstrumentationThread(view) == expected
-                            && DOMUtils.isMediaPaused(getWebContentsOnUiThread(), VIDEO_ID)
-                            != expected;
-                } catch (InterruptedException | TimeoutException e) {
-                    Assert.fail(e.getMessage());
-                    return false;
-                }
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                Criteria.checkThat(
+                        getKeepScreenOnOnInstrumentationThread(view), Matchers.is(expected));
+                Criteria.checkThat(DOMUtils.isMediaPaused(getWebContentsOnUiThread(), VIDEO_ID),
+                        Matchers.not(expected));
+            } catch (TimeoutException e) {
+                throw new CriteriaNotSatisfiedException(e);
             }
         });
     }
@@ -441,36 +437,30 @@ public class AwContentsClientFullScreenTest {
 
     private void assertWaitForIsFullscreen() {
         // We need to poll because the Javascript state is updated asynchronously
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                try {
-                    return DOMUtils.isFullscreen(getWebContentsOnUiThread());
-                } catch (InterruptedException | TimeoutException e) {
-                    Assert.fail(e.getMessage());
-                    return false;
-                }
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                Criteria.checkThat(
+                        DOMUtils.isFullscreen(getWebContentsOnUiThread()), Matchers.is(true));
+            } catch (TimeoutException e) {
+                throw new CriteriaNotSatisfiedException(e);
             }
         });
     }
 
     private void assertWaitForIsEmbedded() {
         // We need to poll because the Javascript state is updated asynchronously
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                try {
-                    return !DOMUtils.isFullscreen(getWebContentsOnUiThread());
-                } catch (InterruptedException | TimeoutException e) {
-                    Assert.fail(e.getMessage());
-                    return false;
-                }
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                Criteria.checkThat(
+                        DOMUtils.isFullscreen(getWebContentsOnUiThread()), Matchers.is(false));
+            } catch (TimeoutException e) {
+                throw new CriteriaNotSatisfiedException(e);
             }
         });
         // TODO: Test that inline video is actually displayed.
     }
 
-    private JavascriptEventObserver registerObserver(final String observerName) throws Throwable {
+    private JavascriptEventObserver registerObserver(final String observerName) {
         final JavascriptEventObserver observer = new JavascriptEventObserver();
         InstrumentationRegistry.getInstrumentation().runOnMainSync(
                 () -> observer.register(mTestContainerView.getWebContents(), observerName));

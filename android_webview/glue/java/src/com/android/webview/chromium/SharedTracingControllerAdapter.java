@@ -1,12 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package com.android.webview.chromium;
 
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.webkit.TracingConfig;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.chromium.android_webview.AwTracingController;
 import org.chromium.android_webview.WebViewChromiumRunQueue;

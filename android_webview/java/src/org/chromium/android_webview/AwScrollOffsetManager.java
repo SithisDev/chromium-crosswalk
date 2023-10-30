@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,12 @@ package org.chromium.android_webview;
 
 import android.graphics.Rect;
 
-import org.chromium.base.VisibleForTesting;
-
 /**
  * Takes care of syncing the scroll offset between the Android View system and the
  * InProcessViewRenderer.
  *
  * Unless otherwise values (sizes, scroll offsets) are in physical pixels.
  */
-@VisibleForTesting
 public class AwScrollOffsetManager {
     // Values taken from WebViewClassic.
 

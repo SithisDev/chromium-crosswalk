@@ -104,7 +104,7 @@ is called `MonochromePublic.apk`.
 
 Trichrome is only compatible with Android Q and later.
 
-Trichrome is composed of three APKs:
+Trichrome is composed of three APK/AABs:
 
 1. TrichromeWebView contains WebView-specific code and data, and provides
 Android apps with the WebView implementation.
@@ -119,15 +119,15 @@ The three Trichrome APKs together are roughly the same size as Monochrome,
 providing the same benefits, but many of the downsides and complexities of
 Monochrome don't apply to Trichrome.
 
-The build targets are called `trichrome_webview_apk`, `trichrome_chrome_apk`,
+The build targets are called `trichrome_webview_apk`, `trichrome_chrome_bundle`,
 and `trichrome_library_apk` respectively, and the resulting output files are
-called `TrichromeWebView.apk`, `TrichromeChrome.apk`, and
+called `TrichromeWebView.apk`, `TrichromeChrome.aab`, and
 `TrichromeLibrary.apk`.
 
 ### Choosing a WebView version
 
 WebView follows the same branching and release model as the rest of the Chromium
-project: a beta version is branched from the master branch approximately every
+project: a beta version is branched from the main branch approximately every
 six weeks, and after approximately six weeks of beta testing it is released to
 stable. If critical security or functionality issues are discovered after the
 stable release, a new version may be released from the same stable branch at any
@@ -144,11 +144,11 @@ to check out the desired release tag.
 
 If you're intending to build WebView just in order to develop, modify, or
 customise it, it's usually best to work directly on the latest version of the
-master branch. Chromium's master branch is covered by a large number of
+main branch. Chromium's main branch is covered by a large number of
 automated build and test systems that ensure it is sufficiently stable for
 development purposes at almost all times.
 
-### Building WebView for a new or in-development version of Android
+### Building WebView for a new or in-development version of Android {#pre-release}
 
 If you want to build WebView for a version of Android which was recently
 released or currently in development, you may find that the current stable
@@ -188,6 +188,10 @@ target_cpu = "arm64"       # or "arm", "x86", or "x64"; see below
 is_debug = false
 is_official_build = true
 
+# Use the default production settings for field trials, instead of the testing
+# defaults.
+disable_fieldtrial_testing_config = true
+
 # WebView's efficient native library loading mechanism is not compatible with
 # component builds of Chromium.
 is_component_build = false
@@ -196,9 +200,9 @@ is_component_build = false
 is_chrome_branded = false
 use_official_google_api_keys = false
 
-# Significantly reduces binary size at the cost of preventing Android's native
-# crash handler from being able to produce useful stack unwindings.
-exclude_unwind_tables = true
+# May disable some experimental (unstable) features. Hides WebView DevTools
+# (a debugging tool most users won't need to access).
+android_channel = "stable"
 ```
 
 The `target_cpu` option must be set to
@@ -271,6 +275,24 @@ ffmpeg_branding = "Chrome"
 proprietary_codecs = true
 ```
 
+#### Crash stack unwinding
+
+By default, builds using `is_official_build = true` exclude unwind tables from
+the binaries, as they significantly increase binary size. Google's builds rely
+on crashes being reported using Crashpad, which can then be decoded server-side.
+If you don't intend to enable Crashpad and set up dedicated crash reporting
+infrastructure for your WebView, you may wish to re-enable the unwind tables
+with the following GN argument:
+
+``` gn
+exclude_unwind_tables = false
+```
+
+This will allow Android's debuggerd to produce meaningful stack traces for
+crashes that occur inside WebView's native code. We don't recommend using this
+setting in shipping builds due to the binary size impact, but it may be the only
+alternative if using Crashpad is impractical.
+
 #### Other build options
 
 Other build options may be used but are not supported by the WebView team and
@@ -308,6 +330,31 @@ files.
 
 ### Configuring the Android framework
 
+#### Android 10.x (Q)
+
+Using Monochrome as a WebView provider on Android 10 is not supported;
+Chrome packages should not be included in the configuration as either the
+Trichrome WebView or standalone WebView should be used.
+
+The configuration mechanism for Android 10 is the same as the following section
+(for Android 7-9), with the exception that the `isFallback` attribute no longer
+causes the provider to be automatically disabled if another implementation is
+available. Android 10 never automatically enables/disables WebView
+implementations under normal usage.
+
+Instead, the `isFallback` attribute is used to allow clean migration from an
+older configuration. When a device is first booted with Android 10, any provider
+marked as `isFallback` will be re-enabled for all users, as a one-time change.
+This ensures that devices which previously used Chrome as their implementation
+on Android 9 and had a disabled WebView do not end up with no enabled WebView
+implementations.
+
+Thus, if upgrading from an Android 9 device, it's recommended that you leave
+`isFallback` set to true for any provider which had it set to true in the
+Android 9 configuration. If this configuration is for a device which has never
+used an older version of Android, `isFallback` is not necessary and can be
+ignored.
+
 #### Android 7.x (Nougat), 8.x (Oreo), and 9.x (Pie)
 
 The permitted WebView implementations are configured using an XML file in the
@@ -321,6 +368,19 @@ There must be at least one provider defined in the configuration. If more than
 one provider is defined, they will be considered in the order listed in the
 file, and the first valid provider chosen by default. A menu is provided in the
 Android developer settings UI to allow the user to choose a different provider.
+
+You can print the base64-encoded signature of a compiled APK with the following
+(look for `Full Signature:` in the output):
+
+```shell
+# For an APK or Bundle target compiled from chromium (replace
+# "system_webview_apk" with your build target):
+$ out/Default/bin/system_webview_apk print-certs --full-cert
+
+# For a pre-compiled APK or Bundle:
+$ build/android/apk_operations.py print-certs --full-cert \
+  --apk-path /path/to/AndroidWebview.apk
+```
 
 *** note
 On `userdebug` and `eng` builds of Android, the WebView's signature,
@@ -361,7 +421,9 @@ Here's a commented example XML file:
       signatures.
 
       Each signature tag contains the entire public certificate corresponding
-      to the private key used to sign the APK, encoded as base64. -->
+      to the private key used to sign the APK, encoded as base64. See the
+      documentation above for instructions to print the signature of an APK in
+      the correct format. -->
 
 
   <!-- This provider is listed first and has "availableByDefault" set to true,

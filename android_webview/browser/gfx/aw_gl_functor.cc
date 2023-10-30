@@ -1,13 +1,12 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "android_webview/browser/gfx/aw_gl_functor.h"
 
-#include "android_webview/native_jni/AwGLFunctor_jni.h"
+#include "android_webview/browser_jni_headers/AwGLFunctor_jni.h"
 #include "android_webview/public/browser/draw_gl.h"
-#include "base/stl_util.h"
-#include "base/task/post_task.h"
+#include "base/trace_event/trace_event.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -36,8 +35,7 @@ int g_instance_count = 0;
 
 AwGLFunctor::AwGLFunctor(const JavaObjectWeakGlobalRef& java_ref)
     : java_ref_(java_ref),
-      render_thread_manager_(
-          base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::UI})) {
+      render_thread_manager_(content::GetUIThreadTaskRunner({})) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ++g_instance_count;
 }
@@ -51,7 +49,7 @@ bool AwGLFunctor::RequestInvokeGL(bool wait_for_completion) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (obj.is_null())
+  if (!obj)
     return false;
   return Java_AwGLFunctor_requestInvokeGL(env, obj, wait_for_completion);
 }
@@ -60,12 +58,11 @@ void AwGLFunctor::DetachFunctorFromView() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (!obj.is_null())
+  if (obj)
     Java_AwGLFunctor_detachFunctorFromView(env, obj);
 }
 
-void AwGLFunctor::Destroy(JNIEnv* env,
-                          const base::android::JavaParamRef<jobject>& obj) {
+void AwGLFunctor::Destroy(JNIEnv* env) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   java_ref_.reset();
   delete this;
@@ -86,7 +83,8 @@ void AwGLFunctor::DeleteHardwareRenderer(
   if (!draw_functor_succeeded) {
     LOG(ERROR) << "Unable to free GL resources. Has the Window leaked?";
     // Calling release on wrong thread intentionally.
-    render_thread_manager_.DestroyHardwareRendererOnRT(true /* save_restore */);
+    render_thread_manager_.DestroyHardwareRendererOnRT(
+        true /* save_restore */, false /* abandon_context */);
   }
 }
 
@@ -101,22 +99,25 @@ void AwGLFunctor::DrawGL(AwDrawGLInfo* draw_info) {
       break;
     case AwDrawGLInfo::kModeProcessNoContext:
       LOG(ERROR) << "Received unexpected kModeProcessNoContext";
-      FALLTHROUGH;
+      render_thread_manager_.DestroyHardwareRendererOnRT(
+          save_restore, true /* abandon_context */);
+      break;
     case AwDrawGLInfo::kModeProcess:
-      render_thread_manager_.DestroyHardwareRendererOnRT(save_restore);
+      render_thread_manager_.DestroyHardwareRendererOnRT(
+          save_restore, false /* abandon_context */);
       break;
     case AwDrawGLInfo::kModeDraw: {
       HardwareRendererDrawParams params{
           draw_info->clip_left,   draw_info->clip_top, draw_info->clip_right,
           draw_info->clip_bottom, draw_info->width,    draw_info->height,
       };
-      static_assert(base::size(decltype(draw_info->transform){}) ==
-                        base::size(params.transform),
+      static_assert(std::size(decltype(draw_info->transform){}) ==
+                        std::size(params.transform),
                     "transform size mismatch");
-      for (unsigned int i = 0; i < base::size(params.transform); ++i) {
+      for (unsigned int i = 0; i < std::size(params.transform); ++i) {
         params.transform[i] = draw_info->transform[i];
       }
-      render_thread_manager_.DrawOnRT(save_restore, &params);
+      render_thread_manager_.DrawOnRT(save_restore, params, OverlaysParams());
       break;
     }
   }

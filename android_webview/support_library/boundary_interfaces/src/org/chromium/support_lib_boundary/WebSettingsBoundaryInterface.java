@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,10 @@ package org.chromium.support_lib_boundary;
 // android.webkit parameter or android.webkit return value. But for forwards compatibility all
 // app-facing classes should have a boundary-interface that the WebView glue layer can build
 // against.
+
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+
 /**
  * Boundary interface for WebSettingsCompat.
  */
@@ -26,4 +30,41 @@ public interface WebSettingsBoundaryInterface {
 
     void setForceDark(int forceDarkMode);
     int getForceDark();
+
+    void setAlgorithmicDarkeningAllowed(boolean allow);
+    boolean isAlgorithmicDarkeningAllowed();
+
+    @Retention(RetentionPolicy.SOURCE)
+    @interface ForceDarkBehavior {
+        int FORCE_DARK_ONLY = 0;
+        int MEDIA_QUERY_ONLY = 1;
+        int PREFER_MEDIA_QUERY_OVER_FORCE_DARK = 2;
+    }
+
+    void setForceDarkBehavior(@ForceDarkBehavior int forceDarkBehavior);
+    @ForceDarkBehavior
+    int getForceDarkBehavior();
+
+    @Retention(RetentionPolicy.SOURCE)
+    @interface WebAuthnSupport {
+        int NONE = 0;
+        int APP = 1;
+        int BROWSER = 2;
+    }
+
+    void setWebAuthnSupport(@WebAuthnSupport int support);
+    @WebAuthnSupport
+    int getWebAuthnSupport();
+
+    @Retention(RetentionPolicy.SOURCE)
+    @interface RequestedWithHeaderMode {
+        int NO_HEADER = 0;
+        int APP_PACKAGE_NAME = 1;
+    }
+    void setRequestedWithHeaderMode(@RequestedWithHeaderMode int mode);
+    @RequestedWithHeaderMode
+    int getRequestedWithHeaderMode();
+
+    void setEnterpriseAuthenticationAppLinkPolicyEnabled(boolean enabled);
+    boolean getEnterpriseAuthenticationAppLinkPolicyEnabled();
 }

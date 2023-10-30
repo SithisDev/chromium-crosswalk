@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,9 +23,8 @@ public class AwShellApplication extends Application {
     protected void attachBaseContext(Context context) {
         super.attachBaseContext(context);
         ContextUtils.initApplicationContext(this);
-        PathUtils.setPrivateDataDirectorySuffix("webview");
+        PathUtils.setPrivateDataDirectorySuffix("webview", "WebView");
         CommandLine.initFromFile("/data/local/tmp/android-webview-command-line");
-        ResourceBundle.setAvailablePakLocales(
-                new String[] {}, AwLocaleConfig.getWebViewSupportedPakLocales());
+        ResourceBundle.setAvailablePakLocales(AwLocaleConfig.getWebViewSupportedPakLocales());
     }
 }

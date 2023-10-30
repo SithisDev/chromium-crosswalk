@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,7 +74,7 @@ public class AwTestTouchUtils {
      *
      * @param view The view the coordinates are relative to.
      */
-    public static void simulateTouchCenterOfView(final View view) throws Throwable {
+    public static void simulateTouchCenterOfView(final View view) {
         view.post(() -> {
             long eventTime = SystemClock.uptimeMillis();
             float x = (float) (view.getRight() - view.getLeft()) / 2;

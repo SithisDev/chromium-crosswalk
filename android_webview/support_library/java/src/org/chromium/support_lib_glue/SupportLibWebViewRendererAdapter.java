@@ -1,12 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.support_lib_glue;
 
+import static org.chromium.support_lib_glue.SupportLibWebViewChromiumFactory.recordApiCall;
+
 import org.chromium.android_webview.AwRenderProcess;
 import org.chromium.android_webview.AwSupportLibIsomorphic;
 import org.chromium.support_lib_boundary.WebViewRendererBoundaryInterface;
+import org.chromium.support_lib_glue.SupportLibWebViewChromiumFactory.ApiCall;
 
 /**
  * Adapter between WebViewRendererBoundaryInterface and AwRenderProcess.
@@ -26,6 +29,7 @@ class SupportLibWebViewRendererAdapter
 
     @Override
     public boolean terminate() {
+        recordApiCall(ApiCall.WEBVIEW_RENDERER_TERMINATE);
         return mRenderer.terminate();
     }
 }

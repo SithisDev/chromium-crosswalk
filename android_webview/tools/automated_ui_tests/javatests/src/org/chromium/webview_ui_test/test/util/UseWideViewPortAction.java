@@ -1,15 +1,16 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.webview_ui_test.test;
 
-import static android.support.test.espresso.matcher.ViewMatchers.isAssignableFrom;
+import static androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom;
 
-import android.support.test.espresso.UiController;
-import android.support.test.espresso.ViewAction;
 import android.view.View;
 import android.webkit.WebView;
+
+import androidx.test.espresso.UiController;
+import androidx.test.espresso.ViewAction;
 
 import org.hamcrest.Matcher;
 

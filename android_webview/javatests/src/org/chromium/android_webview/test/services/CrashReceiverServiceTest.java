@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@ package org.chromium.android_webview.test.services;
 import static org.chromium.android_webview.test.OnlyRunIn.ProcessMode.SINGLE_PROCESS;
 
 import android.os.ParcelFileDescriptor;
-import android.support.test.filters.MediumTest;
+
+import androidx.test.filters.MediumTest;
 
 import org.json.JSONException;
 import org.junit.Assert;
@@ -16,10 +17,12 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
+import org.chromium.android_webview.common.crash.CrashInfo;
+import org.chromium.android_webview.common.crash.SystemWideCrashDirectories;
 import org.chromium.android_webview.services.CrashReceiverService;
 import org.chromium.android_webview.test.AwJUnit4ClassRunner;
 import org.chromium.android_webview.test.OnlyRunIn;
-import org.chromium.android_webview.ui.util.CrashInfoLoader.CrashInfo;
+import org.chromium.base.test.util.Batch;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -28,10 +31,12 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Instrumentation tests for CrashReceiverService.
+ * Instrumentation tests for CrashReceiverService. These tests are batched as UNIT_TESTS because
+ * they don't actually launch any services or other components.
  */
 @RunWith(AwJUnit4ClassRunner.class)
 @OnlyRunIn(SINGLE_PROCESS)
+@Batch(Batch.UNIT_TESTS)
 public class CrashReceiverServiceTest {
     private static final String TEST_CRASH_LOCAL_ID = "abc1234";
     private static final String TEST_CRASH_FILE_NAME =
@@ -46,7 +51,7 @@ public class CrashReceiverServiceTest {
      */
     @Test
     @MediumTest
-    public void testCopyingAbortsForInvalidFds() throws IOException {
+    public void testCopyingAbortsForInvalidFds() {
         Assert.assertFalse(CrashReceiverService.copyMinidumps(0 /* uid */, null, null));
         Assert.assertFalse(CrashReceiverService.copyMinidumps(
                 0 /* uid */, new ParcelFileDescriptor[] {null, null}, null));
@@ -60,7 +65,7 @@ public class CrashReceiverServiceTest {
     @Test
     @MediumTest
     public void testDeleteFilesInDir() throws IOException {
-        File webviewTmpDir = CrashReceiverService.getWebViewTmpCrashDir();
+        File webviewTmpDir = SystemWideCrashDirectories.getWebViewTmpCrashDir();
         if (!webviewTmpDir.isDirectory()) {
             Assert.assertTrue(webviewTmpDir.mkdir());
         }
@@ -94,7 +99,8 @@ public class CrashReceiverServiceTest {
         // Asserting some fields just to make sure that contents are valid.
         Assert.assertEquals(TEST_CRASH_LOCAL_ID, crashInfo.localId);
         Assert.assertEquals(testCrashFile.lastModified(), crashInfo.captureTime);
-        Assert.assertEquals(TEST_CRASH_PACKAGE, crashInfo.packageName);
+        Assert.assertEquals(
+                TEST_CRASH_PACKAGE, crashInfo.getCrashKey(CrashInfo.APP_PACKAGE_NAME_KEY));
     }
 
     private static String readEntireFile(File file) throws IOException {

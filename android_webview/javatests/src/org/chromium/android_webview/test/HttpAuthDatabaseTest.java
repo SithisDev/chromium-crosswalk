@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@ package org.chromium.android_webview.test;
 import static org.chromium.android_webview.test.OnlyRunIn.ProcessMode.SINGLE_PROCESS;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -27,19 +28,19 @@ public class HttpAuthDatabaseTest {
     private static final String TEST_DATABASE = "http_auth_for_HttpAuthDatabaseTest.db";
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         InstrumentationRegistry.getTargetContext().deleteDatabase(TEST_DATABASE);
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         InstrumentationRegistry.getTargetContext().deleteDatabase(TEST_DATABASE);
     }
 
     @Test
     @SmallTest
     @Feature({"AndroidWebView"})
-    public void testAccessHttpAuthUsernamePassword() throws Exception {
+    public void testAccessHttpAuthUsernamePassword() {
         HttpAuthDatabase instance = HttpAuthDatabase.newInstance(
                 InstrumentationRegistry.getTargetContext(), TEST_DATABASE);
 

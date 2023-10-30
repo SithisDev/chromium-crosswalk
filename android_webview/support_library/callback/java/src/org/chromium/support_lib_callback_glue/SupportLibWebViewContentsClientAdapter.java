@@ -1,20 +1,21 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.support_lib_callback_glue;
 
-import android.support.annotation.Nullable;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import androidx.annotation.Nullable;
+
 import org.chromium.android_webview.AwContentsClient.AwWebResourceError;
-import org.chromium.android_webview.AwSafeBrowsingResponse;
-import org.chromium.android_webview.ScopedSysTraceEvent;
+import org.chromium.android_webview.safe_browsing.AwSafeBrowsingResponse;
 import org.chromium.base.Callback;
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.metrics.ScopedSysTraceEvent;
 import org.chromium.support_lib_boundary.SafeBrowsingResponseBoundaryInterface;
 import org.chromium.support_lib_boundary.WebResourceErrorBoundaryInterface;
 import org.chromium.support_lib_boundary.WebViewClientBoundaryInterface;

@@ -1,40 +1,35 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.webview_ui_test.test;
 
-import static android.support.test.espresso.Espresso.onData;
-import static android.support.test.espresso.Espresso.onView;
-import static android.support.test.espresso.action.ViewActions.actionWithAssertions;
-import static android.support.test.espresso.action.ViewActions.click;
-import static android.support.test.espresso.assertion.ViewAssertions.matches;
-import static android.support.test.espresso.intent.Intents.assertNoUnverifiedIntents;
-import static android.support.test.espresso.intent.Intents.intended;
-import static android.support.test.espresso.intent.Intents.intending;
-import static android.support.test.espresso.intent.matcher.BundleMatchers.hasEntry;
-import static android.support.test.espresso.intent.matcher.IntentMatchers.anyIntent;
-import static android.support.test.espresso.intent.matcher.IntentMatchers.hasAction;
-import static android.support.test.espresso.intent.matcher.IntentMatchers.hasExtra;
-import static android.support.test.espresso.intent.matcher.IntentMatchers.hasExtras;
-import static android.support.test.espresso.intent.matcher.IntentMatchers.hasType;
-import static android.support.test.espresso.matcher.RootMatchers.DEFAULT;
-import static android.support.test.espresso.matcher.RootMatchers.withDecorView;
-import static android.support.test.espresso.matcher.ViewMatchers.isClickable;
-import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
-import static android.support.test.espresso.matcher.ViewMatchers.isEnabled;
-import static android.support.test.espresso.matcher.ViewMatchers.withChild;
-import static android.support.test.espresso.matcher.ViewMatchers.withClassName;
-import static android.support.test.espresso.matcher.ViewMatchers.withContentDescription;
-import static android.support.test.espresso.matcher.ViewMatchers.withId;
-import static android.support.test.espresso.matcher.ViewMatchers.withText;
-import static android.support.test.espresso.web.assertion.WebViewAssertions.webMatches;
-import static android.support.test.espresso.web.sugar.Web.onWebView;
-import static android.support.test.espresso.web.webdriver.DriverAtoms.findElement;
-import static android.support.test.espresso.web.webdriver.DriverAtoms.getText;
+import static androidx.test.espresso.Espresso.onData;
+import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.action.ViewActions.actionWithAssertions;
+import static androidx.test.espresso.action.ViewActions.click;
+import static androidx.test.espresso.assertion.ViewAssertions.matches;
+import static androidx.test.espresso.intent.Intents.assertNoUnverifiedIntents;
+import static androidx.test.espresso.intent.Intents.intended;
+import static androidx.test.espresso.intent.Intents.intending;
+import static androidx.test.espresso.intent.matcher.BundleMatchers.hasEntry;
+import static androidx.test.espresso.intent.matcher.IntentMatchers.anyIntent;
+import static androidx.test.espresso.intent.matcher.IntentMatchers.hasAction;
+import static androidx.test.espresso.intent.matcher.IntentMatchers.hasExtra;
+import static androidx.test.espresso.intent.matcher.IntentMatchers.hasExtras;
+import static androidx.test.espresso.intent.matcher.IntentMatchers.hasType;
+import static androidx.test.espresso.matcher.RootMatchers.withDecorView;
+import static androidx.test.espresso.matcher.ViewMatchers.isClickable;
+import static androidx.test.espresso.matcher.ViewMatchers.isEnabled;
+import static androidx.test.espresso.matcher.ViewMatchers.withContentDescription;
+import static androidx.test.espresso.matcher.ViewMatchers.withId;
+import static androidx.test.espresso.matcher.ViewMatchers.withText;
+import static androidx.test.espresso.web.assertion.WebViewAssertions.webMatches;
+import static androidx.test.espresso.web.sugar.Web.onWebView;
+import static androidx.test.espresso.web.webdriver.DriverAtoms.findElement;
+import static androidx.test.espresso.web.webdriver.DriverAtoms.getText;
 
 import static org.hamcrest.CoreMatchers.allOf;
-import static org.hamcrest.CoreMatchers.endsWith;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.core.AnyOf.anyOf;
@@ -48,22 +43,21 @@ import android.app.Instrumentation;
 import android.content.Intent;
 import android.os.Build;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.espresso.NoMatchingViewException;
-import android.support.test.espresso.PerformException;
-import android.support.test.espresso.Root;
-import android.support.test.espresso.action.GeneralClickAction;
-import android.support.test.espresso.action.GeneralLocation;
-import android.support.test.espresso.action.Press;
-import android.support.test.espresso.action.Tap;
-import android.support.test.espresso.intent.Intents;
-import android.support.test.espresso.web.webdriver.Locator;
-import android.support.test.filters.SmallTest;
-import android.support.test.uiautomator.UiDevice;
-import android.support.test.uiautomator.UiObject;
-import android.support.test.uiautomator.UiSelector;
 import android.view.MenuItem;
 
-import junit.framework.AssertionFailedError;
+import androidx.test.espresso.NoMatchingViewException;
+import androidx.test.espresso.PerformException;
+import androidx.test.espresso.Root;
+import androidx.test.espresso.action.GeneralClickAction;
+import androidx.test.espresso.action.GeneralLocation;
+import androidx.test.espresso.action.Press;
+import androidx.test.espresso.action.Tap;
+import androidx.test.espresso.intent.Intents;
+import androidx.test.espresso.web.webdriver.Locator;
+import androidx.test.filters.SmallTest;
+import androidx.test.uiautomator.UiDevice;
+import androidx.test.uiautomator.UiObject;
+import androidx.test.uiautomator.UiSelector;
 
 import org.hamcrest.Description;
 import org.hamcrest.Matcher;
@@ -74,6 +68,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.webview_ui_test.R;
 import org.chromium.webview_ui_test.WebViewUiTestActivity;
 import org.chromium.webview_ui_test.test.util.UseLayout;
@@ -82,6 +77,7 @@ import org.chromium.webview_ui_test.test.util.WebViewUiTestRule;
 /**
  * Tests for WebView ActionMode.
  */
+@DisabledTest(message = "https://crbug.com/947352")
 @RunWith(BaseJUnit4ClassRunner.class)
 public class ActionModeTest {
     private static final String TAG = "ActionModeTest";
@@ -207,22 +203,7 @@ public class ActionModeTest {
      * Click an item on the Action Mode popup
      */
     public void clickPopupAction(final String name) {
-        Matcher<Root> rootMatcher;
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            try {
-                // On L and lower, use the espresso DEFAULT root matcher if ActionBar is detected
-                onView(withClassName(endsWith("ActionBarContextView")))
-                        .check(matches(isDisplayed()));
-                rootMatcher = DEFAULT;
-            } catch (NoMatchingViewException | AssertionFailedError e) {
-                // Else match in a popup
-                rootMatcher = withDecorView(withChild(withText(name)));
-            }
-        } else {
-            // On M and above, can use the decoreView matcher
-            rootMatcher = withDecorView(isEnabled());
-        }
+        Matcher<Root> rootMatcher = withDecorView(isEnabled());
 
         try {
             onView(allOf(anyOf(withText(name), withContentDescription(name)), isClickable()))

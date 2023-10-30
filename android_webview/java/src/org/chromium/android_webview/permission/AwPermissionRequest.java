@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@ import org.chromium.android_webview.CleanupReference;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 
 /**
  * This class wraps permission request in Chromium side, and can only be created
@@ -27,13 +28,6 @@ public class AwPermissionRequest {
     // Responsible for deleting native peer.
     private CleanupReference mCleanupReference;
 
-    // This should be same as corresponding definition in PermissionRequest.
-    // We duplicate definition because it is used in Android L and afterwards, but is only
-    // defined in M.
-    // TODO(michaelbai) : Replace "android.webkit.resource.MIDI_SYSEX" with
-    // PermissionRequest.RESOURCE_MIDI_SYSEX once Android M SDK is used.
-    public static final String RESOURCE_MIDI_SYSEX = "android.webkit.resource.MIDI_SYSEX";
-
     private static final class DestroyRunnable implements Runnable {
         private final long mNativeAwPermissionRequest;
 
@@ -42,7 +36,7 @@ public class AwPermissionRequest {
         }
         @Override
         public void run() {
-            nativeDestroy(mNativeAwPermissionRequest);
+            AwPermissionRequestJni.get().destroy(mNativeAwPermissionRequest);
         }
     }
 
@@ -74,7 +68,8 @@ public class AwPermissionRequest {
     public void grant() {
         validate();
         if (mNativeAwPermissionRequest != 0) {
-            nativeOnAccept(mNativeAwPermissionRequest, true);
+            AwPermissionRequestJni.get().onAccept(
+                    mNativeAwPermissionRequest, AwPermissionRequest.this, true);
             destroyNative();
         }
         mProcessed = true;
@@ -83,7 +78,8 @@ public class AwPermissionRequest {
     public void deny() {
         validate();
         if (mNativeAwPermissionRequest != 0) {
-            nativeOnAccept(mNativeAwPermissionRequest, false);
+            AwPermissionRequestJni.get().onAccept(
+                    mNativeAwPermissionRequest, AwPermissionRequest.this, false);
             destroyNative();
         }
         mProcessed = true;
@@ -97,14 +93,19 @@ public class AwPermissionRequest {
     }
 
     private void validate() {
-        if (!ThreadUtils.runningOnUiThread())
+        if (!ThreadUtils.runningOnUiThread()) {
             throw new IllegalStateException(
                     "Either grant() or deny() should be called on UI thread");
+        }
 
-        if (mProcessed)
+        if (mProcessed) {
             throw new IllegalStateException("Either grant() or deny() has been already called.");
+        }
     }
 
-    private native void nativeOnAccept(long nativeAwPermissionRequest, boolean allowed);
-    private static native void nativeDestroy(long nativeAwPermissionRequest);
+    @NativeMethods
+    interface Natives {
+        void onAccept(long nativeAwPermissionRequest, AwPermissionRequest caller, boolean allowed);
+        void destroy(long nativeAwPermissionRequest);
+    }
 }

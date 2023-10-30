@@ -1,11 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview.test;
 
-import android.support.test.filters.MediumTest;
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -21,6 +21,7 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.util.TestWebServer;
 
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 
 /**
@@ -51,9 +52,10 @@ public class AwProxyControllerTest {
         mContentUrl = mContentServer.setResponse(
                 "/", "<html><head><title>" + CONTENT + "</title></head>Page 1</html>", null);
         mProxyUrl = mProxyServer
-                            .setResponse("/",
+                            .setResponse(mContentUrl,
                                     "<html><head><title>" + PROXY + "</title></head>Page 1</html>",
                                     null)
+                            .replace(mContentUrl, "")
                             .replace("http://", "")
                             .replace("/", "");
     }
@@ -74,21 +76,22 @@ public class AwProxyControllerTest {
                 mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
         final AwContents awContents = testContainerView.getAwContents();
 
-        int proxyServerRequestCount = mProxyServer.getRequestCount("/");
+        int proxyServerRequestCount = mProxyServer.getRequestCount(mContentUrl);
 
         // Set proxy override and load content url
         // Localhost should use proxy with loopback rule
         setProxyOverrideSync(
-                new String[][] {{MATCH_ALL_SCHEMES, mProxyUrl}}, new String[] {LOOPBACK});
+                new String[][] {{MATCH_ALL_SCHEMES, mProxyUrl}}, new String[] {LOOPBACK}, false);
         TestAwContentsClient.OnReceivedTitleHelper onReceivedTitleHelper =
                 contentsClient.getOnReceivedTitleHelper();
         int onReceivedTitleCallCount = onReceivedTitleHelper.getCallCount();
+
         mActivityTestRule.loadUrlSync(
                 awContents, contentsClient.getOnPageFinishedHelper(), mContentUrl);
         onReceivedTitleHelper.waitForCallback(onReceivedTitleCallCount);
 
         proxyServerRequestCount++;
-        Assert.assertEquals(proxyServerRequestCount, mProxyServer.getRequestCount("/"));
+        Assert.assertEquals(proxyServerRequestCount, mProxyServer.getRequestCount(mContentUrl));
         Assert.assertEquals(PROXY, onReceivedTitleHelper.getTitle());
 
         // Clear proxy override and load content url
@@ -98,7 +101,7 @@ public class AwProxyControllerTest {
                 awContents, contentsClient.getOnPageFinishedHelper(), mContentUrl);
         onReceivedTitleHelper.waitForCallback(onReceivedTitleCallCount);
 
-        Assert.assertEquals(proxyServerRequestCount, mProxyServer.getRequestCount("/"));
+        Assert.assertEquals(proxyServerRequestCount, mProxyServer.getRequestCount(mContentUrl));
         Assert.assertEquals(CONTENT, onReceivedTitleHelper.getTitle());
     }
 
@@ -111,11 +114,12 @@ public class AwProxyControllerTest {
                 mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
         final AwContents awContents = testContainerView.getAwContents();
 
-        int proxyServerRequestCount = mProxyServer.getRequestCount("/");
+        int proxyServerRequestCount = mProxyServer.getRequestCount(mContentUrl);
 
         // Set proxy override and load a local url
         // Localhost should not use proxy settings
-        setProxyOverrideSync(new String[][] {{MATCH_ALL_SCHEMES, mProxyUrl}}, new String[] {});
+        setProxyOverrideSync(
+                new String[][] {{MATCH_ALL_SCHEMES, mProxyUrl}}, new String[] {}, false);
         TestAwContentsClient.OnReceivedTitleHelper onReceivedTitleHelper =
                 contentsClient.getOnReceivedTitleHelper();
         int onReceivedTitleCallCount = onReceivedTitleHelper.getCallCount();
@@ -123,8 +127,39 @@ public class AwProxyControllerTest {
                 awContents, contentsClient.getOnPageFinishedHelper(), mContentUrl);
         onReceivedTitleHelper.waitForCallback(onReceivedTitleCallCount);
 
-        Assert.assertEquals(proxyServerRequestCount, mProxyServer.getRequestCount("/"));
+        Assert.assertEquals(proxyServerRequestCount, mProxyServer.getRequestCount(mContentUrl));
         Assert.assertEquals(CONTENT, onReceivedTitleHelper.getTitle());
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testReverseBypassRules() throws Throwable {
+        final TestAwContentsClient contentsClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
+        final AwContents awContents = testContainerView.getAwContents();
+
+        String url = "http://www.example.com/";
+        String bypassUrl = "www.example.com";
+
+        mProxyServer.setResponse(
+                url, "<html><head><title>" + PROXY + "</title></head>Page 1</html>", null);
+        int proxyServerRequestCount = mProxyServer.getRequestCount(url);
+
+        // Set proxy override with reverse bypass, that is, only use proxy settings
+        // with URLs in the bypass list
+        setProxyOverrideSync(
+                new String[][] {{MATCH_ALL_SCHEMES, mProxyUrl}}, new String[] {bypassUrl}, true);
+        TestAwContentsClient.OnReceivedTitleHelper onReceivedTitleHelper =
+                contentsClient.getOnReceivedTitleHelper();
+        int onReceivedTitleCallCount = onReceivedTitleHelper.getCallCount();
+        mActivityTestRule.loadUrlSync(awContents, contentsClient.getOnPageFinishedHelper(), url);
+        onReceivedTitleHelper.waitForCallback(onReceivedTitleCallCount);
+
+        proxyServerRequestCount++;
+        Assert.assertEquals(proxyServerRequestCount, mProxyServer.getRequestCount(url));
+        Assert.assertEquals(PROXY, onReceivedTitleHelper.getTitle());
     }
 
     @Test
@@ -132,7 +167,7 @@ public class AwProxyControllerTest {
     @Feature({"AndroidWebView"})
     public void testCallbacks() throws Throwable {
         // Test setProxyOverride's callback
-        setProxyOverrideSync(null, null);
+        setProxyOverrideSync(null, null, false);
         // Test clearProxyOverride's callback with a proxy override setting
         clearProxyOverrideSync();
         // Test clearProxyOverride's callback without a proxy override setting
@@ -156,7 +191,7 @@ public class AwProxyControllerTest {
                 {MATCH_ALL_SCHEMES, "[FE80:CD00:0:CDE:1257:0:211E:729C]"}};
         String[] bypassRules = {
                 "www.rule.com", "*.rule.com", "*rule.com", "www.*.com", "www.rule*"};
-        setProxyOverrideSync(proxyRules, bypassRules);
+        setProxyOverrideSync(proxyRules, bypassRules, false);
         // If we got to this point it means our input was accepted as expected
     }
 
@@ -178,7 +213,7 @@ public class AwProxyControllerTest {
 
         for (String proxyUrl : invalidProxyUrls) {
             try {
-                setProxyOverrideSync(new String[][] {{MATCH_ALL_SCHEMES, proxyUrl}}, null);
+                setProxyOverrideSync(new String[][] {{MATCH_ALL_SCHEMES, proxyUrl}}, null, false);
                 Assert.fail("No exception for invalid proxy url: " + proxyUrl);
             } catch (IllegalArgumentException e) {
                 // Expected
@@ -200,7 +235,7 @@ public class AwProxyControllerTest {
 
         for (String bypassRule : invalidBypassRules) {
             try {
-                setProxyOverrideSync(null, new String[] {bypassRule});
+                setProxyOverrideSync(null, new String[] {bypassRule}, false);
                 Assert.fail("No exception for invalid bypass rule: " + bypassRule);
             } catch (IllegalArgumentException e) {
                 // Expected
@@ -208,39 +243,44 @@ public class AwProxyControllerTest {
         }
     }
 
-    private void setProxyOverrideSync(String[][] proxyRules, String[] bypassRules)
-            throws Exception {
+    private void setProxyOverrideSync(
+            String[][] proxyRules, String[] bypassRules, boolean reverseBypass) throws Exception {
         CallbackHelper ch = new CallbackHelper();
         int callCount = ch.getCallCount();
-        String result = TestThreadUtils.runOnUiThreadBlocking(() -> {
-            return mAwProxyController.setProxyOverride(proxyRules, bypassRules, new Runnable() {
+        runOnUiThreadBlocking(() -> {
+            mAwProxyController.setProxyOverride(proxyRules, bypassRules, new Runnable() {
                 @Override
                 public void run() {
                     ch.notifyCalled();
                 }
-            }, new SynchronousExecutor());
+            }, new SynchronousExecutor(), reverseBypass);
         });
-        if (!result.isEmpty()) {
-            throw new IllegalArgumentException(result);
-        }
         ch.waitForCallback(callCount);
     }
 
     private void clearProxyOverrideSync() throws Exception {
         CallbackHelper ch = new CallbackHelper();
         int callCount = ch.getCallCount();
-        String result = TestThreadUtils.runOnUiThreadBlocking(() -> {
-            return mAwProxyController.clearProxyOverride(new Runnable() {
+        runOnUiThreadBlocking(() -> {
+            mAwProxyController.clearProxyOverride(new Runnable() {
                 @Override
                 public void run() {
                     ch.notifyCalled();
                 }
             }, new SynchronousExecutor());
         });
-        if (!result.isEmpty()) {
-            throw new IllegalArgumentException(result);
-        }
         ch.waitForCallback(callCount);
+    }
+
+    private void runOnUiThreadBlocking(Runnable r) throws Exception {
+        try {
+            TestThreadUtils.runOnUiThreadBlocking(r);
+        } catch (RuntimeException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof ExecutionException) cause = cause.getCause();
+            if (cause instanceof IllegalArgumentException) throw (IllegalArgumentException) cause;
+            throw e;
+        }
     }
 
     static class SynchronousExecutor implements Executor {

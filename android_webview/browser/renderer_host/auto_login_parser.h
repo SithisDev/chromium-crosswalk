@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,6 @@
 #define ANDROID_WEBVIEW_BROWSER_RENDERER_HOST_AUTO_LOGIN_PARSER_H_
 
 #include <string>
-
-namespace net {
-class URLRequest;
-}
 
 namespace android_webview {
 
@@ -38,12 +34,6 @@ struct HeaderData {
 bool ParseHeader(const std::string& header,
                  RealmRestriction realm_restriction,
                  HeaderData* header_data);
-
-// Helper function that also retrieves the header from the response of the
-// given URLRequest.
-bool ParserHeaderInResponse(net::URLRequest* request,
-                            RealmRestriction realm_restriction,
-                            HeaderData* header_data);
 
 }  // namespace android_webview
 

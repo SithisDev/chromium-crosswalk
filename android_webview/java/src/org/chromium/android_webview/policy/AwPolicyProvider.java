@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@ package org.chromium.android_webview.policy;
 import android.content.Context;
 import android.os.Bundle;
 
-import org.chromium.base.VisibleForTesting;
-import org.chromium.policy.AppRestrictionsProvider;
+import androidx.annotation.VisibleForTesting;
+
+import org.chromium.components.policy.AppRestrictionsProvider;
 
 /**
  * Does the plumbing between the policies collected via Android's App Restriction system and the

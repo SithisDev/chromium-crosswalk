@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@ package org.chromium.android_webview.test;
 
 import android.os.Handler;
 import android.os.Looper;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -47,7 +48,7 @@ public class AwPermissionManagerTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestWebServer.shutdown();
         mTestWebServer = null;
     }
@@ -55,7 +56,7 @@ public class AwPermissionManagerTest {
     @Test
     @Feature({"AndroidWebView"})
     @SmallTest
-    public void testRequestMultiple() throws Throwable {
+    public void testRequestMultiple() {
         mPage = mTestWebServer.setResponse("/permissions", REQUEST_DUPLICATE,
                 CommonResources.getTextHtmlHeaders(true));
 
@@ -84,8 +85,7 @@ public class AwPermissionManagerTest {
         pollTitleAs("second-granted", awContents);
     }
 
-    private void pollTitleAs(final String title, final AwContents awContents)
-            throws Exception {
+    private void pollTitleAs(final String title, final AwContents awContents) {
         AwActivityTestRule.pollInstrumentationThread(
                 () -> title.equals(mActivityTestRule.getTitleOnUiThread(awContents)));
     }

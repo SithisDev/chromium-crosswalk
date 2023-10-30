@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@ package org.chromium.android_webview;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 
 /**
  */
@@ -18,7 +19,15 @@ public final class AwRenderProcess extends AwSupportLibIsomorphic {
     public boolean terminate() {
         if (mNativeRenderProcess == 0) return false;
 
-        return nativeTerminateChildProcess(mNativeRenderProcess);
+        return AwRenderProcessJni.get().terminateChildProcess(
+                mNativeRenderProcess, AwRenderProcess.this);
+    }
+
+    public boolean isProcessLockedToSiteForTesting() {
+        if (mNativeRenderProcess == 0) return false;
+
+        return AwRenderProcessJni.get().isProcessLockedToSiteForTesting(
+                mNativeRenderProcess, AwRenderProcess.this);
     }
 
     @CalledByNative
@@ -31,5 +40,9 @@ public final class AwRenderProcess extends AwSupportLibIsomorphic {
         mNativeRenderProcess = nativeRenderProcess;
     }
 
-    private native boolean nativeTerminateChildProcess(long nativeAwRenderProcess);
+    @NativeMethods
+    interface Natives {
+        boolean terminateChildProcess(long nativeAwRenderProcess, AwRenderProcess caller);
+        boolean isProcessLockedToSiteForTesting(long nativeAwRenderProcess, AwRenderProcess caller);
+    }
 }

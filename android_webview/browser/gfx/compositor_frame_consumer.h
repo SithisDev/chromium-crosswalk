@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,14 @@
 #define ANDROID_WEBVIEW_BROWSER_GFX_COMPOSITOR_FRAME_CONSUMER_H_
 
 #include "android_webview/browser/gfx/child_frame.h"
-#include "android_webview/browser/gfx/compositor_id.h"
 #include "android_webview/browser/gfx/parent_compositor_draw_constraints.h"
+#include "android_webview/browser/gfx/root_frame_sink.h"
 #include "components/viz/common/frame_timing_details_map.h"
-#include "ui/gfx/geometry/vector2d.h"
+#include "ui/gfx/geometry/point.h"
+
+namespace viz {
+class FrameSinkId;
+}
 
 namespace android_webview {
 
@@ -26,14 +30,15 @@ class CompositorFrameConsumer {
   // In order to register a consumer with a new producer, the current producer
   // must unregister the consumer, and call SetCompositorProducer(nullptr).
   virtual void SetCompositorFrameProducer(
-      CompositorFrameProducer* compositor_frame_producer) = 0;
-  virtual void SetScrollOffsetOnUI(gfx::Vector2d scroll_offset) = 0;
+      CompositorFrameProducer* compositor_frame_producer,
+      RootFrameSinkGetter root_frame_sink_getter) = 0;
+  virtual void SetScrollOffsetOnUI(gfx::Point scroll_offset) = 0;
   // Returns uncommitted frame to be returned, if any.
   virtual std::unique_ptr<ChildFrame> SetFrameOnUI(
       std::unique_ptr<ChildFrame> frame) = 0;
   virtual void TakeParentDrawDataOnUI(
       ParentCompositorDrawConstraints* constraints,
-      CompositorID* compositor_id,
+      viz::FrameSinkId* frame_sink_id,
       viz::FrameTimingDetailsMap* timing_details,
       uint32_t* frame_token) = 0;
   virtual ChildFrameQueue PassUncommittedFrameOnUI() = 0;

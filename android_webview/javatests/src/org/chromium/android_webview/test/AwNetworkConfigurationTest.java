@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,11 @@ package org.chromium.android_webview.test;
 
 import static org.chromium.android_webview.test.AwActivityTestRule.WAIT_TIMEOUT_MS;
 
+import android.os.Build;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.webkit.JavascriptInterface;
+
+import androidx.test.filters.SmallTest;
 
 import com.google.common.util.concurrent.SettableFuture;
 
@@ -20,7 +22,8 @@ import org.junit.runner.RunWith;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwContentsClient.AwWebResourceRequest;
-import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.android_webview.test.TestAwContentsClient.OnReceivedSslErrorHelper;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.net.test.ServerCertificate;
@@ -46,7 +49,7 @@ public class AwNetworkConfigurationTest {
     private EmbeddedTestServer mTestServer;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContentsClient = new TestAwContentsClient();
         mTestContainerView = mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
         mAwContents = mTestContainerView.getAwContents();
@@ -55,22 +58,29 @@ public class AwNetworkConfigurationTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Network"})
+    @DisabledTest(message = "crbug.com/1148388")
+    // clang-format off+
     public void testSHA1LocalAnchorsAllowed() throws Throwable {
+        // clang-format on
         mTestServer = EmbeddedTestServer.createAndStartHTTPSServer(
                 InstrumentationRegistry.getInstrumentation().getContext(),
                 ServerCertificate.CERT_SHA1_LEAF);
         try {
-            CallbackHelper onReceivedSslErrorHelper = mContentsClient.getOnReceivedSslErrorHelper();
+            OnReceivedSslErrorHelper onReceivedSslErrorHelper =
+                    mContentsClient.getOnReceivedSslErrorHelper();
             int count = onReceivedSslErrorHelper.getCallCount();
             String url = mTestServer.getURL("/android_webview/test/data/hello_world.html");
             mActivityTestRule.loadUrlSync(
                     mAwContents, mContentsClient.getOnPageFinishedHelper(), url);
-            // TODO(ntfschr): update this assertion whenever
-            // https://android.googlesource.com/platform/external/conscrypt/+/1d6a0b8453054b7dd703693f2ce2896ae061aee3
-            // rolls into an Android release, as this will mean Android intends to distrust SHA1
-            // (http://crbug.com/919749).
-            Assert.assertEquals("We should not have received any SSL errors", count,
-                    onReceivedSslErrorHelper.getCallCount());
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                Assert.assertEquals("We should generate an SSL error on >= Q", count + 1,
+                        onReceivedSslErrorHelper.getCallCount());
+            } else {
+                if (count != onReceivedSslErrorHelper.getCallCount()) {
+                    Assert.fail("We should not have received any SSL errors on < Q but we received"
+                            + " error " + onReceivedSslErrorHelper.getError());
+                }
+            }
         } finally {
             mTestServer.stopAndDestroyServer();
         }
@@ -94,6 +104,80 @@ public class AwNetworkConfigurationTest {
                                                .getPackageName();
             Assert.assertEquals("X-Requested-With header should be the app package name",
                     packageName, xRequestedWith);
+        } finally {
+            mTestServer.stopAndDestroyServer();
+        }
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView", "Network"})
+    public void testRequestedWithHeaderMainFrameAppPackageName() throws Throwable {
+        mTestServer = EmbeddedTestServer.createAndStartServer(
+                InstrumentationRegistry.getInstrumentation().getContext());
+        mAwContents.getSettings().setRequestedWithHeaderMode(
+                org.chromium.android_webview.AwSettings.REQUESTED_WITH_APP_PACKAGE_NAME);
+        try {
+            final String echoHeaderUrl = mTestServer.getURL("/echoheader?X-Requested-With");
+            mActivityTestRule.loadUrlSync(
+                    mAwContents, mContentsClient.getOnPageFinishedHelper(), echoHeaderUrl);
+            AwActivityTestRule.enableJavaScriptOnUiThread(mAwContents);
+            final String xRequestedWith = mActivityTestRule.getJavaScriptResultBodyTextContent(
+                    mAwContents, mContentsClient);
+            final String packageName = InstrumentationRegistry.getInstrumentation()
+                                               .getTargetContext()
+                                               .getPackageName();
+            Assert.assertEquals(
+                    "X-Requested-With header should be the app package name if specified",
+                    packageName, xRequestedWith);
+        } finally {
+            mTestServer.stopAndDestroyServer();
+        }
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView", "Network"})
+    public void testRequestedWithHeaderMainFrameNoHeader() throws Throwable {
+        mTestServer = EmbeddedTestServer.createAndStartServer(
+                InstrumentationRegistry.getInstrumentation().getContext());
+        mAwContents.getSettings().setRequestedWithHeaderMode(
+                org.chromium.android_webview.AwSettings.REQUESTED_WITH_NO_HEADER);
+        try {
+            final String echoHeaderUrl = mTestServer.getURL("/echoheader?X-Requested-With");
+            mActivityTestRule.loadUrlSync(
+                    mAwContents, mContentsClient.getOnPageFinishedHelper(), echoHeaderUrl);
+            AwActivityTestRule.enableJavaScriptOnUiThread(mAwContents);
+            final String xRequestedWith = mActivityTestRule.getJavaScriptResultBodyTextContent(
+                    mAwContents, mContentsClient);
+            // Server responds with "None" when there's no header
+            final String expectNoHeader = "None";
+            Assert.assertEquals("X-Requested-With header should not be set if specified",
+                    expectNoHeader, xRequestedWith);
+        } finally {
+            mTestServer.stopAndDestroyServer();
+        }
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView", "Network"})
+    public void testRequestedWithHeaderMainFrameStringConstant() throws Throwable {
+        mTestServer = EmbeddedTestServer.createAndStartServer(
+                InstrumentationRegistry.getInstrumentation().getContext());
+        mAwContents.getSettings().setRequestedWithHeaderMode(
+                org.chromium.android_webview.AwSettings.REQUESTED_WITH_CONSTANT_WEBVIEW);
+        try {
+            final String echoHeaderUrl = mTestServer.getURL("/echoheader?X-Requested-With");
+            mActivityTestRule.loadUrlSync(
+                    mAwContents, mContentsClient.getOnPageFinishedHelper(), echoHeaderUrl);
+            AwActivityTestRule.enableJavaScriptOnUiThread(mAwContents);
+            final String xRequestedWith = mActivityTestRule.getJavaScriptResultBodyTextContent(
+                    mAwContents, mContentsClient);
+            final String expectedHeaderValue = "WebView";
+            Assert.assertEquals(
+                    "X-Requested-With header should be the a constant string if specified",
+                    expectedHeaderValue, xRequestedWith);
         } finally {
             mTestServer.stopAndDestroyServer();
         }
@@ -188,7 +272,7 @@ public class AwNetworkConfigurationTest {
         mTestServer = EmbeddedTestServer.createAndStartServer(
                 InstrumentationRegistry.getInstrumentation().getContext());
         try {
-            final String url = mTestServer.getURL("/any-http-url-will-suffice.html");
+            final String url = mTestServer.getURL("/android_webview/test/data/hello_world.html");
             mActivityTestRule.loadUrlSync(
                     mAwContents, mContentsClient.getOnPageFinishedHelper(), url);
             AwWebResourceRequest request =

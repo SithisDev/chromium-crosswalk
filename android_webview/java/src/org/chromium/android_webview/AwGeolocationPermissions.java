@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,6 @@ package org.chromium.android_webview;
 
 import android.content.SharedPreferences;
 
-import org.chromium.base.task.PostTask;
-import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.net.GURLUtils;
 
 import java.util.HashSet;
@@ -101,7 +99,7 @@ public final class AwGeolocationPermissions {
      */
     public void getAllowed(String origin, final org.chromium.base.Callback<Boolean> callback) {
         final boolean finalAllowed = isOriginAllowed(origin);
-        PostTask.postTask(UiThreadTaskTraits.DEFAULT, () -> callback.onResult(finalAllowed));
+        AwThreadUtils.postToUiThreadLooper(callback.bind(finalAllowed));
     }
 
     /**
@@ -114,7 +112,7 @@ public final class AwGeolocationPermissions {
                 origins.add(name.substring(PREF_PREFIX.length()));
             }
         }
-        PostTask.postTask(UiThreadTaskTraits.DEFAULT, () -> callback.onResult(origins));
+        AwThreadUtils.postToUiThreadLooper(callback.bind(origins));
     }
 
     /**
@@ -127,5 +125,20 @@ public final class AwGeolocationPermissions {
         }
 
         return PREF_PREFIX + origin;
+    }
+
+    /* package */
+    static void migrateGeolocationPreferences(
+            SharedPreferences oldPrefs, SharedPreferences newPrefs) {
+        SharedPreferences.Editor oldPrefsEditor = oldPrefs.edit();
+
+        SharedPreferences.Editor newPrefsEditor = newPrefs.edit();
+
+        for (String name : oldPrefs.getAll().keySet()) {
+            if (name.startsWith(AwGeolocationPermissions.PREF_PREFIX)) {
+                newPrefsEditor.putBoolean(name, oldPrefs.getBoolean(name, false)).apply();
+                oldPrefsEditor.remove(name).apply();
+            }
+        }
     }
 }

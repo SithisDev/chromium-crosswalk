@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -101,10 +101,10 @@ public class SharedStatics {
         // clang-format on
     }
 
-    public void setSafeBrowsingWhitelist(List<String> urls, Callback<Boolean> callback) {
+    public void setSafeBrowsingAllowlist(List<String> urls, Callback<Boolean> callback) {
         // clang-format off
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT,
-                () -> AwContentsStatics.setSafeBrowsingWhitelist(urls, callback));
+                () -> AwContentsStatics.setSafeBrowsingAllowlist(urls, callback));
         // clang-format on
     }
 
@@ -121,5 +121,9 @@ public class SharedStatics {
 
     public boolean isMultiProcessEnabled() {
         return AwContentsStatics.isMultiProcessEnabled();
+    }
+
+    public String getVariationsHeader() {
+        return AwContentsStatics.getVariationsHeader();
     }
 }

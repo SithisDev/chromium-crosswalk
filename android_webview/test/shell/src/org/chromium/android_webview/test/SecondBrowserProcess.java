@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,9 +49,10 @@ public class SecondBrowserProcess extends Service {
         return START_STICKY;
     }
 
-    private void startBrowserProcess() throws Exception {
+    private void startBrowserProcess() {
         AwResource.setResources(this.getResources());
         AwResource.setConfigKeySystemUuidMapping(R.array.config_key_system_uuid_mapping);
+        AwTestContainerView.installDrawFnFunctionTable(/*useVulkan=*/false);
         AwBrowserProcess.loadLibrary(null);
         AwBrowserProcess.start();
     }

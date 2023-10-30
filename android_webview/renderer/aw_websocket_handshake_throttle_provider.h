@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,23 +7,30 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/threading/thread_checker.h"
-#include "components/safe_browsing/common/safe_browsing.mojom.h"
-#include "content/public/renderer/websocket_handshake_throttle_provider.h"
+#include "components/safe_browsing/content/common/safe_browsing.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
+#include "third_party/blink/public/platform/websocket_handshake_throttle_provider.h"
 
 namespace android_webview {
 
 // This must be constructed on the render thread, and then used and destructed
 // on a single thread, which can be different from the render thread.
 class AwWebSocketHandshakeThrottleProvider final
-    : public content::WebSocketHandshakeThrottleProvider {
+    : public blink::WebSocketHandshakeThrottleProvider {
  public:
-  AwWebSocketHandshakeThrottleProvider();
+  explicit AwWebSocketHandshakeThrottleProvider(
+      blink::ThreadSafeBrowserInterfaceBrokerProxy* broker);
+
+  AwWebSocketHandshakeThrottleProvider& operator=(
+      const AwWebSocketHandshakeThrottleProvider&) = delete;
+
   ~AwWebSocketHandshakeThrottleProvider() override;
 
-  // Implements content::WebSocketHandshakeThrottleProvider.
-  std::unique_ptr<content::WebSocketHandshakeThrottleProvider> Clone(
+  // Implements blink::WebSocketHandshakeThrottleProvider.
+  std::unique_ptr<blink::WebSocketHandshakeThrottleProvider> Clone(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner) override;
   std::unique_ptr<blink::WebSocketHandshakeThrottle> CreateThrottle(
       int render_frame_id,
@@ -35,12 +42,10 @@ class AwWebSocketHandshakeThrottleProvider final
   AwWebSocketHandshakeThrottleProvider(
       const AwWebSocketHandshakeThrottleProvider& other);
 
-  safe_browsing::mojom::SafeBrowsingPtrInfo safe_browsing_info_;
-  safe_browsing::mojom::SafeBrowsingPtr safe_browsing_;
+  mojo::PendingRemote<safe_browsing::mojom::SafeBrowsing> safe_browsing_remote_;
+  mojo::Remote<safe_browsing::mojom::SafeBrowsing> safe_browsing_;
 
   THREAD_CHECKER(thread_checker_);
-
-  DISALLOW_ASSIGN(AwWebSocketHandshakeThrottleProvider);
 };
 
 }  // namespace android_webview

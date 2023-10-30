@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@ package org.chromium.android_webview.test;
 
 import android.net.http.SslError;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -38,7 +39,7 @@ public class SslPreferencesTest {
     private static final String HELLO_WORLD_TITLE = "Hello, World!";
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContentsClient = new TestAwContentsClient();
         mTestContainerView = mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
         mAwContents = mTestContainerView.getAwContents();
@@ -62,8 +63,10 @@ public class SslPreferencesTest {
             mActivityTestRule.loadUrlSync(
                     mAwContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
 
-            Assert.assertEquals("onReceivedSslError should not be called", onSslErrorCallCount,
-                    onReceivedSslErrorHelper.getCallCount());
+            if (onSslErrorCallCount != onReceivedSslErrorHelper.getCallCount()) {
+                Assert.fail("onReceivedSslError should not be called, but was called with error "
+                        + onReceivedSslErrorHelper.getError());
+            }
         } finally {
             mTestServer.stopAndDestroyServer();
         }
@@ -169,7 +172,7 @@ public class SslPreferencesTest {
                     mContentsClient.getOnReceivedSslErrorHelper();
 
             int onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
-            int errorCount = mContentsClient.getOnReceivedError2Helper().getCallCount();
+            int errorCount = mContentsClient.getOnReceivedErrorHelper().getCallCount();
             int httpErrorCount = mContentsClient.getOnReceivedHttpErrorHelper().getCallCount();
 
             // Load the page and cancel the SslError
@@ -180,7 +183,7 @@ public class SslPreferencesTest {
             Assert.assertEquals("onReceivedSslError should be called once", onSslErrorCallCount + 1,
                     onReceivedSslErrorHelper.getCallCount());
             Assert.assertEquals("Canceled SslErrors should not trigger network errors", errorCount,
-                    mContentsClient.getOnReceivedError2Helper().getCallCount());
+                    mContentsClient.getOnReceivedErrorHelper().getCallCount());
             Assert.assertEquals("Canceled SslErrors should not trigger HTTP errors", httpErrorCount,
                     mContentsClient.getOnReceivedHttpErrorHelper().getCallCount());
 
@@ -192,7 +195,7 @@ public class SslPreferencesTest {
             Assert.assertEquals("onReceivedSslError should be called a second time",
                     onSslErrorCallCount + 2, onReceivedSslErrorHelper.getCallCount());
             Assert.assertEquals("Allowed SslErrors should not trigger network errors", errorCount,
-                    mContentsClient.getOnReceivedError2Helper().getCallCount());
+                    mContentsClient.getOnReceivedErrorHelper().getCallCount());
             Assert.assertEquals("Allowed SslErrors should not trigger HTTP errors", httpErrorCount,
                     mContentsClient.getOnReceivedHttpErrorHelper().getCallCount());
         } finally {

@@ -1,10 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
 import org.chromium.base.metrics.RecordHistogram;
 
@@ -45,32 +45,6 @@ public class AwHistogramRecorder {
     public static void recordCallbackInvocation(@WebViewCallbackType int result) {
         RecordHistogram.recordEnumeratedHistogram(
                 "Android.WebView.Callback.Counts", result, WebViewCallbackType.NUM_ENTRIES);
-    }
-
-    @Retention(RetentionPolicy.SOURCE)
-    @IntDef({MimeType.NULL_FROM_CONTENT_PROVIDER, MimeType.NONNULL_FROM_CONTENT_PROVIDER,
-            MimeType.CANNOT_GUESS_FROM_ANDROID_ASSET_PATH, MimeType.GUESSED_FROM_ANDROID_ASSET_PATH,
-            MimeType.CANNOT_GUESS_FROM_ANDROID_ASSET_INPUT_STREAM,
-            MimeType.GUESSED_FROM_ANDROID_ASSET_INPUT_STREAM})
-    public @interface MimeType {
-        // These values are persisted to logs. Entries should not be renumbered and numeric values
-        // should never be reused. Update NUM_ENTRIES when adding more entries.
-        int NULL_FROM_CONTENT_PROVIDER = 0;
-        int NONNULL_FROM_CONTENT_PROVIDER = 1;
-        int CANNOT_GUESS_FROM_ANDROID_ASSET_PATH = 2;
-        int GUESSED_FROM_ANDROID_ASSET_PATH = 3;
-        int CANNOT_GUESS_DUE_TO_GENERIC_EXCEPTION = 4;
-        int CANNOT_GUESS_FROM_ANDROID_ASSET_INPUT_STREAM = 5;
-        int GUESSED_FROM_ANDROID_ASSET_INPUT_STREAM = 6;
-        int CANNOT_GUESS_DUE_TO_IO_EXCEPTION = 7;
-        int NULL_FROM_SHOULD_INTERCEPT_REQUEST = 8;
-        int NONNULL_FROM_SHOULD_INTERCEPT_REQUEST = 9;
-        int NUM_ENTRIES = 10;
-    }
-
-    public static void recordMimeType(@MimeType int type) {
-        RecordHistogram.recordEnumeratedHistogram(
-                "Android.WebView.Mimetype.AppProvided", type, MimeType.NUM_ENTRIES);
     }
 
     // not meant to be instantiated

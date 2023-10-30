@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,11 @@ import android.webkit.WebViewClient;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwRenderProcess;
+import org.chromium.android_webview.ScriptHandler;
+import org.chromium.android_webview.WebMessageListener;
 import org.chromium.android_webview.WebViewChromiumRunQueue;
 import org.chromium.base.ThreadUtils;
+import org.chromium.content_public.browser.MessagePayload;
 import org.chromium.content_public.browser.MessagePort;
 
 import java.util.concurrent.Callable;
@@ -28,7 +31,7 @@ public class SharedWebViewChromium {
     private SharedWebViewContentsClientAdapter mContentsClientAdapter;
 
     // Default WebViewClient used to avoid null checks.
-    final static WebViewClient sNullWebViewClient = new WebViewClient();
+    static final WebViewClient sNullWebViewClient = new WebViewClient();
     // The WebViewClient instance that was passed to WebView.setWebViewClient().
     private WebViewClient mWebViewClient = sNullWebViewClient;
     private WebChromeClient mWebChromeClient;
@@ -103,18 +106,45 @@ public class SharedWebViewChromium {
         return mAwContents.createMessageChannel();
     }
 
-    public void postMessageToMainFrame(
-            final String message, final String targetOrigin, final MessagePort[] sentPorts) {
+    public void postMessageToMainFrame(final MessagePayload messagePayload,
+            final String targetOrigin, final MessagePort[] sentPorts) {
         if (checkNeedsPost()) {
             mRunQueue.addTask(new Runnable() {
                 @Override
                 public void run() {
-                    postMessageToMainFrame(message, targetOrigin, sentPorts);
+                    postMessageToMainFrame(messagePayload, targetOrigin, sentPorts);
                 }
             });
             return;
         }
-        mAwContents.postMessageToMainFrame(message, targetOrigin, sentPorts);
+        mAwContents.postMessageToMainFrame(messagePayload, targetOrigin, sentPorts);
+    }
+
+    public void addWebMessageListener(final String jsObjectName, final String[] allowedOriginRules,
+            final WebMessageListener listener) {
+        if (checkNeedsPost()) {
+            mRunQueue.addTask(
+                    () -> addWebMessageListener(jsObjectName, allowedOriginRules, listener));
+            return;
+        }
+        mAwContents.addWebMessageListener(jsObjectName, allowedOriginRules, listener);
+    }
+
+    public void removeWebMessageListener(final String jsObjectName) {
+        if (checkNeedsPost()) {
+            mRunQueue.addTask(() -> removeWebMessageListener(jsObjectName));
+            return;
+        }
+        mAwContents.removeWebMessageListener(jsObjectName);
+    }
+
+    public ScriptHandler addDocumentStartJavaScript(
+            final String script, final String[] allowedOriginRules) {
+        if (checkNeedsPost()) {
+            return mRunQueue.runOnUiThreadBlocking(
+                    () -> addDocumentStartJavaScript(script, allowedOriginRules));
+        }
+        return mAwContents.addDocumentStartJavaScript(script, allowedOriginRules);
     }
 
     public void setWebViewRendererClientAdapter(

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@ package org.chromium.android_webview.test;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.view.View;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -19,7 +20,9 @@ import org.junit.runner.RunWith;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwContents.VisualStateCallback;
 import org.chromium.android_webview.test.util.GraphicsTestUtils;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.common.ContentUrlConstants;
 
@@ -39,7 +42,7 @@ public class AwContentsRenderTest {
     private AwTestContainerView mContainerView;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContentsClient = new TestAwContentsClient();
         mContainerView = mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
         mAwContents = mContainerView.getAwContents();
@@ -61,11 +64,16 @@ public class AwContentsRenderTest {
 
         mActivityTestRule.loadUrlSync(mAwContents, mContentsClient.getOnPageFinishedHelper(),
                 ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL);
-        Assert.assertEquals(
-                Color.CYAN, GraphicsTestUtils.sampleBackgroundColorOnUiThread(mAwContents));
+        GraphicsTestUtils.pollForBackgroundColor(mAwContents, Color.CYAN);
 
         setBackgroundColorOnUiThread(Color.YELLOW);
         GraphicsTestUtils.pollForBackgroundColor(mAwContents, Color.YELLOW);
+
+        final String html_meta = "<html><head><meta name=color-scheme content=dark></head></html>";
+        mActivityTestRule.loadUrlSync(mAwContents, mContentsClient.getOnPageFinishedHelper(),
+                "data:text/html," + html_meta);
+        final int dark_scheme_color = 0xFF121212;
+        GraphicsTestUtils.pollForBackgroundColor(mAwContents, dark_scheme_color);
 
         final String html = "<html><head><style>body {background-color:#227788}</style></head>"
                 + "<body></body></html>";
@@ -120,7 +128,8 @@ public class AwContentsRenderTest {
                 }
             });
         });
-        Assert.assertTrue(latch.await(AwActivityTestRule.WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS));
+        Assert.assertTrue(
+                latch.await(AwActivityTestRule.SCALED_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS));
 
         final int width =
                 TestThreadUtils.runOnUiThreadBlockingNoException(() -> mContainerView.getWidth());
@@ -155,5 +164,24 @@ public class AwContentsRenderTest {
         invisibleBitmap = GraphicsTestUtils.drawAwContentsOnUiThread(mAwContents, width, height);
         Assert.assertNotNull(invisibleBitmap);
         Assert.assertTrue(invisibleBitmap.sameAs(visibleBitmap));
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testSoftwareCanvas() throws Throwable {
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> mAwContents.setLayerType(View.LAYER_TYPE_SOFTWARE, null));
+
+        String testFile = "android_webview/test/data/green_canvas.html";
+        String url = UrlUtils.getIsolatedTestFileUrl(testFile);
+        AwActivityTestRule.enableJavaScriptOnUiThread(mAwContents);
+        mActivityTestRule.loadUrlSync(mAwContents, mContentsClient.getOnPageFinishedHelper(), url);
+        mActivityTestRule.waitForVisualStateCallback(mAwContents);
+
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            Bitmap bitmap = GraphicsTestUtils.drawAwContentsOnUiThread(mAwContents, 500, 500);
+            return Color.GREEN == bitmap.getPixel(250, 250);
+        });
     }
 }

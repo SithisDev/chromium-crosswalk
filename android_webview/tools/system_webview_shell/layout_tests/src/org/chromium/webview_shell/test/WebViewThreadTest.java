@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,11 @@ package org.chromium.webview_shell.test;
 
 import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
-import android.content.Intent;
-import android.support.test.filters.SmallTest;
-import android.support.test.rule.ActivityTestRule;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.WebStorage;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -20,6 +19,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.test.BaseActivityTestRule;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.webview_shell.WebViewThreadTestActivity;
 
@@ -35,16 +35,17 @@ public class WebViewThreadTest {
     private WebViewThreadTestActivity mActivity;
 
     @Rule
-    public ActivityTestRule<WebViewThreadTestActivity> mActivityTestRule =
-            new ActivityTestRule<>(WebViewThreadTestActivity.class, false, false);
+    public BaseActivityTestRule<WebViewThreadTestActivity> mActivityTestRule =
+            new BaseActivityTestRule<>(WebViewThreadTestActivity.class);
 
     @Before
-    public void setUp() throws Exception {
-        mActivity = mActivityTestRule.launchActivity(new Intent());
+    public void setUp() {
+        mActivityTestRule.launchActivity(null);
+        mActivity = mActivityTestRule.getActivity();
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mActivity.finish();
     }
 

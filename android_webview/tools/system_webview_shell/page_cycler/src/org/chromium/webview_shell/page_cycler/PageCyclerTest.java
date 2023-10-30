@@ -1,15 +1,15 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.webview_shell.page_cycler;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.LargeTest;
-import android.support.test.rule.ActivityTestRule;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+
+import androidx.test.filters.LargeTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -17,6 +17,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.test.BaseActivityTestRule;
 import org.chromium.base.test.params.BaseJUnit4RunnerDelegate;
 import org.chromium.base.test.params.ParameterAnnotations.UseMethodParameter;
 import org.chromium.base.test.params.ParameterAnnotations.UseRunnerDelegate;
@@ -58,11 +59,11 @@ public class PageCyclerTest {
     }
 
     @Rule
-    public ActivityTestRule<PageCyclerTestActivity> mRule =
-            new ActivityTestRule<>(PageCyclerTestActivity.class);
+    public BaseActivityTestRule<PageCyclerTestActivity> mRule =
+            new BaseActivityTestRule<>(PageCyclerTestActivity.class);
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mRule.launchActivity(null);
     }
 
@@ -70,7 +71,7 @@ public class PageCyclerTest {
     @LargeTest
     @UseMethodParameter(WebsiteParams.class)
     @Restriction(Restriction.RESTRICTION_TYPE_INTERNET)
-    public void testVisitPage(String url) throws Throwable {
+    public void testVisitPage(String url) {
         final PageCyclerWebViewClient pageCyclerWebViewClient = new PageCyclerWebViewClient();
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
@@ -118,7 +119,7 @@ public class PageCyclerTest {
     }
 
     private void loadUrlSync(final String url, final CallbackHelper pageFinishedCallback,
-            final CallbackHelper errorCallback) throws InterruptedException {
+            final CallbackHelper errorCallback) {
         boolean timeout = false;
         int pageFinishedCount = pageFinishedCallback.getCallCount();
         int errorCount = errorCallback.getCallCount();

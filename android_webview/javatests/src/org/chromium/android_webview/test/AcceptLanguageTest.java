@@ -1,14 +1,15 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview.test;
 
-import android.annotation.SuppressLint;
 import android.os.Build;
 import android.os.LocaleList;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.annotation.RequiresApi;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -40,7 +41,7 @@ public class AcceptLanguageTest {
     private EmbeddedTestServer mTestServer;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContentsClient = new TestAwContentsClient();
         mAwContents = mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient)
                               .getAwContents();
@@ -50,7 +51,7 @@ public class AcceptLanguageTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -77,7 +78,6 @@ public class AcceptLanguageTest {
         return COMMA_AND_OPTIONAL_Q_VALUE.split(mActivityTestRule.maybeStripDoubleQuotes(raw));
     }
 
-    @SuppressLint("NewApi")
     private boolean isSingleLocale(String lang, String country) {
         String languageTag = String.format("%s-%s", lang, country);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -88,7 +88,6 @@ public class AcceptLanguageTest {
         }
     }
 
-    @SuppressLint("NewApi")
     private void setSingleLocale(String lang, String country) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             LocaleList.setDefault(new LocaleList(new Locale(lang, country)));
@@ -156,7 +155,7 @@ public class AcceptLanguageTest {
     @Test
     @SmallTest
     @MinAndroidSdkLevel(Build.VERSION_CODES.N)
-    @SuppressLint("NewApi")
+    @RequiresApi(Build.VERSION_CODES.N)
     @Feature({"AndroidWebView"})
     public void testAcceptLanguagesWithenUS() throws Throwable {
         LocaleList.setDefault(new LocaleList(new Locale("ko", "KR")));

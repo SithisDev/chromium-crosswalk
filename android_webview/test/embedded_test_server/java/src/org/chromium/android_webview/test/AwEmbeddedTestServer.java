@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,8 +42,7 @@ public class AwEmbeddedTestServer extends EmbeddedTestServer {
      *  @param context The context in which the server will run.
      *  @return The created server.
      */
-    public static AwEmbeddedTestServer createAndStartServer(Context context)
-            throws InterruptedException {
+    public static AwEmbeddedTestServer createAndStartServer(Context context) {
         return initializeAndStartServer(new AwEmbeddedTestServer(), context, 0 /* port */);
     }
 }

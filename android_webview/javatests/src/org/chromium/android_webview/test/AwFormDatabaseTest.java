@@ -1,11 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview.test;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -22,7 +23,7 @@ public class AwFormDatabaseTest {
 
     @Test
     @SmallTest
-    public void testSmoke() throws Throwable {
+    public void testSmoke() {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             AwFormDatabase.clearFormData();
             Assert.assertFalse(AwFormDatabase.hasFormData());

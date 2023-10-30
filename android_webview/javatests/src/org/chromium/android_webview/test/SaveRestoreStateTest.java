@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@ package org.chromium.android_webview.test;
 
 import android.os.Bundle;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -47,7 +48,7 @@ public class SaveRestoreStateTest {
         }
     }
 
-    private TestVars createNewView() throws Exception {
+    private TestVars createNewView() {
         TestAwContentsClient contentsClient = new TestAwContentsClient();
         AwTestContainerView testView =
                 mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
@@ -79,7 +80,7 @@ public class SaveRestoreStateTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (mWebServer != null) {
             mWebServer.shutdown();
         }
@@ -112,13 +113,13 @@ public class SaveRestoreStateTest {
         // but is only meant to test enough to make sure state is restored.
         // See NavigationHistoryTest for more thorough tests.
         for (int i = 0; i < NUM_NAVIGATIONS; ++i) {
-            Assert.assertEquals(mUrls[i], history.getEntryAtIndex(i).getOriginalUrl());
-            Assert.assertEquals(mUrls[i], history.getEntryAtIndex(i).getUrl());
+            Assert.assertEquals(mUrls[i], history.getEntryAtIndex(i).getOriginalUrl().getSpec());
+            Assert.assertEquals(mUrls[i], history.getEntryAtIndex(i).getUrl().getSpec());
             Assert.assertEquals(TITLES[i], history.getEntryAtIndex(i).getTitle());
         }
     }
 
-    private TestVars saveAndRestoreStateOnUiThread(final TestVars vars) throws Throwable {
+    private TestVars saveAndRestoreStateOnUiThread(final TestVars vars) {
         final TestVars restoredVars = createNewView();
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             Bundle bundle = new Bundle();

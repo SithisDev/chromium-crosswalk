@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 
 package org.chromium.android_webview.test;
 
-import android.support.test.filters.MediumTest;
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -172,7 +172,7 @@ public class WebViewModalDialogOverrideTest {
         Assert.assertEquals("false", result);
     }
 
-    private static class TapGestureStateListener implements GestureStateListener {
+    private static class TapGestureStateListener extends GestureStateListener {
         private CallbackHelper mCallbackHelper = new CallbackHelper();
 
         public int getCallCount() {

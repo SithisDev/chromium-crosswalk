@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@ package org.chromium.android_webview.test;
 
 import android.content.Context;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.MediumTest;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -21,7 +22,6 @@ import org.chromium.android_webview.AwGeolocationPermissions;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.test.AwActivityTestRule.TestDependencyFactory;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.device.geolocation.LocationProviderOverrider;
@@ -93,7 +93,7 @@ public class GeolocationTest {
         }
     }
 
-    private void initAwContents(TestAwContentsClient contentsClient) throws Exception {
+    private void initAwContents(TestAwContentsClient contentsClient) {
         mContentsClient = contentsClient;
         mAwContents = mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient)
                               .getAwContents();
@@ -103,13 +103,13 @@ public class GeolocationTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mMockLocationProvider = new MockLocationProvider();
         LocationProviderOverrider.setLocationProviderImpl(mMockLocationProvider);
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mMockLocationProvider.stopUpdates();
         mOverridenFactory = null;
     }
@@ -125,7 +125,7 @@ public class GeolocationTest {
         return result;
     }
 
-    private void ensureGeolocationRunning(final boolean running) throws Exception {
+    private void ensureGeolocationRunning(final boolean running) {
         AwActivityTestRule.pollInstrumentationThread(
                 () -> mMockLocationProvider.isRunning() == running);
     }
@@ -175,7 +175,6 @@ public class GeolocationTest {
     @Test
     @MediumTest
     @Feature({"AndroidWebView"})
-    @RetryOnFailure
     public void testWatchPosition() throws Throwable {
         initAwContents(new GrantPermisionAwContentClient());
         mActivityTestRule.loadDataWithBaseUrlSync(mAwContents,
@@ -269,7 +268,6 @@ public class GeolocationTest {
     @Test
     @Feature({"AndroidWebView"})
     @SmallTest
-    @RetryOnFailure
     public void testDenyAccessByDefault() throws Throwable {
         initAwContents(new DefaultPermisionAwContentClient());
         mActivityTestRule.loadDataWithBaseUrlSync(mAwContents,
@@ -292,7 +290,6 @@ public class GeolocationTest {
     @Test
     @Feature({"AndroidWebView"})
     @SmallTest
-    @RetryOnFailure
     public void testDenyOnInsecureOrigins() throws Throwable {
         mOverridenFactory = new GeolocationOnInsecureOriginsTestDependencyFactory(false);
         initAwContents(new GrantPermisionAwContentClient());

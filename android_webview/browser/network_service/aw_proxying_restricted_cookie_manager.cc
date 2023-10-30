@@ -1,15 +1,22 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "android_webview/browser/network_service/aw_proxying_restricted_cookie_manager.h"
 
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "android_webview/browser/aw_cookie_access_policy.h"
 #include "base/memory/ptr_util.h"
-#include "base/task/post_task.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
+#include "url/gurl.h"
 
 namespace android_webview {
 
@@ -18,45 +25,44 @@ class AwProxyingRestrictedCookieManagerListener
  public:
   AwProxyingRestrictedCookieManagerListener(
       const GURL& url,
-      const GURL& site_for_cookies,
+      const net::SiteForCookies& site_for_cookies,
       base::WeakPtr<AwProxyingRestrictedCookieManager>
           aw_restricted_cookie_manager,
-      network::mojom::CookieChangeListenerPtr client_listener)
+      mojo::PendingRemote<network::mojom::CookieChangeListener> client_listener)
       : url_(url),
         site_for_cookies_(site_for_cookies),
         aw_restricted_cookie_manager_(aw_restricted_cookie_manager),
         client_listener_(std::move(client_listener)) {}
 
-  void OnCookieChange(const net::CanonicalCookie& cookie,
-                      network::mojom::CookieChangeCause cause) override {
+  void OnCookieChange(const net::CookieChangeInfo& change) override {
     if (aw_restricted_cookie_manager_ &&
         aw_restricted_cookie_manager_->AllowCookies(url_, site_for_cookies_))
-      client_listener_->OnCookieChange(cookie, cause);
+      client_listener_->OnCookieChange(change);
   }
 
  private:
   const GURL url_;
-  const GURL site_for_cookies_;
+  const net::SiteForCookies site_for_cookies_;
   base::WeakPtr<AwProxyingRestrictedCookieManager>
       aw_restricted_cookie_manager_;
-  network::mojom::CookieChangeListenerPtr client_listener_;
+  mojo::Remote<network::mojom::CookieChangeListener> client_listener_;
 };
 
 // static
 void AwProxyingRestrictedCookieManager::CreateAndBind(
-    network::mojom::RestrictedCookieManagerPtrInfo underlying_rcm,
+    mojo::PendingRemote<network::mojom::RestrictedCookieManager> underlying_rcm,
     bool is_service_worker,
     int process_id,
     int frame_id,
-    network::mojom::RestrictedCookieManagerRequest request) {
+    mojo::PendingReceiver<network::mojom::RestrictedCookieManager> receiver) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(
           &AwProxyingRestrictedCookieManager::CreateAndBindOnIoThread,
           std::move(underlying_rcm), is_service_worker, process_id, frame_id,
-          std::move(request)));
+          std::move(receiver)));
 }
 
 AwProxyingRestrictedCookieManager::~AwProxyingRestrictedCookieManager() {
@@ -65,29 +71,35 @@ AwProxyingRestrictedCookieManager::~AwProxyingRestrictedCookieManager() {
 
 void AwProxyingRestrictedCookieManager::GetAllForUrl(
     const GURL& url,
-    const GURL& site_for_cookies,
+    const net::SiteForCookies& site_for_cookies,
+    const url::Origin& top_frame_origin,
     network::mojom::CookieManagerGetOptionsPtr options,
+    bool partitioned_cookies_runtime_feature_enabled,
     GetAllForUrlCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   if (AllowCookies(url, site_for_cookies)) {
     underlying_restricted_cookie_manager_->GetAllForUrl(
-        url, site_for_cookies, std::move(options), std::move(callback));
+        url, site_for_cookies, top_frame_origin, std::move(options),
+        partitioned_cookies_runtime_feature_enabled, std::move(callback));
   } else {
-    std::move(callback).Run(std::vector<net::CanonicalCookie>());
+    std::move(callback).Run(std::vector<net::CookieWithAccessResult>());
   }
 }
 
 void AwProxyingRestrictedCookieManager::SetCanonicalCookie(
     const net::CanonicalCookie& cookie,
     const GURL& url,
-    const GURL& site_for_cookies,
+    const net::SiteForCookies& site_for_cookies,
+    const url::Origin& top_frame_origin,
+    net::CookieInclusionStatus status,
     SetCanonicalCookieCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   if (AllowCookies(url, site_for_cookies)) {
     underlying_restricted_cookie_manager_->SetCanonicalCookie(
-        cookie, url, site_for_cookies, std::move(callback));
+        cookie, url, site_for_cookies, top_frame_origin, status,
+        std::move(callback));
   } else {
     std::move(callback).Run(false);
   }
@@ -95,49 +107,59 @@ void AwProxyingRestrictedCookieManager::SetCanonicalCookie(
 
 void AwProxyingRestrictedCookieManager::AddChangeListener(
     const GURL& url,
-    const GURL& site_for_cookies,
-    network::mojom::CookieChangeListenerPtr listener,
+    const net::SiteForCookies& site_for_cookies,
+    const url::Origin& top_frame_origin,
+    mojo::PendingRemote<network::mojom::CookieChangeListener> listener,
     AddChangeListenerCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
-  network::mojom::CookieChangeListenerPtr proxy_listener_ptr;
+  mojo::PendingRemote<network::mojom::CookieChangeListener>
+      proxy_listener_remote;
   auto proxy_listener =
       std::make_unique<AwProxyingRestrictedCookieManagerListener>(
           url, site_for_cookies, weak_factory_.GetWeakPtr(),
           std::move(listener));
 
-  mojo::MakeStrongBinding(std::move(proxy_listener),
-                          mojo::MakeRequest(&proxy_listener_ptr));
+  mojo::MakeSelfOwnedReceiver(
+      std::move(proxy_listener),
+      proxy_listener_remote.InitWithNewPipeAndPassReceiver());
 
   underlying_restricted_cookie_manager_->AddChangeListener(
-      url, site_for_cookies, std::move(proxy_listener_ptr),
+      url, site_for_cookies, top_frame_origin, std::move(proxy_listener_remote),
       std::move(callback));
 }
 
 void AwProxyingRestrictedCookieManager::SetCookieFromString(
     const GURL& url,
-    const GURL& site_for_cookies,
+    const net::SiteForCookies& site_for_cookies,
+    const url::Origin& top_frame_origin,
     const std::string& cookie,
+    bool partitioned_cookies_runtime_feature_enabled,
     SetCookieFromStringCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   if (AllowCookies(url, site_for_cookies)) {
     underlying_restricted_cookie_manager_->SetCookieFromString(
-        url, site_for_cookies, cookie, std::move(callback));
+        url, site_for_cookies, top_frame_origin, cookie,
+        partitioned_cookies_runtime_feature_enabled, std::move(callback));
   } else {
-    std::move(callback).Run();
+    std::move(callback).Run(/*site_for_cookies_ok=*/true,
+                            /*top_frame_origin_ok=*/true);
   }
 }
 
 void AwProxyingRestrictedCookieManager::GetCookiesString(
     const GURL& url,
-    const GURL& site_for_cookies,
+    const net::SiteForCookies& site_for_cookies,
+    const url::Origin& top_frame_origin,
+    bool partitioned_cookies_runtime_feature_enabled,
     GetCookiesStringCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   if (AllowCookies(url, site_for_cookies)) {
     underlying_restricted_cookie_manager_->GetCookiesString(
-        url, site_for_cookies, std::move(callback));
+        url, site_for_cookies, top_frame_origin,
+        partitioned_cookies_runtime_feature_enabled, std::move(callback));
   } else {
     std::move(callback).Run("");
   }
@@ -145,14 +167,15 @@ void AwProxyingRestrictedCookieManager::GetCookiesString(
 
 void AwProxyingRestrictedCookieManager::CookiesEnabledFor(
     const GURL& url,
-    const GURL& site_for_cookies,
+    const net::SiteForCookies& site_for_cookies,
+    const url::Origin& top_frame_origin,
     CookiesEnabledForCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   std::move(callback).Run(AllowCookies(url, site_for_cookies));
 }
 
 AwProxyingRestrictedCookieManager::AwProxyingRestrictedCookieManager(
-    network::mojom::RestrictedCookieManagerPtr
+    mojo::PendingRemote<network::mojom::RestrictedCookieManager>
         underlying_restricted_cookie_manager,
     bool is_service_worker,
     int process_id,
@@ -161,28 +184,26 @@ AwProxyingRestrictedCookieManager::AwProxyingRestrictedCookieManager(
           std::move(underlying_restricted_cookie_manager)),
       is_service_worker_(is_service_worker),
       process_id_(process_id),
-      frame_id_(frame_id),
-      weak_factory_(this) {
+      frame_id_(frame_id) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 }
 
 // static
 void AwProxyingRestrictedCookieManager::CreateAndBindOnIoThread(
-    network::mojom::RestrictedCookieManagerPtrInfo underlying_rcm,
+    mojo::PendingRemote<network::mojom::RestrictedCookieManager> underlying_rcm,
     bool is_service_worker,
     int process_id,
     int frame_id,
-    network::mojom::RestrictedCookieManagerRequest request) {
+    mojo::PendingReceiver<network::mojom::RestrictedCookieManager> receiver) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   auto wrapper = base::WrapUnique(new AwProxyingRestrictedCookieManager(
-      network::mojom::RestrictedCookieManagerPtr(std::move(underlying_rcm)),
-      is_service_worker, process_id, frame_id));
-  mojo::MakeStrongBinding(std::move(wrapper), std::move(request));
+      std::move(underlying_rcm), is_service_worker, process_id, frame_id));
+  mojo::MakeSelfOwnedReceiver(std::move(wrapper), std::move(receiver));
 }
 
 bool AwProxyingRestrictedCookieManager::AllowCookies(
     const GURL& url,
-    const GURL& site_for_cookies) const {
+    const net::SiteForCookies& site_for_cookies) const {
   if (is_service_worker_) {
     // Service worker cookies are always first-party, so only need to check
     // the global toggle.
@@ -191,6 +212,12 @@ bool AwProxyingRestrictedCookieManager::AllowCookies(
     return AwCookieAccessPolicy::GetInstance()->AllowCookies(
         url, site_for_cookies, process_id_, frame_id_);
   }
+}
+
+void AwProxyingRestrictedCookieManager::
+    ConvertPartitionedCookiesToUnpartitioned(const GURL& url) {
+  underlying_restricted_cookie_manager_
+      ->ConvertPartitionedCookiesToUnpartitioned(url);
 }
 
 }  // namespace android_webview

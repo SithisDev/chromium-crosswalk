@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@ import android.view.View;
 import android.webkit.URLUtil;
 import android.widget.FrameLayout;
 
+import org.chromium.android_webview.common.AwFeatures;
 import org.chromium.base.Callback;
 import org.chromium.base.ContentUriUtils;
 import org.chromium.base.ThreadUtils;
@@ -25,6 +26,7 @@ import org.chromium.base.task.AsyncTask;
 import org.chromium.content_public.browser.InvalidateTypes;
 import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.content_public.common.ResourceRequestBody;
+import org.chromium.url.GURL;
 
 /**
  * Adapts the AwWebContentsDelegate interface to the AwContentsClient interface.
@@ -40,6 +42,7 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     private final Context mContext;
     private View mContainerView;
     private FrameLayout mCustomView;
+    private boolean mDidSynthesizePageLoad;
 
     public AwWebContentsDelegateAdapter(AwContents awContents, AwContentsClient contentsClient,
             AwSettings settings, Context context, View containerView) {
@@ -47,17 +50,13 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
         mContentsClient = contentsClient;
         mAwSettings = settings;
         mContext = context;
+        mDidSynthesizePageLoad = false;
         setContainerView(containerView);
     }
 
     public void setContainerView(View containerView) {
         mContainerView = containerView;
         mContainerView.setClickable(true);
-    }
-
-    @Override
-    public void onLoadProgressChanged(int progress) {
-        mContentsClient.getCallbackHelper().postOnProgressChanged(progress);
     }
 
     @Override
@@ -158,12 +157,12 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     }
 
     @Override
-    public void onUpdateUrl(String url) {
+    public void onUpdateUrl(GURL url) {
         // TODO: implement
     }
 
     @Override
-    public void openNewTab(String url, String extraHeaders, ResourceRequestBody postData,
+    public void openNewTab(GURL url, String extraHeaders, ResourceRequestBody postData,
             int disposition, boolean isRendererInitiated) {
         // This is only called in chrome layers.
         assert false;
@@ -214,8 +213,9 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     @Override
     public void runFileChooser(final int processId, final int renderId, final int modeFlags,
             String acceptTypes, String title, String defaultFilename, boolean capture) {
+        int correctedModeFlags = FileModeConversionHelper.convertFileChooserMode(modeFlags);
         AwContentsClient.FileChooserParamsImpl params = new AwContentsClient.FileChooserParamsImpl(
-                modeFlags, acceptTypes, title, defaultFilename, capture);
+                correctedModeFlags, acceptTypes, title, defaultFilename, capture);
 
         mContentsClient.showFileChooser(new Callback<String[]>() {
             boolean mCompleted;
@@ -226,12 +226,12 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
                 }
                 mCompleted = true;
                 if (results == null) {
-                    nativeFilesSelectedInChooser(
-                            processId, renderId, modeFlags, null, null);
+                    AwWebContentsDelegateJni.get().filesSelectedInChooser(
+                            processId, renderId, correctedModeFlags, null, null);
                     return;
                 }
-                GetDisplayNameTask task =
-                        new GetDisplayNameTask(mContext, processId, renderId, modeFlags, results);
+                GetDisplayNameTask task = new GetDisplayNameTask(
+                        mContext, processId, renderId, correctedModeFlags, results);
                 task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
             }
         }, params);
@@ -249,25 +249,42 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
 
     @Override
     public void navigationStateChanged(int flags) {
-        if ((flags & InvalidateTypes.URL) != 0
-                && mAwContents.isPopupWindow()
-                && mAwContents.hasAccessedInitialDocument()) {
-            // Hint the client to show the last committed url, as it may be unsafe to show
-            // the pending entry.
+        // If this is a popup whose document has been accessed by script, hint
+        // the client to show the last committed url through synthesizing a page
+        // load, as it may be unsafe to show the pending entry.
+        boolean shouldSynthesizePageLoad = ((flags & InvalidateTypes.URL) != 0)
+                && mAwContents.isPopupWindow() && mAwContents.hasAccessedInitialDocument();
+        if (AwFeatureList.isEnabled(
+                    AwFeatures.WEBVIEW_SYNTHESIZE_PAGE_LOAD_ONLY_ON_INITIAL_MAIN_DOCUMENT_ACCESS)) {
+            // Since we want to synthesize the page load only once for when the
+            // NavigationStateChange call is triggered by the first initial main
+            // document access, the flag must match InvalidateTypes.URL (the flag
+            // fired by NavigationControllerImpl::DidAccessInitialMainDocument())
+            // and we must check whether a page load has previously been
+            // synthesized here.
+            shouldSynthesizePageLoad &= (flags == InvalidateTypes.URL) && !mDidSynthesizePageLoad;
+        }
+        if (shouldSynthesizePageLoad) {
             String url = mAwContents.getLastCommittedUrl();
             url = TextUtils.isEmpty(url) ? ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL : url;
             mContentsClient.getCallbackHelper().postSynthesizedPageLoadingForUrlBarUpdate(url);
+            mDidSynthesizePageLoad = true;
         }
     }
 
     @Override
-    public void enterFullscreenModeForTab(boolean prefersNavigationBar) {
+    public void enterFullscreenModeForTab(boolean prefersNavigationBar, boolean prefersStatusBar) {
         enterFullscreen();
     }
 
     @Override
     public void exitFullscreenModeForTab() {
         exitFullscreen();
+    }
+
+    @Override
+    public int getDisplayMode() {
+        return mAwContents.getDisplayMode();
     }
 
     @Override
@@ -313,9 +330,10 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     }
 
     @Override
-    public boolean shouldBlockMediaRequest(String url) {
+    public boolean shouldBlockMediaRequest(GURL url) {
         return mAwSettings != null
-                ? mAwSettings.getBlockNetworkLoads() && URLUtil.isNetworkUrl(url) : true;
+                ? mAwSettings.getBlockNetworkLoads() && URLUtil.isNetworkUrl(url.getSpec())
+                : true;
     }
 
     private static class GetDisplayNameTask extends AsyncTask<String[]> {
@@ -348,7 +366,8 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
 
         @Override
         protected void onPostExecute(String[] result) {
-            nativeFilesSelectedInChooser(mProcessId, mRenderId, mModeFlags, mFilePaths, result);
+            AwWebContentsDelegateJni.get().filesSelectedInChooser(
+                    mProcessId, mRenderId, mModeFlags, mFilePaths, result);
         }
 
         /**

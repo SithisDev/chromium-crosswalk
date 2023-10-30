@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -157,9 +157,10 @@ std::unique_ptr<HttpResponse> HandleSetImageResponse(
   bool header_exist = false;
   if (query.find("header") != query.end()) {
     for (const auto& header : query.at("header")) {
-      if (request.headers.find(header) != request.headers.end())
+      if (request.headers.find(header) != request.headers.end()) {
         header_exist = true;
-      break;
+        break;
+      }
     }
   }
 

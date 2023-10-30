@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "android_webview/browser/permission/aw_permission_request_delegate.h"
-#include "android_webview/native_jni/AwPermissionRequest_jni.h"
+#include "android_webview/browser_jni_headers/AwPermissionRequest_jni.h"
 #include "base/android/jni_string.h"
 
 using base::android::AttachCurrentThread;
@@ -31,7 +31,7 @@ base::android::ScopedJavaLocalRef<jobject> AwPermissionRequest::Create(
 AwPermissionRequest::AwPermissionRequest(
     std::unique_ptr<AwPermissionRequestDelegate> delegate,
     ScopedJavaLocalRef<jobject>* java_peer)
-    : delegate_(std::move(delegate)), processed_(false), weak_factory_(this) {
+    : delegate_(std::move(delegate)), processed_(false) {
   DCHECK(delegate_.get());
   DCHECK(java_peer);
 
@@ -61,13 +61,12 @@ void AwPermissionRequest::OnAcceptInternal(bool accept) {
 
 void AwPermissionRequest::DeleteThis() {
   ScopedJavaLocalRef<jobject> j_request = GetJavaObject();
-  if (j_request.is_null())
+  if (!j_request)
     return;
   Java_AwPermissionRequest_destroyNative(AttachCurrentThread(), j_request);
 }
 
-void AwPermissionRequest::Destroy(JNIEnv* env,
-                                  const JavaParamRef<jobject>& obj) {
+void AwPermissionRequest::Destroy(JNIEnv* env) {
   delete this;
 }
 

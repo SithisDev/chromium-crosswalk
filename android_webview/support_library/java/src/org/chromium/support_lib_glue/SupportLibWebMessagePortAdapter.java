@@ -1,16 +1,20 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.support_lib_glue;
 
+import static org.chromium.support_lib_glue.SupportLibWebViewChromiumFactory.recordApiCall;
+
 import android.os.Handler;
 
+import org.chromium.content_public.browser.MessagePayload;
 import org.chromium.content_public.browser.MessagePort;
 import org.chromium.support_lib_boundary.WebMessageBoundaryInterface;
 import org.chromium.support_lib_boundary.WebMessageCallbackBoundaryInterface;
 import org.chromium.support_lib_boundary.WebMessagePortBoundaryInterface;
 import org.chromium.support_lib_boundary.util.BoundaryInterfaceReflectionUtil;
+import org.chromium.support_lib_glue.SupportLibWebViewChromiumFactory.ApiCall;
 
 import java.lang.reflect.InvocationHandler;
 
@@ -30,66 +34,43 @@ class SupportLibWebMessagePortAdapter implements WebMessagePortBoundaryInterface
 
     @Override
     public void postMessage(InvocationHandler message) {
+        recordApiCall(ApiCall.WEB_MESSAGE_PORT_POST_MESSAGE);
         WebMessageBoundaryInterface messageBoundaryInterface =
                 BoundaryInterfaceReflectionUtil.castToSuppLibClass(
                         WebMessageBoundaryInterface.class, message);
-        mPort.postMessage(messageBoundaryInterface.getData(),
+        mPort.postMessage(SupportLibWebMessagePayloadAdapter.fromWebMessageBoundaryInterface(
+                                  messageBoundaryInterface),
                 toMessagePorts(messageBoundaryInterface.getPorts()));
     }
 
     @Override
     public void close() {
+        recordApiCall(ApiCall.WEB_MESSAGE_PORT_CLOSE);
         mPort.close();
     }
 
     @Override
     public void setWebMessageCallback(InvocationHandler callback) {
+        recordApiCall(ApiCall.WEB_MESSAGE_PORT_SET_CALLBACK);
         setWebMessageCallback(callback, null);
     }
 
     @Override
     public void setWebMessageCallback(InvocationHandler callback, Handler handler) {
+        if (handler != null) {
+            recordApiCall(ApiCall.WEB_MESSAGE_PORT_SET_CALLBACK_WITH_HANDLER);
+        }
         SupportLibWebMessageCallbackAdapter callbackAdapter =
                 new SupportLibWebMessageCallbackAdapter(
                         BoundaryInterfaceReflectionUtil.castToSuppLibClass(
                                 WebMessageCallbackBoundaryInterface.class, callback));
         mPort.setMessageCallback(new MessagePort.MessageCallback() {
             @Override
-            public void onMessage(String message, MessagePort[] ports) {
+            public void onMessage(MessagePayload messagePayload, MessagePort[] ports) {
                 callbackAdapter.onMessage(SupportLibWebMessagePortAdapter.this,
-                        new SupportLibWebMessageAdapter(message, ports));
+                        new SupportLibWebMessageAdapter(messagePayload, ports));
             }
         }, handler);
-    }
-
-    /**
-     * Utility class for creating a WebMessageBoundaryInterface (this is necessary to pass a
-     * WebMessage back across the boundary).
-     */
-    private static class SupportLibWebMessageAdapter implements WebMessageBoundaryInterface {
-        private String mData;
-        private MessagePort[] mPorts;
-
-        SupportLibWebMessageAdapter(String data, MessagePort[] ports) {
-            mData = data;
-            mPorts = ports;
-        }
-
-        @Override
-        public String getData() {
-            return mData;
-        }
-
-        @Override
-        public /* WebMessagePort */ InvocationHandler[] getPorts() {
-            return SupportLibWebMessagePortAdapter.fromMessagePorts(mPorts);
-        }
-
-        @Override
-        public String[] getSupportedFeatures() {
-            // getData() and getPorts() are not covered by feature flags.
-            return new String[0];
-        }
     }
 
     public static /* WebMessagePort */ InvocationHandler[] fromMessagePorts(

@@ -1,11 +1,12 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android_webview.test;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -14,8 +15,8 @@ import org.junit.runner.RunWith;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwContentsStatics;
-import org.chromium.android_webview.ErrorCodeConversionHelper;
-import org.chromium.android_webview.test.TestAwContentsClient.OnReceivedError2Helper;
+import org.chromium.android_webview.WebviewErrorCode;
+import org.chromium.android_webview.test.TestAwContentsClient.OnReceivedErrorHelper;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
 import org.chromium.net.AndroidNetworkLibraryTestUtil;
@@ -65,7 +66,7 @@ public class AwContentsStaticsTest {
         callbackHelper.waitForCallback(currentCallCount);
     }
 
-    private void createContainerView() throws Exception {
+    private void createContainerView() {
         mContentsClient = new TestAwContentsClient();
         mTestContainer = mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
         mAwContents = mTestContainer.getAwContents();
@@ -88,14 +89,14 @@ public class AwContentsStaticsTest {
                 InstrumentationRegistry.getInstrumentation().getContext());
         try {
             String url = testServer.getURL("/android_webview/test/data/hello_world.html");
-            OnReceivedError2Helper errorHelper = mContentsClient.getOnReceivedError2Helper();
+            OnReceivedErrorHelper errorHelper = mContentsClient.getOnReceivedErrorHelper();
             int errorCount = errorHelper.getCallCount();
             mActivityTestRule.loadUrlSync(
                     mAwContents, mContentsClient.getOnPageFinishedHelper(), url);
             Assert.assertEquals("onReceivedError should be called.", errorCount + 1,
                     errorHelper.getCallCount());
-            Assert.assertEquals("Incorrect network error code.",
-                    ErrorCodeConversionHelper.ERROR_UNKNOWN, errorHelper.getError().errorCode);
+            Assert.assertEquals("Incorrect network error code.", WebviewErrorCode.ERROR_UNKNOWN,
+                    errorHelper.getError().errorCode);
             Assert.assertEquals("onReceivedError was called for the wrong URL.", url,
                     errorHelper.getRequest().url);
         } finally {
@@ -120,7 +121,7 @@ public class AwContentsStaticsTest {
                 InstrumentationRegistry.getInstrumentation().getContext());
         try {
             String url = testServer.getURL("/android_webview/test/data/hello_world.html");
-            OnReceivedError2Helper errorHelper = mContentsClient.getOnReceivedError2Helper();
+            OnReceivedErrorHelper errorHelper = mContentsClient.getOnReceivedErrorHelper();
             int errorCount = errorHelper.getCallCount();
             mActivityTestRule.loadUrlSync(
                     mAwContents, mContentsClient.getOnPageFinishedHelper(), url);
