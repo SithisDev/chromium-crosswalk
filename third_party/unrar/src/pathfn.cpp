@@ -170,14 +170,17 @@ int GetPathDisk(const wchar *Path)
 void AddEndSlash(wchar *Path,size_t MaxLength)
 {
   size_t Length=wcslen(Path);
-  if (Length>0 && Path[Length-1]!=CPATHDIVIDER)
-    wcsncatz(Path,SPATHDIVIDER,MaxLength);
+  if (Length>0 && Path[Length-1]!=CPATHDIVIDER && Length+1<MaxLength)
+  {
+    Path[Length]=CPATHDIVIDER;
+    Path[Length+1]=0;
+  }
 }
 
 
 void MakeName(const wchar *Path,const wchar *Name,wchar *Pathname,size_t MaxSize)
 {
-  // 'Name' and 'Pathname' can point to same memory area. This is why we use
+  // 'Path', 'Name' and 'Pathname' can point to same memory area. So we use
   // the temporary buffer instead of constructing the name in 'Pathname'.
   wchar OutName[NM];
   wcsncpyz(OutName,Path,ASIZE(OutName));
@@ -652,7 +655,7 @@ wchar* VolNameToFirstName(const wchar *VolName,wchar *FirstName,size_t MaxSize,b
   }
   if (!FileExist(FirstName))
   {
-    // If the first volume, which name we just generated, is not exist,
+    // If the first volume, which name we just generated, does not exist,
     // check if volume with same name and any other extension is available.
     // It can help in case of *.exe or *.sfx first volume.
     wchar Mask[NM];
@@ -758,16 +761,16 @@ static void GenArcName(wchar *ArcName,size_t MaxSize,const wchar *GenerateMask,u
 
   char Field[10][6];
 
-  sprintf(Field[0],"%04u",rlt.Year);
-  sprintf(Field[1],"%02u",rlt.Month);
-  sprintf(Field[2],"%02u",rlt.Day);
-  sprintf(Field[3],"%02u",rlt.Hour);
-  sprintf(Field[4],"%02u",rlt.Minute);
-  sprintf(Field[5],"%02u",rlt.Second);
-  sprintf(Field[6],"%02u",(uint)CurWeek);
-  sprintf(Field[7],"%u",(uint)WeekDay+1);
-  sprintf(Field[8],"%03u",rlt.yDay+1);
-  sprintf(Field[9],"%05u",ArcNumber);
+  snprintf(Field[0],sizeof(Field[0]),"%04u",rlt.Year);
+  snprintf(Field[1],sizeof(Field[1]),"%02u",rlt.Month);
+  snprintf(Field[2],sizeof(Field[2]),"%02u",rlt.Day);
+  snprintf(Field[3],sizeof(Field[3]),"%02u",rlt.Hour);
+  snprintf(Field[4],sizeof(Field[4]),"%02u",rlt.Minute);
+  snprintf(Field[5],sizeof(Field[5]),"%02u",rlt.Second);
+  snprintf(Field[6],sizeof(Field[6]),"%02u",(uint)CurWeek);
+  snprintf(Field[7],sizeof(Field[7]),"%u",(uint)WeekDay+1);
+  snprintf(Field[8],sizeof(Field[8]),"%03u",rlt.yDay+1);
+  snprintf(Field[9],sizeof(Field[9]),"%05u",ArcNumber);
 
   const wchar *MaskChars=L"YMDHISWAEN";
 

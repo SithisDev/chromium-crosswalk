@@ -26,17 +26,12 @@ bool RarReader::Open(base::File rar_file, base::File temp_file) {
   archive_->SetTempFileHandle(temp_file_.GetPlatformFile());
 
   bool open_success = archive_->Open(L"dummy.rar");
-  UMA_HISTOGRAM_BOOLEAN("SBClientDownload.RarOpenSuccess", open_success);
   if (!open_success)
     return false;
 
   bool is_valid_archive = archive_->IsArchive(/*EnableBroken=*/true);
-  UMA_HISTOGRAM_BOOLEAN("SBClientDownload.RarValidArchive", is_valid_archive);
   if (!is_valid_archive)
     return false;
-
-  UMA_HISTOGRAM_BOOLEAN("SBClientDownload.RarHeadersEncrypted",
-                        archive_->Encrypted);
 
   command_ = std::make_unique<CommandData>();
   command_->ParseArg(const_cast<wchar_t*>(L"-p"));
@@ -69,8 +64,26 @@ bool RarReader::ExtractNextEntry() {
 #endif
       current_entry_.is_directory = archive_->FileHead.Dir;
       current_entry_.is_encrypted = archive_->FileHead.Encrypted;
-      current_entry_.file_size = extractor_->GetCurrentFileSize();
-      return true;
+      current_entry_.file_size =
+          current_entry_.is_directory ? 0 : extractor_->GetCurrentFileSize();
+
+      if (success) {
+        return true;
+      }
+
+      if (archive_->FileHead.Encrypted) {
+        // Since Chromium doesn't have the password, manually skip over the
+        // encrypted data and fill in the metadata we do have.
+        archive_->SeekToNext();
+        return true;
+      }
+
+      if (extractor_->IsMissingNextVolume()) {
+        // Since Chromium doesn't have the next volume, manually skip over this
+        // file, but report the metadata we do have.
+        archive_->SeekToNext();
+        return true;
+      }
     }
   }
 
