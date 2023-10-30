@@ -1,9 +1,10 @@
 Name: harfbuzz-ng
 Short Name: harfbuzz-ng
 URL: http://harfbuzz.org
-Version: 2.5.3-60
-Date: 20190708
-Revision: 2e7021da7d1726a37822e6a001b9218f82255bc8
+Version: 4.4.1-226
+CPEPrefix: cpe:/a:harfbuzz_project:harfbuzz:4.4.1
+Date: 20220721
+Revision: fa471043fccb94444510e3300ac2573297c82137
 Security Critical: yes
 License: MIT
 License File: src/COPYING
@@ -44,7 +45,6 @@ on HarfBuzz' built-in AAT shaping.
     hb-null.hh
     hb-ot-color-sbix-table.hh
     hb-ot-color-svg-table.hh
-    hb-ot-color.cc
     hb-uniscribe.cc
     hb-uniscribe.h
     test-unicode-ranges.cc

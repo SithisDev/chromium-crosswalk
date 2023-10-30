@@ -89,7 +89,7 @@ static_library("hunspell") {
     ]
   }
 
-  if (is_posix && !is_mac && !is_ios && !is_clang) {
+  if (is_posix && !is_apple && !is_clang) {
     cflags += [
       # affentry.hxx has NULL as default parameter for a FLAG in two
       # places.
@@ -109,10 +109,24 @@ static_library("hunspell") {
   }
 }
 
-fuzzer_test("hunspell_fuzzer") {
+fuzzer_test("hunspell_spell_fuzzer") {
   sources = [
-    "fuzz/hunspell_fuzzer.cc",
     "fuzz/hunspell_fuzzer_hunspell_dictionary.h",
+    "fuzz/hunspell_spell_fuzzer.cc",
+  ]
+  deps = [
+    ":hunspell",
+    "//base:base",
+  ]
+
+  # This is a dictionary for the fuzzer, not a spellcheck dictionary.
+  dict = "fuzz/hunspell.dict"
+}
+
+fuzzer_test("hunspell_suggest_fuzzer") {
+  sources = [
+    "fuzz/hunspell_fuzzer_hunspell_dictionary.h",
+    "fuzz/hunspell_suggest_fuzzer.cc",
   ]
   deps = [
     ":hunspell",
@@ -124,9 +138,7 @@ fuzzer_test("hunspell_fuzzer") {
 }
 
 fuzzer_test("bdict_fuzzer") {
-  sources = [
-    "fuzz/bdict_fuzzer.cc",
-  ]
+  sources = [ "fuzz/bdict_fuzzer.cc" ]
   deps = [
     ":hunspell",
     "//base:base",

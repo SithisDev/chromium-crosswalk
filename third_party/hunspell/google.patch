@@ -1,5 +1,5 @@
 diff --git a/src/hunspell/affixmgr.cxx b/src/hunspell/affixmgr.cxx
-index 658a8aa..2ece1cd 100644
+index 658a8aa..78d10ac 100644
 --- a/src/hunspell/affixmgr.cxx
 +++ b/src/hunspell/affixmgr.cxx
 @@ -87,11 +87,19 @@
@@ -177,6 +177,15 @@ index 658a8aa..2ece1cd 100644
  
    return 0;
  }
+@@ -4391,7 +4469,7 @@ void AffixMgr::reverse_condition(std::string& piece) {
+       case '^': {
+         if (*(k - 1) == ']')
+           neg = 1;
+-        else
++        else if (neg)
+           *(k - 1) = *k;
+         break;
+       }
 @@ -4489,6 +4567,7 @@ bool AffixMgr::parse_affix(const std::string& line,
        case 1: {
          np++;
@@ -723,14 +732,13 @@ diff --git a/src/hunspell/hashmgr.hxx b/src/hunspell/hashmgr.hxx
 index 812171a..af27d6c 100644
 --- a/src/hunspell/hashmgr.hxx
 +++ b/src/hunspell/hashmgr.hxx
-@@ -82,9 +82,23 @@
+@@ -82,9 +82,22 @@
  #include "filemgr.hxx"
  #include "w_char.hxx"
  
 +#ifdef HUNSPELL_CHROME_CLIENT
 +#include <map>
 +
-+#include "base/stl_util.h"
 +#include "base/strings/string_piece.h"
 +#include "third_party/hunspell/google/bdict_reader.h"
 +#endif
@@ -1042,7 +1050,7 @@ diff --git a/src/hunspell/hunspell.hxx b/src/hunspell/hunspell.hxx
 index 43af66b..a35df83 100644
 --- a/src/hunspell/hunspell.hxx
 +++ b/src/hunspell/hunspell.hxx
-@@ -79,6 +79,10 @@
+@@ -79,9 +79,13 @@
  #include <string>
  #include <vector>
  
@@ -1052,7 +1060,12 @@ index 43af66b..a35df83 100644
 +
  #define SPELL_XML "<?xml?>"
  
- #define MAXSUGGESTION 15
+-#define MAXSUGGESTION 15
++#define MAXSUGGESTION 5
+ #define MAXSHARPS 5
+ 
+ #ifndef MAXWORDLEN
+
 @@ -115,11 +119,17 @@ class LIBHUNSPELL_DLL_EXPORTED Hunspell {
     * long path names (without the long path prefix Hunspell will use fopen()
     * with system-dependent character encoding instead of _wfopen()).
